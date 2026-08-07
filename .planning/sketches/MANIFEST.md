@@ -13,3 +13,4 @@
 | # | Name | Design Question | Winner | Tags |
 |---|------|-----------------|--------|------|
 | 001 | athlete-measurements | Как компактно добавлять спортсмена и замеры? | A — боковая панель | client, athlete, measurements |
+| 002 | order-creation | Как быстро создать заказ из карточки клиента? | A — боковая панель с фото | orders, sales |
