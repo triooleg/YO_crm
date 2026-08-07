@@ -1,1 +1,19 @@
-{"name":"yoleotard-crm","version":"0.1.0","private":true,"packageManager":"pnpm@11.16.0","engines":{"node":">=22"},"scripts":{"dev":"pnpm --parallel --filter @yoleotard-crm/api --filter @yoleotard-crm/web dev","build":"pnpm -r build","typecheck":"pnpm -r typecheck","test":"pnpm -r test","db:generate":"pnpm --filter @yoleotard-crm/database exec prisma generate --schema prisma/schema.prisma","db:migrate":"pnpm --filter @yoleotard-crm/database exec prisma migrate dev --schema prisma/schema.prisma","db:deploy":"pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma","db:seed":"pnpm --filter @yoleotard-crm/database seed"},"pnpm":{"onlyBuiltDependencies":["@prisma/client","@prisma/engines","argon2","esbuild","prisma","sharp"]}}
+{
+    "name":  "yoleotard-crm",
+    "version":  "0.1.0",
+    "private":  true,
+    "packageManager":  "pnpm@11.16.0",
+    "engines":  {
+                    "node":  "\u003e=22"
+                },
+    "scripts":  {
+                    "dev":  "pnpm --parallel --filter @yoleotard-crm/api --filter @yoleotard-crm/web dev",
+                    "build":  "pnpm -r build",
+                    "typecheck":  "pnpm -r typecheck",
+                    "test":  "pnpm -r test",
+                    "db:generate":  "pnpm --filter @yoleotard-crm/database exec prisma generate --schema prisma/schema.prisma",
+                    "db:migrate":  "pnpm --filter @yoleotard-crm/database exec prisma migrate dev --schema prisma/schema.prisma",
+                    "db:deploy":  "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma",
+                    "db:seed":  "pnpm --filter @yoleotard-crm/database seed"
+                }
+}

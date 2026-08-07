@@ -9,3 +9,10 @@ allowBuilds:
   esbuild: true
   prisma: true
   sharp: true
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - argon2
+  - esbuild
+  - prisma
+  - sharp
