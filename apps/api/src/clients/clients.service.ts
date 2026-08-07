@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto } from "./clients.dto";
@@ -72,11 +72,25 @@ export class ClientsService {
   async addMeasurement(clientId: string, athleteId: string, dto: CreateMeasurementDto, actor: User) {
     const athlete = await this.prisma.athlete.findFirst({ where: { id: athleteId, clientId, archivedAt: null } });
     if (!athlete) throw new NotFoundException("Спортсмен не найден");
+    const { measuredAt, standardHeight, notes, ...numbered } = dto;
+    if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
+      throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
+    }
     return this.prisma.$transaction(async tx => {
       const measurement = await tx.measurement.create({
-        data: { ...dto, athleteId, measuredAt: new Date(dto.measuredAt) }
+        data: {
+          athleteId,
+          measuredAt: new Date(measuredAt),
+          chest: dto.m1,
+          waist: dto.m2,
+          hips: dto.m3,
+          torso: dto.m15,
+          values: { standardHeight, ...numbered },
+          notes,
+          source: standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод"
+        }
       });
-      await tx.activity.create({ data: { clientId, type: "MEASUREMENT_CREATED", summary: `Добавлены замеры: ${athlete.firstName}`, metadata: { measurementId: measurement.id } } });
+      await tx.activity.create({ data: { clientId, type: "MEASUREMENT_CREATED", summary: `Добавлены 17 замеров: ${athlete.firstName}`, metadata: { measurementId: measurement.id, standardHeight } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
       return measurement;
     });
