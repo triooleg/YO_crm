@@ -5,9 +5,9 @@ import type { User } from "@prisma/client";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateOrderDto, UploadModelImageDto } from "./orders.dto";
-import { OrdersService } from "./orders.service";
 import { uploadsRoot } from "../uploads";
+import { AddOrderPaymentDto, CreateOrderDto, UploadModelImageDto } from "./orders.dto";
+import { OrdersService } from "./orders.service";
 
 @Controller("orders")
 @UseGuards(SessionGuard, RolesGuard)
@@ -16,6 +16,7 @@ export class OrdersController {
   @Get() list(@Query("search") search?: string) { return this.orders.list(search); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }
+  @Post(":id/payments") @Roles("OWNER", "ADMIN", "MANAGER") addPayment(@Param("id") id: string, @Body() dto: AddOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.addPayment(id, dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {
     if (!/^[a-f0-9-]+\.(jpg|png|webp)$/.test(name)) return res.status(404).end();
     return res.sendFile(join(uploadsRoot(), "order-models", name));
