@@ -2,17 +2,17 @@
 
 ## Current state - 2026-08-07
 
-Project initialized from the approved master prompt. Phase 0 discovery is
-complete and Phase 1 foundation is in progress.
+Phase 0 infrastructure discovery and the deployable Phase 1 foundation are
+complete.
 
 ## Infrastructure
 
 - Server: `trio@192.168.31.219` (`homeserver`).
 - Docker 28.4.0, Compose 2.39.2, Portainer and Nginx Proxy Manager.
-- Ports 3000/3100/3200/3300/3400 and 4000/4100/4400 are occupied.
-- CRM reserves web 3500 and API 4500.
+- CRM web/API ports: 3500/4500.
 - Existing proxy owns 80/443. Do not create another proxy.
-- Deploy archive into `/home/trio/yoleotard-crm`; keep server-only `.env`.
+- Stack directory: `/home/trio/yoleotard-crm`.
+- Server-only `.env` has mode 600; never print or copy it into Git.
 
 ## Decisions
 
@@ -22,10 +22,26 @@ complete and Phase 1 foundation is in progress.
 - PostgreSQL and Redis have no production host ports.
 - Public domain is undecided pending DNS/proxy review.
 
+## Delivered
+
+- Foundation commit: `f03c6a4`.
+- Container startup fix: `93b1050`.
+- Web runtime port fix: `bba03e8`.
+- LAN web: `http://192.168.31.219:3500`.
+- LAN API: `http://192.168.31.219:4500/api`.
+
 ## Verification
 
-Pending dependency install, Prisma validation, typecheck, tests and builds.
+- Prisma schema validation and client generation passed.
+- Contract tests: 7/7 passed.
+- Monorepo TypeScript typecheck passed.
+- NestJS/Next.js/Prisma production builds passed locally and in Docker.
+- Local and Portainer compose configs validated.
+- Server PostgreSQL, Redis and API health checks passed.
+- LAN API health returned `{"ok":true,"service":"yoleotard-crm-api"}`.
+- LAN dashboard returned HTTP 200 and contained the Yoleotard brand.
 
 ## Next step
 
-Finish and verify Phase 1, deploy and smoke test, then implement Phase 2.
+Implement Phase 2 client/athlete/measurement vertical slice with authenticated
+REST endpoints, audit activity and usable client screens.
