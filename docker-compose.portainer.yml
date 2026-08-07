@@ -39,6 +39,7 @@ services:
       OWNER_DISPLAY_NAME: ${OWNER_DISPLAY_NAME:-Yoleotard Owner}
       WEB_ORIGIN: ${WEB_ORIGIN}
       API_PORT: 4500
+      UPLOADS_DIR: /app/uploads
     command: >
       sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
       && pnpm --filter @yoleotard-crm/database seed

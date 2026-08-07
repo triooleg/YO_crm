@@ -7,6 +7,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { CreateOrderDto, UploadModelImageDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
+import { uploadsRoot } from "../uploads";
 
 @Controller("orders")
 @UseGuards(SessionGuard, RolesGuard)
@@ -17,6 +18,6 @@ export class OrdersController {
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {
     if (!/^[a-f0-9-]+\.(jpg|png|webp)$/.test(name)) return res.status(404).end();
-    return res.sendFile(join(process.cwd(), "uploads", "order-models", name));
+    return res.sendFile(join(uploadsRoot(), "order-models", name));
   }
 }
