@@ -33,6 +33,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
       AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
       OWNER_EMAIL: ${OWNER_EMAIL}
       OWNER_PASSWORD: ${OWNER_PASSWORD}
       OWNER_DISPLAY_NAME: ${OWNER_DISPLAY_NAME:-Yoleotard Owner}
