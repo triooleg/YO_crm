@@ -1,0 +1,1 @@
+{"name":"@yoleotard-crm/database","version":"0.1.0","private":true,"type":"module","scripts":{"build":"prisma generate","typecheck":"tsc --noEmit","test":"node --test tests/*.test.mjs","seed":"tsx prisma/seed.ts"},"dependencies":{"@prisma/client":"^6.17.1","argon2":"^0.44.0"},"devDependencies":{"@types/node":"24.7.2","prisma":"^6.17.1","tsx":"^4.20.6","typescript":"^5.9.3"}}

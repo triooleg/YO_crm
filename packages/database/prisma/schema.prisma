@@ -1,0 +1,333 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  PRODUCTION
+  ACCOUNTANT
+  VIEWER
+}
+enum ClientStatus {
+  LEAD
+  ACTIVE
+  VIP
+  INACTIVE
+  BLOCKED
+}
+enum ContactChannel {
+  WEBSITE
+  CHATWOOT
+  INSTAGRAM
+  FACEBOOK
+  WHATSAPP
+  EMAIL
+  TELEGRAM
+  REFERRAL
+  RETURNING_CUSTOMER
+  MANUAL
+  OTHER
+}
+enum Discipline {
+  RHYTHMIC_GYMNASTICS
+  ACROBATIC_GYMNASTICS
+  FIGURE_SKATING
+  AEROBIC_GYMNASTICS
+  BATON_TWIRLING_MAJORETTE
+  OTHER
+}
+enum OrderType {
+  READY_MODEL
+  CUSTOM_ORDER
+  COPY_MODEL
+  MODIFIED_MODEL
+  PAIR
+  GROUP_ORDER
+  REPEAT_ORDER
+  ACCESSORY
+}
+enum SalesStatus {
+  NEW_LEAD
+  WAITING_CLIENT_REPLY
+  NEEDS_ESTIMATE
+  ESTIMATE_SENT
+  DESIGN_DISCUSSION
+  WAITING_COACH_APPROVAL
+  WAITING_DEPOSIT
+  DEPOSIT_RECEIVED
+  ORDER_CONFIRMED
+  MEASUREMENTS_REQUIRED
+  MEASUREMENTS_RECEIVED
+  READY_FOR_PRODUCTION
+  IN_PRODUCTION
+  FINAL_DECORATION
+  QUALITY_CONTROL
+  PHOTO_SENT
+  WAITING_FINAL_PAYMENT
+  PAID
+  READY_TO_SHIP
+  SHIPPED
+  DELIVERED
+  REVIEW_REQUESTED
+  COMPLETED
+  CANCELLED
+}
+enum ProductionStatus {
+  NOT_SCHEDULED
+  TENTATIVE
+  SCHEDULED
+  MATERIALS
+  CUTTING
+  SEWING
+  DECORATION
+  QUALITY_CONTROL
+  READY
+  ON_HOLD
+  CANCELLED
+}
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  DEPOSIT_PAID
+  PAID
+  REFUNDED
+  CANCELLED
+}
+enum ShippingStatus {
+  NOT_READY
+  READY
+  LABEL_CREATED
+  SHIPPED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  LOST
+}
+enum PaymentMethod {
+  CARD
+  BANK_TRANSFER
+  PAYPAL
+  CASH
+  OTHER
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  displayName String
+  role UserRole @default(MANAGER)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  sessions Session[]
+  clients Client[] @relation("ClientManager")
+  orders Order[] @relation("OrderManager")
+  auditLogs AuditLog[] @relation("AuditActor")
+}
+
+model Session {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  userId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+}
+
+model Client {
+  id String @id @default(cuid())
+  firstName String
+  lastName String?
+  displayName String
+  country String?
+  city String?
+  address String?
+  postalCode String?
+  email String?
+  phone String?
+  whatsapp String?
+  instagram String?
+  facebook String?
+  telegram String?
+  preferredChannel ContactChannel?
+  language String?
+  timezone String?
+  firstContactAt DateTime?
+  source ContactChannel @default(MANUAL)
+  status ClientStatus @default(LEAD)
+  notes String?
+  responsibleManagerId String?
+  nextActionAt DateTime?
+  lastContactAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  responsibleManager User? @relation("ClientManager", fields: [responsibleManagerId], references: [id])
+  athletes Athlete[]
+  orders Order[]
+  activities Activity[]
+  @@index([displayName])
+  @@index([email])
+  @@index([phone])
+  @@index([status, archivedAt])
+}
+
+model Athlete {
+  id String @id @default(cuid())
+  clientId String
+  firstName String
+  lastName String?
+  birthDate DateTime?
+  discipline Discipline?
+  club String?
+  coach String?
+  country String?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  client Client @relation(fields: [clientId], references: [id])
+  measurements Measurement[]
+  orders Order[]
+  @@index([clientId, archivedAt])
+}
+
+model Measurement {
+  id String @id @default(cuid())
+  athleteId String
+  measuredAt DateTime
+  unit String @default("cm")
+  height Decimal? @db.Decimal(6, 2)
+  chest Decimal? @db.Decimal(6, 2)
+  waist Decimal? @db.Decimal(6, 2)
+  hips Decimal? @db.Decimal(6, 2)
+  torso Decimal? @db.Decimal(6, 2)
+  values Json?
+  notes String?
+  source String?
+  createdAt DateTime @default(now())
+  athlete Athlete @relation(fields: [athleteId], references: [id])
+  orders Order[]
+  @@index([athleteId, measuredAt])
+}
+
+model Order {
+  id String @id @default(cuid())
+  number String @unique
+  clientId String
+  athleteId String?
+  measurementId String?
+  type OrderType
+  discipline Discipline?
+  country String?
+  requiredDeliveryAt DateTime?
+  promisedProductionAt DateTime?
+  priority Int @default(0)
+  responsibleManagerId String?
+  productionOwner String?
+  priceMinor Int
+  currency String @default("EUR")
+  depositRequiredMinor Int
+  deliveryMinor Int @default(0)
+  discountMinor Int @default(0)
+  productionCostMinor Int?
+  salesStatus SalesStatus @default(NEW_LEAD)
+  productionStatus ProductionStatus @default(NOT_SCHEDULED)
+  paymentStatus PaymentStatus @default(UNPAID)
+  shippingStatus ShippingStatus @default(NOT_READY)
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  client Client @relation(fields: [clientId], references: [id])
+  athlete Athlete? @relation(fields: [athleteId], references: [id])
+  measurement Measurement? @relation(fields: [measurementId], references: [id])
+  responsibleManager User? @relation("OrderManager", fields: [responsibleManagerId], references: [id])
+  items OrderItem[]
+  payments Payment[]
+  productionSlot ProductionSlot?
+  activities Activity[]
+  @@index([salesStatus, archivedAt])
+  @@index([requiredDeliveryAt])
+  @@index([clientId, createdAt])
+}
+
+model OrderItem {
+  id String @id @default(cuid())
+  orderId String
+  name String
+  quantity Int @default(1)
+  priceMinor Int
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id String @id @default(cuid())
+  orderId String
+  amountMinor Int
+  currency String
+  method PaymentMethod
+  receivedAt DateTime
+  reference String?
+  notes String?
+  createdAt DateTime @default(now())
+  order Order @relation(fields: [orderId], references: [id])
+  @@index([orderId, receivedAt])
+}
+
+model ProductionSlot {
+  id String @id @default(cuid())
+  orderId String @unique
+  startsAt DateTime
+  endsAt DateTime
+  capacity Int @default(1)
+  tentative Boolean @default(true)
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order Order @relation(fields: [orderId], references: [id])
+  @@index([startsAt, endsAt])
+}
+
+model Activity {
+  id String @id @default(cuid())
+  clientId String?
+  orderId String?
+  type String
+  summary String
+  metadata Json?
+  createdAt DateTime @default(now())
+  client Client? @relation(fields: [clientId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+  @@index([clientId, createdAt])
+  @@index([orderId, createdAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  entityType String
+  entityId String?
+  before Json?
+  after Json?
+  requestId String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
