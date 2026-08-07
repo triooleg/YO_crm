@@ -49,8 +49,8 @@ button { cursor: pointer; }
 .phase2-avatar { flex: 0 0 38px; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: #e9e0ff; color: var(--violet); font-weight: 800; }
 .phase2-avatar.big { width: 52px; height: 52px; }
 .phase2-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 22px; }
-.phase2-card-head > button, .phase2-section-title button { border: 0; background: transparent; color: var(--violet); font-weight: 700; }
-.phase2-person { display: flex; align-items: center; gap: 13px; }
+.phase2-card-head > button, .phase2-card-actions button, .phase2-section-title button { border: 0; background: transparent; color: var(--violet); font-weight: 700; }
+.phase2-card-actions{display:flex;gap:10px}.phase2-person { display: flex; align-items: center; gap: 13px; }
 .phase2-person h2 { margin: 0 0 5px; font-size: 24px; }
 .phase2-person em { padding: 5px 9px; border-radius: 20px; background: var(--green-soft); color: #27834e; font-size: 12px; font-style: normal; }
 .phase2-tabs { display: flex; gap: 20px; padding: 0 22px; border-bottom: 1px solid var(--line); }

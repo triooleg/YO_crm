@@ -246,6 +246,7 @@ model Order {
   paymentStatus PaymentStatus @default(UNPAID)
   shippingStatus ShippingStatus @default(NOT_READY)
   notes String?
+  modelImagePath String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   archivedAt DateTime?
