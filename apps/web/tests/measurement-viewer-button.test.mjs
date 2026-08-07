@@ -1,0 +1,1 @@
+import{readFile}from"node:fs/promises";import test from"node:test";import assert from"node:assert/strict";const css=await readFile(new URL("../app/measurement-panel.css",import.meta.url),"utf8");test("кнопка закрытия просмотра имеет видимый текст",()=>{assert.match(css,/\.measure-viewer footer>\.phase2-primary:first-child\{[^}]*background:var\(--violet\)[^}]*color:#fff/)})

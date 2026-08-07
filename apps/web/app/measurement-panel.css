@@ -3,3 +3,5 @@
 
 .measure-panel.measure-viewer{width:min(590px,100%)}.measure-values>div{grid-template-columns:minmax(0,1fr) 145px}.measure-values>div>strong{white-space:nowrap}
 
+.measure-viewer footer>.phase2-primary:first-child{border-color:var(--violet);background:var(--violet);color:#fff}
+
