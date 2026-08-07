@@ -1,0 +1,1 @@
+import{readFile}from"node:fs/promises";import test from"node:test";import assert from"node:assert/strict";const html=await readFile(new URL("./index.html",import.meta.url),"utf8");test("заказы показывают источник клиента",()=>{assert.match(html,/Источник клиента/);assert.match(html,/o\.source/);assert.match(html,/source:'Instagram'/);assert.match(html,/source:'Сайт'/)})

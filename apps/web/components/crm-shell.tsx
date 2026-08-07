@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useState } from "react";
 import { ClientWorkspace } from "./client-workspace";
+import { OrdersWorkspace } from "./orders-workspace";
 
 const items = [
   ["Обзор", "⌂"], ["Входящие", "✉"], ["Клиенты", "👤"], ["Заказы", "▣"],
@@ -18,7 +19,7 @@ export function CrmShell(){
       <button className="crm-collapse" onClick={()=>setCollapsed(v=>!v)} title={collapsed?"Развернуть меню":"Свернуть меню"}>{collapsed?"›":"‹"}</button>
       <nav>{items.map(([name,icon])=><button key={name} className={section===name?"active":""} onClick={()=>setSection(name)} title={name}><i>{icon}</i>{!collapsed&&<span>{name}</span>}</button>)}</nav>
     </aside>
-    <section className="crm-content">{section==="Клиенты"?<ClientWorkspace/>:section==="Входящие"?<Inbox onOpenClients={()=>setSection("Клиенты")}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<Inbox onOpenClients={()=>setSection(items[2][0])}/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:<ComingSoon name={section}/>}</section>
   </main>
 }
 
@@ -32,3 +33,4 @@ function IncomingCreate({close,done}:{close:()=>void;done:()=>void}){const[error
 function ComingSoon({name}:{name:string}){return <div className="coming-soon"><span>Раздел</span><h1>{name}</h1><p>Этот рабочий экран будет реализован на следующем этапе.</p></div>}
 function initials(n:string){return n.split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase()}
 function source(v?:string){return ({INSTAGRAM:"Instagram",WHATSAPP:"WhatsApp",TELEGRAM:"Telegram",EMAIL:"Email",WEBSITE:"Сайт",MANUAL:"Вручную"} as Record<string,string>)[v||""]||"Другой канал"}
+

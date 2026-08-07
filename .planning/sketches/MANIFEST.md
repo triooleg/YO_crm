@@ -1,4 +1,4 @@
-# Sketch Manifest
+﻿# Sketch Manifest
 
 ## Design Direction
 
@@ -14,3 +14,6 @@
 |---|------|-----------------|--------|------|
 | 001 | athlete-measurements | Как компактно добавлять спортсмена и замеры? | A — боковая панель | client, athlete, measurements |
 | 002 | order-creation | Как быстро создать заказ из карточки клиента? | A — боковая панель с фото | orders, sales |
+| 003 | orders-workspace | Какой общий вид заказов лучше сочетает фото моделей, плотность данных и контроль этапов? | A — компактная таблица | orders, list, kanban, production |
+
+
