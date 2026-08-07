@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./styles.css";
+import "./phase2.css";
 
 export const metadata: Metadata = {
   title: "CRM Yoleotard",

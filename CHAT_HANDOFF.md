@@ -1,49 +1,43 @@
-# Yoleotard CRM handoff
+# Yoleotard CRM — передача контекста
 
-## Current state - 2026-08-07
+## Текущее состояние — 2026-08-07
 
-Phase 0 discovery and deployable Phase 1 foundation are complete. The production
-web interface is deployed in Russian.
+Завершены базовая платформа Phase 1 и первый вертикальный срез Phase 2 «Клиенты».
+Основной интерфейс и все пользовательские данные отображаются на русском языке.
 
-## Infrastructure
+## Инфраструктура
 
-- Server: `trio@192.168.31.219` (`homeserver`).
-- Docker 28.4.0, Compose 2.39.2, Portainer and Nginx Proxy Manager.
-- Production web: `https://crm.yoleotard.com/`.
-- LAN web/API: ports 3500/4500.
-- Public `/api` proxy is not configured; do not assume it exists.
-- Stack directory: `/home/trio/yoleotard-crm`.
-- Server-only `.env` has mode 600; never print or copy it into Git.
+- Production: `https://crm.yoleotard.com/`.
+- Сервер: `trio@192.168.31.219`, каталог `/home/trio/yoleotard-crm`.
+- Docker Compose project: `yoleotard-crm`; LAN web/API: 3500/4500.
+- Web проксирует same-origin `/api/*` во внутренний контейнер `api:4500`, поэтому отдельная настройка доменного `/api` в Nginx не требуется.
+- Серверный `.env` имеет права 600; его нельзя выводить или сохранять в Git.
 
-## Decisions
+## Зафиксированные решения
 
-- TypeScript modular monolith: Next.js, NestJS, Prisma/PostgreSQL and Redis.
-- Primary interface language is Russian; user-facing strings and enum labels
-  belong in `apps/web/lib/i18n.ts`.
-- Stable database/API enum identifiers remain English internally.
-- Client-entered names, addresses and messages remain in their original language.
-- Client and Athlete are separate; Measurement is an immutable snapshot.
-- Money is integer minor units plus ISO currency.
-- PostgreSQL and Redis have no production host ports.
+- Стек: Next.js, NestJS, Prisma/PostgreSQL, Redis; модульный TypeScript-монолит.
+- Язык интерфейса — русский; внутренние enum остаются английскими.
+- Клиент и спортсмен — разные сущности; замер — неизменяемый снимок.
+- Деньги хранятся в минимальных единицах валюты.
+- Утверждён макет клиентов: список слева 220 px, карточка занимает остаток; список сворачивается до 64 px; мобильная версия адаптивная.
+- KeyCRM не является шаблоном: проектируем более компактный собственный интерфейс и показываем визуальные этапы на утверждение.
 
-## Delivered
+## Реализовано в Phase 2
 
-- Foundation: `f03c6a4`.
-- Deployment fixes: `93b1050`, `bba03e8`.
-- Russian localization and production origin: `b113c85`.
+- Защищённые API списка, поиска, просмотра и создания клиентов.
+- API добавления спортсмена и его замеров.
+- Ролевые ограничения OWNER/ADMIN/MANAGER; PRODUCTION может добавлять замеры.
+- Для созданий записываются Activity и AuditLog; принадлежность спортсмена клиенту проверяется.
+- Русский экран входа, список клиентов, поиск, сворачивание панели, карточка с вкладками, контактами, спортсменами, возрастом замеров, заказами и историей.
+- Модальное создание клиента и состояния пустого списка/ошибки.
+- Same-origin API rewrite для production-домена.
 
-## Verification
+## Проверка
 
-- Contract tests: 9/9 passed after localization.
-- Monorepo typecheck and production build passed.
-- Docker production build passed.
-- PostgreSQL, Redis and API are healthy.
-- `https://crm.yoleotard.com/` returned HTTP 200.
-- Public page contains `Доброе утро`, `Клиенты`, `Заказы`, `Производство`.
-- LAN API health returned `{"ok":true,"service":"yoleotard-crm-api"}`.
+- Все contract tests прошли.
+- TypeScript typecheck прошёл во всех пакетах.
+- Production build Next.js/NestJS/Prisma прошёл.
 
-## Next step
+## Следующий этап
 
-Implement Phase 2 client/athlete/measurement vertical slice in Russian. Before
-finalizing its information architecture, review redacted KeyCRM screenshots of
-the client list, client card and related tabs.
+После визуальной проверки пользователем подключить рабочие формы добавления спортсмена и замеров, затем перейти к вертикальному срезу заказов. Перед каждым крупным UI-блоком показать интерактивный прототип или работающий экран для утверждения.
