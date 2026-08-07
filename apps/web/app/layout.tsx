@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Yoleotard CRM",
-  description: "Yoleotard operations workspace"
+  title: "CRM Yoleotard",
+  description: "Рабочая система управления клиентами, заказами и производством Yoleotard"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="ru"><body>{children}</body></html>;
 }

@@ -12,7 +12,7 @@ export class AuthService {
   async login(email: string, password: string) {
     const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user?.active || !(await argon2.verify(user.passwordHash, password))) {
-      throw new UnauthorizedException("Invalid email or password");
+      throw new UnauthorizedException("Неверный адрес электронной почты или пароль");
     }
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + 14 * 86_400_000);
