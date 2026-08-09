@@ -322,6 +322,7 @@ model ProductionSlot {
   endsAt    DateTime
   capacity  Int      @default(1)
   tentative Boolean  @default(true)
+  locked    Boolean  @default(false)
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

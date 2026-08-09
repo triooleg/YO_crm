@@ -1,62 +1,38 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { productionUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 
-type Payment = { amountMinor:number; currency:string };
-type Measurement = { id:string };
-type Item = { id:string; modelImagePath?:string; measurement?:Measurement; athlete?:{ firstName:string; lastName?:string } };
-type ProductionOrder = {
-  id:string; number:string; notes?:string; modelImagePath?:string; requiredDeliveryAt?:string;
-  depositRequiredMinor:number; currency:string; productionStatus:string;
-  client:{ displayName:string }; athlete?:{ firstName:string; lastName?:string };
-  measurement?:Measurement; items:Item[]; payments:Payment[];
-};
-
-const COLUMNS = [
-  { id:"queue", label:productionUi.queue, statuses:["NOT_SCHEDULED","TENTATIVE","SCHEDULED"] },
-  { id:"materials", label:productionUi.materials, statuses:["MATERIALS"] },
-  { id:"cutting", label:productionUi.cutting, statuses:["CUTTING"] },
-  { id:"sewing", label:productionUi.sewing, statuses:["SEWING"] },
-  { id:"decoration", label:productionUi.decoration, statuses:["DECORATION"] },
-  { id:"quality", label:productionUi.quality, statuses:["QUALITY_CONTROL"] },
-  { id:"ready", label:productionUi.ready, statuses:["READY"] },
-] as const;
-
-const STATUS_OPTIONS = ["NOT_SCHEDULED","TENTATIVE","SCHEDULED","MATERIALS","CUTTING","SEWING","DECORATION","QUALITY_CONTROL","READY","ON_HOLD","CANCELLED"];
+type Slot={startsAt:string;endsAt:string;capacity:number;tentative:boolean;locked:boolean};
+type Order={id:string;number:string;notes?:string;modelImagePath?:string;requiredDeliveryAt?:string;productionStatus:string;client:{displayName:string;country?:string};items:{modelImagePath?:string;athlete?:{firstName:string;lastName?:string}}[];athlete?:{firstName:string;lastName?:string};productionSlot?:Slot};
+const DAY=86400000, DAYS=35, MONTHS=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+const localDate=(value:string|Date)=>{const d=value instanceof Date?value:new Date(value);return new Date(d.getFullYear(),d.getMonth(),d.getDate())};
+export const toLocalIso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const plus=(d:Date,n:number)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);
+const diff=(a:Date,b:Date)=>Math.round((localDate(a).getTime()-localDate(b).getTime())/DAY);
+const flag=(country?:string)=>({Ukraine:"🇺🇦",France:"🇫🇷",Italy:"🇮🇹",Spain:"🇪🇸",Poland:"🇵🇱",Malaysia:"🇲🇾"}[country||""]||"🌍");
 
 export function ProductionWorkspace(){
-  const [orders,setOrders]=useState<ProductionOrder[]>([]),[search,setSearch]=useState(""),[filter,setFilter]=useState<"all"|"urgent"|"blocked">("all"),[saving,setSaving]=useState<string>(),[error,setError]=useState("");
-  async function load(){const response=await fetch("/api/orders",{credentials:"include"});if(!response.ok){setError(productionUi.loadError);return}setOrders(await response.json())}
-  useEffect(()=>{load()},[]);
-  async function change(order:ProductionOrder,productionStatus:string){setSaving(order.id);setError("");try{const response=await fetch(`/api/orders/${order.id}/statuses`,{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({productionStatus})});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||productionUi.saveError)}await load()}catch(reason){setError(reason instanceof Error?reason.message:productionUi.saveError)}finally{setSaving(undefined)}}
-  const visible=useMemo(()=>orders.filter(order=>{const text=`${order.number} ${order.client.displayName} ${order.notes||""}`.toLowerCase();if(search&&!text.includes(search.toLowerCase()))return false;if(filter==="urgent"&&daysLeft(order)>7)return false;if(filter==="blocked"&&depositReady(order)&&measurementsReady(order))return false;return !["CANCELLED"].includes(order.productionStatus)}),[orders,search,filter]);
-  const urgent=orders.filter(order=>daysLeft(order)<=7&&order.productionStatus!=="READY").length,blocked=orders.filter(order=>!depositReady(order)||!measurementsReady(order)).length;
-  return <main className="production-page">
-    <header className="phase2-header"><div><p>{productionUi.eyebrow}</p><h1>{productionUi.title}</h1><span>{productionUi.subtitle}</span></div></header>
-    <section className="production-metrics"><Metric label={productionUi.inWork} value={orders.filter(order=>!["NOT_SCHEDULED","READY","CANCELLED"].includes(order.productionStatus)).length}/><Metric label={productionUi.urgent} value={urgent}/><Metric label={productionUi.blocked} value={blocked}/><Metric label={productionUi.ready} value={orders.filter(order=>order.productionStatus==="READY").length}/></section>
-    <section className="production-toolbar"><input value={search} onChange={event=>setSearch(event.target.value)} placeholder={productionUi.search}/><button className={filter==="all"?"active":""} onClick={()=>setFilter("all")}>{productionUi.all}</button><button className={filter==="urgent"?"active":""} onClick={()=>setFilter("urgent")}>{productionUi.urgent}</button><button className={filter==="blocked"?"active":""} onClick={()=>setFilter("blocked")}>{productionUi.blocked}</button></section>
-    {error&&<div className="phase2-error">{error}<button onClick={()=>setError("")}>{productionUi.close}</button></div>}
-    <section className="production-board">{COLUMNS.map(column=>{const cards=visible.filter(order=>column.statuses.some(status=>status===order.productionStatus));return <div className="production-column" key={column.id}><header><strong>{column.label}</strong><span>{cards.length}</span></header><div>{cards.map(order=><ProductionCard key={order.id} order={order} saving={saving===order.id} change={status=>change(order,status)}/>)}{!cards.length&&<p className="production-empty">{productionUi.empty}</p>}</div></div>})}</section>
-  </main>
+ const now=new Date(),[base,setBase]=useState(()=>new Date(now.getFullYear(),now.getMonth(),1)),[orders,setOrders]=useState<Order[]>([]),[search,setSearch]=useState(""),[capacityPerDay,setCapacity]=useState(3),[selected,setSelected]=useState<string>(),[error,setError]=useState("");
+ async function load(){const r=await fetch("/api/orders",{credentials:"include"});if(!r.ok){setError(productionUi.loadError);return}setOrders(await r.json())}
+ useEffect(()=>{load();const saved=Number(localStorage.getItem("production-capacity"));if(saved>=1&&saved<=10)setCapacity(saved)},[]);
+ const days=useMemo(()=>Array.from({length:DAYS},(_,i)=>plus(base,i)),[base]);
+ const visible=useMemo(()=>orders.filter(o=>`${o.number} ${o.client.displayName} ${o.notes||""}`.toLowerCase().includes(search.toLowerCase())&&o.productionStatus!=="CANCELLED"),[orders,search]);
+ const scheduled=visible.filter(o=>o.productionSlot&&diff(localDate(o.productionSlot.endsAt),base)>=0&&diff(localDate(o.productionSlot.startsAt),base)<DAYS);
+ const dailyLoad=days.map(day=>scheduled.filter(o=>{const s=localDate(o.productionSlot!.startsAt),e=localDate(o.productionSlot!.endsAt);return day>=s&&day<=e}).length);
+ const monthGroups=days.reduce<{month:number;year:number;start:number;length:number}[]>((all,d,i)=>{const last=all.at(-1);if(last&&last.month===d.getMonth())last.length++;else all.push({month:d.getMonth(),year:d.getFullYear(),start:i,length:1});return all},[]);
+ const selectedOrder=orders.find(o=>o.id===selected);
+ function setCapacityValue(value:number){setCapacity(value);localStorage.setItem("production-capacity",String(value))}
+ async function saveSlot(order:Order,slot:Slot){setError("");setOrders(list=>list.map(o=>o.id===order.id?{...o,productionSlot:slot}:o));const r=await fetch(`/api/orders/${order.id}/production-slot`,{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(slot)});if(!r.ok){const body=await r.json().catch(()=>({}));setError(body.message||productionUi.saveError);await load()}}
+ function drag(order:Order,edge:"move"|"left"|"right",event:ReactPointerEvent){if(!order.productionSlot||order.productionSlot.locked)return;event.preventDefault();const startX=event.clientX,originalStart=diff(localDate(order.productionSlot.startsAt),base),originalEnd=diff(localDate(order.productionSlot.endsAt),base);let last=0,latestSlot=order.productionSlot;const move=(e:PointerEvent)=>{const delta=Math.round((e.clientX-startX)/40);if(delta===last)return;last=delta;let s=originalStart,eDay=originalEnd;if(edge==="move"){s=originalStart+delta;eDay=originalEnd+delta}if(edge==="left")s=Math.min(originalEnd,originalStart+delta);if(edge==="right")eDay=Math.max(originalStart,originalEnd+delta);const slot={...order.productionSlot!,startsAt:toLocalIso(plus(base,s)),endsAt:toLocalIso(plus(base,eDay))};latestSlot=slot;setOrders(list=>list.map(o=>o.id===order.id?{...o,productionSlot:slot}:o))};const up=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);if(latestSlot)void saveSlot(order,latestSlot);};window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true})}
+ function autoSchedule(order:Order){const end=order.requiredDeliveryAt?localDate(order.requiredDeliveryAt):plus(base,14),slot={startsAt:toLocalIso(plus(end,-6)),endsAt:toLocalIso(end),capacity:1,tentative:order.productionStatus==="TENTATIVE",locked:false};void saveSlot(order,slot)}
+ return <main className="production-page"><header className="phase2-header"><div><p>{productionUi.eyebrow}</p><h1>План производства</h1><span>Заказы, загрузка и сроки на единой временной шкале</span></div><div className="production-period"><button onClick={()=>setBase(plus(base,-28))}>‹</button><b>{monthGroups.map(g=>`${MONTHS[g.month]} ${g.year}`).join(" — ")}</b><button onClick={()=>setBase(plus(base,28))}>›</button></div></header>
+ <section className="production-metrics"><Metric label="Заказов на шкале" value={scheduled.length}/><Metric label="Средняя загрузка" value={`${Math.round(dailyLoad.reduce((a,b)=>a+b,0)/DAYS/capacityPerDay*100)}%`}/><Metric label="Свободных дней" value={dailyLoad.filter(v=>v<capacityPerDay).length}/><Metric label="Перегружено дней" value={dailyLoad.filter(v=>v>capacityPerDay).length}/></section>
+ <nav className="production-months"><span>Перейти к месяцу:</span>{Array.from({length:5},(_,i)=>new Date(now.getFullYear(),now.getMonth()+i,1)).map(m=><button key={m.toISOString()} className={m.getMonth()===base.getMonth()?"active":""} onClick={()=>setBase(m)}>{MONTHS[m.getMonth()]} <b>{orders.filter(o=>o.productionSlot&&localDate(o.productionSlot.startsAt).getMonth()===m.getMonth()).length}</b></button>)}</nav>
+ <section className="production-toolbar"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={productionUi.search}/><label>Мощность дня <select value={capacityPerDay} onChange={e=>setCapacityValue(Number(e.target.value))}>{[1,2,3,4,5,6].map(v=><option key={v} value={v}>{v} {v===1?"заказ":"заказа"}</option>)}</select></label></section>{error&&<div className="phase2-error">{error}<button onClick={()=>setError("")}>×</button></div>}
+ <section className="production-timeline"><div className="production-canvas"><div className="timeline-months"><div>Заказ / модель</div>{monthGroups.map(g=><b key={`${g.year}-${g.month}`} style={{gridColumn:`${g.start+2}/${g.start+g.length+2}`}}>{MONTHS[g.month]} {g.year}</b>)}</div><div className="timeline-days"><div>День</div>{days.map(d=><span key={toLocalIso(d)}>{d.getDate()}<small>{new Intl.DateTimeFormat("ru-RU",{weekday:"short"}).format(d)}</small></span>)}</div><div className="timeline-load"><div>Загрузка · {capacityPerDay}/день</div>{dailyLoad.map((count,i)=><span key={i} className={count>capacityPerDay?"over":count===capacityPerDay?"full":""}><i style={{width:`${Math.min(100,count/capacityPerDay*100)}%`}}/><small>{count}/{capacityPerDay}</small></span>)}</div>{scheduled.map(order=><TimelineRow key={order.id} order={order} base={base} select={()=>setSelected(order.id)} drag={drag}/>)}{visible.filter(o=>!o.productionSlot).map(order=><div className="timeline-unscheduled" key={order.id}><div><strong>{order.number}</strong><small>{order.client.displayName}</small></div><button onClick={()=>autoSchedule(order)}>+ Запланировать</button></div>)}</div></section>
+ {selectedOrder?.productionSlot&&<aside className="production-slot-card"><button onClick={()=>setSelected(undefined)}>×</button><small>ПРОИЗВОДСТВЕННЫЙ СЛОТ</small><h2>{selectedOrder.number}</h2><b>{selectedOrder.client.displayName}</b><label>Начало<input type="date" value={toLocalIso(localDate(selectedOrder.productionSlot.startsAt))} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,startsAt:e.target.value})}/></label><label>Окончание<input type="date" value={toLocalIso(localDate(selectedOrder.productionSlot.endsAt))} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,endsAt:e.target.value})}/></label><label className="slot-lock"><input type="checkbox" checked={selectedOrder.productionSlot.locked} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,locked:e.target.checked})}/> Закрепить слот</label><p>{orderLabel("production",selectedOrder.productionStatus)}</p></aside>}</main>
 }
-
-function ProductionCard({order,saving,change}:{order:ProductionOrder;saving:boolean;change:(status:string)=>void}){
-  const image=order.items.find(item=>item.modelImagePath)?.modelImagePath||order.modelImagePath,paid=order.payments.reduce((sum,payment)=>sum+payment.amountMinor,0),deposit=depositReady(order),measurements=measurementsReady(order);
-  return <article className={`production-card ${daysLeft(order)<=7?"urgent":""}`}>
-    <div className="production-card-main">{image?<img src={`/api/orders/images/${image}`} alt={productionUi.modelImage}/>:<span className="production-no-image">Y</span>}<div><strong>{order.number}</strong><b>{order.client.displayName}</b><small>{athletes(order)}</small></div></div>
-    <p>{order.notes||productionUi.noDescription}</p>
-    <div className="production-readiness"><span className={deposit?"ok":"blocked"}>{deposit?"✓":"!"} {productionUi.deposit}: {money(paid,order.currency)} / {money(order.depositRequiredMinor,order.currency)}</span><span className={measurements?"ok":"blocked"}>{measurements?"✓":"!"} {measurements?productionUi.measurementsReady:productionUi.measurementsMissing}</span></div>
-    <div className="production-deadline"><span>{productionUi.deadline}</span><strong>{deadline(order)}</strong></div>
-    <label><span>{productionUi.stage}</span><select value={order.productionStatus} disabled={saving} onChange={event=>change(event.target.value)}>{STATUS_OPTIONS.map(status=><option value={status} key={status}>{orderLabel("production",status)}</option>)}</select></label>
-  </article>
-}
-
-function Metric({label,value}:{label:string;value:number}){return <div><span>{label}</span><strong>{value}</strong></div>}
-function depositReady(order:ProductionOrder){return order.payments.reduce((sum,payment)=>sum+payment.amountMinor,0)>=order.depositRequiredMinor}
-function measurementsReady(order:ProductionOrder){return order.items.length?order.items.every(item=>Boolean(item.measurement)):Boolean(order.measurement)}
-function athletes(order:ProductionOrder){const names=order.items.map(item=>item.athlete&&[item.athlete.firstName,item.athlete.lastName].filter(Boolean).join(" ")).filter(Boolean);if(names.length)return names.join(", ");return order.athlete?[order.athlete.firstName,order.athlete.lastName].filter(Boolean).join(" "):productionUi.athleteMissing}
-function daysLeft(order:ProductionOrder){return order.requiredDeliveryAt?Math.ceil((new Date(order.requiredDeliveryAt).getTime()-Date.now())/86400000):9999}
-function deadline(order:ProductionOrder){if(!order.requiredDeliveryAt)return productionUi.noDeadline;return new Intl.DateTimeFormat("ru-RU",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(order.requiredDeliveryAt))}
-function money(value:number,currency:string){return new Intl.NumberFormat("ru-RU",{style:"currency",currency}).format(value/100)}
+function TimelineRow({order,base,select,drag}:{order:Order;base:Date;select:()=>void;drag:(o:Order,e:"move"|"left"|"right",x:ReactPointerEvent)=>void}){const slot=order.productionSlot!,start=diff(localDate(slot.startsAt),base),end=diff(localDate(slot.endsAt),base),image=order.items.find(i=>i.modelImagePath)?.modelImagePath||order.modelImagePath;return <div className="timeline-row"><div><strong>{order.number}</strong><small>{order.notes||order.client.displayName}</small></div><button className={`timeline-bar ${slot.tentative?"tentative":""} ${slot.locked?"locked":""}`} style={{gridColumn:`${Math.max(0,start)+2}/${Math.min(DAYS,end+1)+2}`}} onClick={select} onPointerDown={e=>drag(order,"move",e)}><span className="resize left" onPointerDown={e=>{e.stopPropagation();drag(order,"left",e)}}/>{image?<img src={`/api/orders/images/${image}`} alt="Модель"/>:<i>Y</i>}<b>{flag(order.client.country)} {order.client.displayName}</b><small>{diff(localDate(slot.endsAt),localDate(slot.startsAt))+1} дн.</small><span className="resize right" onPointerDown={e=>{e.stopPropagation();drag(order,"right",e)}}/></button></div>}
+function Metric({label,value}:{label:string;value:number|string}){return <div><span>{label}</span><strong>{value}</strong></div>}

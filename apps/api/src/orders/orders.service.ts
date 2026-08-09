@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+﻿import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,7 +6,7 @@ import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderStatusesDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -42,7 +42,7 @@ export class OrdersService {
       select: {
         id: true, number: true, type: true, requiredDeliveryAt: true, priceMinor: true,
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
-        paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true,
+        paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true, productionSlot: true,
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, measuredAt: true, values: true } },
@@ -70,6 +70,20 @@ export class OrdersService {
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_STATUSES_UPDATED", summary, metadata: data } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
       return updated;
+    });
+  }
+  async updateProductionSlot(orderId: string, dto: UpdateProductionSlotDto, actor: User) {
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
+    if (!order) throw new NotFoundException("Заказ не найден");
+    const startsAt = new Date(dto.startsAt), endsAt = new Date(dto.endsAt);
+    if (endsAt < startsAt) throw new BadRequestException("Дата окончания не может быть раньше даты начала");
+    const tentative = dto.tentative ?? true;
+    const paid = order.payments.filter(p => p.currency === order.currency).reduce((sum,p) => sum + p.amountMinor, 0);
+    if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
+    return this.prisma.$transaction(async tx => {
+      const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false} });
+      await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_UPDATED",summary:"Обновлён производственный слот",metadata:{startsAt,endsAt,tentative,locked:dto.locked??false}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:order.productionSlot?"UPDATE":"CREATE",entityType:"ProductionSlot",entityId:slot.id,before:order.productionSlot??undefined,after:slot}});return slot;
     });
   }
   async addPayment(orderId: string, dto: AddOrderPaymentDto, actor: User) {
