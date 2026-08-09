@@ -43,3 +43,14 @@
 @media(max-width:1200px){.orders-table-wrap{overflow-x:auto}.orders-table,.orders-table thead,.orders-table tbody{min-width:1180px}}
 
 .orders-table td{font-size:13px}
+/* Размеры каждой позиции группового и парного заказа */
+.orders-group-items article{grid-template-columns:38px minmax(120px,.9fr) minmax(150px,1.1fr) minmax(260px,1.5fr) auto}
+.orders-group-measures{min-width:0}
+.orders-group-measures>div{display:flex;flex-wrap:wrap;gap:4px}
+.orders-group-measures>div>span{display:inline-flex;align-items:baseline;gap:4px;padding:4px 6px;border-radius:7px;background:#f1edf8;white-space:nowrap}
+.orders-group-measures span small{color:var(--muted);font-size:10px}
+.orders-group-measures span b{font-size:11px}
+.orders-group-measures>small{display:block;margin-top:4px;color:#198754;font-size:10px}
+.orders-group-measures.missing>div>span{background:#fff0ec}
+.orders-group-measures.missing>small,.orders-group-measures.missing span b{color:#c2413a}
+@media(max-width:900px){.orders-group-items article{grid-template-columns:38px 1fr auto}.orders-group-items article>.orders-group-measures{grid-column:2/4}.orders-group-measures>div{flex-wrap:nowrap}}

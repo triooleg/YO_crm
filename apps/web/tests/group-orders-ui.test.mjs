@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const panel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const list = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
+const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
 test("форма создаёт парный и групповой состав", () => {
   for (const text of ["Парный заказ", "Групповой заказ", "Выберите состав группы"]) {
@@ -23,4 +24,12 @@ test("раскрытие группового заказа показывает 
   assert.match(list, /orders-group-items/);
   assert.match(list, /item\.measurement/);
   assert.match(list, /item\.productionStatus/);
+});
+test("каждая позиция группового заказа показывает свои грудь талию и бёдра", () => {
+  assert.match(list, /GroupMeasurementSizes/);
+  assert.match(list, /values\?\.m1/);
+  assert.match(list, /values\?\.m2/);
+  assert.match(list, /values\?\.m3/);
+  for (const label of ["Грудь", "Талия", "Бёдра"]) assert.match(i18n, new RegExp(label));
+  assert.match(list, /ordersUi\.measurementChest/);
 });

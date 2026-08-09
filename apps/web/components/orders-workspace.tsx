@@ -79,7 +79,24 @@ export function OrdersWorkspace({onClients}:Props){
   </>;
 }
 
-function GroupOrderItems({o}:{o:Order}){return <section className="orders-group-items"><header><strong>Состав заказа</strong><span>{athleteCount(o)} спортсменов · {itemQuantity(o)} изделий</span></header><div>{o.items.map((item,index)=><article key={item.id}>{item.modelImagePath?<img src={`/api/orders/images/${item.modelImagePath}`} alt="Модель изделия"/>:<span className="orders-group-item-index">{index+1}</span>}<strong>{item.athlete?`${item.athlete.firstName} ${item.athlete.lastName||""}`:`Позиция ${index+1}`}</strong><span>{item.name} · {item.quantity} шт.</span><b className={item.measurement?"ready":"missing"}>{item.measurement?`Замеры от ${new Intl.DateTimeFormat("ru-RU").format(new Date(item.measurement.measuredAt))}`:"Требуются замеры"}</b><StatusBadge text={orderLabel("production",item.productionStatus)} tone={statusTone(item.productionStatus)}/></article>)}</div></section>}
+function GroupOrderItems({o}:{o:Order}){
+  return <section className="orders-group-items"><header><strong>Состав заказа</strong><span>{athleteCount(o)} спортсменов · {itemQuantity(o)} изделий</span></header><div>{o.items.map((item,index)=><article key={item.id}>
+    {item.modelImagePath?<img src={`/api/orders/images/${item.modelImagePath}`} alt="Модель изделия"/>:<span className="orders-group-item-index">{index+1}</span>}
+    <strong>{item.athlete?`${item.athlete.firstName} ${item.athlete.lastName||""}`:`Позиция ${index+1}`}</strong>
+    <span>{item.name} · {item.quantity} шт.</span>
+    <GroupMeasurementSizes measurement={item.measurement}/>
+    <StatusBadge text={orderLabel("production",item.productionStatus)} tone={statusTone(item.productionStatus)}/>
+  </article>)}</div></section>;
+}
+
+function GroupMeasurementSizes({measurement}:{measurement?:OrderItem["measurement"]}){
+  const values=measurement?.values;
+  const sizes=[[ordersUi.measurementChest,values?.m1],[ordersUi.measurementWaist,values?.m2],[ordersUi.measurementHips,values?.m3]] as const;
+  return <div className={`orders-group-measures ${measurement?"ready":"missing"}`} aria-label={ordersUi.groupMeasurements}>
+    <div>{sizes.map(([label,value])=><span key={label}><small>{label}</small><b>{value==null?"—":`${formatCm(value)} см`}</b></span>)}</div>
+    <small>{measurement?`Замеры от ${new Intl.DateTimeFormat("ru-RU").format(new Date(measurement.measuredAt))}`:ordersUi.measurementsMissing}</small>
+  </div>;
+}
 
 function OrderDrawer({order:o,close,request,refresh}:{order:Order;close:()=>void;request:(path:string,init?:RequestInit)=>Promise<unknown>;refresh:()=>Promise<void>}){
   const[showPayment,setShowPayment]=useState(false),[amount,setAmount]=useState(""),[method,setMethod]=useState("BANK_TRANSFER"),[receivedAt,setReceivedAt]=useState(new Date().toISOString().slice(0,10)),[reference,setReference]=useState(""),[notes,setNotes]=useState(""),[saving,setSaving]=useState(false),[error,setError]=useState("");
@@ -113,4 +130,5 @@ function deliveryDate(o:Order){return o.requiredDeliveryAt?new Intl.DateTimeForm
 function dayText(o:Order){const d=days(o);return d===9999?"Нет срока":d<0?`Просрочен на ${Math.abs(d)} дн.`:d===0?"Сегодня":`Через ${d} дн.`}
 function deliveryPlace(o:Order){return[o.client.country,o.client.city,o.client.address].filter(Boolean).join(", ")||"Адрес не указан"}
 function sizes(o:Order){const v=o.measurement?.values;if(!v)return"Нет замеров";const height=v.standardHeight?`Рост ${v.standardHeight} · `:"";return height+[v.m1,v.m2,v.m3,v.m15].map(x=>x??"—").join(" / ")+" см"}
+function formatCm(value:number){return new Intl.NumberFormat("ru-RU",{maximumFractionDigits:1}).format(value)}
 function paymentMethod(method:string){return({BANK_TRANSFER:"Банковский перевод",CARD:"Карта",PAYPAL:"PayPal",CASH:"Наличные",OTHER:"Другое"}as Record<string,string>)[method]??method}

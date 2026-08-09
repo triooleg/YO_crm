@@ -124,5 +124,10 @@ export const ordersUi = {
   reset: "Сбросить",
   done: "Готово",
   close: "Закрыть",
+  groupMeasurements: "Основные размеры спортсмена",
+  measurementChest: "Грудь",
+  measurementWaist: "Талия",
+  measurementHips: "Бёдра",
+  measurementsMissing: "Замеры не заполнены",
   enlargedModel: "Увеличенный просмотр модели"
 } as const;
