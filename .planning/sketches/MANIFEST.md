@@ -17,3 +17,4 @@
 | 003 | orders-workspace | Какой общий вид заказов лучше сочетает фото моделей, плотность данных и контроль этапов? | A — компактная таблица | orders, list, kanban, production |
 | 004 | multi-item-orders | Как наглядно отображать парные и групповые заказы с несколькими спортсменами и изделиями? | — | orders, group-orders, pair-orders, athletes, production |
 | 005 | group-order-list | Как групповой заказ должен выглядеть рядом с индивидуальными и парными в общем списке? | A — сводная строка | orders, list, group-orders, density |
+| 006 | order-row-cleanup | Как раскрывать заказ без визуального шума и повторения данных из основной строки? | A | orders, list, disclosure, information-hierarchy, density |

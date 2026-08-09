@@ -111,3 +111,18 @@ export const labels = {
     OTHER: "Другое"
   }
 } as const;
+
+export const ordersUi = {
+  columns: "Столбцы",
+  columnSettings: "Поля таблицы",
+  columnSettingsHint: "Перетаскивайте поля или используйте стрелки.",
+  previewWidth: "Ширина предпросмотра",
+  previewHeightHint: "Высота рассчитывается пропорционально",
+  fixedControls: "Управление раскрытием и выбором строки всегда остаётся в начале.",
+  moveUp: "Переместить выше",
+  moveDown: "Переместить ниже",
+  reset: "Сбросить",
+  done: "Готово",
+  close: "Закрыть",
+  enlargedModel: "Увеличенный просмотр модели"
+} as const;
