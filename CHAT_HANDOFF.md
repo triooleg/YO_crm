@@ -154,3 +154,11 @@
 - Полосу нельзя переместить или растянуть мышью правее срока. Если срок заказа вручную изменён так, что производство выходит за него, просроченная часть полосы окрашивается красным.
 - Проверка: 24 API-теста, 37 web-тестов, 4 database-теста, полный typecheck и production build проходят.
 - Строка заказа остаётся видимой в периоде даты отправки, даже если сама производственная полоса уже находится за пределами показанного месяца.
+
+## 2026-08-09 - Production timeline sizing and shipping gap
+
+- Restored absolute edge handles so slot duration changes by dragging either edge in one-day increments.
+- Timeline bars now show the gap between production completion and shipping deadline.
+- Shipping marker remains inside the order row and no longer changes row height.
+- Row grid starts after the 220px order column and aligns with 40px day columns.
+- Verification: 39 web tests, typecheck, and production build pass.

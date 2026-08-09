@@ -170,6 +170,7 @@ export const productionUi = {
   deposit: "Предоплата",
   measurementsReady: "Замеры готовы",
   measurementsMissing: "Нет замеров",
+  untilShipping: "\u0414\u043e \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438",
   deadline: "Срок",
   noDeadline: "Не указан",
   stage: "Этап производства",
