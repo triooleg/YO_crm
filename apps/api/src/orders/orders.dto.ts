@@ -1,4 +1,4 @@
-﻿import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { OrderType, PaymentMethod, ProductionStatus, SalesStatus, ShippingStatus } from "@prisma/client";
@@ -52,4 +52,7 @@ export class UpdateProductionSlotDto {
  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) capacity?: number;
  @ApiPropertyOptional() @IsOptional() @IsBoolean() tentative?: boolean;
  @ApiPropertyOptional() @IsOptional() @IsBoolean() locked?: boolean;
+}
+export class UpdateOrderDeadlineDto {
+ @ApiProperty() @IsDateString() requiredDeliveryAt!: string;
 }

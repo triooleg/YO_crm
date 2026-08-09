@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 const production=await readFile(new URL("../components/production-workspace.tsx",import.meta.url),"utf8");
@@ -9,3 +9,5 @@ test("даты сохраняются локально и загрузка за�
 test("закрепленный слот нельзя двигать мышью",()=>{assert.match(production,/productionSlot\.locked/);assert.match(production,/Закрепить слот/);assert.match(styles,/timeline-bar\.locked/);assert.match(production,/dataset\.dragged/);assert.match(production,/slot-pin/)});
 test("preview width",()=>{assert.match(production,/orders-image-preview-width-v1/);assert.match(production,/min=\{200\}/);assert.match(production,/max=\{1200\}/);assert.match(production,/step=\{50\}/);assert.match(production,/previewWidth/);assert.match(styles,/production-preview-width/)});
 test("timeline click toggles date card",()=>{assert.match(production,/setSelected\(current=>current===order\.id\?undefined:order\.id\)/);assert.match(production,/dataset\.dragged/)});
+
+test("shipping date is marked and mouse movement is limited by it",()=>{assert.match(production,/requiredDeliveryAt/);assert.match(production,/shippingLimit/);assert.match(production,/shipping-date-marker/);assert.match(production,/shipping-overrun/);assert.match(styles,/shipping-date-marker/);assert.match(styles,/shipping-overrun/)});

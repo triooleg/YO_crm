@@ -29,3 +29,5 @@ test("таблица не ломается при раскрытии и умещ
   assert.match(css, /\.orders-table th\{font-size:10px/);
   assert.match(css, /\.orders-table td\{font-size:13px/);
 });
+
+test("order deadline changes on click",()=>{assert.match(source,/editingDeadlineId/);assert.match(source,/orders-deadline-input/);assert.match(source,/requiredDeliveryAt/);assert.match(css,/orders-deadline-button/)});
