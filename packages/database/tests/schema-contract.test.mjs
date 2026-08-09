@@ -11,13 +11,13 @@ test("order keeps independent workflow dimensions", () => {
 });
 
 test("money uses integer minor units", () => {
-  assert.match(schema, /priceMinor Int/);
-  assert.match(schema, /depositRequiredMinor Int/);
+  assert.match(schema, /priceMinor\s+Int/);
+  assert.match(schema, /depositRequiredMinor\s+Int/);
   assert.doesNotMatch(schema, /price Float/);
 });
 
 test("orders reference immutable measurement snapshots", () => {
   assert.match(schema, /model Measurement/);
-  assert.match(schema, /measuredAt DateTime/);
-  assert.match(schema, /measurementId String\?/);
+  assert.match(schema, /measuredAt\s+DateTime/);
+  assert.match(schema, /measurementId\s+String\?/);
 });
