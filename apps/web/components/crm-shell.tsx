@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 
 import { FormEvent, useEffect, useState } from "react";
 import { ClientWorkspace } from "./client-workspace";
 import { OrdersWorkspace } from "./orders-workspace";
+import { ProductionWorkspace } from "./production-workspace";
 
 const items = [
   ["Обзор", "⌂"], ["Входящие", "✉"], ["Клиенты", "👤"], ["Заказы", "▣"],
@@ -19,7 +20,7 @@ export function CrmShell(){
       <button className="crm-collapse" onClick={()=>setCollapsed(v=>!v)} title={collapsed?"Развернуть меню":"Свернуть меню"}>{collapsed?"›":"‹"}</button>
       <nav>{items.map(([name,icon])=><button key={name} className={section===name?"active":""} onClick={()=>setSection(name)} title={name}><i>{icon}</i>{!collapsed&&<span>{name}</span>}</button>)}</nav>
     </aside>
-    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<Inbox onOpenClients={()=>setSection(items[2][0])}/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<Inbox onOpenClients={()=>setSection(items[2][0])}/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:section===items[4][0]?<ProductionWorkspace/>:<ComingSoon name={section}/>}</section>
   </main>
 }
 

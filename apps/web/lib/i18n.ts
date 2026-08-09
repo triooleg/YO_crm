@@ -145,3 +145,33 @@ export const ordersUi = {
   measurementsMissing: "Замеры не заполнены",
   enlargedModel: "Увеличенный просмотр модели"
 } as const;
+export const productionUi = {
+  eyebrow: "УПРАВЛЕНИЕ ПРОИЗВОДСТВОМ",
+  title: "Производство",
+  subtitle: "Очередь, этапы работы, сроки и готовность заказов",
+  queue: "Очередь",
+  materials: "Материалы",
+  cutting: "Раскрой",
+  sewing: "Пошив",
+  decoration: "Декор",
+  quality: "Контроль",
+  ready: "Готово",
+  inWork: "В работе",
+  urgent: "Срочные",
+  blocked: "Не готовы",
+  all: "Все",
+  search: "Номер, клиент или модель…",
+  empty: "Заказов на этом этапе нет",
+  loadError: "Не удалось загрузить производственную очередь",
+  saveError: "Не удалось изменить этап производства",
+  close: "Закрыть",
+  modelImage: "Модель изделия",
+  noDescription: "Описание изделия не указано",
+  deposit: "Предоплата",
+  measurementsReady: "Замеры готовы",
+  measurementsMissing: "Нет замеров",
+  deadline: "Срок",
+  noDeadline: "Не указан",
+  stage: "Этап производства",
+  athleteMissing: "Спортсмен не указан"
+} as const;

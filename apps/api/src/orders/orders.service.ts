@@ -55,8 +55,13 @@ export class OrdersService {
 
 
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null } });
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true } });
     if (!order) throw new NotFoundException("Заказ не найден");
+    const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
+    if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
+      const paidMinor = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
+    }
     const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus, shippingStatus: dto.shippingStatus };
     if (!Object.values(data).some(Boolean)) throw new BadRequestException("Укажите хотя бы один статус");
     return this.prisma.$transaction(async (tx) => {
