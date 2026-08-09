@@ -3,13 +3,26 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
-import type { User } from "@prisma/client";
+import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, UploadModelImageDto } from "./orders.dto";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
+
+async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
+  const year = String(now.getFullYear()).slice(-2);
+  const prefix = `YO-${year}-`;
+  const last = await tx.order.findFirst({
+    where: { number: { startsWith: `YO-${year}-` } },
+    orderBy: { number: "desc" },
+    select: { number: true },
+  });
+  const sequence = Number(last?.number.slice(-4) ?? "0") + 1;
+  if (sequence > 9999) throw new BadRequestException(`Исчерпан диапазон номеров заказов за 20${year} год`);
+  return `${prefix}${String(sequence).padStart(4, "0")}`;
+}
 
 @Injectable()
 export class OrdersService {
@@ -80,8 +93,8 @@ export class OrdersService {
     const items = dto.items?.length ? dto.items : [{ athleteId: dto.athleteId, measurementId: dto.measurementId, name: dto.description, quantity: 1, priceMinor: dto.priceMinor, modelImagePath: dto.modelImagePath }];
     const athleteIds = [...new Set(items.map((item) => item.athleteId).filter((id): id is string => Boolean(id)))];
     if (athleteIds.length && await this.prisma.athlete.count({ where: { id: { in: athleteIds }, clientId: dto.clientId, archivedAt: null } }) !== athleteIds.length) throw new BadRequestException("Один или несколько спортсменов не принадлежат клиенту");
-    const number = `YO-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`;
     return this.prisma.$transaction(async (tx) => {
+      const number = await nextOrderNumber(tx);
       const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor: dto.depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
       await tx.activity.create({ data: { clientId: dto.clientId, orderId: order.id, type: "ORDER_CREATED", summary: `Создан заказ ${number}` } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Order", entityId: order.id, after: order } });
