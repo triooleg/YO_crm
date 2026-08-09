@@ -6,7 +6,7 @@ import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderStatusesDto, UploadModelImageDto } from "./orders.dto";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -47,11 +47,26 @@ export class OrdersService {
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, measuredAt: true, values: true } },
         items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, measuredAt: true, values: true } } } },
+        activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         payments: { select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } },
       },
     });
   }
 
+
+  async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null } });
+    if (!order) throw new NotFoundException("Заказ не найден");
+    const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus, shippingStatus: dto.shippingStatus };
+    if (!Object.values(data).some(Boolean)) throw new BadRequestException("Укажите хотя бы один статус");
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({ where: { id: orderId }, data });
+      const summary = "Изменены рабочие статусы заказа";
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_STATUSES_UPDATED", summary, metadata: data } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
+      return updated;
+    });
+  }
   async addPayment(orderId: string, dto: AddOrderPaymentDto, actor: User) {
     const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true } });
     if (!order) throw new NotFoundException("Заказ не найден");
