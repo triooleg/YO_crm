@@ -1,4 +1,4 @@
-# Sketch Manifest
+﻿# Sketch Manifest
 
 ## Design Direction
 
@@ -19,3 +19,4 @@
 | 005 | group-order-list | Как групповой заказ должен выглядеть рядом с индивидуальными и парными в общем списке? | A — сводная строка | orders, list, group-orders, density |
 | 006 | order-row-cleanup | Как раскрывать заказ без визуального шума и повторения данных из основной строки? | A | orders, list, disclosure, information-hierarchy, density |
 | 007 | order-card-workspace | Как организовать полноценную карточку индивидуального и группового заказа без дублей и визуального шума? | A — единый рабочий экран | orders, order-card, workflow, group-orders |
+| 008 | production-calendar | Как планировать производственные слоты, загрузку и ответственных без потери ежедневной наглядности? | E | production, calendar, capacity, scheduling |
