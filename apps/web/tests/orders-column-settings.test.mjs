@@ -22,3 +22,10 @@ test("миниатюры имеют увеличенный предпросмо�
   assert.match(css, /\.orders-image-preview/);
   assert.match(css, /table-layout:fixed/);
 });
+test("таблица не ломается при раскрытии и умещается в рабочую область", () => {
+  assert.match(css, /\.orders-table,\.orders-table thead,\.orders-table tbody\{display:block/);
+  assert.match(css, /\.orders-table\{min-width:0/);
+  assert.match(css, /\.orders-expanded-row\{display:block!important/);
+  assert.match(css, /\.orders-table th\{font-size:10px/);
+  assert.match(css, /\.orders-table td\{font-size:13px/);
+});
