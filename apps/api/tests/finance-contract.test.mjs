@@ -1,0 +1,10 @@
+import{readFile}from"node:fs/promises";import test from"node:test";import assert from"node:assert/strict";
+const schema=await readFile(new URL("../../../packages/database/prisma/schema.prisma",import.meta.url),"utf8");
+const controller=await readFile(new URL("../src/finance/finance.controller.ts",import.meta.url),"utf8").catch(()=>(""));
+const service=await readFile(new URL("../src/finance/finance.service.ts",import.meta.url),"utf8").catch(()=>(""));
+test("финансы имеют настраиваемые статьи расходов и архивируемые расходы",()=>{assert.match(schema,/model ExpenseCategory/);assert.match(schema,/model Expense/);assert.match(schema,/archivedAt\s+DateTime\?/);assert.match(controller,/@Post\("expense-categories"\)/);assert.match(controller,/@Post\("expenses"\)/)});
+test("сводка сравнивает выбранный месяц с предыдущим периодом",()=>{assert.match(controller,/@Get\(\)/);assert.match(service,/previous/);assert.match(service,/month/);assert.match(service,/expensesMinor/);assert.match(service,/profitMinor/)});
+test("инвойс привязан к заказу и хранит редактируемый снимок",()=>{assert.match(schema,/model Invoice/);assert.match(schema,/orderId\s+String/);assert.match(schema,/seller\s+Json/);assert.match(schema,/customer\s+Json/);assert.match(schema,/items\s+Json/);assert.match(controller,/@Post\("invoices"\)/);assert.match(controller,/@Patch\("invoices\/:id"\)/);assert.match(controller,/@Get\("invoices\/:id\/document"\)/)});
+test("настройки влияют на следующий инвойс",()=>{assert.match(service,/invoicePrefix/);assert.match(service,/appSetting/)});
+
+test("финансовая запись и аудит атомарны",()=>{for(const name of ["createCategory","createExpense","saveSetting","updateInvoice"]){const start=service.indexOf("async "+name),end=service.indexOf("\n async ",start+7),block=service.slice(start,end<0?service.length:end);assert.match(block,/\$transaction/);assert.match(block,/tx\.auditLog\.create/)}const update=service.slice(service.indexOf("async updateInvoice"),service.indexOf("async document"));assert.match(update,/tx\.activity\.create/);assert.match(update,/INVOICE_UPDATED/)});

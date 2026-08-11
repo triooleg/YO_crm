@@ -138,6 +138,8 @@ export const ordersUi = {
   hideMeasurements: "Скрыть замеры",
   addPayment: "Добавить оплату",
   savePayment: "Сохранить оплату",
+  viewInvoice: "Просмотреть инвойс",
+  download: "Скачать",
   noHistory: "История появится после первого действия",  groupMeasurements: "Основные размеры спортсмена",
   measurementChest: "Грудь",
   measurementWaist: "Талия",
@@ -175,4 +177,11 @@ export const productionUi = {
   noDeadline: "Не указан",
   stage: "Этап производства",
   athleteMissing: "Спортсмен не указан"
+} as const;
+
+export const financeUi = {
+  actionError:"Не удалось выполнить действие", eyebrow:"КОНТРОЛЬ ДЕНЕГ", title:"Финансы", subtitle:"Оплаты, расходы, прибыль и инвойсы", month:"Месяц", expense:"Расход", createInvoice:"Создать инвойс", received:"Получено", expenses:"Расходы", profit:"Прибыль", invoices:"Инвойсы", selectedMonth:"за выбранный месяц", comparisonTitle:"Сравнение с предыдущим месяцем:", comparisonHint:"показатели под суммами показывают изменение относительно прошлого периода.", ordersPayments:"Заказы и оплаты", order:"Заказ", client:"Клиент", cost:"Стоимость", paid:"Оплачено", balance:"Остаток", invoice:"Инвойс", open:"Открыть", download:"Скачать", create:"Создать", expenseCategories:"Статьи расходов", noExpenses:"За выбранный месяц расходов нет", noOrders:"Заказов пока нет", noInvoices:"Инвойсов за выбранный месяц нет", addExpense:"Добавить расход", view:"Просмотр", newExpense:"Новый расход", category:"Статья", noOrder:"Без заказа", amount:"Сумма", currency:"Валюта", date:"Дата", notes:"Примечание", saveExpense:"Сохранить расход", newCategory:"Новая статья", categoryExample:"Например, реклама", addCategory:"Добавить статью", invoiceEditor:"Редактор инвойса", seller:"Продавец", sellerAddress:"Адрес продавца", customer:"Клиент", customerAddress:"Адрес клиента", description:"Описание", createInvoiceAction:"Создать инвойс", defaultProduct:"Индивидуальный гимнастический купальник", defaultCountry:"Украина", close:"Закрыть", newResult:"Новый результат", noChanges:"Без изменений", previousPeriod:"к предыдущему периоду"
+} as const;
+export const settingsUi = {
+  saveError:"Не удалось сохранить настройки", saved:"Настройки сохранены", eyebrow:"ПАРАМЕТРЫ CRM", title:"Настройки", subtitle:"Общие параметры разных разделов системы", finance:"Финансы", orders:"Заказы", production:"Производство", shipping:"Доставка", interface:"Интерфейс", financeInvoices:"Финансы и инвойсы", financeHint:"Эти значения автоматически подставляются в редактор нового инвойса, но их можно изменить перед выпуском документа.", invoicePrefix:"Префикс инвойса", defaultCurrency:"Валюта по умолчанию", sellerName:"Название продавца", sellerDetails:"Адрес и реквизиты продавца", defaultDeposit:"Стандартная предоплата, %", save:"Сохранить настройки", otherSections:"Другие разделы", otherHint:"Настройки заказов, производства, доставки и интерфейса будут добавляться сюда по мере реализации соответствующих функций.", comingSoon:"Настройки раздела появятся позже", defaultCountry:"Украина"
 } as const;

@@ -119,6 +119,13 @@ enum ShippingStatus {
   LOST
 }
 
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
 enum PaymentMethod {
   CARD
   BANK_TRANSFER
@@ -273,6 +280,8 @@ model Order {
   payments             Payment[]
   productionSlot       ProductionSlot?
   activities           Activity[]
+  invoices             Invoice[]
+  expenses             Expense[]
 
   @@index([salesStatus, archivedAt])
   @@index([requiredDeliveryAt])
@@ -315,6 +324,62 @@ model Payment {
   @@index([orderId, receivedAt])
 }
 
+
+model AppSetting {
+  id String @id @default(cuid())
+  key String
+  section String
+  value Json
+  updatedAt DateTime @updatedAt
+  @@unique([section, key])
+  @@index([section])
+}
+model ExpenseCategory {
+  id String @id @default(cuid())
+  name String @unique
+  active Boolean @default(true)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expenses Expense[]
+}
+model Expense {
+  id String @id @default(cuid())
+  categoryId String
+  orderId String?
+  amountMinor Int
+  currency String
+  incurredAt DateTime
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  category ExpenseCategory @relation(fields:[categoryId],references:[id])
+  order Order? @relation(fields:[orderId],references:[id])
+  @@index([incurredAt,archivedAt])
+  @@index([orderId])
+}
+model Invoice {
+  id String @id @default(cuid())
+  number String @unique
+  orderId String
+  status InvoiceStatus @default(DRAFT)
+  language String @default("ru")
+  currency String
+  issueDate DateTime
+  dueDate DateTime?
+  seller Json
+  customer Json
+  items Json
+  notes String?
+  totalMinor Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  order Order @relation(fields:[orderId],references:[id])
+  @@index([orderId,createdAt])
+  @@index([issueDate,status])
+}
 model ProductionSlot {
   id        String   @id @default(cuid())
   orderId   String   @unique

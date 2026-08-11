@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { OrderType, PaymentMethod, ProductionStatus, SalesStatus, ShippingStatus } from "@prisma/client";
 
@@ -28,13 +28,13 @@ export class CreateOrderDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() requiredDeliveryAt?: string;
   @ApiProperty() @IsInt() @Min(0) priceMinor!: number;
   @ApiProperty() @IsInt() @Min(0) depositRequiredMinor!: number;
-  @ApiProperty() @IsString() @Length(3, 3) currency!: string;
+  @ApiProperty() @IsString() @IsIn(["EUR", "USD", "UAH"]) currency!: string;
   @ApiPropertyOptional({ type: [CreateOrderItemDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CreateOrderItemDto) items?: CreateOrderItemDto[];
 }
 
 export class AddOrderPaymentDto {
   @ApiProperty() @IsInt() @IsPositive() amountMinor!: number;
-  @ApiProperty() @IsString() @Length(3, 3) currency!: string;
+  @ApiProperty() @IsString() @IsIn(["EUR", "USD", "UAH"]) currency!: string;
 
   @ApiProperty({ enum: PaymentMethod }) @IsEnum(PaymentMethod) method!: PaymentMethod;
   @ApiProperty() @IsDateString() receivedAt!: string;
