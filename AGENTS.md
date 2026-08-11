@@ -47,3 +47,11 @@ The existing Nginx Proxy Manager owns 80/443; never add another proxy.
 - Р”Р»СЏ РєР°Р¶РґРѕРіРѕ РЅРѕРІРѕРіРѕ enum-РєРѕРґР° РѕР±СЏР·Р°С‚РµР»СЊРЅР° СЂСѓСЃСЃРєР°СЏ РѕС‚РѕР±СЂР°Р¶Р°РµРјР°СЏ РїРѕРґРїРёСЃСЊ.
 - РџРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёРµ РёРјРµРЅР°, Р°РґСЂРµСЃР° Рё СЃРѕРѕР±С‰РµРЅРёСЏ РЅРµ РїРµСЂРµРІРѕРґСЏС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.
 - Production web URL: `https://crm.yoleotard.com/`.
+
+## Mandatory review agents
+
+Before a meaningful change is called complete, follow `.agents/README.md`.
+Regression, business-rule, visual, and release reviews are mandatory. A release
+must not be deployed while any reviewer reports a blocking finding or while
+`pnpm quality:check` fails. Existing working behavior is a compatibility
+contract unless the user explicitly approves its replacement.

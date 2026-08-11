@@ -176,3 +176,11 @@
 - Production timeline labels now use exactly two lines: client identity on line one, duration and shipping gap on line two.
 - Bar typography increased from 10/8px to 11/9px while preserving truncation and resize handles.
 - Verification: 41 web tests, typecheck, and production build pass.
+
+## 2026-08-11 - Permanent review-agent quality gates
+
+- Added four mandatory review roles under .agents: regression, business/API, visual UI, and release gatekeeper.
+- Added pnpm quality:check for full tests, typecheck, and production build.
+- Added GitHub Actions quality workflow for pull requests and main pushes.
+- AGENTS.md now blocks completion/deployment when a reviewer or quality gate fails.
+- Full quality gate passed: 24 API tests, 41 web tests, 4 database tests, all typechecks and builds.
