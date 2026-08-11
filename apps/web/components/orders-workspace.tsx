@@ -13,6 +13,7 @@ type ColumnId="number"|"model"|"client"|"country"|"source"|"measurements"|"deadl
 type Preview={src:string;left:number;top:number;width:number};
 const DEFAULT_COLUMNS:ColumnId[]=["number","model","client","country","source","measurements","deadline","payment","delivery","sales","production"];
 const COLUMN_LABELS:Record<ColumnId,string>={number:"№ заказа",model:"Тип / модель",client:"Клиент / состав",country:"Страна / язык",source:"Источник",measurements:"Базовые размеры",deadline:"Срок",payment:"Оплата",delivery:"Доставка",sales:"Продажа",production:"Производство"};
+const ORDER_COLUMN_WIDTHS:Record<ColumnId,string>={number:"minmax(62px,.55fr)",model:"minmax(170px,1.5fr)",client:"minmax(150px,1.3fr)",country:"minmax(105px,.9fr)",source:"minmax(105px,.9fr)",measurements:"minmax(165px,1.45fr)",deadline:"minmax(120px,1fr)",payment:"minmax(145px,1.25fr)",delivery:"minmax(125px,1.05fr)",sales:"minmax(105px,.9fr)",production:"minmax(115px,1fr)"};
 const COLUMN_SETTINGS_KEY="orders-column-settings-v1",PREVIEW_WIDTH_KEY="orders-image-preview-width-v1";
 
 export function OrdersWorkspace({onClients}:Props){
@@ -27,12 +28,14 @@ export function OrdersWorkspace({onClients}:Props){
   function dropColumn(target:ColumnId){if(!draggedColumn||draggedColumn===target)return;const next=[...columnOrder],from=next.indexOf(draggedColumn),to=next.indexOf(target);next.splice(from,1);next.splice(to,0,draggedColumn);setDraggedColumn(undefined);saveColumns(next,hiddenColumns)}
   function toggleColumn(id:ColumnId,visible:boolean){const next=new Set(hiddenColumns);visible?next.delete(id):next.add(id);saveColumns(columnOrder,next)}
   function resetColumns(){saveColumns(DEFAULT_COLUMNS,new Set());setPreviewSize(600)}
+  async function changeListStatus(o:Order,field:"salesStatus"|"productionStatus",value:string){setOrders(list=>list.map(item=>item.id===o.id?{...item,[field]:value}:item));try{await request(`/orders/${o.id}/statuses`,{method:"PATCH",body:JSON.stringify({[field]:value})})}catch(e){setError((e as Error).message);await load()}}
   function setPreviewSize(value:number){const width=Math.max(200,Math.min(1200,Math.round(value/50)*50||600));setPreviewWidth(width);localStorage.setItem(PREVIEW_WIDTH_KEY,String(width))}
   function columnProps(id:ColumnId,extra=""){return{className:`orders-col orders-col-${id}${extra?` ${extra}`:""}`,style:{order:columnOrder.indexOf(id)+1,display:hiddenColumns.has(id)?"none":undefined} as CSSProperties}}
   function showPreview(e:ReactMouseEvent<HTMLImageElement>){const image=e.currentTarget,ratio=image.naturalWidth?image.naturalHeight/image.naturalWidth:1.4,width=Math.min(previewWidth,window.innerWidth-24),height=Math.min(window.innerHeight-24,width*ratio),left=e.clientX+18+width<window.innerWidth?e.clientX+18:Math.max(12,e.clientX-width-18),top=e.clientY+18+height<window.innerHeight?e.clientY+18:Math.max(12,window.innerHeight-height-12);setPreview({src:image.src,left,top,width})}
   const selected=orders.find(o=>o.id===selectedId),workspace=orders.find(o=>o.id===workspaceId),filtered=useMemo(()=>orders.filter(o=>filter==="all"||filter==="urgent"&&days(o)<=7||filter==="deposit"&&paid(o)<o.depositRequiredMinor||filter==="ready"&&o.productionStatus==="READY"),[orders,filter]),shown=useMemo(()=>[...filtered].sort((a,b)=>sort==="newest"?new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime():sort==="payment"?(a.priceMinor-paid(a))-(b.priceMinor-paid(b)):sort==="client"?a.client.displayName.localeCompare(b.client.displayName,"ru"):days(a)-days(b)),[filtered,sort]);
   const active=orders.filter(o=>!["COMPLETED","CANCELLED"].includes(o.salesStatus)).length,urgent=orders.filter(o=>days(o)<=7).length,deposit=orders.filter(o=>paid(o)<o.depositRequiredMinor).length,late=orders.filter(o=>days(o)<0).length;
   const visibleColumns=columnOrder.filter(id=>!hiddenColumns.has(id));
+  const orderGridTemplate="54px "+visibleColumns.map(id=>ORDER_COLUMN_WIDTHS[id]).join(" ");
   async function changeDeadline(o:Order,value:string){if(!value)return;try{await request(`/orders/${o.id}/deadline`,{method:"PATCH",body:JSON.stringify({requiredDeliveryAt:value})});setEditingDeadlineId(undefined);await load()}catch(e){setError((e as Error).message)}}
   function renderOrderCell(o:Order,id:ColumnId){
     if(id==="number")return <td key={id} {...columnProps(id)}><strong>{orderListNumber(o.number)}</strong></td>;
@@ -44,8 +47,8 @@ export function OrdersWorkspace({onClients}:Props){
     if(id==="deadline")return <td key={id} {...columnProps(id,days(o)<0?"orders-danger":"")}>{editingDeadlineId===o.id?<input className="orders-deadline-input" autoFocus type="date" value={o.requiredDeliveryAt?.slice(0,10)||""} onClick={e=>e.stopPropagation()} onBlur={()=>setEditingDeadlineId(undefined)} onChange={e=>void changeDeadline(o,e.target.value)}/>:<button className="orders-deadline-button" title={COLUMN_LABELS.deadline} onClick={e=>{e.stopPropagation();setEditingDeadlineId(o.id)}}><strong>{deliveryDate(o)}</strong><small>{dayText(o)}</small></button>}</td>;
     if(id==="payment")return <td key={id} {...columnProps(id)}><strong>{money(o.priceMinor,o.currency)}</strong><small className="orders-paid-line">Оплачено {money(paid(o),o.currency)}</small><small className="orders-balance-line">Остаток {money(Math.max(0,o.priceMinor-paid(o)),o.currency)}</small></td>;
     if(id==="delivery")return <td key={id} {...columnProps(id)}><strong>{deliveryPlace(o)}</strong><small>{orderLabel("shipping",o.shippingStatus)}</small></td>;
-    if(id==="sales")return <td key={id} {...columnProps(id)}><StatusBadge text={orderLabel("sales",o.salesStatus)} tone={statusTone(o.salesStatus)}/></td>;
-    return <td key={id} {...columnProps(id)}><div className="orders-actions"><StatusBadge text={orderLabel("production",o.productionStatus)} tone={statusTone(o.productionStatus)}/><button aria-label="Быстрые действия" title="Быстрые действия" onClick={e=>{e.stopPropagation();setSelectedId(o.id)}}>⋯</button></div></td>;
+    if(id==="sales")return <td key={id} {...columnProps(id)}><select className={`orders-inline-status orders-status--${statusTone(o.salesStatus)}`} aria-label="Изменить статус продажи" value={o.salesStatus} onClick={e=>e.stopPropagation()} onChange={e=>void changeListStatus(o,"salesStatus",e.target.value)}>{SALES_STATUSES.map(status=><option key={status} value={status}>{orderLabel("sales",status)}</option>)}</select></td>;
+    return <td key={id} {...columnProps(id)}><div className="orders-actions"><select className={`orders-inline-status orders-status--${statusTone(o.productionStatus)}`} aria-label="Изменить статус производства" value={o.productionStatus} onClick={e=>e.stopPropagation()} onChange={e=>void changeListStatus(o,"productionStatus",e.target.value)}>{PRODUCTION_STATUSES.map(status=><option key={status} value={status}>{orderLabel("production",status)}</option>)}</select><button aria-label="Быстрые действия" title="Быстрые действия" onClick={e=>{e.stopPropagation();setSelectedId(o.id)}}>⋯</button></div></td>;
   }
   if(workspace)return <OrderWorkspaceCard order={workspace} onBack={()=>setWorkspaceId(undefined)} request={request} refresh={load}/>;
   return <>
@@ -60,7 +63,7 @@ export function OrdersWorkspace({onClients}:Props){
         <button className="orders-columns-button" onClick={()=>setColumnsOpen(true)}>⚙ {ordersUi.columns}</button>
       </div>
       {selectedIds.size>0&&<div className="orders-selection"><strong>Выбрано: {selectedIds.size}</strong><span>Массовые действия будут доступны после выбора рабочего статуса.</span><button onClick={()=>setSelectedIds(new Set())}>Снять выбор</button></div>}
-      <div className="orders-table-wrap"><table className="orders-table">
+      <div className="orders-table-wrap"><table className="orders-table" style={{"--orders-grid":orderGridTemplate} as CSSProperties}>
         <thead><tr><th className="orders-controls" style={{order:0}}><input aria-label="Выбрать все заказы" type="checkbox" checked={shown.length>0&&shown.every(o=>selectedIds.has(o.id))} onChange={e=>setSelectedIds(e.target.checked?new Set(shown.map(o=>o.id)):new Set())}/></th>{visibleColumns.map(id=><th key={id} {...columnProps(id)}>{COLUMN_LABELS[id]}</th>)}</tr></thead>
         <tbody>{shown.map(o=><Fragment key={o.id}>
           <tr className={expandedId===o.id?"is-expanded":""} onClick={()=>setWorkspaceId(o.id)}>

@@ -162,3 +162,11 @@
 - Shipping marker remains inside the order row and no longer changes row height.
 - Row grid starts after the 220px order column and aligns with 40px day columns.
 - Verification: 39 web tests, typecheck, and production build pass.
+
+## 2026-08-11 - Timeline visual parity and aligned order statuses
+
+- Production bars now match prototype typography: 10px primary text and 8px secondary text.
+- Unlocked bars show visible edge resize marks; locked bars hide them and remain mouse-immutable.
+- Orders header and data rows share one CSS Grid template, with one continuous row border instead of fragmented cell borders.
+- Sales and production statuses in order rows are editable dropdown badges and save through PATCH /orders/:id/statuses.
+- Verification: 41 web tests, typecheck, and production build pass.

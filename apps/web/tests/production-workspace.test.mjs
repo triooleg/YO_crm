@@ -15,3 +15,5 @@ test("shipping date is marked and mouse movement is limited by it",()=>{assert.m
 test("resize handles stay on bar edges and shipping gap stays in the same row",()=>{assert.match(styles,/\.resize\{position:absolute/);assert.doesNotMatch(styles,/timeline-bar>\.resize\{position:relative/);assert.match(styles,/timeline-bar>\.resize\{z-index:6/);assert.match(production,/shippingGap/);assert.match(production,/productionUi\.untilShipping/);assert.match(styles,/shipping-date-marker\{position:absolute/)});
 
 test("timeline grid starts after the order column and matches day cells",()=>{assert.match(styles,/\.timeline-row::before\{content:"";position:absolute;left:220px/);assert.match(styles,/repeat\(35,40px\)/)});
+
+test("production bars match prototype typography and handles",()=>{assert.match(styles,/\.timeline-bar b\{font-size:10px/);assert.match(styles,/\.timeline-bar small\{font-size:8px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
