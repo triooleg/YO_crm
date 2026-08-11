@@ -16,4 +16,4 @@ test("resize handles stay on bar edges and shipping gap stays in the same row",(
 
 test("timeline grid starts after the order column and matches day cells",()=>{assert.match(styles,/\.timeline-row::before\{content:"";position:absolute;left:220px/);assert.match(styles,/repeat\(35,40px\)/)});
 
-test("production bars match prototype typography and handles",()=>{assert.match(styles,/\.timeline-bar b\{font-size:10px/);assert.match(styles,/\.timeline-bar small\{font-size:8px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
+test("production bars use two text lines and visible handles",()=>{assert.match(production,/timeline-bar-text/);assert.match(styles,/\.timeline-bar-text\{[^}]*display:grid/);assert.match(styles,/\.timeline-bar b\{font-size:11px/);assert.match(styles,/\.timeline-bar small\{font-size:9px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});

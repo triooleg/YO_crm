@@ -170,3 +170,9 @@
 - Orders header and data rows share one CSS Grid template, with one continuous row border instead of fragmented cell borders.
 - Sales and production statuses in order rows are editable dropdown badges and save through PATCH /orders/:id/statuses.
 - Verification: 41 web tests, typecheck, and production build pass.
+
+## 2026-08-11 - Two-line production bar labels
+
+- Production timeline labels now use exactly two lines: client identity on line one, duration and shipping gap on line two.
+- Bar typography increased from 10/8px to 11/9px while preserving truncation and resize handles.
+- Verification: 41 web tests, typecheck, and production build pass.

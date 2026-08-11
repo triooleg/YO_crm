@@ -6,3 +6,5 @@
 .shipping-date-marker{position:absolute;z-index:5;top:0;bottom:0;width:40px;display:grid;place-items:center;border-left:2px solid #d44747;color:#b52d2d;pointer-events:none}.shipping-date-marker b{font-size:14px}.shipping-date-marker small{padding:1px 3px;border-radius:4px;background:#fff;color:#b52d2d;font-size:8px}.shipping-overrun{position:absolute;z-index:0;top:0;right:0;bottom:0;background:#e35b5b55;pointer-events:none}.timeline-bar>img,.timeline-bar>i,.timeline-bar>b,.timeline-bar>small{position:relative;z-index:1}.timeline-bar>.resize{z-index:6}.timeline-shipping-gap{margin-left:auto;font-weight:700}
 
 .timeline-bar b{font-size:10px}.timeline-bar small{font-size:8px}.resize:after{content:"";position:absolute;top:11px;bottom:11px;width:2px;border-radius:3px;background:currentColor;opacity:.3}.resize:hover:after{opacity:.85}.resize.left:after{left:3px}.resize.right:after{right:3px}
+
+.timeline-bar-text{position:relative;z-index:1;display:grid;min-width:0;gap:2px;text-align:left}.timeline-bar-text b,.timeline-bar-text small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-bar b{font-size:11px}.timeline-bar small{font-size:9px}
