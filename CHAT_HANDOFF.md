@@ -205,3 +205,12 @@
 - Deployment: commit `54526a0` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm` with Docker Compose project `yoleotard-crm`.
 - Live smoke: `https://crm.yoleotard.com/` and `/api/health` return HTTP 200; Finance returns EUR data with existing order/invoice, Settings returns five settings; production HTML preloads the Inter WOFF2 asset; web/api/postgres/redis containers are running.
 - In-app browser automation was unavailable because the Windows browser helper hit the known ACL error; live verification used external HTTP responses and container logs, while the visual guardian completed a static PASS.
+
+## 2026-08-12 - Расходы, аналитика и печать инвойсов
+
+- Расходы можно редактировать и архивировать без удаления истории; статьи расходов можно добавлять, переименовывать и архивировать.
+- Сервер принимает только активную статью и неархивированный заказ для новых связей, при этом редактирование старых расходов сохраняет архивные связи.
+- Добавлены шестимесячная динамика и структура расходов по статьям с доступными подписями значений.
+- Для инвойсов доступны отдельные действия просмотра, скачивания и PDF/печати.
+- Ошибки и состояние сохранения показываются внутри модальных окон, повторные отправки блокируются.
+- Проверка: 35 API-тестов, 51 web-тест, 4 теста базы, typecheck и production build прошли; regression, business/API и visual UI review — PASS.
