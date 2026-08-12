@@ -226,3 +226,8 @@
 - Модальные окна имеют локальные ошибки, блокировку повторного сохранения, focus trap, Escape и восстановление фокуса; интерфейс и runtime-строки защищены UTF-8 тестами.
 - Миграция Prisma: `20260812190000_shipping`.
 - Проверка: 43 API-теста, 57 web-тестов, 4 database-теста, все typecheck и production build прошли.
+
+- Deployment: commit `34d0089` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`.
+- Production migration `20260812190000_shipping` applied successfully; all 7 Prisma migrations are current.
+- Live smoke: `https://crm.yoleotard.com/` and `/api/health` return HTTP 200; Shipping routes are registered; web/api/postgres/redis containers are running.
+- In-app browser visual smoke could not run because the Windows browser helper hit the known ACL error; visual/a11y guardian completed a static PASS, while live HTTP/container/API checks passed.
