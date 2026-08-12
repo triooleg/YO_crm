@@ -119,6 +119,13 @@ enum ShippingStatus {
   LOST
 }
 
+enum ShippingCarrier {
+  NOVA_POSHTA
+  NOVA_GLOBAL
+  UKRPOSHTA
+  DHL
+}
+
 enum InvoiceStatus {
   DRAFT
   ISSUED
@@ -282,10 +289,27 @@ model Order {
   activities           Activity[]
   invoices             Invoice[]
   expenses             Expense[]
+  shipment             Shipment?
 
   @@index([salesStatus, archivedAt])
   @@index([requiredDeliveryAt])
   @@index([clientId, createdAt])
+}
+
+model Shipment {
+  id             String          @id @default(cuid())
+  orderId        String          @unique
+  carrier        ShippingCarrier
+  trackingNumber String?
+  costMinor      Int             @default(0)
+  currency       String
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  order          Order           @relation(fields: [orderId], references: [id])
+  @@index([carrier, trackingNumber])
 }
 
 model OrderItem {
