@@ -1,0 +1,11 @@
+.invoice-editor-modal{width:min(920px,100%)}
+.invoice-editor-form textarea{min-height:72px;padding:8px;border:1px solid var(--line);border-radius:8px;resize:vertical}
+.invoice-items{display:grid;gap:8px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#faf8fc}
+.invoice-items-title{display:flex;align-items:center;justify-content:space-between}
+.invoice-items-title button{border:0;background:transparent;color:var(--violet);font-weight:700}
+.invoice-item-row{display:grid;grid-template-columns:minmax(220px,1fr) 105px 140px 34px;gap:8px;align-items:end}
+.invoice-remove{height:38px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#a33;font-size:18px}
+.invoice-remove:disabled{opacity:.35}
+.invoice-total{display:flex;align-items:center;justify-content:flex-end;gap:18px;padding:12px;border-top:1px solid var(--line)}
+.invoice-total strong{font-size:20px}
+@media(max-width:700px){.invoice-item-row{grid-template-columns:1fr 90px}.invoice-item-row label:first-child{grid-column:1/-1}.invoice-remove{align-self:end}}

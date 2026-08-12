@@ -10,6 +10,6 @@ import { CreateExpenseCategoryDto,CreateExpenseDto,CreateInvoiceDto,UpdateInvoic
  @Post("expense-categories") @Roles("OWNER","ADMIN","ACCOUNTANT") category(@Body() dto:CreateExpenseCategoryDto,@Req() req:Request&{user:User}){return this.finance.createCategory(dto,req.user)}
  @Post("expenses") @Roles("OWNER","ADMIN","ACCOUNTANT") expense(@Body() dto:CreateExpenseDto,@Req() req:Request&{user:User}){return this.finance.createExpense(dto,req.user)}
  @Post("invoices") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") invoice(@Body() dto:CreateInvoiceDto,@Req() req:Request&{user:User}){return this.finance.createInvoice(dto,req.user)}
- @Patch("invoices/:id") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") updateInvoice(@Param("id") id:string,@Body() dto:UpdateInvoiceDto,@Req() req:Request&{user:User}){return this.finance.updateInvoice(id,dto,req.user)}
+ @Patch("invoices/:id") @Roles("OWNER","ADMIN","ACCOUNTANT") updateInvoice(@Param("id") id:string,@Body() dto:UpdateInvoiceDto,@Req() req:Request&{user:User}){return this.finance.updateInvoice(id,dto,req.user)}
  @Get("invoices/:id/document") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") async document(@Param("id") id:string,@Query("download") download:string|undefined,@Res() res:Response){const html=await this.finance.document(id);if(download==="1")res.setHeader("Content-Disposition",'attachment; filename="invoice-'+id+'.html"');return res.type("html").send(html)}
 }

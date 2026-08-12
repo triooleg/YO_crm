@@ -193,3 +193,12 @@
 - Добавлена отдельная страница «Настройки» для параметров финансов, заказов, производства, доставки и интерфейса; реализованы финансовые реквизиты и стандартная предоплата.
 - Финансовые мутации и аудит атомарны; доступ к настройкам ограничен OWNER/ADMIN, финансовая сводка — финансовыми ролями.
 - Prisma migration: `20260811190000_finance_invoices`.
+
+## 2026-08-12 - Inter typography and safe invoice editing
+
+- The entire CRM now uses Inter through Next.js font loading with Latin and Cyrillic subsets plus the approved system fallback stack.
+- Added an accessible responsive invoice editor for multiple positions, seller/customer snapshots, dates, language and controlled statuses.
+- Invoice editing keeps archived-order history available and supports clearing the due date.
+- PAID status requires sufficient same-currency payments not already consumed by other paid invoices; allocation checks are serialized per order.
+- Finance mutations retain atomic audit/activity history, and Russian API/document text is UTF-8 safe.
+- Verification: 31 API tests, 48 web tests, 4 database tests, all typechecks and production builds pass; mandatory regression and visual reviews pass.
