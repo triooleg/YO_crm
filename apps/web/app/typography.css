@@ -1,3 +1,3 @@
-:root{--font-ui:var(--font-inter),Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Tahoma,Arial,sans-serif}
+:root{--font-ui:var(--font-ubuntu),Ubuntu,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Tahoma,Arial,sans-serif}
 html,body,button,input,select,textarea{font-family:var(--font-ui)!important}
 h1,h2,h3,h4,h5,h6,.metric strong,.brand>span,.empty-illustration>span,.orders-card-head h1{font-family:var(--font-ui)!important}

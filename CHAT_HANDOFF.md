@@ -231,3 +231,12 @@
 - Production migration `20260812190000_shipping` applied successfully; all 7 Prisma migrations are current.
 - Live smoke: `https://crm.yoleotard.com/` and `/api/health` return HTTP 200; Shipping routes are registered; web/api/postgres/redis containers are running.
 - In-app browser visual smoke could not run because the Windows browser helper hit the known ACL error; visual/a11y guardian completed a static PASS, while live HTTP/container/API checks passed.
+
+
+## 2026-08-12 - Глобальный шрифт Ubuntu
+
+- Глобальный интерфейс CRM переведён с Inter на Ubuntu через `next/font/google`.
+- Загружаются Latin/Cyrillic и нативные веса Ubuntu 300, 400, 500 и 700 с `display: swap`.
+- Ubuntu применяется ко всему документу, заголовкам, метрикам и элементам форм; сохранена системная fallback-цепочка.
+- Добавлен контрактный тест, защищающий подключение Ubuntu и кириллицы.
+- Проверка: 44 API-теста, 58 web-тестов, 4 database-теста, все typecheck и production build прошли; regression, business/API и visual UI review — PASS.
