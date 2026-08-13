@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 const component = await readFile(new URL("../components/communications-workspace.tsx", import.meta.url), "utf8");
 const locale = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/communications-workspace.css", import.meta.url), "utf8");
+const menuCss = await readFile(new URL("../app/communications-template-menu.css", import.meta.url), "utf8");
 
 test("входящие используют централизованные русские подписи и статусы", () => {
   assert.match(component, /communicationsUi/);
@@ -13,6 +14,9 @@ test("входящие используют централизованные р�
   for (const key of ["title", "search", "createClient", "loading", "emptyMessages", "saveDraft"])
     assert.match(locale, new RegExp(`${key}:`));
 });
+
+test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
+test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)=>chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 
 test("поиск клиентов работает, а источник расположен рядом с именем", () => {
   assert.match(component, /setSearch/);
