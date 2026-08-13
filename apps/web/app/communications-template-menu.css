@@ -1,9 +1,9 @@
 .communications-template-menu{position:relative}
 .communications-chat>footer{position:relative;overflow:visible;isolation:isolate}
-.communications-ai{flex-wrap:wrap;overflow:visible}
+.communications-ai{position:relative;flex-wrap:wrap;overflow:visible}
 .communications-template-menu>div{position:absolute;z-index:40;right:0;bottom:calc(100% + 6px);display:grid;min-width:min(230px,calc(100vw - 32px));max-width:min(320px,calc(100vw - 32px));max-height:220px;overflow:auto;padding:5px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 10px 28px #20162b22}
 .communications-template-menu>div button{display:flex;justify-content:space-between;gap:12px;padding:8px;text-align:left}
 .communications-template-menu small{color:var(--muted)}
 .settings-grid .settings-channel-toggle{display:flex;align-items:center;gap:8px;align-self:center;color:var(--text)}
 .settings-grid .settings-channel-toggle input[type="checkbox"]{flex:0 0 18px;width:18px;height:18px;min-height:0;margin:0;padding:0}
-@media(max-width:650px){.communications-template-menu>div{right:auto;left:0;min-width:0;width:min(230px,calc(100vw - 115px));max-width:calc(100vw - 115px);overflow-x:hidden}.communications-template-menu>div button{min-width:0}.communications-template-menu>div b{overflow-wrap:anywhere}}
+@media(max-width:650px){.communications-template-menu{position:static}.communications-template-menu>div{right:0;left:0;min-width:0;width:auto;max-width:100%;overflow-x:hidden}.communications-template-menu>div button{min-width:0}.communications-template-menu>div b{overflow-wrap:anywhere}}
