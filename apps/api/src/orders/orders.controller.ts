@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { join } from "node:path";
-import type { User } from "@prisma/client";
+import { UserRole, type User } from "@prisma/client";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
@@ -14,7 +14,8 @@ import { OrdersService } from "./orders.service";
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
   @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER") defaults() { return this.orders.defaults(); }
-  @Get() list(@Query("search") search?: string) { return this.orders.list(search); }
+  @Get("production") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) productionList() { return this.orders.productionList(); }
+  @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string) { return this.orders.list(search); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }
   @Patch(":id/statuses") @Roles("OWNER", "ADMIN", "MANAGER") updateStatuses(@Param("id") id: string, @Body() dto: UpdateOrderStatusesDto, @Req() req: Request & { user: User }) { return this.orders.updateStatuses(id, dto, req.user); }

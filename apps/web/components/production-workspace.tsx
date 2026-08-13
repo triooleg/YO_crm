@@ -16,7 +16,7 @@ const flag=(country?:string)=>({Ukraine:"🇺🇦",France:"🇫🇷",Italy:"🇮
 
 export function ProductionWorkspace(){
  const now=new Date(),[base,setBase]=useState(()=>new Date(now.getFullYear(),now.getMonth(),1)),[orders,setOrders]=useState<Order[]>([]),[search,setSearch]=useState(""),[capacityPerDay,setCapacity]=useState(3),[previewWidth,setPreviewWidth]=useState(600),[selected,setSelected]=useState<string>(),[preview,setPreview]=useState<{src:string;x:number;y:number;country:string;quantity:number;total:string}>(),[error,setError]=useState("");
- async function load(){const r=await fetch("/api/orders",{credentials:"include"});if(!r.ok){setError(productionUi.loadError);return}setOrders(await r.json())}
+ async function load(){const r=await fetch("/api/orders/production",{credentials:"include"});if(!r.ok){setError(productionUi.loadError);return}setOrders(await r.json())}
  useEffect(()=>{load();const saved=Number(localStorage.getItem("production-capacity"));if(saved>=1&&saved<=10)setCapacity(saved);const savedWidth=Number(localStorage.getItem(PREVIEW_WIDTH_KEY));if(Number.isFinite(savedWidth)&&savedWidth>=200&&savedWidth<=1200)setPreviewWidth(savedWidth)},[]);
  const days=useMemo(()=>Array.from({length:DAYS},(_,i)=>plus(base,i)),[base]);
  const visible=useMemo(()=>orders.filter(o=>`${o.number} ${o.client.displayName} ${o.notes||""}`.toLowerCase().includes(search.toLowerCase())&&o.productionStatus!=="CANCELLED"),[orders,search]);

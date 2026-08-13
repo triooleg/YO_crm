@@ -15,11 +15,13 @@ export class ClientsController {
   constructor(private readonly clients: ClientsService) {}
 
   @Get()
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   list(@Query("search") search?: string) {
     return this.clients.list(search);
   }
 
   @Get(":id")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   detail(@Param("id") id: string) {
     return this.clients.detail(id);
   }

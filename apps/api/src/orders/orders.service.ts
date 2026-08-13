@@ -64,6 +64,33 @@ export class OrdersService {
     });
   }
 
+  async productionList() {
+    return this.prisma.order.findMany({
+      where: { archivedAt: null },
+      orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
+      take: 100,
+      select: {
+        id: true,
+        number: true,
+        notes: true,
+        modelImagePath: true,
+        requiredDeliveryAt: true,
+        productionStatus: true,
+        priceMinor: true,
+        currency: true,
+        productionSlot: true,
+        client: { select: { displayName: true, country: true } },
+        items: {
+          select: {
+            quantity: true,
+            modelImagePath: true,
+            athlete: { select: { firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+  }
+
 
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
     const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true } });
