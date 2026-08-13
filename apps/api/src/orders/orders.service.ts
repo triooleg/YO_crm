@@ -109,18 +109,26 @@ export class OrdersService {
     });
   }
   async addPayment(orderId: string, dto: AddOrderPaymentDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true } });
-    if (!order) throw new NotFoundException("Заказ не найден");
     const currency = dto.currency.toUpperCase();
-    if (currency !== order.currency) throw new BadRequestException(`Оплата должна быть в валюте заказа: ${order.currency}`);
-    const alreadyPaid = order.payments.filter((payment) => payment.currency === currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
-    const totalPaid = alreadyPaid + dto.amountMinor;
-    const paymentStatus = totalPaid >= order.priceMinor ? "PAID" : totalPaid >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (currency !== order.currency) throw new BadRequestException(`Оплата должна быть в валюте заказа: ${order.currency}`);
+      const alreadyPaid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const totalPaid = alreadyPaid + dto.amountMinor;
+      const paymentStatus = totalPaid >= order.priceMinor ? "PAID" : totalPaid >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
+      const confirmsProductionSlot = totalPaid >= order.depositRequiredMinor && order.productionSlot?.tentative;
       const payment = await tx.payment.create({ data: { orderId, amountMinor: dto.amountMinor, currency, method: dto.method, receivedAt: new Date(dto.receivedAt), reference: dto.reference?.trim() || null, notes: dto.notes?.trim() || null } });
-      await tx.order.update({ where: { id: orderId }, data: { paymentStatus } });
+      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(confirmsProductionSlot && order.productionStatus === "NOT_SCHEDULED" ? { productionStatus: "SCHEDULED" } : {}) } });
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PAYMENT_RECEIVED", summary: `Получена оплата ${(dto.amountMinor / 100).toFixed(2)} ${currency}`, metadata: { paymentId: payment.id, method: dto.method } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Payment", entityId: payment.id, after: payment } });
+      if (confirmsProductionSlot && order.productionSlot) {
+        const slot = await tx.productionSlot.update({ where: { orderId }, data: { tentative: false } });
+        await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_CONFIRMED", summary: "Производственный слот подтверждён после получения предоплаты", metadata: { paymentId: payment.id, depositRequiredMinor: order.depositRequiredMinor, currency, productionStatus: updatedOrder.productionStatus } } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });
+        if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
+      }
       return payment;
     });
   }
