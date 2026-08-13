@@ -1,24 +1,608 @@
-import{BadGatewayException,BadRequestException,HttpException,Injectable,NotFoundException}from"@nestjs/common";import{ContactChannel,MessageDirection,MessageStatus,Prisma,type User}from"@prisma/client";import{PrismaService}from"../prisma.service";import{ALLOWED_AI_MODELS,AiRequestDto,AiSettingsDto,ChatwootIntegrationDto,EmailIntegrationDto,MessageTemplateDto,SendMessageDto}from"./communications.dto";
-const AI_RATE_LIMIT_PER_HOUR=20,AI_CONCURRENCY_LIMIT=2,AI_LEASE_MS=30_000;
-class TooManyRequestsException extends HttpException{constructor(message:string){super(message,429)}}
-@Injectable()export class CommunicationsService{constructor(private p:PrismaService){}
-list(){return this.p.client.findMany({where:{archivedAt:null},orderBy:[{lastContactAt:"desc"},{displayName:"asc"}],include:{orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,include:{payments:true}},conversations:{where:{archivedAt:null},orderBy:{lastMessageAt:"desc"},include:{messages:{orderBy:{createdAt:"desc"},take:1}}}},take:100})}
-templates(){return this.p.messageTemplate.findMany({where:{archivedAt:null},orderBy:[{name:"asc"},{createdAt:"asc"}]})}
-private templateData(d:MessageTemplateDto){const name=d.name.trim(),content=d.content.trim();if(!name||!content)throw new BadRequestException("Название и текст шаблона обязательны");return{name,content,channel:d.channel,language:d.language?.trim()||"ru"}}
-createTemplate(d:MessageTemplateDto,u:User){const data=this.templateData(d);return this.p.$transaction(async tx=>{const template=await tx.messageTemplate.create({data});await tx.auditLog.create({data:{actorId:u.id,action:"CREATE",entityType:"MessageTemplate",entityId:template.id,after:template}});return template})}
-async updateTemplate(id:string,d:MessageTemplateDto,u:User){const data=this.templateData(d);return this.p.$transaction(async tx=>{const before=await tx.messageTemplate.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Шаблон не найден");const template=await tx.messageTemplate.update({where:{id},data:{...data,channel:data.channel??null}});await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"MessageTemplate",entityId:id,before,after:template}});return template})}
-async archiveTemplate(id:string,u:User){return this.p.$transaction(async tx=>{const before=await tx.messageTemplate.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Шаблон не найден");const template=await tx.messageTemplate.update({where:{id},data:{archivedAt:new Date()}});await tx.auditLog.create({data:{actorId:u.id,action:"ARCHIVE",entityType:"MessageTemplate",entityId:id,before,after:template}});return{archived:true,id:template.id}})}
-private integrationStatus(channel:"chatwoot"|"email",v:Record<string,unknown>){if(channel==="chatwoot"){const ready=Boolean(v.enabled&&v.baseUrl&&v.accountId&&v.inboxId&&v.accessToken);return{channel,enabled:v.enabled===true,status:ready?"CONFIGURED":"NOT_CONNECTED",baseUrl:typeof v.baseUrl==="string"?v.baseUrl:"",accountId:typeof v.accountId==="string"?v.accountId:"",inboxId:typeof v.inboxId==="string"?v.inboxId:"",accessTokenConfigured:Boolean(v.accessToken)}}const ready=Boolean(v.enabled&&v.smtpHost&&v.smtpPort&&v.username&&v.password&&v.fromAddress);return{channel,enabled:v.enabled===true,status:ready?"CONFIGURED":"NOT_CONNECTED",smtpHost:typeof v.smtpHost==="string"?v.smtpHost:"",smtpPort:typeof v.smtpPort==="number"?v.smtpPort:587,username:typeof v.username==="string"?v.username:"",fromAddress:typeof v.fromAddress==="string"?v.fromAddress:"",passwordConfigured:Boolean(v.password)}}
-async integrations(){const rows=await this.p.appSetting.findMany({where:{section:{in:["integration.chatwoot","integration.email"]}}});const value=(section:string)=>Object.fromEntries(rows.filter(x=>x.section===section).map(x=>[x.key,x.value]))as Record<string,unknown>;return{chatwoot:this.integrationStatus("chatwoot",value("integration.chatwoot")),email:this.integrationStatus("email",value("integration.email")),deliveryAvailable:false}}
-async saveIntegration(channel:string,d:ChatwootIntegrationDto|EmailIntegrationDto,u:User){if(channel!=="chatwoot"&&channel!=="email")throw new BadRequestException("Неизвестный канал интеграции");const section="integration."+channel,secret=channel==="chatwoot"?"accessToken":"password",allowed=channel==="chatwoot"?["enabled","baseUrl","accountId","inboxId","accessToken"]:["enabled","smtpHost","smtpPort","username","password","fromAddress"],entries=Object.entries(d).filter(([key,value])=>allowed.includes(key)&&value!==undefined&&(key!==secret||value!==""));await this.p.$transaction(async tx=>{for(const[key,value]of entries)await tx.appSetting.upsert({where:{section_key:{section,key}},create:{section,key,value:value as Prisma.InputJsonValue},update:{value:value as Prisma.InputJsonValue}});const safe=Object.fromEntries(entries.filter(([key])=>key!==secret));await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"IntegrationSetting",entityId:channel,after:{...safe,[secret+"Updated"]:entries.some(([key])=>key===secret)}}})});return(await this.integrations())[channel]}
-async detail(clientId:string,channel?:ContactChannel){const client=await this.p.client.findFirst({where:{id:clientId,archivedAt:null},select:{id:true,source:true,preferredChannel:true}});if(!client)throw new NotFoundException("Клиент не найден");const selected=channel||client.preferredChannel||client.source||ContactChannel.MANUAL;const c=await this.p.conversation.findUnique({where:{clientId_channel:{clientId,channel:selected}},include:{messages:{orderBy:{createdAt:"asc"},take:300}}});return c??{id:null,clientId,channel:selected,unreadCount:0,lastMessageAt:null,messages:[]}}
-async send(clientId:string,d:SendMessageDto,u:User){const selected=await this.p.client.findFirst({where:{id:clientId,archivedAt:null},select:{source:true,preferredChannel:true}});if(!selected)throw new NotFoundException("Клиент не найден");const channel=d.channel||selected.preferredChannel||selected.source||ContactChannel.MANUAL;const content=d.content.trim();if(!content)throw new BadRequestException("Сообщение не может быть пустым");return this.p.$transaction(async tx=>{const c=await tx.conversation.upsert({where:{clientId_channel:{clientId,channel}},create:{clientId,channel},update:{}});const m=await tx.message.create({data:{conversationId:c.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT,content,authorId:u.id}});await tx.conversation.update({where:{id:c.id},data:{lastMessageAt:m.createdAt}});await tx.activity.create({data:{clientId,type:"MESSAGE_DRAFTED",summary:"Создан исходящий черновик сообщения",metadata:{messageId:m.id,channel:c.channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"CREATE",entityType:"Message",entityId:m.id,after:m}});return m})}}
-@Injectable()export class AiAssistantService{constructor(private p:PrismaService){}
-private async values(){const rows=await this.p.appSetting.findMany({where:{section:"ai"}});return Object.fromEntries(rows.map(x=>[x.key,x.value])) as Record<string,unknown>}
-private reserve(u:User){return this.p.$transaction(async tx=>{await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))","ai:"+u.id);const now=new Date(),hourAgo=new Date(now.getTime()-3_600_000),leaseAgo=new Date(now.getTime()-AI_LEASE_MS),used=await tx.auditLog.count({where:{actorId:u.id,entityType:"AI_GENERATION_ATTEMPT",createdAt:{gte:hourAgo}}}),active=await tx.auditLog.count({where:{actorId:u.id,entityType:"AI_GENERATION_ATTEMPT",action:"START",createdAt:{gte:leaseAgo}}});if(used>=AI_RATE_LIMIT_PER_HOUR)throw new TooManyRequestsException("Лимит AI-запросов исчерпан. Повторите позже");if(active>=AI_CONCURRENCY_LIMIT)throw new TooManyRequestsException("Слишком много одновременных AI-запросов");return tx.auditLog.create({data:{actorId:u.id,action:"START",entityType:"AI_GENERATION_ATTEMPT",after:{windowMinutes:60,limit:AI_RATE_LIMIT_PER_HOUR}}})})}
-private release(id:string){return this.p.auditLog.update({where:{id},data:{action:"COMPLETE"}}).catch(()=>undefined)}
-async generateLimited(d:AiRequestDto,u:User){const lease=await this.reserve(u);try{return await this.generate(d,u)}finally{await this.release(lease.id)}}
-async settings(){const v=await this.values();return{enabled:v.enabled===true,allowClientContext:v.allowClientContext===true,model:typeof v.model==="string"&&ALLOWED_AI_MODELS.includes(v.model as any)?v.model:"gpt-4.1-mini",defaultLanguage:typeof v.defaultLanguage==="string"?v.defaultLanguage:"Русский",tone:typeof v.tone==="string"?v.tone:"Доброжелательный и профессиональный",systemPrompt:typeof v.systemPrompt==="string"?v.systemPrompt:"",connected:Boolean(process.env.OPENAI_API_KEY)}}
-async save(d:AiSettingsDto,u:User){const allowed=["enabled","allowClientContext","model","defaultLanguage","tone","systemPrompt"] as const;return this.p.$transaction(async tx=>{for(const key of allowed)if(d[key]!==undefined){await tx.appSetting.upsert({where:{section_key:{section:"ai",key}},create:{section:"ai",key,value:d[key] as Prisma.InputJsonValue},update:{value:d[key] as Prisma.InputJsonValue}})}await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"AppSetting",entityId:"ai",after:d as Prisma.InputJsonValue}});const rows=await tx.appSetting.findMany({where:{section:"ai"}});const v=Object.fromEntries(rows.map(x=>[x.key,x.value])) as Record<string,unknown>;return{enabled:v.enabled===true,allowClientContext:v.allowClientContext===true,model:typeof v.model==="string"?v.model:"gpt-4.1-mini",defaultLanguage:typeof v.defaultLanguage==="string"?v.defaultLanguage:"Русский",tone:typeof v.tone==="string"?v.tone:"Доброжелательный и профессиональный",systemPrompt:typeof v.systemPrompt==="string"?v.systemPrompt:"",connected:Boolean(process.env.OPENAI_API_KEY)}})}
-async generate(d:AiRequestDto,u:User){const cfg=await this.settings();if(!cfg.enabled)throw new BadRequestException("AI-помощник отключён");const key=process.env.OPENAI_API_KEY;if(!key)throw new BadRequestException("OpenAI API не подключён");let context="";if(cfg.allowClientContext&&d.clientId&&(d.action==="REPLY"||d.action==="TEMPLATE")){const c=await this.p.client.findFirst({where:{id:d.clientId,archivedAt:null},select:{displayName:true,language:true,country:true,orders:{where:{archivedAt:null},take:5,orderBy:{createdAt:"desc"},select:{number:true,salesStatus:true,productionStatus:true,requiredDeliveryAt:true}}}});if(c)context=JSON.stringify({client:{name:c.displayName,language:c.language,country:c.country},orders:c.orders.map(o=>({number:o.number,status:o.salesStatus,production:o.productionStatus,deadline:o.requiredDeliveryAt}))})}const task={REPLY:"Предложи готовый ответ клиенту",TRANSLATE:"Переведи текст без дополнительных комментариев",IMPROVE:"Улучши черновик, сохранив смысл",TEMPLATE:"Создай краткий шаблонный ответ"}[d.action];const prompt="Ты помощник CRM Yoleotard. "+cfg.tone+". Язык результата: "+(d.targetLanguage||cfg.defaultLanguage)+". Не выдумывай факты о сроках, оплате и заказе. Если данных недостаточно, явно укажи это. "+cfg.systemPrompt+"\nЗадача: "+task+"\nКонтекст: "+context+"\nТекст: "+d.text+"\nУточнение: "+(d.instructions||"");const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},signal:AbortSignal.timeout(15000),body:JSON.stringify({model:cfg.model,input:prompt,max_output_tokens:800})});if(!r.ok)throw new BadGatewayException("OpenAI не смог подготовить ответ");const x=await r.json() as any;const text=x.output_text||x.output?.flatMap((o:any)=>o.content||[]).find((z:any)=>z.type==="output_text")?.text;if(!text)throw new BadGatewayException("OpenAI вернул пустой ответ");await this.p.auditLog.create({data:{actorId:u.id,action:"GENERATE",entityType:"AiAssistantGeneration",entityId:d.clientId,after:{action:d.action,model:cfg.model,clientContextIncluded:Boolean(context),inputCharacters:d.text.length,outputCharacters:text.length}}});return{text}}
+import {
+  BadGatewayException,
+  BadRequestException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import {
+  ContactChannel,
+  MessageDirection,
+  MessageStatus,
+  Prisma,
+  type User,
+} from "@prisma/client";
+import { PrismaService } from "../prisma.service";
+import { decryptSecret, encryptSecret } from "../secret-box";
+import {
+  ALLOWED_AI_MODELS,
+  AiRequestDto,
+  AiSettingsDto,
+  ChatwootIntegrationDto,
+  EmailIntegrationDto,
+  MessageTemplateDto,
+  SendMessageDto,
+} from "./communications.dto";
+const AI_RATE_LIMIT_PER_HOUR = 20,
+  AI_CONCURRENCY_LIMIT = 2,
+  AI_LEASE_MS = 30_000;
+class TooManyRequestsException extends HttpException {
+  constructor(message: string) {
+    super(message, 429);
+  }
+}
+@Injectable()
+export class CommunicationsService {
+  constructor(private p: PrismaService) {}
+  list() {
+    return this.p.client.findMany({
+      where: { archivedAt: null },
+      orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }],
+      include: {
+        orders: {
+          where: { archivedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          include: { payments: true },
+        },
+        conversations: {
+          where: { archivedAt: null },
+          orderBy: { lastMessageAt: "desc" },
+          include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+        },
+      },
+      take: 100,
+    });
+  }
+  templates() {
+    return this.p.messageTemplate.findMany({
+      where: { archivedAt: null },
+      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+    });
+  }
+  private templateData(d: MessageTemplateDto) {
+    const name = d.name.trim(),
+      content = d.content.trim();
+    if (!name || !content)
+      throw new BadRequestException("Название и текст шаблона обязательны");
+    return {
+      name,
+      content,
+      channel: d.channel,
+      language: d.language?.trim() || "ru",
+    };
+  }
+  createTemplate(d: MessageTemplateDto, u: User) {
+    const data = this.templateData(d);
+    return this.p.$transaction(async (tx) => {
+      const template = await tx.messageTemplate.create({ data });
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "CREATE",
+          entityType: "MessageTemplate",
+          entityId: template.id,
+          after: template,
+        },
+      });
+      return template;
+    });
+  }
+  async updateTemplate(id: string, d: MessageTemplateDto, u: User) {
+    const data = this.templateData(d);
+    return this.p.$transaction(async (tx) => {
+      const before = await tx.messageTemplate.findFirst({
+        where: { id, archivedAt: null },
+      });
+      if (!before) throw new NotFoundException("Шаблон не найден");
+      const template = await tx.messageTemplate.update({
+        where: { id },
+        data: { ...data, channel: data.channel ?? null },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "UPDATE",
+          entityType: "MessageTemplate",
+          entityId: id,
+          before,
+          after: template,
+        },
+      });
+      return template;
+    });
+  }
+  async archiveTemplate(id: string, u: User) {
+    return this.p.$transaction(async (tx) => {
+      const before = await tx.messageTemplate.findFirst({
+        where: { id, archivedAt: null },
+      });
+      if (!before) throw new NotFoundException("Шаблон не найден");
+      const template = await tx.messageTemplate.update({
+        where: { id },
+        data: { archivedAt: new Date() },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "ARCHIVE",
+          entityType: "MessageTemplate",
+          entityId: id,
+          before,
+          after: template,
+        },
+      });
+      return { archived: true, id: template.id };
+    });
+  }
+  private integrationStatus(
+    channel: "chatwoot" | "email",
+    v: Record<string, unknown>,
+  ) {
+    if (channel === "chatwoot") {
+      const ready = Boolean(
+        v.enabled && v.baseUrl && v.accountId && v.inboxId && v.accessToken,
+      );
+      return {
+        channel,
+        enabled: v.enabled === true,
+        status: ready ? "CONFIGURED" : "NOT_CONNECTED",
+        baseUrl: typeof v.baseUrl === "string" ? v.baseUrl : "",
+        accountId: typeof v.accountId === "string" ? v.accountId : "",
+        inboxId: typeof v.inboxId === "string" ? v.inboxId : "",
+        accessTokenConfigured: Boolean(v.accessToken),
+      };
+    }
+    const ready = Boolean(
+      v.enabled &&
+        v.smtpHost &&
+        v.smtpPort &&
+        v.username &&
+        v.password &&
+        v.fromAddress,
+    );
+    return {
+      channel,
+      enabled: v.enabled === true,
+      status: ready ? "CONFIGURED" : "NOT_CONNECTED",
+      smtpHost: typeof v.smtpHost === "string" ? v.smtpHost : "",
+      smtpPort: typeof v.smtpPort === "number" ? v.smtpPort : 587,
+      username: typeof v.username === "string" ? v.username : "",
+      fromAddress: typeof v.fromAddress === "string" ? v.fromAddress : "",
+      passwordConfigured: Boolean(v.password),
+    };
+  }
+  async integrations() {
+    const rows = await this.p.appSetting.findMany({
+      where: { section: { in: ["integration.chatwoot", "integration.email"] } },
+    });
+    const value = (section: string) =>
+      Object.fromEntries(
+        rows.filter((x) => x.section === section).map((x) => [x.key, x.value]),
+      ) as Record<string, unknown>;
+    return {
+      chatwoot: this.integrationStatus(
+        "chatwoot",
+        value("integration.chatwoot"),
+      ),
+      email: this.integrationStatus("email", value("integration.email")),
+      deliveryAvailable: false,
+    };
+  }
+  async saveIntegration(
+    channel: string,
+    d: ChatwootIntegrationDto | EmailIntegrationDto,
+    u: User,
+  ) {
+    if (channel !== "chatwoot" && channel !== "email")
+      throw new BadRequestException("Неизвестный канал интеграции");
+    const section = "integration." + channel,
+      secret = channel === "chatwoot" ? "accessToken" : "password",
+      allowed =
+        channel === "chatwoot"
+          ? ["enabled", "baseUrl", "accountId", "inboxId", "accessToken"]
+          : [
+              "enabled",
+              "smtpHost",
+              "smtpPort",
+              "username",
+              "password",
+              "fromAddress",
+            ],
+      entries = Object.entries(d).filter(
+        ([key, value]) =>
+          allowed.includes(key) &&
+          value !== undefined &&
+          (key !== secret || value !== ""),
+      );
+    await this.p.$transaction(async (tx) => {
+      for (const [key, value] of entries)
+        await tx.appSetting.upsert({
+          where: { section_key: { section, key } },
+          create: { section, key, value: value as Prisma.InputJsonValue },
+          update: { value: value as Prisma.InputJsonValue },
+        });
+      const safe = Object.fromEntries(
+        entries.filter(([key]) => key !== secret),
+      );
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "UPDATE",
+          entityType: "IntegrationSetting",
+          entityId: channel,
+          after: {
+            ...safe,
+            [secret + "Updated"]: entries.some(([key]) => key === secret),
+          },
+        },
+      });
+    });
+    return (await this.integrations())[channel];
+  }
+  async detail(clientId: string, channel?: ContactChannel) {
+    const client = await this.p.client.findFirst({
+      where: { id: clientId, archivedAt: null },
+      select: { id: true, source: true, preferredChannel: true },
+    });
+    if (!client) throw new NotFoundException("Клиент не найден");
+    const selected =
+      channel ||
+      client.preferredChannel ||
+      client.source ||
+      ContactChannel.MANUAL;
+    const c = await this.p.conversation.findUnique({
+      where: { clientId_channel: { clientId, channel: selected } },
+      include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } },
+    });
+    return (
+      c ?? {
+        id: null,
+        clientId,
+        channel: selected,
+        unreadCount: 0,
+        lastMessageAt: null,
+        messages: [],
+      }
+    );
+  }
+  async send(clientId: string, d: SendMessageDto, u: User) {
+    const selected = await this.p.client.findFirst({
+      where: { id: clientId, archivedAt: null },
+      select: { source: true, preferredChannel: true },
+    });
+    if (!selected) throw new NotFoundException("Клиент не найден");
+    const channel =
+      d.channel ||
+      selected.preferredChannel ||
+      selected.source ||
+      ContactChannel.MANUAL;
+    const content = d.content.trim();
+    if (!content)
+      throw new BadRequestException("Сообщение не может быть пустым");
+    return this.p.$transaction(async (tx) => {
+      const c = await tx.conversation.upsert({
+        where: { clientId_channel: { clientId, channel } },
+        create: { clientId, channel },
+        update: {},
+      });
+      const m = await tx.message.create({
+        data: {
+          conversationId: c.id,
+          direction: MessageDirection.OUTBOUND,
+          status: MessageStatus.DRAFT,
+          content,
+          authorId: u.id,
+        },
+      });
+      await tx.conversation.update({
+        where: { id: c.id },
+        data: { lastMessageAt: m.createdAt },
+      });
+      await tx.activity.create({
+        data: {
+          clientId,
+          type: "MESSAGE_DRAFTED",
+          summary: "Создан исходящий черновик сообщения",
+          metadata: { messageId: m.id, channel: c.channel },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "CREATE",
+          entityType: "Message",
+          entityId: m.id,
+          after: m,
+        },
+      });
+      return m;
+    });
+  }
+}
+@Injectable()
+export class AiAssistantService {
+  constructor(private p: PrismaService) {}
+  private async values() {
+    const rows = await this.p.appSetting.findMany({ where: { section: "ai" } });
+    return Object.fromEntries(rows.map((x) => [x.key, x.value])) as Record<
+      string,
+      unknown
+    >;
+  }
+  private resolveApiKey(v: Record<string, unknown>) {
+    if (v.apiKeyDisabled === true) return undefined;
+    if (typeof v.apiKeyEncrypted === "string") {
+      try {
+        return decryptSecret(v.apiKeyEncrypted);
+      } catch {
+        return undefined;
+      }
+    }
+    return process.env.OPENAI_API_KEY?.trim() || undefined;
+  }
+  private publicSettings(v: Record<string, unknown>) {
+    const connected = Boolean(this.resolveApiKey(v));
+    return {
+      enabled: v.enabled === true,
+      allowClientContext: v.allowClientContext === true,
+      model:
+        typeof v.model === "string" &&
+        ALLOWED_AI_MODELS.includes(v.model as any)
+          ? v.model
+          : "gpt-4.1-mini",
+      defaultLanguage:
+        typeof v.defaultLanguage === "string" ? v.defaultLanguage : "Русский",
+      tone:
+        typeof v.tone === "string"
+          ? v.tone
+          : "Доброжелательный и профессиональный",
+      systemPrompt: typeof v.systemPrompt === "string" ? v.systemPrompt : "",
+      connected,
+      apiKeySource: connected
+        ? typeof v.apiKeyEncrypted === "string"
+          ? "settings"
+          : "environment"
+        : "none",
+    };
+  }
+  private reserve(u: User) {
+    return this.p.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        "ai:" + u.id,
+      );
+      const now = new Date(),
+        hourAgo = new Date(now.getTime() - 3_600_000),
+        leaseAgo = new Date(now.getTime() - AI_LEASE_MS),
+        used = await tx.auditLog.count({
+          where: {
+            actorId: u.id,
+            entityType: "AI_GENERATION_ATTEMPT",
+            createdAt: { gte: hourAgo },
+          },
+        }),
+        active = await tx.auditLog.count({
+          where: {
+            actorId: u.id,
+            entityType: "AI_GENERATION_ATTEMPT",
+            action: "START",
+            createdAt: { gte: leaseAgo },
+          },
+        });
+      if (used >= AI_RATE_LIMIT_PER_HOUR)
+        throw new TooManyRequestsException(
+          "Лимит AI-запросов исчерпан. Повторите позже",
+        );
+      if (active >= AI_CONCURRENCY_LIMIT)
+        throw new TooManyRequestsException(
+          "Слишком много одновременных AI-запросов",
+        );
+      return tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "START",
+          entityType: "AI_GENERATION_ATTEMPT",
+          after: { windowMinutes: 60, limit: AI_RATE_LIMIT_PER_HOUR },
+        },
+      });
+    });
+  }
+  private release(id: string) {
+    return this.p.auditLog
+      .update({ where: { id }, data: { action: "COMPLETE" } })
+      .catch(() => undefined);
+  }
+  async generateLimited(d: AiRequestDto, u: User) {
+    const lease = await this.reserve(u);
+    try {
+      return await this.generate(d, u);
+    } finally {
+      await this.release(lease.id);
+    }
+  }
+  async settings() {
+    return this.publicSettings(await this.values());
+  }
+  async save(d: AiSettingsDto, u: User) {
+    if (d.apiKey && d.removeApiKey)
+      throw new BadRequestException(
+        "Нельзя одновременно сохранить и удалить токен",
+      );
+    const allowed = [
+      "enabled",
+      "allowClientContext",
+      "model",
+      "defaultLanguage",
+      "tone",
+      "systemPrompt",
+    ] as const;
+    return this.p.$transaction(async (tx) => {
+      for (const key of allowed)
+        if (d[key] !== undefined)
+          await tx.appSetting.upsert({
+            where: { section_key: { section: "ai", key } },
+            create: {
+              section: "ai",
+              key,
+              value: d[key] as Prisma.InputJsonValue,
+            },
+            update: { value: d[key] as Prisma.InputJsonValue },
+          });
+      if (d.apiKey) {
+        const encrypted = encryptSecret(d.apiKey.trim());
+        await tx.appSetting.upsert({
+          where: { section_key: { section: "ai", key: "apiKeyEncrypted" } },
+          create: { section: "ai", key: "apiKeyEncrypted", value: encrypted },
+          update: { value: encrypted },
+        });
+        await tx.appSetting.upsert({
+          where: { section_key: { section: "ai", key: "apiKeyDisabled" } },
+          create: { section: "ai", key: "apiKeyDisabled", value: false },
+          update: { value: false },
+        });
+      }
+      if (d.removeApiKey) {
+        await tx.appSetting.deleteMany({
+          where: { section: "ai", key: "apiKeyEncrypted" },
+        });
+        await tx.appSetting.upsert({
+          where: { section_key: { section: "ai", key: "apiKeyDisabled" } },
+          create: { section: "ai", key: "apiKeyDisabled", value: true },
+          update: { value: true },
+        });
+      }
+      const safeAfter = {
+        ...Object.fromEntries(
+          allowed
+            .filter((key) => d[key] !== undefined)
+            .map((key) => [key, d[key]]),
+        ),
+        apiKeyUpdated: Boolean(d.apiKey),
+        apiKeyRemoved: d.removeApiKey === true,
+      };
+      await tx.auditLog.create({
+        data: {
+          actorId: u.id,
+          action: "UPDATE",
+          entityType: "AppSetting",
+          entityId: "ai",
+          after: safeAfter as Prisma.InputJsonValue,
+        },
+      });
+      const rows = await tx.appSetting.findMany({ where: { section: "ai" } });
+      return this.publicSettings(
+        Object.fromEntries(rows.map((x) => [x.key, x.value])) as Record<
+          string,
+          unknown
+        >,
+      );
+    });
+  }
+  async generate(d: AiRequestDto, u: User) {
+    const values = await this.values();
+    const cfg = this.publicSettings(values);
+    if (!cfg.enabled) throw new BadRequestException("AI-помощник отключён");
+    const key = this.resolveApiKey(values);
+    if (!key) throw new BadRequestException("OpenAI API не подключён");
+    let context = "";
+    if (
+      cfg.allowClientContext &&
+      d.clientId &&
+      (d.action === "REPLY" || d.action === "TEMPLATE")
+    ) {
+      const c = await this.p.client.findFirst({
+        where: { id: d.clientId, archivedAt: null },
+        select: {
+          displayName: true,
+          language: true,
+          country: true,
+          orders: {
+            where: { archivedAt: null },
+            take: 5,
+            orderBy: { createdAt: "desc" },
+            select: {
+              number: true,
+              salesStatus: true,
+              productionStatus: true,
+              requiredDeliveryAt: true,
+            },
+          },
+        },
+      });
+      if (c)
+        context = JSON.stringify({
+          client: {
+            name: c.displayName,
+            language: c.language,
+            country: c.country,
+          },
+          orders: c.orders.map((o) => ({
+            number: o.number,
+            status: o.salesStatus,
+            production: o.productionStatus,
+            deadline: o.requiredDeliveryAt,
+          })),
+        });
+    }
+    const task = {
+      REPLY: "Предложи готовый ответ клиенту",
+      TRANSLATE: "Переведи текст без дополнительных комментариев",
+      IMPROVE: "Улучши черновик, сохранив смысл",
+      TEMPLATE: "Создай краткий шаблонный ответ",
+    }[d.action];
+    const prompt =
+      "Ты помощник CRM Yoleotard. " +
+      cfg.tone +
+      ". Язык результата: " +
+      (d.targetLanguage || cfg.defaultLanguage) +
+      ". Не выдумывай факты о сроках, оплате и заказе. Если данных недостаточно, явно укажи это. " +
+      cfg.systemPrompt +
+      "\nЗадача: " +
+      task +
+      "\nКонтекст: " +
+      context +
+      "\nТекст: " +
+      d.text +
+      "\nУточнение: " +
+      (d.instructions || "");
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + key,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({
+        model: cfg.model,
+        input: prompt,
+        max_output_tokens: 800,
+      }),
+    });
+    if (!r.ok)
+      throw new BadGatewayException("OpenAI не смог подготовить ответ");
+    const x = (await r.json()) as any;
+    const text =
+      x.output_text ||
+      x.output
+        ?.flatMap((o: any) => o.content || [])
+        .find((z: any) => z.type === "output_text")?.text;
+    if (!text) throw new BadGatewayException("OpenAI вернул пустой ответ");
+    await this.p.auditLog.create({
+      data: {
+        actorId: u.id,
+        action: "GENERATE",
+        entityType: "AiAssistantGeneration",
+        entityId: d.clientId,
+        after: {
+          action: d.action,
+          model: cfg.model,
+          clientContextIncluded: Boolean(context),
+          inputCharacters: d.text.length,
+          outputCharacters: text.length,
+        },
+      },
+    });
+    return { text };
+  }
 }
