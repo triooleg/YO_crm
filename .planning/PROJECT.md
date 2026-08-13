@@ -17,14 +17,17 @@ history behind every client and order.
 - [x] Foundation, deployment and health checks.
 - [x] Clients, athletes and immutable measurements.
 - [x] Orders, production, finance and shipping workflows.
+- [x] Audit closures F-01 through F-09 implemented with focused contract tests.
 
 ### Active
 
-- [ ] Secure auth and RBAC.
+- [x] API session security, RBAC and least-privilege CRM/production read routes.
+- [ ] Global web authentication lifecycle and role-aware navigation (deferred for focused testing).
 - [ ] Unified client communications and message timeline.
-- [ ] Message templates and channel integrations.
+- [x] Internal message templates and persisted Chatwoot/e-mail channel settings.
+- [ ] External Chatwoot/e-mail ingestion and delivery (pending credentials and integration).
 - [ ] Responsive Unicode-safe interface.
-- [ ] Docker deployment, backups and health checks.
+- [x] Docker configuration, executable backup/restore scripts and dependency-aware health checks.
 
 ### Out of Scope
 
@@ -51,14 +54,14 @@ secrets, separate compose stacks and health checks.
 
 | Decision | Rationale | Outcome |
 |---|---|---|
-| TypeScript modular monolith | Proven stack without distributed complexity | Pending |
-| Next.js + NestJS + Prisma | Clear UI/API/data boundaries | Pending |
-| Ports 3500/4500 | Confirmed free in discovery | Pending |
-| Immutable measurements | Historically correct sizing evidence | Pending |
+| TypeScript modular monolith | Proven stack without distributed complexity | Adopted |
+| Next.js + NestJS + Prisma | Clear UI/API/data boundaries | Adopted |
+| Ports 3500/4500 | Confirmed free in discovery | Adopted |
+| Immutable measurements | Historically correct sizing evidence | Adopted |
 
 ## Evolution
 
 Review requirements, decisions and framing at every phase and milestone.
 
 ---
-*Last updated: 2026-08-13 after completion of phases 1-6*
+*Last updated: 2026-08-13 after local implementation of audit closures F-01 through F-09; deployment and live smoke not asserted*
