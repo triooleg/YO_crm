@@ -17,6 +17,7 @@ test("входящие используют централизованные р�
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)=>chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
+test("mobile template menu stays inside the chat panel without document overflow",()=>{assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu>div\{[^}]*right:auto[^}]*left:0[^}]*width:min\(230px,calc\(100vw - 115px\)\)[^}]*max-width:calc\(100vw - 115px\)[^}]*overflow-x:hidden/)});
 
 test("поиск клиентов работает, а источник расположен рядом с именем", () => {
   assert.match(component, /setSearch/);

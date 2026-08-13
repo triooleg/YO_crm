@@ -6,3 +6,4 @@
 .communications-template-menu small{color:var(--muted)}
 .settings-grid .settings-channel-toggle{display:flex;align-items:center;gap:8px;align-self:center;color:var(--text)}
 .settings-grid .settings-channel-toggle input[type="checkbox"]{flex:0 0 18px;width:18px;height:18px;min-height:0;margin:0;padding:0}
+@media(max-width:650px){.communications-template-menu>div{right:auto;left:0;min-width:0;width:min(230px,calc(100vw - 115px));max-width:calc(100vw - 115px);overflow-x:hidden}.communications-template-menu>div button{min-width:0}.communications-template-menu>div b{overflow-wrap:anywhere}}
