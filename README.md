@@ -17,7 +17,9 @@ responsive CRM shell and Docker/Portainer deployment.
 5. Run `pnpm db:generate`, `pnpm db:migrate`, then `pnpm dev`.
 
 - Web: `http://localhost:3500`
-- API health: `http://localhost:4500/api/health`
+- API health: `http://localhost:4500/api/health`. The endpoint returns `ok` and
+  machine-readable `dependencies` statuses for PostgreSQL, Redis, and upload
+  storage; any required dependency marked `down` makes the response HTTP 503.
 - OpenAPI: `http://localhost:4500/api/docs`
 
 Read `PROJECT_BLUEPRINT.md`, `ROADMAP.md`, and `CHAT_HANDOFF.md` before

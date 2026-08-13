@@ -47,7 +47,7 @@ services:
     ports: ["${API_PUBLIC_PORT:-4500}:4500"]
     volumes: [crm_uploads:/app/uploads]
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4500/api/health | grep -q 'true'"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4500/api/health | grep -q '\"ok\":true'"]
       interval: 15s
       timeout: 5s
       retries: 15
