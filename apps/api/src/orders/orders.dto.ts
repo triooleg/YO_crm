@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
-import { OrderType, PaymentMethod, ProductionStatus, SalesStatus, ShippingStatus } from "@prisma/client";
+import { OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 
 export class UploadModelImageDto {
   @ApiProperty() @IsString() @Length(1, 150) name!: string;
@@ -44,7 +44,6 @@ export class AddOrderPaymentDto {
 export class UpdateOrderStatusesDto {
   @ApiPropertyOptional({ enum: SalesStatus }) @IsOptional() @IsEnum(SalesStatus) salesStatus?: SalesStatus;
   @ApiPropertyOptional({ enum: ProductionStatus }) @IsOptional() @IsEnum(ProductionStatus) productionStatus?: ProductionStatus;
-  @ApiPropertyOptional({ enum: ShippingStatus }) @IsOptional() @IsEnum(ShippingStatus) shippingStatus?: ShippingStatus;
 }
 export class UpdateProductionSlotDto {
  @ApiProperty() @IsDateString() startsAt!: string;

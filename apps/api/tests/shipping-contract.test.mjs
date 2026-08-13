@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 const schema=await readFile(new URL("../../../packages/database/prisma/schema.prisma",import.meta.url),"utf8");
 const controller=await readFile(new URL("../src/shipping/shipping.controller.ts",import.meta.url),"utf8");
 const service=await readFile(new URL("../src/shipping/shipping.service.ts",import.meta.url),"utf8");
+const ordersDto=await readFile(new URL("../src/orders/orders.dto.ts",import.meta.url),"utf8");
+const ordersService=await readFile(new URL("../src/orders/orders.service.ts",import.meta.url),"utf8");
 test("один заказ имеет только одну посылку",()=>{assert.match(schema,/orderId\s+String\s+@unique/);assert.match(schema,/shipment\s+Shipment\?/)});
 test("поддерживаются четыре службы доставки и настройки",()=>{for(const x of["NOVA_POSHTA","NOVA_GLOBAL","UKRPOSHTA","DHL"])assert.match(schema,new RegExp(x));assert.match(controller,/@Patch\("carriers\/:carrier"\)/)});
 test("посылка сохраняется с историей и аудитом",()=>{assert.match(controller,/@Put\("orders\/:orderId"\)/);assert.match(service,/shipment\.upsert/);assert.match(service,/tx\.activity\.create/);assert.match(service,/tx\.auditLog\.create/);assert.match(service,/deliveryMinor:d\.costMinor/)});
@@ -14,3 +16,10 @@ test("даты соответствуют статусу и поля можно 
 test("runtime строки доставки имеют корректный UTF-8",()=>{for(const x of["Новая почта","Укрпочта","Заказ не найден","Обновлены данные доставки"])assert.match(service,new RegExp(x));assert.doesNotMatch(service,/Рќ|РЎ|Р”|вЂ|Г—|пїЅ|�/)});
 
 test("shipping updates are serialized per order",()=>{assert.match(service,/pg_advisory_xact_lock/);assert.ok(service.indexOf("pg_advisory_xact_lock")<service.indexOf("order.findFirst"))});
+test("generic order status endpoint cannot bypass shipment invariants",()=>{
+  const statusDto=ordersDto.match(/export class UpdateOrderStatusesDto \{([\s\S]*?)\n\}/)?.[1]??"";
+  const updateStatuses=ordersService.match(/async updateStatuses\([\s\S]*?\n  \}\n  async updateDeadline/)?.[0]??"";
+  assert.doesNotMatch(statusDto,/shippingStatus/);
+  assert.doesNotMatch(updateStatuses,/shippingStatus/);
+  assert.match(controller,/@Put\("orders\/:orderId"\)/);
+});

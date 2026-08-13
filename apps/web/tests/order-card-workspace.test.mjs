@@ -31,3 +31,9 @@ test("исторический индивидуальный заказ без п
   assert.match(workspace,/legacy-/);
   assert.match(workspace,/measurement:o\.measurement/);
 });
+
+test("shipping status is read only in the generic order card",()=>{
+  assert.doesNotMatch(workspace,/field:"salesStatus"\|"productionStatus"\|"shippingStatus"/);
+  assert.doesNotMatch(workspace,/status\("shippingStatus"/);
+  assert.match(workspace,/orderLabel\("shipping",o\.shippingStatus\)/);
+});

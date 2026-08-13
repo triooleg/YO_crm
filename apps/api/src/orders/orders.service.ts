@@ -62,7 +62,7 @@ export class OrdersService {
       const paidMinor = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
       if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
     }
-    const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus, shippingStatus: dto.shippingStatus };
+    const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus };
     if (!Object.values(data).some(Boolean)) throw new BadRequestException("Укажите хотя бы один статус");
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.order.update({ where: { id: orderId }, data });
