@@ -122,14 +122,15 @@ export class OrdersService {
     });
   }
   async updateProductionSlot(orderId: string, dto: UpdateProductionSlotDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
-    if (!order) throw new NotFoundException("Заказ не найден");
     const startsAt = new Date(dto.startsAt), endsAt = new Date(dto.endsAt);
     if (endsAt < startsAt) throw new BadRequestException("Дата окончания не может быть раньше даты начала");
-    const tentative = dto.tentative ?? true;
-    const paid = order.payments.filter(p => p.currency === order.currency).reduce((sum,p) => sum + p.amountMinor, 0);
-    if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const paid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const tentative = paid >= order.depositRequiredMinor ? false : dto.tentative ?? true;
+      if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
       const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false} });
       await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_UPDATED",summary:"Обновлён производственный слот",metadata:{startsAt,endsAt,tentative,locked:dto.locked??false}}});
       await tx.auditLog.create({data:{actorId:actor.id,action:order.productionSlot?"UPDATE":"CREATE",entityType:"ProductionSlot",entityId:slot.id,before:order.productionSlot??undefined,after:slot}});return slot;
