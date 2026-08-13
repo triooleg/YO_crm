@@ -1,0 +1,25 @@
+import { join } from "node:path";
+import PDFDocument from "pdfkit";
+
+type InvoiceItem={description:string;quantity:number;amountMinor:number};
+type InvoiceDocument={number:string;language:string;currency:string;issueDate:Date;dueDate:Date|null;seller:unknown;customer:unknown;items:unknown;notes:string|null;totalMinor:number};
+const labels={ru:{invoice:"Инвойс",date:"Дата",due:"Оплатить до",seller:"Продавец",customer:"Клиент",description:"Описание",quantity:"Количество",amount:"Сумма",total:"Всего"},uk:{invoice:"Інвойс",date:"Дата",due:"Сплатити до",seller:"Продавець",customer:"Клієнт",description:"Опис",quantity:"Кількість",amount:"Сума",total:"Всього"},en:{invoice:"Invoice",date:"Date",due:"Due date",seller:"Seller",customer:"Customer",description:"Description",quantity:"Quantity",amount:"Amount",total:"Total"}} as const;
+function safeText(value:unknown,max=1000){return String(value??"").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,"").slice(0,max)}
+function party(value:unknown){const item=value&&typeof value==="object"?value as Record<string,unknown>:{};return{name:safeText(item.name,200),address:safeText(item.address,500)}}
+function invoiceItems(value:unknown):InvoiceItem[]{return Array.isArray(value)?value.map(item=>{const record=item&&typeof item==="object"?item as Record<string,unknown>:{};return{description:safeText(record.description,500),quantity:Number(record.quantity)||0,amountMinor:Number(record.amountMinor)||0}}):[]}
+function integerMinor(value:unknown){const parsed=Number(value);return Number.isSafeInteger(parsed)?parsed:0}
+export function invoicePdfStrings(invoice:InvoiceDocument){const locale=invoice.language==="uk"?"uk-UA":invoice.language==="en"?"en-US":"ru-RU",copy=labels[invoice.language as keyof typeof labels]??labels.ru,items=invoiceItems(invoice.items),totalMinor=items.reduce((sum,item)=>sum+integerMinor(item.amountMinor)*integerMinor(item.quantity),0),currency=/^[A-Z]{3}$/.test(invoice.currency)?invoice.currency:"EUR",money=(minor:unknown)=>new Intl.NumberFormat(locale,{style:"currency",currency,minimumFractionDigits:2,maximumFractionDigits:2}).format(integerMinor(minor)/100);return{items,totalMinor,money,total:`${copy.total}: ${money(totalMinor)}`}}
+export async function renderInvoicePdf(invoice:InvoiceDocument){
+ const locale=invoice.language==="uk"?"uk-UA":invoice.language==="en"?"en-US":"ru-RU",copy=labels[invoice.language as keyof typeof labels]??labels.ru;
+ const rendered=invoicePdfStrings(invoice),money=rendered.money,date=(value:Date)=>new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeZone:"UTC"}).format(value);
+ const seller=party(invoice.seller),customer=party(invoice.customer),items=rendered.items,chunks:Buffer[]=[];
+ const doc=new PDFDocument({size:"A4",margin:50,info:{Title:safeText(invoice.number,200),Author:"Yoleotard",Creator:"Yoleotard CRM"}});doc.on("data",chunk=>chunks.push(Buffer.from(chunk)));
+ const completed=new Promise<Buffer>((resolve,reject)=>{doc.on("end",()=>resolve(Buffer.concat(chunks)));doc.on("error",reject)});
+ doc.registerFont("Ubuntu",join(__dirname,"../assets/Ubuntu-Regular.ttf")).font("Ubuntu");
+ doc.fillColor("#6f42ed").fontSize(25).text("YOLEOTARD",50,50).fillColor("#211a2d").fontSize(14).text(`${copy.invoice} ${safeText(invoice.number,100)}`,330,55,{width:215,align:"right"});doc.moveTo(50,88).lineTo(545,88).lineWidth(2).strokeColor("#6f42ed").stroke();
+ doc.fontSize(10).fillColor("#655d70").text(`${copy.date}: ${date(invoice.issueDate)}`,330,98,{width:215,align:"right"});if(invoice.dueDate)doc.text(`${copy.due}: ${date(invoice.dueDate)}`,330,114,{width:215,align:"right"});
+ doc.fillColor("#211a2d").fontSize(10).text(copy.seller.toUpperCase(),50,105).fontSize(12).text(seller.name,50,122,{width:220}).fontSize(10).fillColor("#655d70").text(seller.address,50,140,{width:220});doc.fillColor("#211a2d").fontSize(10).text(copy.customer.toUpperCase(),50,190).fontSize(12).text(customer.name,50,207,{width:495}).fontSize(10).fillColor("#655d70").text(customer.address,50,225,{width:495});
+ let y=Math.max(280,doc.y+25);const header=()=>{doc.rect(50,y,495,24).fill("#eee9ff");doc.fillColor("#211a2d").fontSize(9).text(copy.description,58,y+7,{width:292}).text(copy.quantity,355,y+7,{width:70,align:"center"}).text(copy.amount,430,y+7,{width:107,align:"right"});y+=24};header();
+ for(const item of items){const height=Math.max(30,doc.heightOfString(item.description,{width:292})+14);if(y+height>735){doc.addPage();y=50;header()}doc.moveTo(50,y+height).lineTo(545,y+height).strokeColor("#ded9e6").lineWidth(0.5).stroke();doc.fillColor("#211a2d").fontSize(10).text(item.description,58,y+7,{width:292}).text(String(item.quantity),355,y+7,{width:70,align:"center"}).text(money(item.amountMinor*item.quantity),430,y+7,{width:107,align:"right"});y+=height}
+ if(y+85>750){doc.addPage();y=50}doc.fillColor("#211a2d").fontSize(15).text(rendered.total,330,y+20,{width:215,align:"right"});const notes=safeText(invoice.notes,2000);if(notes)doc.fillColor("#655d70").fontSize(10).text(notes,50,y+58,{width:495});doc.end();return completed;
+}
