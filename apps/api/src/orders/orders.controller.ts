@@ -13,6 +13,7 @@ import { OrdersService } from "./orders.service";
 @UseGuards(SessionGuard, RolesGuard)
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
+  @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER") defaults() { return this.orders.defaults(); }
   @Get() list(@Query("search") search?: string) { return this.orders.list(search); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }

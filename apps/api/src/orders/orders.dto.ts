@@ -27,7 +27,7 @@ export class CreateOrderDto {
   @ApiProperty() @IsString() modelImagePath!: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() requiredDeliveryAt?: string;
   @ApiProperty() @IsInt() @Min(0) priceMinor!: number;
-  @ApiProperty() @IsInt() @Min(0) depositRequiredMinor!: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) depositRequiredMinor?: number;
   @ApiProperty() @IsString() @IsIn(["EUR", "USD", "UAH"]) currency!: string;
   @ApiPropertyOptional({ type: [CreateOrderItemDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CreateOrderItemDto) items?: CreateOrderItemDto[];
 }

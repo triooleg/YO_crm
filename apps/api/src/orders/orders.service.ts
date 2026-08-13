@@ -11,6 +11,11 @@ import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderDeadlineDto, UpdateOrder
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
 
+function calculateDepositMinor(priceMinor: number, percent: number) {
+  const scaled = BigInt(priceMinor) * BigInt(percent);
+  return Number((scaled + 50n) / 100n);
+}
+
 async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
   const year = String(now.getFullYear()).slice(-2);
   const prefix = `YO-${year}-`;
@@ -27,6 +32,12 @@ async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
 @Injectable()
 export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async defaults() {
+    const setting = await this.prisma.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } });
+    const depositPercent = typeof setting?.value === "number" && Number.isInteger(setting.value) && setting.value >= 0 && setting.value <= 100 ? setting.value : 50;
+    return { depositPercent };
+  }
 
   async list(search?: string) {
     const query = search?.trim();
@@ -132,7 +143,6 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, actor: User) {
-    if (dto.depositRequiredMinor > dto.priceMinor) throw new BadRequestException("Предоплата не может превышать цену");
     const items = dto.items?.length ? dto.items : [{ athleteId: dto.athleteId, measurementId: dto.measurementId, name: dto.description, quantity: 1, priceMinor: dto.priceMinor, modelImagePath: dto.modelImagePath }];
     const athleteIds = [...new Set([dto.athleteId, ...items.map((item) => item.athleteId)].filter((id): id is string => Boolean(id)))];
     const measurementRefs = [
@@ -140,6 +150,10 @@ export class OrdersService {
       ...items.flatMap((item) => item.measurementId ? [{ measurementId: item.measurementId, athleteId: item.athleteId }] : []),
     ];
     return this.prisma.$transaction(async (tx) => {
+      const depositSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } });
+      const depositPercent = typeof depositSetting?.value === "number" && Number.isInteger(depositSetting.value) && depositSetting.value >= 0 && depositSetting.value <= 100 ? depositSetting.value : 50;
+      const depositRequiredMinor = dto.depositRequiredMinor ?? calculateDepositMinor(dto.priceMinor, depositPercent);
+      if (depositRequiredMinor > dto.priceMinor) throw new BadRequestException("Предоплата не может превышать цену");
       const client = await tx.client.findFirst({ where: { id: dto.clientId, archivedAt: null } });
       if (!client) throw new NotFoundException("Клиент не найден");
       if (athleteIds.length && await tx.athlete.count({ where: { id: { in: athleteIds }, clientId: dto.clientId, archivedAt: null } }) !== athleteIds.length) throw new BadRequestException("Один или несколько спортсменов не принадлежат клиенту");
@@ -152,7 +166,7 @@ export class OrdersService {
         if (measurementRefs.some((reference) => measurementById.get(reference.measurementId) !== reference.athleteId)) throw new BadRequestException("Снимок замеров не принадлежит выбранному спортсмену клиента");
       }
       const number = await nextOrderNumber(tx);
-      const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor: dto.depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
+      const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
       await tx.activity.create({ data: { clientId: dto.clientId, orderId: order.id, type: "ORDER_CREATED", summary: `Создан заказ ${number}` } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Order", entityId: order.id, after: order } });
       return order;
