@@ -5,31 +5,31 @@
 Docker/Portainer/Nginx Proxy Manager topology, occupied ports, deployment access
 and reusable patterns documented.
 
-## Phase 1 - Foundation (in progress)
+## Phase 1 - Foundation (complete)
 
 Monorepo, database, auth/RBAC, responsive layout, Docker, health checks and docs.
 
-## Phase 2 - Clients
+## Phase 2 - Clients (complete)
 
 Clients, athletes, measurements, tags, notes, search and activity timeline.
 
-## Phase 3 - Orders
+## Phase 3 - Orders (complete)
 
 Order types, pipeline, ready models, designs, files, prices and deposits.
 
-## Phase 4 - Production
+## Phase 4 - Production (complete)
 
 Calendar, capacity, slots, deadlines, tasks and readiness/deposit gates.
 
-## Phase 5 - Finance
+## Phase 5 - Finance (complete)
 
 Invoices, PDFs, payment allocation, multi-currency balances and audit.
 
-## Phase 6 - Shipping
+## Phase 6 - Shipping (complete)
 
 Shipments, carriers, tracking, delivery states and overdue alerts.
 
-## Phase 7 - Communications
+## Phase 7 - Communications (in progress)
 
 Chatwoot, email architecture, message references, templates and timeline.
 

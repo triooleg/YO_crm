@@ -21,3 +21,5 @@
 | 007 | order-card-workspace | Как организовать полноценную карточку индивидуального и группового заказа без дублей и визуального шума? | A — единый рабочий экран | orders, order-card, workflow, group-orders |
 | 008 | production-calendar | Как планировать производственные слоты, загрузку и ответственных без потери ежедневной наглядности? | E | production, calendar, capacity, scheduling |
 | 009 | finance-invoices | Как объединить контроль оплат, задолженностей и создание инвойсов в одном финансовом разделе? | — | finance, invoices, payments, multi-currency, pdf |
+
+| 010 | communications-inbox | Как объединить список клиентов, переписку и заказы в одном экране? | A — Баланс | communications, inbox, chat, clients, orders |

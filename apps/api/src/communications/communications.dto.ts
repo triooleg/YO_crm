@@ -1,0 +1,5 @@
+import{IsBoolean,IsEnum,IsIn,IsOptional,IsString,Length,MaxLength}from"class-validator";import{ContactChannel}from"@prisma/client";
+export const ALLOWED_AI_MODELS=["gpt-4.1-mini","gpt-4.1","gpt-5-mini"] as const;export class ConversationQueryDto{@IsOptional()@IsEnum(ContactChannel)channel?:ContactChannel}
+export class SendMessageDto{@IsString()@Length(1,5000)content!:string;@IsOptional()@IsEnum(ContactChannel)channel?:ContactChannel}
+export class AiRequestDto{@IsIn(["REPLY","TRANSLATE","IMPROVE","TEMPLATE"] as const)action!:"REPLY"|"TRANSLATE"|"IMPROVE"|"TEMPLATE";@IsString()@MaxLength(12000)text!:string;@IsOptional()@IsString()@MaxLength(50)targetLanguage?:string;@IsOptional()@IsString()@MaxLength(2000)instructions?:string;@IsOptional()@IsString()clientId?:string}
+export class AiSettingsDto{@IsOptional()@IsBoolean()enabled?:boolean;@IsOptional()@IsBoolean()allowClientContext?:boolean;@IsOptional()@IsIn(ALLOWED_AI_MODELS)model?:(typeof ALLOWED_AI_MODELS)[number];@IsOptional()@IsString()@MaxLength(80)defaultLanguage?:string;@IsOptional()@IsString()@MaxLength(80)tone?:string;@IsOptional()@IsString()@MaxLength(4000)systemPrompt?:string}

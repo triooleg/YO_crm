@@ -38,6 +38,18 @@ enum ContactChannel {
   OTHER
 }
 
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+}
+enum MessageStatus {
+  RECEIVED
+  DRAFT
+  SENT
+  FAILED
+}
 enum Discipline {
   RHYTHMIC_GYMNASTICS
   ACROBATIC_GYMNASTICS
@@ -155,6 +167,7 @@ model User {
   clients      Client[]   @relation("ClientManager")
   orders       Order[]    @relation("OrderManager")
   auditLogs    AuditLog[] @relation("AuditActor")
+  authoredMessages Message[] @relation("MessageAuthor")
 }
 
 model Session {
@@ -200,6 +213,7 @@ model Client {
   athletes             Athlete[]
   orders               Order[]
   activities           Activity[]
+  conversations        Conversation[]
 
   @@index([displayName])
   @@index([email])
@@ -287,6 +301,7 @@ model Order {
   payments             Payment[]
   productionSlot       ProductionSlot?
   activities           Activity[]
+
   invoices             Invoice[]
   expenses             Expense[]
   shipment             Shipment?
@@ -349,6 +364,37 @@ model Payment {
 }
 
 
+
+model Conversation {
+  id String @id @default(cuid())
+  clientId String
+  channel ContactChannel
+  externalId String?
+  subject String?
+  lastMessageAt DateTime?
+  unreadCount Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  client Client @relation(fields:[clientId],references:[id],onDelete:Restrict)
+  messages Message[]
+  @@unique([clientId,channel])
+  @@index([lastMessageAt,archivedAt])
+}
+model Message {
+  id String @id @default(cuid())
+  conversationId String
+  direction MessageDirection
+  status MessageStatus
+  content String
+  externalId String?
+  authorId String?
+  createdAt DateTime @default(now())
+  conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Restrict)
+  author User? @relation("MessageAuthor",fields:[authorId],references:[id],onDelete:SetNull)
+  @@index([conversationId, createdAt])
+  @@index([externalId])
+}
 model AppSetting {
   id String @id @default(cuid())
   key String

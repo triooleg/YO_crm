@@ -14,15 +14,15 @@ history behind every client and order.
 
 ### Validated
 
-(None yet - ship to validate)
+- [x] Foundation, deployment and health checks.
+- [x] Clients, athletes and immutable measurements.
+- [x] Orders, production, finance and shipping workflows.
 
 ### Active
 
 - [ ] Secure auth and RBAC.
-- [ ] Client, athlete and measurement history.
-- [ ] Independent sales/production/payment/shipping order states.
-- [ ] Deposit-gated production scheduling.
-- [ ] Invoices, payments, shipments, communication, files and audit.
+- [ ] Unified client communications and message timeline.
+- [ ] Message templates and channel integrations.
 - [ ] Responsive Unicode-safe interface.
 - [ ] Docker deployment, backups and health checks.
 
@@ -61,4 +61,4 @@ secrets, separate compose stacks and health checks.
 Review requirements, decisions and framing at every phase and milestone.
 
 ---
-*Last updated: 2026-08-07 after initialization*
+*Last updated: 2026-08-13 after completion of phases 1-6*

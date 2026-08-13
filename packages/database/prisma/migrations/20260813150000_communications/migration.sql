@@ -1,0 +1,11 @@
+CREATE TYPE "MessageDirection" AS ENUM ('INBOUND','OUTBOUND','INTERNAL');
+CREATE TYPE "MessageStatus" AS ENUM ('RECEIVED','DRAFT','SENT','FAILED');
+CREATE TABLE "Conversation" ("id" TEXT NOT NULL,"clientId" TEXT NOT NULL,"channel" "ContactChannel" NOT NULL,"externalId" TEXT,"subject" TEXT,"lastMessageAt" TIMESTAMP(3),"unreadCount" INTEGER NOT NULL DEFAULT 0,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,"archivedAt" TIMESTAMP(3),CONSTRAINT "Conversation_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "Message" ("id" TEXT NOT NULL,"conversationId" TEXT NOT NULL,"direction" "MessageDirection" NOT NULL,"status" "MessageStatus" NOT NULL,"content" TEXT NOT NULL,"externalId" TEXT,"authorId" TEXT,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "Message_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "Conversation_clientId_channel_key" ON "Conversation"("clientId","channel");
+CREATE INDEX "Conversation_lastMessageAt_archivedAt_idx" ON "Conversation"("lastMessageAt","archivedAt");
+CREATE INDEX "Message_conversationId_createdAt_idx" ON "Message"("conversationId","createdAt");
+CREATE INDEX "Message_externalId_idx" ON "Message"("externalId");
+ALTER TABLE "Conversation" ADD CONSTRAINT "Conversation_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Message" ADD CONSTRAINT "Message_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Message" ADD CONSTRAINT "Message_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
