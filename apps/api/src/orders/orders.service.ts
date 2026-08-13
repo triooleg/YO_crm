@@ -132,13 +132,25 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, actor: User) {
-    const client = await this.prisma.client.findFirst({ where: { id: dto.clientId, archivedAt: null } });
-    if (!client) throw new NotFoundException("Клиент не найден");
     if (dto.depositRequiredMinor > dto.priceMinor) throw new BadRequestException("Предоплата не может превышать цену");
     const items = dto.items?.length ? dto.items : [{ athleteId: dto.athleteId, measurementId: dto.measurementId, name: dto.description, quantity: 1, priceMinor: dto.priceMinor, modelImagePath: dto.modelImagePath }];
-    const athleteIds = [...new Set(items.map((item) => item.athleteId).filter((id): id is string => Boolean(id)))];
-    if (athleteIds.length && await this.prisma.athlete.count({ where: { id: { in: athleteIds }, clientId: dto.clientId, archivedAt: null } }) !== athleteIds.length) throw new BadRequestException("Один или несколько спортсменов не принадлежат клиенту");
+    const athleteIds = [...new Set([dto.athleteId, ...items.map((item) => item.athleteId)].filter((id): id is string => Boolean(id)))];
+    const measurementRefs = [
+      ...(dto.measurementId ? [{ measurementId: dto.measurementId, athleteId: dto.athleteId }] : []),
+      ...items.flatMap((item) => item.measurementId ? [{ measurementId: item.measurementId, athleteId: item.athleteId }] : []),
+    ];
     return this.prisma.$transaction(async (tx) => {
+      const client = await tx.client.findFirst({ where: { id: dto.clientId, archivedAt: null } });
+      if (!client) throw new NotFoundException("Клиент не найден");
+      if (athleteIds.length && await tx.athlete.count({ where: { id: { in: athleteIds }, clientId: dto.clientId, archivedAt: null } }) !== athleteIds.length) throw new BadRequestException("Один или несколько спортсменов не принадлежат клиенту");
+      if (measurementRefs.length) {
+        const measurements = await tx.measurement.findMany({
+          where: { id: { in: [...new Set(measurementRefs.map((reference) => reference.measurementId))] }, athlete: { clientId: dto.clientId, archivedAt: null } },
+          select: { id: true, athleteId: true },
+        });
+        const measurementById = new Map(measurements.map((measurement) => [measurement.id, measurement.athleteId]));
+        if (measurementRefs.some((reference) => measurementById.get(reference.measurementId) !== reference.athleteId)) throw new BadRequestException("Снимок замеров не принадлежит выбранному спортсмену клиента");
+      }
       const number = await nextOrderNumber(tx);
       const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor: dto.depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
       await tx.activity.create({ data: { clientId: dto.clientId, orderId: order.id, type: "ORDER_CREATED", summary: `Создан заказ ${number}` } });
