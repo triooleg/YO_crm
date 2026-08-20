@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   NotFoundException,
@@ -21,8 +22,12 @@ import {
   ChatwootIntegrationDto,
   EmailIntegrationDto,
   MessageTemplateDto,
+  MetaIntegrationDto,
   SendMessageDto,
 } from "./communications.dto";
+import { normalizeMetaWebhook, safeTokenEqual, verifyMetaSignature, type MetaInboundMessage } from "./meta-webhook";
+import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
+import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -141,7 +146,7 @@ export class CommunicationsService {
   ) {
     if (channel === "chatwoot") {
       const ready = Boolean(
-        v.enabled && v.baseUrl && v.accountId && v.inboxId && v.accessToken,
+        v.enabled && v.accountId && v.inboxId && this.secretValue(v, "webhookSecretEncrypted"),
       );
       return {
         channel,
@@ -150,7 +155,9 @@ export class CommunicationsService {
         baseUrl: typeof v.baseUrl === "string" ? v.baseUrl : "",
         accountId: typeof v.accountId === "string" ? v.accountId : "",
         inboxId: typeof v.inboxId === "string" ? v.inboxId : "",
-        accessTokenConfigured: Boolean(v.accessToken),
+        accessTokenConfigured: Boolean(this.secretValue(v, "accessTokenEncrypted")),
+        webhookSecretConfigured: Boolean(this.secretValue(v, "webhookSecretEncrypted")),
+        webhookUrl: this.publicOrigin() + "/api/communications/chatwoot/webhook",
       };
     }
     const ready = Boolean(
@@ -158,7 +165,7 @@ export class CommunicationsService {
         v.smtpHost &&
         v.smtpPort &&
         v.username &&
-        v.password &&
+        this.secretValue(v, "passwordEncrypted") &&
         v.fromAddress,
     );
     return {
@@ -169,7 +176,7 @@ export class CommunicationsService {
       smtpPort: typeof v.smtpPort === "number" ? v.smtpPort : 587,
       username: typeof v.username === "string" ? v.username : "",
       fromAddress: typeof v.fromAddress === "string" ? v.fromAddress : "",
-      passwordConfigured: Boolean(v.password),
+      passwordConfigured: Boolean(this.secretValue(v, "passwordEncrypted")),
     };
   }
   async integrations() {
@@ -181,6 +188,7 @@ export class CommunicationsService {
         rows.filter((x) => x.section === section).map((x) => [x.key, x.value]),
       ) as Record<string, unknown>;
     return {
+      meta: await this.metaSettings(),
       chatwoot: this.integrationStatus(
         "chatwoot",
         value("integration.chatwoot"),
@@ -197,23 +205,18 @@ export class CommunicationsService {
     if (channel !== "chatwoot" && channel !== "email")
       throw new BadRequestException("Неизвестный канал интеграции");
     const section = "integration." + channel,
-      secret = channel === "chatwoot" ? "accessToken" : "password",
       allowed =
         channel === "chatwoot"
-          ? ["enabled", "baseUrl", "accountId", "inboxId", "accessToken"]
+          ? ["enabled", "baseUrl", "accountId", "inboxId"]
           : [
               "enabled",
               "smtpHost",
               "smtpPort",
               "username",
-              "password",
               "fromAddress",
             ],
       entries = Object.entries(d).filter(
-        ([key, value]) =>
-          allowed.includes(key) &&
-          value !== undefined &&
-          (key !== secret || value !== ""),
+        ([key, value]) => allowed.includes(key) && value !== undefined,
       );
     await this.p.$transaction(async (tx) => {
       for (const [key, value] of entries)
@@ -222,9 +225,19 @@ export class CommunicationsService {
           create: { section, key, value: value as Prisma.InputJsonValue },
           update: { value: value as Prisma.InputJsonValue },
         });
-      const safe = Object.fromEntries(
-        entries.filter(([key]) => key !== secret),
-      );
+      const secrets = channel === "chatwoot"
+        ? [{ input: "accessToken", stored: "accessTokenEncrypted", remove: "removeAccessToken" }, { input: "webhookSecret", stored: "webhookSecretEncrypted", remove: "removeWebhookSecret" }] as const
+        : [{ input: "password", stored: "passwordEncrypted", remove: "removePassword" }] as const;
+      for (const item of secrets) {
+        if ((d as any)[item.remove]) await tx.appSetting.deleteMany({ where: { section, key: item.stored } });
+        const value = (d as any)[item.input];
+        if (typeof value === "string" && value.trim()) {
+          const encrypted = encryptSecret(value.trim());
+          await tx.appSetting.upsert({ where: { section_key: { section, key: item.stored } }, create: { section, key: item.stored, value: encrypted }, update: { value: encrypted } });
+          await tx.appSetting.deleteMany({ where: { section, key: item.input } });
+        }
+      }
+      const safe = Object.fromEntries(entries);
       await tx.auditLog.create({
         data: {
           actorId: u.id,
@@ -233,12 +246,129 @@ export class CommunicationsService {
           entityId: channel,
           after: {
             ...safe,
-            [secret + "Updated"]: entries.some(([key]) => key === secret),
+            secretsUpdated: secrets.filter(item => Boolean((d as any)[item.input])).map(item => item.input),
+            secretsRemoved: secrets.filter(item => Boolean((d as any)[item.remove])).map(item => item.input),
           },
         },
       });
     });
     return (await this.integrations())[channel];
+  }
+  private async sectionValues(section: string) {
+    const rows = await this.p.appSetting.findMany({ where: { section } });
+    return Object.fromEntries(rows.map((x) => [x.key, x.value])) as Record<string, unknown>;
+  }
+  private publicOrigin() {
+    return (process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim().replace(/\/$/, "");
+  }
+  private secretValue(values: Record<string, unknown>, key: string) {
+    const encrypted = values[key];
+    if (typeof encrypted !== "string" || !encrypted) return undefined;
+    try { return decryptSecret(encrypted); } catch { return undefined; }
+  }
+  async metaSettings() {
+    const v = await this.sectionValues("integration.meta"), origin = this.publicOrigin();
+    const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), verifyTokenConfigured = Boolean(this.secretValue(v, "verifyTokenEncrypted")), pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
+    const hasConfiguredChannel = Boolean((v.pageId || v.instagramAccountId) && pageAccessTokenConfigured) || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
+    const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel;
+    return { enabled: v.enabled === true, status: ready ? "CONFIGURED" : "NOT_CONNECTED", appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, verifyTokenConfigured, pageAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
+  }
+  async saveMetaSettings(d: MetaIntegrationDto, u: User) {
+    const section = "integration.meta", publicKeys = ["enabled", "appId", "pageId", "instagramAccountId", "whatsappPhoneNumberId"] as const;
+    const secrets = [{ input: "appSecret", stored: "appSecretEncrypted", remove: "removeAppSecret" }, { input: "verifyToken", stored: "verifyTokenEncrypted", remove: "removeVerifyToken" }, { input: "pageAccessToken", stored: "pageAccessTokenEncrypted", remove: "removePageAccessToken" }, { input: "whatsappAccessToken", stored: "whatsappAccessTokenEncrypted", remove: "removeWhatsappAccessToken" }] as const;
+    await this.p.$transaction(async (tx) => {
+      for (const key of publicKeys) if (d[key] !== undefined) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value: d[key] as Prisma.InputJsonValue }, update: { value: d[key] as Prisma.InputJsonValue } });
+      for (const item of secrets) {
+        if (d[item.remove]) await tx.appSetting.deleteMany({ where: { section, key: item.stored } });
+        const value = d[item.input];
+        if (typeof value === "string" && value.trim()) { const encrypted = encryptSecret(value.trim()); await tx.appSetting.upsert({ where: { section_key: { section, key: item.stored } }, create: { section, key: item.stored, value: encrypted }, update: { value: encrypted } }); }
+      }
+      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { enabled: d.enabled, appId: d.appId, pageId: d.pageId, instagramAccountId: d.instagramAccountId, whatsappPhoneNumberId: d.whatsappPhoneNumberId, secretsUpdated: secrets.filter(x => Boolean(d[x.input])).map(x => x.input), secretsRemoved: secrets.filter(x => d[x.remove]).map(x => x.input) } } });
+    });
+    return this.metaSettings();
+  }
+  async verifyMetaWebhook(mode?: string, token?: string, challenge?: string) {
+    const values = await this.sectionValues("integration.meta"), saved = this.secretValue(values, "verifyTokenEncrypted");
+    if (mode !== "subscribe" || !safeTokenEqual(token, saved) || challenge === undefined) throw new ForbiddenException("Проверка Meta webhook не пройдена");
+    return challenge;
+  }
+  async receiveMetaWebhook(rawBody: Buffer, signature: string | undefined, payload: unknown) {
+    const values = await this.sectionValues("integration.meta"), secret = this.secretValue(values, "appSecretEncrypted");
+    if (values.enabled !== true || !secret || !verifyMetaSignature(rawBody, signature, secret)) throw new ForbiddenException("Подпись Meta webhook недействительна");
+    const events = normalizeMetaWebhook(payload).slice(0, 100).filter(event => {
+      const expected = event.channel === "FACEBOOK" ? values.pageId : event.channel === "INSTAGRAM" ? values.instagramAccountId : values.whatsappPhoneNumberId;
+      return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+    });
+    let accepted = 0;
+    for (const event of events) if (await this.persistInbound(event)) accepted++;
+    return { received: true, accepted, ignored: events.length - accepted };
+  }
+  async receiveChatwootWebhook(rawBody: Buffer, signature: string | undefined, token: string | undefined, payload: unknown) {
+    const values = await this.sectionValues("integration.chatwoot"), secret = this.secretValue(values, "webhookSecretEncrypted");
+    if (values.enabled !== true || !secret || (!verifyChatwootSignature(rawBody, signature, secret) && !safeTokenEqual(token, secret))) throw new ForbiddenException("Проверка Chatwoot webhook не пройдена");
+    const events = normalizeChatwootWebhook(payload).filter(event => chatwootScopeMatches(values, event));
+    let accepted = 0;
+    for (const event of events) if (await this.persistInbound(event)) accepted++;
+    return { received: true, accepted, ignored: events.length - accepted };
+  }
+  private async persistInbound(event: MetaInboundMessage | ChatwootInboundMessage) {
+    return this.p.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + event.externalMessageId}, 0))`;
+      const channel = event.channel as ContactChannel;
+      let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } } });
+      const duplicate = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel } }, select: { id: true } });
+      if (duplicate) return false;
+      let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true } }) : null;
+      let ambiguousMatches = 0;
+      const match: Prisma.ClientWhereInput[] = [];
+      if (event.email) match.push({ email: { equals: event.email, mode: "insensitive" } });
+      const phone = event.phone || (channel === ContactChannel.WHATSAPP ? event.externalSenderId : undefined);
+      if (phone) match.push({ phone: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } }, { whatsapp: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } });
+      if (channel === ContactChannel.FACEBOOK) match.push({ facebook: event.externalSenderId });
+      if (channel === ContactChannel.INSTAGRAM) match.push({ instagram: event.externalSenderId });
+      if (!client && match.length) {
+        const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
+        const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
+        const candidates = active.length ? active : archived;
+        ambiguousMatches = candidates.length > 1 ? candidates.length : 0;
+        client = uniqueCandidate(candidates);
+        clientId = client?.id;
+        linkedByContact = Boolean(client);
+      }
+      if (client?.archivedAt) {
+        const before = client;
+        client = await tx.client.update({ where: { id: client.id }, data: { archivedAt: null }, select: { id: true, archivedAt: true, lastContactAt: true } });
+        await tx.auditLog.create({ data: { action: "REACTIVATE", entityType: "Client", entityId: client.id, before: { archived: true }, after: { archived: false, source: event.channel } } });
+        await tx.activity.create({ data: { clientId: client.id, type: "CLIENT_REACTIVATED_BY_INBOUND", summary: "Клиент возвращён из архива новым входящим сообщением", metadata: { channel: event.channel, previousArchivedAt: before.archivedAt } } });
+      }
+      if (!clientId) {
+        const fallback = event.channel === "WHATSAPP" ? "WhatsApp" : event.channel === "INSTAGRAM" ? "Instagram" : event.channel === "FACEBOOK" ? "Facebook" : event.channel === "EMAIL" ? "E-mail" : "Chatwoot", displayName = event.displayName?.trim() || fallback + " " + event.externalSenderId.slice(-6);
+        const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email: event.email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: event.externalSenderId } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
+        clientId = created.id;
+        client = { id: created.id, archivedAt: null, lastContactAt: created.lastContactAt };
+        await tx.auditLog.create({ data: { action: "CREATE", entityType: "Client", entityId: created.id, after: { source: event.channel, createdFromInbound: true } } });
+        if (ambiguousMatches) await tx.auditLog.create({ data: { action: "AMBIGUOUS", entityType: "InboundIdentity", entityId: created.id, after: { channel: event.channel, candidateCount: ambiguousMatches, resolution: "newLead" } } });
+        await tx.activity.create({ data: { clientId: created.id, type: "CLIENT_CREATED_FROM_INBOUND", summary: "Клиент создан из входящего сообщения", metadata: { channel: event.channel } } });
+      }
+      if (!conversation) {
+        conversation = await tx.conversation.upsert({ where: { clientId_channel: { clientId, channel } }, create: { clientId, channel, externalId: event.externalSenderId }, update: { externalId: event.externalSenderId, archivedAt: null } });
+        await tx.auditLog.create({ data: { action: "CREATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, createdFromInbound: true } } });
+        if (linkedByContact) await tx.auditLog.create({ data: { action: "LINK", entityType: "InboundIdentity", entityId: conversation.id, after: { clientId, channel, matchedBy: event.email ? "email" : event.phone ? "phone" : "channelIdentifier" } } });
+      } else if (conversation.archivedAt) {
+        conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { archivedAt: null } });
+        await tx.auditLog.create({ data: { action: "REACTIVATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, archived: false } } });
+      }
+      const receivedAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
+      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, externalId: event.externalMessageId, createdAt: receivedAt, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined } as Prisma.InputJsonValue } });
+      const conversationTime = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > receivedAt.getTime() ? conversation.lastMessageAt : receivedAt;
+      const contactTime = client?.lastContactAt && client.lastContactAt.getTime() > receivedAt.getTime() ? client.lastContactAt : receivedAt;
+      await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: conversationTime, unreadCount: { increment: 1 } } });
+      await tx.client.update({ where: { id: clientId }, data: { lastContactAt: contactTime } });
+      await tx.activity.create({ data: { clientId, type: "INBOUND_MESSAGE_RECEIVED", summary: "Получено входящее сообщение: " + event.channel, metadata: { messageId: message.id, channel: event.channel } } });
+      await tx.auditLog.create({ data: { action: "CREATE", entityType: "InboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId } } });
+      return true;
+    });
   }
   async detail(clientId: string, channel?: ContactChannel) {
     const client = await this.p.client.findFirst({
@@ -246,17 +376,18 @@ export class CommunicationsService {
       select: { id: true, source: true, preferredChannel: true },
     });
     if (!client) throw new NotFoundException("Клиент не найден");
-    const selected =
-      channel ||
-      client.preferredChannel ||
-      client.source ||
-      ContactChannel.MANUAL;
+    if (!channel) {
+      const conversations = await this.p.conversation.findMany({ where: { clientId, archivedAt: null }, include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } } });
+      const messages = conversations.flatMap(conversation => conversation.messages.map(message => ({ ...message, channel: conversation.channel }))).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-300);
+      return { id: null, clientId, channel: null, unreadCount: conversations.reduce((sum,x) => sum + x.unreadCount, 0), lastMessageAt: messages.at(-1)?.createdAt ?? null, messages };
+    }
+    const selected = channel;
     const c = await this.p.conversation.findUnique({
       where: { clientId_channel: { clientId, channel: selected } },
       include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } },
     });
-    return (
-      c ?? {
+    return c ? { ...c, messages: c.messages.map(message => ({ ...message, channel: c.channel })) } : (
+      {
         id: null,
         clientId,
         channel: selected,

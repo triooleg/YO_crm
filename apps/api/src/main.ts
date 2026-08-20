@@ -2,13 +2,13 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
-import { json, urlencoded } from "express";
+import { json, urlencoded, type Request } from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
-  app.use(json({ limit: "8mb" }));
+  app.use(json({ limit: "8mb", verify: (request: Request & { rawBody?: Buffer }, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
   app.use(urlencoded({ extended: true, limit: "8mb" }));
   app.setGlobalPrefix("api");
   app.use(helmet());

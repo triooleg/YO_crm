@@ -387,6 +387,7 @@ model Conversation {
   client Client @relation(fields:[clientId],references:[id],onDelete:Restrict)
   messages Message[]
   @@unique([clientId,channel])
+  @@unique([externalId,channel])
   @@index([lastMessageAt,archivedAt])
 }
 model Message {
@@ -396,13 +397,14 @@ model Message {
   status MessageStatus
   content String
   externalId String?
+  metadata Json?
   authorId String?
   createdAt DateTime @default(now())
   conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Restrict)
   author User? @relation("MessageAuthor",fields:[authorId],references:[id],onDelete:SetNull)
   workTasks WorkTask[]
   @@index([conversationId, createdAt])
-  @@index([externalId])
+  @@unique([conversationId,externalId])
 }
 model TaskColumn {
   id String @id @default(cuid())

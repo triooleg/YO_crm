@@ -40,3 +40,20 @@ test("из активного входящего можно создать кл�
   assert.match(component, /preferredChannel/);
   assert.match(component, /communications-create/);
 });
+
+test("каждое сообщение показывает канал Meta, Chatwoot или e-mail", () => {
+  assert.match(component, /message\.channel/);
+  assert.match(component, /sourceBadge\(\{source:message\.channel/);
+  assert.match(component, /communications-message-channel/);
+  assert.match(locale, /FACEBOOK:\s*"Facebook"/);
+  assert.match(locale, /INSTAGRAM:\s*"Instagram"/);
+  assert.match(locale, /WHATSAPP:\s*"WhatsApp"/);
+  assert.match(locale, /CHATWOOT:\s*"Chatwoot"/);
+  assert.match(locale, /EMAIL:\s*"E-mail"/);
+});
+
+test("список клиентов показывает все связанные каналы", () => {
+  assert.match(component, /clientBadges/);
+  assert.match(component, /communications-source-icons/);
+  assert.match(component, /badges\.map/);
+});

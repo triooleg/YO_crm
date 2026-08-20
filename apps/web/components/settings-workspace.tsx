@@ -14,6 +14,19 @@ type AiData = {
 };
 type IntegrationData = {
   deliveryAvailable: boolean;
+  meta: {
+    enabled: boolean;
+    status: string;
+    appId: string;
+    pageId: string;
+    instagramAccountId: string;
+    whatsappPhoneNumberId: string;
+    appSecretConfigured: boolean;
+    verifyTokenConfigured: boolean;
+    pageAccessTokenConfigured: boolean;
+    whatsappAccessTokenConfigured: boolean;
+    webhookUrl: string;
+  };
   chatwoot: {
     enabled: boolean;
     status: string;
@@ -21,6 +34,8 @@ type IntegrationData = {
     accountId: string;
     inboxId: string;
     accessTokenConfigured: boolean;
+    webhookSecretConfigured: boolean;
+    webhookUrl: string;
   };
   email: {
     enabled: boolean;
@@ -32,10 +47,13 @@ type IntegrationData = {
     passwordConfigured: boolean;
   };
 };
+function Secret({ name, label, saved }: { name: string; label: string; saved: boolean }) {
+  return <label>{label}<input name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/></label>;
+}
 function CommunicationsSettings() {
   const [data, setData] = useState<IntegrationData>(),
     [error, setError] = useState(""),
-    [saved, setSaved] = useState(false),
+    [saved, setSaved] = useState<"meta" | "chatwoot" | "email" | null>(null),
     [saving, setSaving] = useState(false);
   async function load() {
     const r = await fetch("/api/communications/integrations", {
@@ -53,7 +71,7 @@ function CommunicationsSettings() {
   ) {
     e.preventDefault();
     setSaving(true);
-    setSaved(false);
+    setSaved(null);
     setError("");
     const f = new FormData(e.currentTarget),
       body =
@@ -64,6 +82,7 @@ function CommunicationsSettings() {
               accountId: f.get("accountId"),
               inboxId: f.get("inboxId"),
               accessToken: f.get("accessToken"),
+              webhookSecret: f.get("webhookSecret"),
             }
           : {
               enabled: f.get("enabled") === "on",
@@ -82,12 +101,17 @@ function CommunicationsSettings() {
       });
       if (!r.ok) throw new Error(settingsUi.channelsSaveError);
       await load();
-      setSaved(true);
+      setSaved(channel);
     } catch (x) {
       setError((x as Error).message);
     } finally {
       setSaving(false);
     }
+  }
+  async function submitMeta(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();setSaving(true);setSaved(null);setError("");
+    const f=new FormData(e.currentTarget),body={enabled:f.get("enabled")==="on",appId:f.get("appId"),pageId:f.get("pageId"),instagramAccountId:f.get("instagramAccountId"),whatsappPhoneNumberId:f.get("whatsappPhoneNumberId"),appSecret:f.get("appSecret"),verifyToken:f.get("verifyToken"),pageAccessToken:f.get("pageAccessToken"),whatsappAccessToken:f.get("whatsappAccessToken")};
+    try{const r=await fetch("/api/communications/meta/settings",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!r.ok)throw new Error(settingsUi.channelsSaveError);await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}
   }
   if (!data)
     return (
@@ -124,11 +148,30 @@ function CommunicationsSettings() {
           {error}
         </div>
       )}
+      <form className="settings-card settings-meta-card" onSubmit={submitMeta}>
+        <h2>{settingsUi.metaTitle} · {status(data.meta.status)}</h2>
+        <p>{settingsUi.metaHint}</p>
+        <label className="settings-channel-toggle"><input name="enabled" type="checkbox" defaultChecked={data.meta.enabled}/>{settingsUi.channelEnabled}</label>
+        <div className="settings-grid">
+          <label>{settingsUi.metaWebhook}<input value={data.meta.webhookUrl} readOnly/></label>
+          <label>{settingsUi.metaAppId}<input name="appId" defaultValue={data.meta.appId}/></label>
+          <label>{settingsUi.metaPageId}<input name="pageId" defaultValue={data.meta.pageId}/></label>
+          <label>{settingsUi.metaInstagramId}<input name="instagramAccountId" defaultValue={data.meta.instagramAccountId}/></label>
+          <label>{settingsUi.metaWhatsappId}<input name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/></label>
+          <Secret name="appSecret" label={settingsUi.metaAppSecret} saved={data.meta.appSecretConfigured}/>
+          <Secret name="verifyToken" label={settingsUi.metaVerifyToken} saved={data.meta.verifyTokenConfigured}/>
+          <Secret name="pageAccessToken" label={settingsUi.metaPageToken} saved={data.meta.pageAccessTokenConfigured}/>
+          <Secret name="whatsappAccessToken" label={settingsUi.metaWhatsappToken} saved={data.meta.whatsappAccessTokenConfigured}/>
+        </div>
+        {saved==="meta"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
+        <button className="phase2-primary" disabled={saving}>{settingsUi.save}</button>
+      </form>
       <form className="settings-card" onSubmit={(e) => submit("chatwoot", e)}>
         <h2>
-          Chatwoot {"\u00b7"} {status(data.chatwoot.status)}
+          {settingsUi.chatwootTitle} {"\u00b7"} {status(data.chatwoot.status)}
         </h2>
         <div className="settings-grid">
+          <label>{settingsUi.chatwootWebhook}<input value={data.chatwoot.webhookUrl} readOnly/></label>
           <label className="settings-channel-toggle">
             <input
               name="enabled"
@@ -166,14 +209,17 @@ function CommunicationsSettings() {
               }
             />
           </label>
+          <Secret name="webhookSecret" label={settingsUi.chatwootWebhookSecret} saved={data.chatwoot.webhookSecretConfigured}/>
         </div>
+        <p>{settingsUi.chatwootEmailHint}</p>
+        {saved==="chatwoot"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
         <button className="phase2-primary" disabled={saving}>
           {settingsUi.save}
         </button>
       </form>
       <form className="settings-card" onSubmit={(e) => submit("email", e)}>
         <h2>
-          E-mail {"\u00b7"} {status(data.email.status)}
+          {settingsUi.emailTitle} {"\u00b7"} {status(data.email.status)}
         </h2>
         <div className="settings-grid">
           <label className="settings-channel-toggle">
@@ -224,7 +270,7 @@ function CommunicationsSettings() {
             />
           </label>
         </div>
-        {saved && (
+        {saved === "email" && (
           <div className="settings-success" role="status">
             {settingsUi.saved}
           </div>

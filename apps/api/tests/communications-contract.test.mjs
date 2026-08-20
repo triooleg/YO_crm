@@ -155,3 +155,59 @@ test("AI generation resolves the stored token without exposing it", () => {
   assert.match(service, /Authorization:"Bearer"\+key/);
   assert.match(controller, /@Patch\("settings"\)@Roles\("OWNER","ADMIN"\)/);
 });
+
+test("Meta inbound webhook is public but signed, idempotent and audited", () => {
+  assert.match(controller, /@Controller\("communications\/meta"\)/);
+  assert.match(controller, /@Get\("webhook"\)/);
+  assert.match(controller, /@Post\("webhook"\)/);
+  assert.match(service, /verifyMetaSignature/);
+  assert.match(service, /normalizeMetaWebhook/);
+  assert.match(service, /externalId_channel/);
+  assert.match(service, /externalId:event\.externalMessageId,conversation:\{channel\}/);
+  assert.match(service, /MessageDirection\.INBOUND/);
+  assert.match(service, /unreadCount:\{increment:1\}/);
+  assert.match(service, /INBOUND_MESSAGE_RECEIVED/);
+});
+
+test("Meta secrets are encrypted and settings return only safe connection status", () => {
+  assert.match(controller, /@Get\("meta\/settings"\)@Roles\("OWNER","ADMIN"\)/);
+  assert.match(controller, /@Patch\("meta\/settings"\)@Roles\("OWNER","ADMIN"\)/);
+  assert.match(service, /integration\.meta/);
+  assert.match(service, /encryptSecret/);
+  assert.match(service, /decryptSecret/);
+  assert.match(service, /appSecretConfigured/);
+  assert.match(service, /pageAccessTokenConfigured/);
+  assert.match(service, /whatsappAccessTokenConfigured/);
+  assert.doesNotMatch(service, /appSecret:\s*v\.appSecret/);
+});
+
+test("Chatwoot webhook receives native, social and e-mail inbox messages safely", () => {
+  assert.match(controller, /Controller\("communications\/chatwoot"\)/);
+  assert.match(controller, /x-chatwoot-signature/);
+  assert.match(controller, /Query\("token"\)/);
+  assert.match(service, /normalizeChatwootWebhook/);
+  assert.match(service, /verifyChatwootSignature/);
+  assert.match(service, /safeTokenEqual\(token,secret\)/);
+  assert.match(service, /webhookSecretEncrypted/);
+  assert.match(service, /accessTokenEncrypted/);
+  assert.match(service, /passwordEncrypted/);
+  assert.doesNotMatch(service, /after:\{[^}]*accessToken:/);
+  assert.doesNotMatch(service, /after:\{[^}]*password:/);
+});
+
+test("inbound routing reuses contacts, reopens history and validates configured scope",()=>{
+  assert.match(service,/archivedAt:null/);
+  assert.match(service,/event\.email/);
+  assert.match(service,/event\.phone/);
+  assert.match(service,/receiverId/);
+  assert.match(service,/accountId/);
+  assert.match(service,/inboxId/);
+  assert.match(service,/REACTIVATE/);
+  assert.match(service,/entityType:"Client"/);
+  assert.match(service,/lastMessageAt.*getTime/);
+  assert.match(service,/chatwootScopeMatches/);
+  assert.match(service,/uniqueCandidate/);
+  assert.match(service,/candidateCount:ambiguousMatches/);
+  const inbound=service.slice(service.indexOf("privateasyncpersistInbound"),service.indexOf("asyncdetail"));
+  assert.ok(inbound.indexOf("if(duplicate)returnfalse") < inbound.indexOf("CLIENT_REACTIVATED_BY_INBOUND"));
+});

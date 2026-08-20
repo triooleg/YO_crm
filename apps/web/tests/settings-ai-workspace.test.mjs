@@ -36,7 +36,7 @@ test("AI токен можно безопасно сохранить, замен
   assert.match(source, /removeApiKey:true/);
   assert.doesNotMatch(source, /value=\{data\.apiKey\}/);
 });
-test("channel settings show Chatwoot and email without reading secrets", () => {
+test("channel settings show Meta, Chatwoot and email without reading secrets", () => {
   assert.match(source, /communications/);
   assert.match(source, /\/communications\/integrations/);
   assert.match(source, /accessToken/);
@@ -44,11 +44,15 @@ test("channel settings show Chatwoot and email without reading secrets", () => {
   assert.match(source, /type="password"/);
   assert.match(source, /chatwoot/);
   assert.match(source, /email/);
+  assert.match(source, /submitMeta/);
+  assert.match(source, /metaWebhook/);
+  assert.match(source, /webhookSecret/);
+  assert.doesNotMatch(source, /value=\{data\.meta\.(appSecret|verifyToken|pageAccessToken|whatsappAccessToken)\}/);
 });
 test("channel enabled checkboxes stay compact and keep their accessible labels", () => {
   assert.equal(
     (source.match(/className="settings-channel-toggle"/g) || []).length,
-    2,
+    3,
   );
   assert.match(
     communicationsCss,
@@ -60,8 +64,8 @@ test("channel enabled checkboxes stay compact and keep their accessible labels",
   );
 });
 test("channel settings render readable headings and a common visible error", () => {
-  assert.match(source, /Chatwoot\{"\\u00b7"\}/);
-  assert.match(source, /E-mail\{"\\u00b7"\}/);
+  assert.match(source, /settingsUi\.chatwootTitle\}\{"\\u00b7"\}/);
+  assert.match(source, /settingsUi\.emailTitle\}\{"\\u00b7"\}/);
   assert.doesNotMatch(source, /Chatwoot В·|E-mail В·/);
   const loaded = source.slice(
     source.indexOf('return(<sectionid="settings-communications-panel"'),
@@ -70,4 +74,10 @@ test("channel settings render readable headings and a common visible error", () 
   assert.ok(
     loaded.indexOf('role="alert"') < loaded.indexOf('submit("chatwoot"'),
   );
+});
+test("success message is shown only inside the saved channel form", () => {
+  assert.match(source, /useState<"meta"\|"chatwoot"\|"email"\|null>/);
+  assert.match(source, /saved==="meta"/);
+  assert.match(source, /saved==="chatwoot"/);
+  assert.match(source, /saved==="email"/);
 });

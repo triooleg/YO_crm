@@ -325,9 +325,9 @@ export const clientAthleteUi = {
 
 export const settingsUi = {
   communications: "Каналы связи",
-  channelsTitle: "Chatwoot и e-mail",
+  channelsTitle: "Meta, Chatwoot и e-mail",
   channelsHint:
-    "Настройки подключения сохраняются без показа секретов. Реальная отправка включается только отдельной интеграцией.",
+    "Входящие объединяются в одну переписку и получают метку канала. Секреты сохраняются только в зашифрованном виде.",
   channelsLoading: "Загрузка настроек каналов…",
   channelsLoadError: "Не удалось загрузить настройки каналов",
   channelsSaveError: "Не удалось сохранить настройки канала",
@@ -340,6 +340,24 @@ export const settingsUi = {
   accountId: "ID аккаунта",
   inboxId: "ID входящих",
   accessToken: "Токен доступа",
+  metaTitle: "Meta",
+  chatwootTitle: "Chatwoot",
+  emailTitle: "E-mail",
+  chatwootWebhook: "Адрес webhook Chatwoot",
+  chatwootWebhookSecret: "Секрет webhook Chatwoot",
+  chatwootEmailHint:
+    "В Chatwoot добавьте webhook события message_created. Для защиты добавьте к адресу ?token=ВАШ_СЕКРЕТ. Сообщения из Email Inbox будут отмечены как E-mail.",
+  metaHint:
+    "Единый webhook принимает Facebook, Instagram и WhatsApp. В приложении Meta подпишите Page, Instagram и WhatsApp Business Account на события сообщений. Не подключайте один и тот же социальный канал одновременно напрямую и через Chatwoot, чтобы не получить дубликаты.",
+  metaWebhook: "Адрес webhook Meta",
+  metaAppId: "ID приложения Meta",
+  metaPageId: "ID страницы Facebook",
+  metaInstagramId: "ID аккаунта Instagram",
+  metaWhatsappId: "ID номера WhatsApp",
+  metaAppSecret: "Секрет приложения Meta",
+  metaVerifyToken: "Проверочный токен Meta",
+  metaPageToken: "Токен страницы Facebook / Instagram",
+  metaWhatsappToken: "Токен WhatsApp",
   smtpHost: "SMTP-сервер",
   smtpPort: "SMTP-порт",
   username: "Имя пользователя",
