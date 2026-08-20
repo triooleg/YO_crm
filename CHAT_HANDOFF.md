@@ -26,6 +26,16 @@
   блока Settings на 1366×768 и 390×844 — PASS; regression и обязательный
   business/security review — PASS. Деплой и реальное OAuth
   подключение к Meta в этой записи ещё не заявляются.
+- Deployment: commit `9c47a97` pushed to `origin/main` and deployed to
+  `/home/trio/yoleotard-crm`; новая migration не требовалась.
+- Production health: домен и `/api/health` возвращают HTTP 200; PostgreSQL,
+  Redis и uploads имеют статус `up`. Запуск OAuth без реальной CRM-сессии
+  отклоняется HTTP 401 с русским сообщением о необходимости входа.
+- Production browser smoke: `Настройки → Каналы связи` показывает основной
+  сценарий «Продолжить с Facebook» и сворачиваемые расширенные настройки;
+  кнопка видима (42 px), Ubuntu 14 px, заголовок 29 px, document overflow и
+  новые console errors отсутствуют. Реальный OAuth E2E остаётся unverified до
+  включения штатной авторизации и безопасного ввода Meta credentials владельцем.
 
 ## 2026-08-13 — deployment F-01–F-09
 
