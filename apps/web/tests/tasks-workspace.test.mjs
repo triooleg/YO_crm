@@ -42,4 +42,23 @@ test("mobile board scrolls internally without document overflow",()=>{
   assert.match(css,/\.tasks-column\{[^}]*min-width:/);
   assert.match(css,/\.tasks-header-actions \.phase2-primary\{[^}]*background:#7047eb[^}]*color:#fff/);
   assert.match(css,/\.tasks-modal>header\{[^}]*flex-direction:row/);
+  assert.match(css,/@media\(max-width:650px\)\{[\s\S]*?\.tasks-modal\{width:100%;max-width:720px/);
+});
+
+test("drop position is calculated without the dragged card and an empty column appends",()=>{
+  assert.match(ui,/const targetIndex = column\.tasks[\s\S]*filter\(\(item\) => item\.id !== dragged\.current\)[\s\S]*findIndex\(\(item\) => item\.id === task\.id\)/);
+  assert.match(ui,/const insertAfter =[\s\S]*event\.clientY > bounds\.top \+ bounds\.height \/ 2/);
+  assert.match(ui,/move\(\s*dragged\.current,\s*column\.id,\s*targetPosition,?\s*\)/);
+  assert.match(ui,/async function move\(taskId: string, columnId: string, position\?: number\)/);
+  assert.match(ui,/dragged\.current !== task\.id/);
+});
+
+test("archived task mode is explicit and archived cards cannot be dragged",()=>{
+  assert.match(ui,/showArchived/);
+  assert.match(ui,/`\/tasks\/board\?archived=\$\{archived\}`/);
+  assert.match(ui,/draggable=\{!showArchived\}/);
+  assert.match(ui,/setArchivedTask\(task\)/);
+  assert.match(ui,/tasks-archived-detail/);
+  assert.match(ui,/tasksUi\.archivedTasks/);
+  assert.match(i18n,/archivedTasks:\s*"Архивные"/);
 });

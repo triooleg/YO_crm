@@ -61,6 +61,11 @@ test("task ordering is serialized and sibling positions are normalized",()=>{
   assert.match(service,/before\.completedAt \?\? new Date\(\)/);
 });
 
+test("moved task is inserted at requested target position before renumbering",()=>{
+  assert.match(service,/target\.splice\(requested,\s*0,\s*\{ id \}\)/);
+  assert.match(service,/for \(const \[position, item\] of target\.entries\(\)\) if \(item\.id !== id\)/);
+});
+
 test("task sources and images are validated by stored state and bytes",()=>{
   assert.match(service,/conversation:\s*\{ archivedAt:\s*null \}/);
   assert.match(service,/sharp\(source\)\.metadata\(\)/);
@@ -74,4 +79,11 @@ test("archive keeps positions dense and done-column changes synchronize tasks",(
   assert.match(service,/for \(const \[position, item\] of remaining\.entries\(\)\)/);
   assert.match(service,/dto\.isDone !== before\.isDone/);
   assert.match(service,/tx\.workTask\.updateMany/);
+});
+
+test("board can explicitly return archived tasks without mixing them into active view",()=>{
+  assert.match(controller,/@Query\("archived"\) archived\?: string/);
+  assert.match(service,/async board\(archived = false\)/);
+  assert.match(service,/archivedAt: archived \? \{ not: null \} : null/);
+  assert.match(service,/archived\s*\? \{ tasks: \{ some: \{ archivedAt: \{ not: null \} \} \} \}\s*: \{ archivedAt: null \}/);
 });

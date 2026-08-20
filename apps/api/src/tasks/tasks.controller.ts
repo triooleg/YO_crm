@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import type { User } from "@prisma/client";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ import { TasksService } from "./tasks.service";
 export class TasksController {
   constructor(private readonly tasks: TasksService) {}
 
-  @Get("board") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") board() { return this.tasks.board(); }
+  @Get("board") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") board(@Query("archived") archived?: string) { return this.tasks.board(archived === "true"); }
   @Get("incoming") @Roles("OWNER", "ADMIN", "MANAGER") incoming() { return this.tasks.incoming(); }
   @Post("images") @Roles("OWNER", "ADMIN", "MANAGER") uploadImage(@Body() dto: UploadTaskImageDto) { return this.tasks.uploadImage(dto); }
   @Get("images/:name") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") image(@Param("name") name: string, @Res() res: Response) {

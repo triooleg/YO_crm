@@ -14,6 +14,7 @@ type Task = {
   markerColor: string;
   labels: string[];
   dueAt?: string;
+  archivedAt?: string;
   client?: { id: string; displayName: string };
   assignee?: User;
   attachments: Attachment[];
@@ -62,22 +63,24 @@ export function TasksWorkspace() {
     [search, setSearch] = useState(""),
     [assignee, setAssignee] = useState(""),
     [label, setLabel] = useState(""),
+    [showArchived, setShowArchived] = useState(false),
+    [archivedTask, setArchivedTask] = useState<Task>(),
     [error, setError] = useState(""),
     [editing, setEditing] = useState<Partial<Task> & { columnId?: string }>(),
     [incoming, setIncoming] = useState<Incoming[] | null>(null),
     [columnEditor, setColumnEditor] = useState<Partial<Column>>(),
     [saving, setSaving] = useState(false),
     dragged = useRef<string | undefined>(undefined);
-  async function load() {
+  async function load(archived = showArchived) {
     try {
-      setData(await api("/tasks/board"));
+      setData(await api(`/tasks/board?archived=${archived}`));
       setError("");
     } catch (e) {
       setError((e as Error).message);
     }
   }
   useEffect(() => {
-    load();
+    load(false);
   }, []);
   const labels = useMemo(
     () =>
@@ -122,11 +125,14 @@ export function TasksWorkspace() {
       assignee: data.users.find((u) => u.role === "ADMIN"),
     });
   }
-  async function move(taskId: string, columnId: string, position = 0) {
+  async function move(taskId: string, columnId: string, position?: number) {
     try {
       await api(`/tasks/${taskId}/move`, {
         method: "PATCH",
-        body: JSON.stringify({ columnId, position }),
+        body: JSON.stringify({
+          columnId,
+          ...(position === undefined ? {} : { position }),
+        }),
       });
       await load();
     } catch (e) {
@@ -143,21 +149,25 @@ export function TasksWorkspace() {
           <span>{tasksUi.subtitle}</span>
         </div>
         <div className="tasks-header-actions">
-          <button onClick={openIncoming}>{tasksUi.fromInbox}</button>
-          <button onClick={newAdmin}>{tasksUi.forAdministrator}</button>
-          <button
-            className="phase2-primary"
-            onClick={() =>
-              setEditing({
-                columnId: data.columns[0]?.id,
-                type: "CLIENT",
-                markerColor: "#7047eb",
-                labels: [],
-              })
-            }
-          >
-            {tasksUi.newTask}
-          </button>
+          {!showArchived && (
+            <>
+              <button onClick={openIncoming}>{tasksUi.fromInbox}</button>
+              <button onClick={newAdmin}>{tasksUi.forAdministrator}</button>
+              <button
+                className="phase2-primary"
+                onClick={() =>
+                  setEditing({
+                    columnId: data.columns[0]?.id,
+                    type: "CLIENT",
+                    markerColor: "#7047eb",
+                    labels: [],
+                  })
+                }
+              >
+                {tasksUi.newTask}
+              </button>
+            </>
+          )}
         </div>
       </header>
       {error && (
@@ -237,15 +247,28 @@ export function TasksWorkspace() {
           </button>
         </div>
         <button
-          onClick={() =>
-            setColumnEditor({
-              color: "#7047eb",
-              sortOrder: data.columns.length,
-            })
-          }
+          className={showArchived ? "active" : ""}
+          aria-pressed={showArchived}
+          onClick={async () => {
+            const next = !showArchived;
+            setShowArchived(next);
+            await load(next);
+          }}
         >
-          {tasksUi.addColumn}
+          {showArchived ? tasksUi.activeTasks : tasksUi.archivedTasks}
         </button>
+        {!showArchived && (
+          <button
+            onClick={() =>
+              setColumnEditor({
+                color: "#7047eb",
+                sortOrder: data.columns.length,
+              })
+            }
+          >
+            {tasksUi.addColumn}
+          </button>
+        )}
       </div>
       <div className="tasks-board-wrap">
         <div className={`tasks-board ${view}`}>
@@ -253,8 +276,12 @@ export function TasksWorkspace() {
             <section
               className="tasks-column"
               key={column.id}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => dragged.current && move(dragged.current, column.id)}
+              onDragOver={(e) => !showArchived && e.preventDefault()}
+              onDrop={() =>
+                !showArchived &&
+                dragged.current &&
+                move(dragged.current, column.id)
+              }
             >
               <header style={{ borderColor: column.color }}>
                 <span>
@@ -262,39 +289,70 @@ export function TasksWorkspace() {
                   {column.name}
                   <b>{shown(column.tasks).length}</b>
                 </span>
-                <button
-                  aria-label={tasksUi.editColumn}
-                  onClick={() => setColumnEditor(column)}
-                >
-                  •••
-                </button>
+                {!showArchived && (
+                  <button
+                    aria-label={tasksUi.editColumn}
+                    onClick={() => setColumnEditor(column)}
+                  >
+                    •••
+                  </button>
+                )}
               </header>
               <div>
-                {shown(column.tasks).map((task, position) => (
+                {shown(column.tasks).map((task) => (
                   <article
                     className="task-card"
                     key={task.id}
                     role="button"
                     tabIndex={0}
                     aria-label={`${tasksUi.openTask}: ${task.title}`}
-                    draggable
+                    draggable={!showArchived}
                     onDragStart={() => {
-                      dragged.current = task.id;
+                      if (!showArchived) dragged.current = task.id;
                     }}
                     onDragEnd={() => {
                       dragged.current = undefined;
                     }}
-                    onDragOver={(event) => event.preventDefault()}
+                    onDragOver={(event) =>
+                      !showArchived && event.preventDefault()
+                    }
                     onDrop={(event) => {
                       event.stopPropagation();
-                      if (dragged.current)
-                        move(dragged.current, column.id, position);
+                      if (
+                        !showArchived &&
+                        dragged.current &&
+                        dragged.current !== task.id
+                      ) {
+                        const targetIndex = column.tasks
+                          .filter((item) => item.id !== dragged.current)
+                          .findIndex((item) => item.id === task.id);
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        const insertAfter =
+                          event.clientY > bounds.top + bounds.height / 2;
+                        const targetPosition = Math.max(
+                          0,
+                          targetIndex + (insertAfter ? 1 : 0),
+                        );
+                        move(
+                          dragged.current,
+                          column.id,
+                          targetPosition,
+                        );
+                      }
                     }}
-                    onClick={() => setEditing(task)}
+                    onClick={() =>
+                      showArchived
+                        ? setArchivedTask(task)
+                        : setEditing(task)
+                    }
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
+                      if (
+                        (event.key === "Enter" || event.key === " ")
+                      ) {
                         event.preventDefault();
-                        setEditing(task);
+                        showArchived
+                          ? setArchivedTask(task)
+                          : setEditing(task);
                       }
                     }}
                     style={{ borderLeftColor: task.markerColor }}
@@ -335,7 +393,11 @@ export function TasksWorkspace() {
                   </article>
                 ))}
                 {!shown(column.tasks).length && (
-                  <p className="tasks-empty">{tasksUi.emptyColumn}</p>
+                  <p className="tasks-empty">
+                    {showArchived
+                      ? tasksUi.emptyArchiveColumn
+                      : tasksUi.emptyColumn}
+                  </p>
                 )}
               </div>
             </section>
@@ -387,6 +449,30 @@ export function TasksWorkspace() {
               : undefined
           }
         />
+      )}
+      {archivedTask && (
+        <Dialog
+          title={archivedTask.title}
+          close={() => setArchivedTask(undefined)}
+        >
+          <div className="tasks-archived-detail">
+            {archivedTask.attachments[0] && (
+              <img
+                src={`/api/tasks/images/${archivedTask.attachments[0].path}`}
+                alt={`${tasksUi.taskPhoto}: ${archivedTask.title}`}
+              />
+            )}
+            {archivedTask.description && <p>{archivedTask.description}</p>}
+            <div className="task-labels">
+              {archivedTask.labels.map((item) => (
+                <i key={item}>{item}</i>
+              ))}
+            </div>
+            <button onClick={() => setArchivedTask(undefined)}>
+              {tasksUi.close}
+            </button>
+          </div>
+        </Dialog>
       )}
       {incoming && (
         <IncomingDialog

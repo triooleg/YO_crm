@@ -26,13 +26,15 @@ export class TasksService {
     await this.prisma.taskColumn.createMany({ data: defaultColumns, skipDuplicates: true });
   }
 
-  async board() {
+  async board(archived = false) {
     await this.ensureColumns();
     const [columns, users] = await Promise.all([
       this.prisma.taskColumn.findMany({
-        where: { archivedAt: null },
+        where: archived
+          ? { tasks: { some: { archivedAt: { not: null } } } }
+          : { archivedAt: null },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: { tasks: { where: { archivedAt: null }, orderBy: [{ position: "asc" }, { createdAt: "desc" }], include: {
+        include: { tasks: { where: { archivedAt: archived ? { not: null } : null }, orderBy: [{ position: "asc" }, { createdAt: "desc" }], include: {
           client: { select: { id: true, displayName: true } },
           assignee: { select: { id: true, displayName: true, role: true } },
           attachments: { orderBy: { createdAt: "asc" } },
