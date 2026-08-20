@@ -19,6 +19,7 @@ type IntegrationData = {
     status: string;
     appId: string;
     pageId: string;
+    pageName: string;
     instagramAccountId: string;
     whatsappPhoneNumberId: string;
     appSecretConfigured: boolean;
@@ -54,7 +55,10 @@ function CommunicationsSettings() {
   const [data, setData] = useState<IntegrationData>(),
     [error, setError] = useState(""),
     [saved, setSaved] = useState<"meta" | "chatwoot" | "email" | null>(null),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [oauthLoading,setOauthLoading]=useState(false),
+    [metaFlowId,setMetaFlowId]=useState(""),
+    [metaPages,setMetaPages]=useState<Array<{id:string;name:string;instagramAccountId:string;instagramUsername:string}>>([]);
   async function load() {
     const r = await fetch("/api/communications/integrations", {
       credentials: "include",
@@ -113,6 +117,9 @@ function CommunicationsSettings() {
     const f=new FormData(e.currentTarget),body={enabled:f.get("enabled")==="on",appId:f.get("appId"),pageId:f.get("pageId"),instagramAccountId:f.get("instagramAccountId"),whatsappPhoneNumberId:f.get("whatsappPhoneNumberId"),appSecret:f.get("appSecret"),verifyToken:f.get("verifyToken"),pageAccessToken:f.get("pageAccessToken"),whatsappAccessToken:f.get("whatsappAccessToken")};
     try{const r=await fetch("/api/communications/meta/settings",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!r.ok)throw new Error(settingsUi.channelsSaveError);await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}
   }
+  async function fetchMetaPages(){const r=await fetch("/api/communications/meta/oauth/pages",{credentials:"include"});if(!r.ok)return false;const result=await r.json();setMetaFlowId(result.flowId||"");setMetaPages(result.pages||[]);return true}
+  async function connectFacebook(){setError("");setOauthLoading(true);try{const r=await fetch("/api/communications/meta/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();const popup=window.open(url,"yoleotard-meta-oauth","popup,width=620,height=760");if(!popup)throw new Error(settingsUi.metaPopupBlocked);for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));if(await fetchMetaPages())break;if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}}catch(x){setError((x as Error).message)}finally{setOauthLoading(false)}}
+  async function selectMetaPage(pageId:string){setSaving(true);setError("");try{const r=await fetch("/api/communications/meta/oauth/connect",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({flowId:metaFlowId,pageId})});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.channelsSaveError)}await load();setMetaFlowId("");setMetaPages([]);setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   if (!data)
     return (
       <section
@@ -151,20 +158,27 @@ function CommunicationsSettings() {
       <form className="settings-card settings-meta-card" onSubmit={submitMeta}>
         <h2>{settingsUi.metaTitle} · {status(data.meta.status)}</h2>
         <p>{settingsUi.metaHint}</p>
-        <label className="settings-channel-toggle"><input name="enabled" type="checkbox" defaultChecked={data.meta.enabled}/>{settingsUi.channelEnabled}</label>
-        <div className="settings-grid">
-          <label>{settingsUi.metaWebhook}<input value={data.meta.webhookUrl} readOnly/></label>
-          <label>{settingsUi.metaAppId}<input name="appId" defaultValue={data.meta.appId}/></label>
-          <label>{settingsUi.metaPageId}<input name="pageId" defaultValue={data.meta.pageId}/></label>
-          <label>{settingsUi.metaInstagramId}<input name="instagramAccountId" defaultValue={data.meta.instagramAccountId}/></label>
-          <label>{settingsUi.metaWhatsappId}<input name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/></label>
-          <Secret name="appSecret" label={settingsUi.metaAppSecret} saved={data.meta.appSecretConfigured}/>
-          <Secret name="verifyToken" label={settingsUi.metaVerifyToken} saved={data.meta.verifyTokenConfigured}/>
-          <Secret name="pageAccessToken" label={settingsUi.metaPageToken} saved={data.meta.pageAccessTokenConfigured}/>
-          <Secret name="whatsappAccessToken" label={settingsUi.metaWhatsappToken} saved={data.meta.whatsappAccessTokenConfigured}/>
-        </div>
+        {data.meta.pageId&&<div className="settings-meta-current"><b>{data.meta.pageName||settingsUi.metaConnectedPage}</b><span>ID {data.meta.pageId}{data.meta.instagramAccountId?` · Instagram ${data.meta.instagramAccountId}`:""}</span></div>}
+        <button type="button" className="settings-facebook-button" onClick={connectFacebook} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</button>
+        {metaPages.length>0&&<div className="settings-meta-pages" role="group" aria-label={settingsUi.metaChoosePage}><h3>{settingsUi.metaChoosePage}</h3>{metaPages.map(page=><button type="button" key={page.id} onClick={()=>selectMetaPage(page.id)} disabled={saving}><span><b>{page.name}</b><small>ID {page.id}{page.instagramUsername?` · @${page.instagramUsername}`:""}</small></span><span>{settingsUi.metaSelect}</span></button>)}</div>}
+        <details className="settings-meta-advanced">
+          <summary>{settingsUi.metaAdvanced}</summary>
+          <p>{settingsUi.metaAdvancedHint}</p>
+          <label className="settings-channel-toggle"><input name="enabled" type="checkbox" defaultChecked={data.meta.enabled}/>{settingsUi.channelEnabled}</label>
+          <div className="settings-grid">
+            <label>{settingsUi.metaWebhook}<input value={data.meta.webhookUrl} readOnly/></label>
+            <label>{settingsUi.metaAppId}<input name="appId" defaultValue={data.meta.appId}/></label>
+            <label>{settingsUi.metaPageId}<input name="pageId" defaultValue={data.meta.pageId}/></label>
+            <label>{settingsUi.metaInstagramId}<input name="instagramAccountId" defaultValue={data.meta.instagramAccountId}/></label>
+            <label>{settingsUi.metaWhatsappId}<input name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/></label>
+            <Secret name="appSecret" label={settingsUi.metaAppSecret} saved={data.meta.appSecretConfigured}/>
+            <Secret name="verifyToken" label={settingsUi.metaVerifyToken} saved={data.meta.verifyTokenConfigured}/>
+            <Secret name="pageAccessToken" label={settingsUi.metaPageToken} saved={data.meta.pageAccessTokenConfigured}/>
+            <Secret name="whatsappAccessToken" label={settingsUi.metaWhatsappToken} saved={data.meta.whatsappAccessTokenConfigured}/>
+          </div>
+          <button className="phase2-primary" disabled={saving}>{settingsUi.saveAdvanced}</button>
+        </details>
         {saved==="meta"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
-        <button className="phase2-primary" disabled={saving}>{settingsUi.save}</button>
       </form>
       <form className="settings-card" onSubmit={(e) => submit("chatwoot", e)}>
         <h2>

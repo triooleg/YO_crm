@@ -65,6 +65,10 @@ export class MetaIntegrationDto {
   @IsOptional() @IsBoolean() removePageAccessToken?: boolean;
   @IsOptional() @IsBoolean() removeWhatsappAccessToken?: boolean;
 }
+export class MetaOauthConnectDto {
+  @IsString() @Length(1, 80) pageId!: string;
+  @IsString() @Length(16, 80) flowId!: string;
+}
 export class AiRequestDto {
   @IsIn(["REPLY", "TRANSLATE", "IMPROVE", "TEMPLATE"] as const) action!:
     | "REPLY"
