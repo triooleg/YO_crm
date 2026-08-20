@@ -47,6 +47,13 @@ Internal drafts, message references, templates, channel settings and timeline.
 External Chatwoot/e-mail ingestion and delivery remain pending credentials and
 integration work.
 
+## Phase 7.5 - Tasks Kanban (implemented locally; deployment pending)
+
+Customizable Kanban with compact C and visual B views, client/incoming and
+administrative tasks, assignees, deadlines, markers, labels, persistent images,
+audited movement and soft archive. Production migration and live smoke remain
+pending.
+
 ## Phase 8 - Automation and AI
 
 Reminders, rules, multilingual drafts, translation and summaries.

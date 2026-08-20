@@ -23,3 +23,4 @@
 | 009 | finance-invoices | Как объединить контроль оплат, задолженностей и создание инвойсов в одном финансовом разделе? | — | finance, invoices, payments, multi-currency, pdf |
 
 | 010 | communications-inbox | Как объединить список клиентов, переписку и заказы в одном экране? | A — Баланс | communications, inbox, chat, clients, orders |
+| 011 | tasks-kanban | Как организовать полностью настраиваемую доску задач, создаваемых из входящих сообщений? | C — компактный контроль, B — переключаемый визуальный вид | tasks, kanban, inbox, attachments, deadlines, labels |

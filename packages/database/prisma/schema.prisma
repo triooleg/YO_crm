@@ -50,6 +50,11 @@ enum MessageStatus {
   SENT
   FAILED
 }
+enum WorkTaskType {
+  CLIENT
+  ADMINISTRATIVE
+  PRODUCTION
+}
 enum Discipline {
   RHYTHMIC_GYMNASTICS
   ACROBATIC_GYMNASTICS
@@ -168,6 +173,8 @@ model User {
   orders       Order[]    @relation("OrderManager")
   auditLogs    AuditLog[] @relation("AuditActor")
   authoredMessages Message[] @relation("MessageAuthor")
+  assignedTasks WorkTask[] @relation("TaskAssignee")
+  createdTasks WorkTask[] @relation("TaskCreator")
 }
 
 model Session {
@@ -214,6 +221,7 @@ model Client {
   orders               Order[]
   activities           Activity[]
   conversations        Conversation[]
+  workTasks            WorkTask[]
 
   @@index([displayName])
   @@index([email])
@@ -392,8 +400,60 @@ model Message {
   createdAt DateTime @default(now())
   conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Restrict)
   author User? @relation("MessageAuthor",fields:[authorId],references:[id],onDelete:SetNull)
+  workTasks WorkTask[]
   @@index([conversationId, createdAt])
   @@index([externalId])
+}
+model TaskColumn {
+  id String @id @default(cuid())
+  name String
+  color String @default("#7047eb")
+  isDone Boolean @default(false)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archivedAt DateTime?
+  tasks WorkTask[]
+  @@index([sortOrder, archivedAt])
+}
+model WorkTask {
+  id String @id @default(cuid())
+  columnId String
+  clientId String?
+  sourceMessageId String?
+  assigneeId String?
+  createdById String?
+  type WorkTaskType @default(CLIENT)
+  title String
+  description String?
+  markerColor String @default("#7047eb")
+  labels String[]
+  dueAt DateTime?
+  position Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+  archivedAt DateTime?
+  column TaskColumn @relation(fields:[columnId],references:[id],onDelete:Restrict)
+  client Client? @relation(fields:[clientId],references:[id],onDelete:SetNull)
+  sourceMessage Message? @relation(fields:[sourceMessageId],references:[id],onDelete:SetNull)
+  assignee User? @relation("TaskAssignee",fields:[assigneeId],references:[id],onDelete:SetNull)
+  createdBy User? @relation("TaskCreator",fields:[createdById],references:[id],onDelete:SetNull)
+  attachments TaskAttachment[]
+  @@index([columnId, position, archivedAt])
+  @@index([assigneeId, dueAt])
+  @@index([clientId, createdAt])
+  @@index([sourceMessageId])
+}
+model TaskAttachment {
+  id String @id @default(cuid())
+  taskId String
+  path String
+  mimeType String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  task WorkTask @relation(fields:[taskId],references:[id],onDelete:Restrict)
+  @@index([taskId, createdAt])
 }
 model MessageTemplate {
   id String @id @default(cuid())

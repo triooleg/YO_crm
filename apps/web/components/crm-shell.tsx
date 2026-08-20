@@ -9,6 +9,7 @@ import { SettingsWorkspace } from "./settings-workspace";
 import { navigationUi } from "../lib/i18n";
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
+import { TasksWorkspace } from "./tasks-workspace";
 
 const items=[[navigationUi.overview,"⌂"],[navigationUi.inbox,"✉"],[navigationUi.clients,"●"],[navigationUi.orders,"▣"],[navigationUi.production,"⚙"],[navigationUi.finance,"₴"],[navigationUi.shipping,"➜"],[navigationUi.tasks,"✓"],[navigationUi.settings,"☰"]] as const;
 
@@ -22,7 +23,7 @@ export function CrmShell(){
       <button className="crm-collapse" onClick={()=>setCollapsed(v=>!v)} title={collapsed?navigationUi.expand:navigationUi.collapse}>{collapsed?"›":"‹"}</button>
       <nav>{items.map(([name,icon])=><button key={name} className={section===name?"active":""} onClick={()=>setSection(name)} title={name} aria-label={name}><i>{icon}</i>{!collapsed&&<span>{name}</span>}</button>)}</nav>
     </aside>
-    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<CommunicationsWorkspace/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:section===items[4][0]?<ProductionWorkspace/>:section===items[5][0]?<FinanceWorkspace/>:section===items[6][0]?<ShippingWorkspace/>:section===items[8][0]?<SettingsWorkspace/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<CommunicationsWorkspace/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:section===items[4][0]?<ProductionWorkspace/>:section===items[5][0]?<FinanceWorkspace/>:section===items[6][0]?<ShippingWorkspace/>:section===items[7][0]?<TasksWorkspace/>:section===items[8][0]?<SettingsWorkspace/>:<ComingSoon name={section}/>}</section>
   </main>
 }
 
