@@ -23,8 +23,16 @@
   `messages`, безопасного audit payload, отключённого канала и небезопасного
   verify token. Актуальная локальная проверка: API 108/108, web 96/96,
   database 4/4, typecheck и production build PASS. Business/security и
-  regression reviews — PASS. Deployment и новый live webhook smoke пока не
-  заявляются.
+  regression reviews — PASS.
+- Deployment: commit `90f77eb` pushed to `origin/main` and deployed to
+  `/home/trio/yoleotard-crm`; новая migration не требовалась. Домен и
+  `/api/health` возвращают HTTP 200, PostgreSQL, Redis и uploads — `up`.
+- Production API безопасно показывает `VERIFY_TOKEN_UNSAFE` для текущего
+  verify token, не считает его настроенным и не принимает в webhook challenge.
+  Live browser smoke Settings и Inbox — PASS, новых console errors нет.
+  Реальный post-deploy webhook E2E остаётся pending до отзыва старого Meta
+  access token, записи нового случайного verify token, переподключения Page и
+  отправки нового уникального тестового сообщения.
 
 ## 2026-08-21 — подключение Meta по сценарию KeyCRM (локально, не развёрнуто)
 
