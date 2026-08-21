@@ -24,8 +24,11 @@ type IntegrationData = {
     whatsappPhoneNumberId: string;
     appSecretConfigured: boolean;
     verifyTokenConfigured: boolean;
+    verifyTokenUnsafe: boolean;
     pageAccessTokenConfigured: boolean;
     whatsappAccessTokenConfigured: boolean;
+    subscriptionVerifiedAt: string | null;
+    lastWebhookAt: string | null;
     webhookUrl: string;
   };
   chatwoot: {
@@ -120,6 +123,7 @@ function CommunicationsSettings() {
   async function fetchMetaPages(){const r=await fetch("/api/communications/meta/oauth/pages",{credentials:"include"});if(!r.ok)return false;const result=await r.json();setMetaFlowId(result.flowId||"");setMetaPages(result.pages||[]);return true}
   async function connectFacebook(){setError("");setOauthLoading(true);try{const r=await fetch("/api/communications/meta/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();const popup=window.open(url,"yoleotard-meta-oauth","popup,width=620,height=760");if(!popup)throw new Error(settingsUi.metaPopupBlocked);for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));if(await fetchMetaPages())break;if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}}catch(x){setError((x as Error).message)}finally{setOauthLoading(false)}}
   async function selectMetaPage(pageId:string){setSaving(true);setError("");try{const r=await fetch("/api/communications/meta/oauth/connect",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({flowId:metaFlowId,pageId})});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.channelsSaveError)}await load();setMetaFlowId("");setMetaPages([]);setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
+  async function verifyMetaDelivery(){setSaving(true);setSaved(null);setError("");try{const r=await fetch("/api/communications/meta/delivery/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaVerifyDeliveryError)}await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   if (!data)
     return (
       <section
@@ -139,6 +143,7 @@ function CommunicationsSettings() {
     );
   const status = (value: string) =>
     value === "CONFIGURED" ? settingsUi.configured : settingsUi.notConnected;
+  const metaStatus = (value: string) => value === "VERIFY_TOKEN_UNSAFE" ? settingsUi.metaVerifyTokenUnsafe : value === "RECEIVING" ? settingsUi.metaDeliveryReceiving : value === "VERIFIED" ? settingsUi.metaDeliveryVerified : value === "NOT_VERIFIED" ? settingsUi.metaDeliveryNotVerified : settingsUi.notConnected;
   return (
     <section id="settings-communications-panel" role="tabpanel">
       <div className="settings-card">
@@ -156,10 +161,13 @@ function CommunicationsSettings() {
         </div>
       )}
       <form className="settings-card settings-meta-card" onSubmit={submitMeta}>
-        <h2>{settingsUi.metaTitle} · {status(data.meta.status)}</h2>
+        <h2>{settingsUi.metaTitle} · {metaStatus(data.meta.status)}</h2>
         <p>{settingsUi.metaHint}</p>
         {data.meta.pageId&&<div className="settings-meta-current"><b>{data.meta.pageName||settingsUi.metaConnectedPage}</b><span>ID {data.meta.pageId}{data.meta.instagramAccountId?` · Instagram ${data.meta.instagramAccountId}`:""}</span></div>}
-        <button type="button" className="settings-facebook-button" onClick={connectFacebook} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</button>
+        <div className="settings-meta-actions">
+          <button type="button" className="settings-facebook-button" onClick={connectFacebook} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</button>
+          {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<button type="button" className="phase2-primary" onClick={verifyMetaDelivery} disabled={saving}>{settingsUi.metaVerifyDelivery}</button>}
+        </div>
         {metaPages.length>0&&<div className="settings-meta-pages" role="group" aria-label={settingsUi.metaChoosePage}><h3>{settingsUi.metaChoosePage}</h3>{metaPages.map(page=><button type="button" key={page.id} onClick={()=>selectMetaPage(page.id)} disabled={saving}><span><b>{page.name}</b><small>ID {page.id}{page.instagramUsername?` · @${page.instagramUsername}`:""}</small></span><span>{settingsUi.metaSelect}</span></button>)}</div>}
         <details className="settings-meta-advanced">
           <summary>{settingsUi.metaAdvanced}</summary>

@@ -1,0 +1,31 @@
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import ts from "typescript";
+import { createRequire } from "node:module";
+
+const source = await readFile(new URL("../src/communications/meta-delivery.ts", import.meta.url), "utf8");
+const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
+const module = { exports: {} }, require = createRequire(import.meta.url);
+vm.runInNewContext(javascript, { module, exports: module.exports, require });
+const { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } = module.exports;
+
+test("successful Meta Page subscription produces verified state and safe audit", () => {
+  const result = confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1", name: "YOLeotard" }, subscriptions: [{ id: "app-1", subscribed_fields: ["messages", "message_reads"] }], verifiedAt: "2026-08-21T12:00:00.000Z" });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.settings)), { subscriptionVerifiedAt: "2026-08-21T12:00:00.000Z", pageName: "YOLeotard" });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.auditAfter)), { deliveryVerified: true, pageId: "page-1", subscribedFields: ["messages", "message_reads"] });
+  assert.equal(JSON.stringify(result).includes("token"), false);
+});
+
+test("missing messages subscription fails before any verified mutation is produced", () => {
+  assert.throws(() => confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1" }, subscriptions: [{ id: "app-1", subscribed_fields: ["message_reads"] }], verifiedAt: "now" }), /MESSAGES_NOT_SUBSCRIBED/);
+});
+
+test("unsafe or disabled Meta delivery is never reported ready", () => {
+  assert.equal(isMetaAccessToken("EAAExampleAccessToken"), true);
+  assert.equal(isMetaAccessToken("random-webhook-secret-32-chars"), false);
+  assert.equal(metaDeliveryStatus({ enabled: true, ready: true, verified: true, receiving: true, verifyTokenUnsafe: true }), "VERIFY_TOKEN_UNSAFE");
+  assert.equal(metaDeliveryStatus({ enabled: false, ready: false, verified: true, receiving: true, verifyTokenUnsafe: false }), "NOT_CONNECTED");
+  assert.equal(metaDeliveryStatus({ enabled: true, ready: true, verified: false, receiving: false, verifyTokenUnsafe: false }), "NOT_VERIFIED");
+});

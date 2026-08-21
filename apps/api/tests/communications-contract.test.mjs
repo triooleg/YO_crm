@@ -181,6 +181,17 @@ test("Meta secrets are encrypted and settings return only safe connection status
   assert.doesNotMatch(service, /appSecret:\s*v\.appSecret/);
 });
 
+test("Meta delivery is verified by a real Page subscription before it is reported ready", () => {
+  assert.match(controller, /@Post\("meta\/delivery\/verify"\)@Roles\("OWNER","ADMIN"\)/);
+  assert.match(service, /asyncverifyMetaDelivery/);
+  assert.match(service, /subscribed_apps/);
+  assert.match(service, /subscribed_fields/);
+  assert.match(service, /subscriptionVerifiedAt/);
+  assert.match(service, /lastWebhookAt/);
+  assert.match(service, /metaDeliveryStatus/);
+  assert.match(service, /isMetaAccessToken\(saved\)/);
+});
+
 test("Chatwoot webhook receives native, social and e-mail inbox messages safely", () => {
   assert.match(controller, /Controller\("communications\/chatwoot"\)/);
   assert.match(controller, /x-chatwoot-signature/);

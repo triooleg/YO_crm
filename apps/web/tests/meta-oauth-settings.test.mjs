@@ -19,3 +19,11 @@ test("manual Meta credentials remain in an explicit advanced section", () => {
   assert.match(source, /<details[^>]*className="settings-meta-advanced"/);
   assert.match(source, /settingsUi\.metaAdvanced/);
 });
+
+test("Meta settings expose a delivery verification action and honest status", () => {
+  assert.match(source, /meta\/delivery\/verify/);
+  assert.match(source, /metaVerifyDelivery/);
+  assert.match(source, /metaDeliveryReceiving/);
+  assert.match(source, /metaDeliveryNotVerified/);
+  assert.match(source, /settings-meta-actions/);
+});

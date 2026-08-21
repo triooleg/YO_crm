@@ -30,6 +30,7 @@ import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInbound
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
+import { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } from "./meta-delivery";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -371,7 +372,7 @@ export class CommunicationsService {
     try {
       await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
       await this.p.$transaction(async tx => {
-        const values: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, pageName: page.name, instagramAccountId: page.instagram_business_account?.id || "", pageAccessTokenEncrypted: encryptSecret(page.access_token) };
+        const values: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, pageName: page.name, instagramAccountId: page.instagram_business_account?.id || "", pageAccessTokenEncrypted: encryptSecret(page.access_token), subscriptionVerifiedAt: new Date().toISOString() };
         for (const [key, value] of Object.entries(values)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
         await tx.appSetting.upsert({where:{section_key:{section,key:"tokenExpiresAt"}},create:{section,key:"tokenExpiresAt",value:pending.tokenExpiresAt??0},update:{value:pending.tokenExpiresAt??0}});
         await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, pageId: page.id, instagramAccountId: page.instagram_business_account?.id || null } } });
@@ -394,14 +395,17 @@ export class CommunicationsService {
   }
   async metaSettings() {
     const v = await this.sectionValues("integration.meta"), origin = this.publicOrigin();
-    const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), verifyTokenConfigured = Boolean(this.secretValue(v, "verifyTokenEncrypted")), pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
+    const verifyToken = this.secretValue(v, "verifyTokenEncrypted"), verifyTokenUnsafe = isMetaAccessToken(verifyToken);
+    const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), verifyTokenConfigured = Boolean(verifyToken) && !verifyTokenUnsafe, pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
     const hasConfiguredChannel = Boolean((v.pageId || v.instagramAccountId) && pageAccessTokenConfigured) || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
-    const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel;
-    return { enabled: v.enabled === true, status: ready ? "CONFIGURED" : "NOT_CONNECTED", appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", pageName: typeof v.pageName === "string" ? v.pageName : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, verifyTokenConfigured, pageAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
+    const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel, verified = typeof v.subscriptionVerifiedAt === "string" && Boolean(v.subscriptionVerifiedAt), receiving = typeof v.lastWebhookAt === "string" && Boolean(v.lastWebhookAt);
+    return { enabled: v.enabled === true, status: metaDeliveryStatus({ enabled: v.enabled === true, ready, verified, receiving, verifyTokenUnsafe }), subscriptionVerifiedAt: verified ? v.subscriptionVerifiedAt : null, lastWebhookAt: receiving ? v.lastWebhookAt : null, appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", pageName: typeof v.pageName === "string" ? v.pageName : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, verifyTokenConfigured, verifyTokenUnsafe, pageAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
   }
   async saveMetaSettings(d: MetaIntegrationDto, u: User) {
     const section = "integration.meta", publicKeys = ["enabled", "appId", "pageId", "instagramAccountId", "whatsappPhoneNumberId"] as const;
     const secrets = [{ input: "appSecret", stored: "appSecretEncrypted", remove: "removeAppSecret" }, { input: "verifyToken", stored: "verifyTokenEncrypted", remove: "removeVerifyToken" }, { input: "pageAccessToken", stored: "pageAccessTokenEncrypted", remove: "removePageAccessToken" }, { input: "whatsappAccessToken", stored: "whatsappAccessTokenEncrypted", remove: "removeWhatsappAccessToken" }] as const;
+    if (typeof d.verifyToken === "string" && isMetaAccessToken(d.verifyToken)) throw new BadRequestException("Проверочный токен webhook не должен быть токеном доступа Meta");
+    const current = await this.sectionValues(section), deliveryChanged = (d.appId !== undefined && d.appId !== current.appId) || (d.pageId !== undefined && d.pageId !== current.pageId) || Boolean(d.appSecret || d.removeAppSecret || d.pageAccessToken || d.removePageAccessToken);
     await this.p.$transaction(async (tx) => {
       for (const key of publicKeys) if (d[key] !== undefined) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value: d[key] as Prisma.InputJsonValue }, update: { value: d[key] as Prisma.InputJsonValue } });
       for (const item of secrets) {
@@ -409,13 +413,35 @@ export class CommunicationsService {
         const value = d[item.input];
         if (typeof value === "string" && value.trim()) { const encrypted = encryptSecret(value.trim()); await tx.appSetting.upsert({ where: { section_key: { section, key: item.stored } }, create: { section, key: item.stored, value: encrypted }, update: { value: encrypted } }); }
       }
+      if (deliveryChanged) await tx.appSetting.deleteMany({ where: { section, key: { in: ["subscriptionVerifiedAt", "lastWebhookAt"] } } });
       await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { enabled: d.enabled, appId: d.appId, pageId: d.pageId, instagramAccountId: d.instagramAccountId, whatsappPhoneNumberId: d.whatsappPhoneNumberId, secretsUpdated: secrets.filter(x => Boolean(d[x.input])).map(x => x.input), secretsRemoved: secrets.filter(x => d[x.remove]).map(x => x.input) } } });
     });
     return this.metaSettings();
   }
+  async verifyMetaDelivery(u: User) {
+    const section = "integration.meta", values = await this.sectionValues(section), pageId = typeof values.pageId === "string" ? values.pageId : "", appId = typeof values.appId === "string" ? values.appId : "", appSecret = this.secretValue(values, "appSecretEncrypted"), pageToken = this.secretValue(values, "pageAccessTokenEncrypted");
+    if (values.enabled !== true || !pageId || !appId || !appSecret || !pageToken) throw new BadRequestException("Сначала заполните и сохраните настройки страницы Facebook");
+    try {
+      const page = await this.metaGraph<{ id: string; name?: string }>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
+      if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
+      const fields = "messages,messaging_postbacks,message_reads,messaging_optins";
+      await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
+      const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
+      const verifiedAt = new Date().toISOString();
+      const confirmed = confirmMetaPageSubscription({ pageId, appId, page, subscriptions: subscriptions.data || [], verifiedAt });
+      await this.p.$transaction(async tx => {
+        for (const [key, value] of Object.entries(confirmed.settings)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: confirmed.auditAfter } });
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException("Meta не разрешила подписать страницу. Переподключите Facebook и предоставьте разрешение pages_manage_metadata");
+    }
+    return this.metaSettings();
+  }
   async verifyMetaWebhook(mode?: string, token?: string, challenge?: string) {
     const values = await this.sectionValues("integration.meta"), saved = this.secretValue(values, "verifyTokenEncrypted");
-    if (mode !== "subscribe" || !safeTokenEqual(token, saved) || challenge === undefined) throw new ForbiddenException("Проверка Meta webhook не пройдена");
+    if (isMetaAccessToken(saved) || mode !== "subscribe" || !safeTokenEqual(token, saved) || challenge === undefined) throw new ForbiddenException("Проверка Meta webhook не пройдена");
     return challenge;
   }
   async receiveMetaWebhook(rawBody: Buffer, signature: string | undefined, payload: unknown) {
@@ -427,6 +453,7 @@ export class CommunicationsService {
     });
     let accepted = 0;
     for (const event of events) if (await this.persistInbound(event)) accepted++;
+    if (events.length) { const section = "integration.meta", key = "lastWebhookAt", value = new Date().toISOString(); await this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } }); }
     return { received: true, accepted, ignored: events.length - accepted };
   }
   async receiveChatwootWebhook(rawBody: Buffer, signature: string | undefined, token: string | undefined, payload: unknown) {
