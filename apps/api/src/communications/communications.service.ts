@@ -26,7 +26,7 @@ import {
   MetaIntegrationDto,
   SendMessageDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConversationExternalId, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaInboundMessage } from "./meta-webhook";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
@@ -373,7 +373,7 @@ export class CommunicationsService {
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
@@ -429,7 +429,7 @@ export class CommunicationsService {
     try {
       const page = await this.metaGraph<{ id: string; name?: string }>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
-      const fields = "messages,messaging_postbacks,message_reads,messaging_optins";
+      const fields = "messages,message_echoes,messaging_postbacks,message_reads,messaging_optins";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
@@ -542,15 +542,21 @@ export class CommunicationsService {
       }));
       const accepted = persisted.filter(Boolean).length;
       if(pageToken)void this.enrichMetaFacebookProfiles(events,pageToken,appSecret);
-      const controls = normalizeMetaControlEvents(payload).filter(event => {
+      const echoes = normalizeMetaEchoMessages(payload).filter(event => {
+        const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
+        return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+      });
+      const echoResults = await Promise.all(echoes.map(event => this.persistMetaEcho(event)));
+      const echoesAccepted = echoResults.filter(Boolean).length;
+      const controls = normalizeMetaControlEvents(payload).filter(event => event.eventType !== "message_echo").filter(event => {
         const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
         return typeof expected === "string" && expected !== "" && event.receiverId === expected;
       });
       const controlResults = await Promise.all(controls.map(event => this.applyMetaControl(event)));
       const controlsAccepted = controlResults.filter(Boolean).length;
-      if (events.length || controls.length) { const section = "integration.meta", key = "lastWebhookAt", value = new Date().toISOString(); await this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } }); }
-      const result = { received: true, accepted, ignored: Math.max(0, summaries.length - accepted - controlsAccepted) };
-      this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RESPONDED", timestamp, httpStatus: 200, normalized: normalized.length, scoped: events.length, accepted, controls: controls.length, controlsAccepted, ignored: result.ignored }));
+      if (events.length || echoes.length || controls.length) { const section = "integration.meta", key = "lastWebhookAt", value = new Date().toISOString(); await this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } }); }
+      const result = { received: true, accepted: accepted + echoesAccepted, ignored: Math.max(0, summaries.length - accepted - echoesAccepted - controlsAccepted) };
+      this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RESPONDED", timestamp, httpStatus: 200, normalized: normalized.length, scoped: events.length, accepted, echoes: echoes.length, echoesAccepted, controls: controls.length, controlsAccepted, ignored: result.ignored }));
       return result;
     } catch (error) {
       if (!(error instanceof ForbiddenException)) this.logger.error(JSON.stringify({ event: "META_MESSAGE_ERROR", timestamp, httpStatus: 500, errorType: error instanceof Error ? error.constructor.name : "UnknownError" }));
@@ -574,6 +580,32 @@ export class CommunicationsService {
       const updated = await tx.message.update({ where: { id: message.id }, data: { ...(event.editedText ? { content: event.editedText } : {}), metadata: { ...oldMetadata, lastMetaControl: { type: event.eventType, receivedAt: event.receivedAt.toISOString() } } } });
       await tx.auditLog.create({ data: { action: "UPDATE", entityType: "InboundMessage", entityId: message.id, before: { contentChanged: false }, after: { metaControl: event.eventType, contentChanged: Boolean(event.editedText) } } });
       this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_APPLIED", eventType: event.eventType, mid: event.externalMessageId, messageId: updated.id, recipientId: event.receiverId }));
+      return true;
+    });
+  }
+  private async persistMetaEcho(event: MetaEchoMessage) {
+    return this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalRecipientId}, 0))`;
+      const externalId = metaConversationExternalId(event.receiverId, event.externalRecipientId);
+      let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId, channel: event.channel as ContactChannel } } });
+      if (!conversation && externalId !== event.externalRecipientId) {
+        const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalRecipientId, channel: event.channel as ContactChannel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
+        if (legacy && metaEchoConversationExternalIds(event.receiverId, event.externalRecipientId, legacy.messages[0]?.metadata).includes(event.externalRecipientId)) {
+          conversation = await tx.conversation.update({ where: { id: legacy.id }, data: { externalId } });
+          await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel: event.channel, identityScope: "receiverId+recipientId", source: "META_ECHO" } } });
+        }
+      }
+      if (!conversation || conversation.archivedAt) { this.logger.warn(JSON.stringify({ event: "META_ECHO_IGNORED", channel: event.channel, recipientId: event.externalRecipientId, mid: event.externalMessageId, reason: "conversationNotFound" })); return false; }
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + event.externalMessageId}, 0))`;
+      const duplicate = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true } });
+      if (duplicate) return false;
+      const sentAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
+      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, metadata: { ...event.metadata, receiverId: event.receiverId, source: "META_ECHO" } as Prisma.InputJsonValue } });
+      const lastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > sentAt.getTime() ? conversation.lastMessageAt : sentAt;
+      await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt } });
+      await tx.activity.create({ data: { clientId: conversation.clientId, type: "OUTBOUND_MESSAGE_SYNCED", summary: "Исходящее сообщение синхронизировано из " + event.channel, metadata: { messageId: message.id, channel: event.channel } } });
+      await tx.auditLog.create({ data: { action: "CREATE", entityType: "OutboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId, source: "META_ECHO" } } });
+      this.logger.log(JSON.stringify({ event: "META_ECHO_CREATED", channel: event.channel, recipientId: event.externalRecipientId, mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id }));
       return true;
     });
   }

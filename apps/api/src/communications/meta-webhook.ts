@@ -17,6 +17,10 @@ export type MetaInboundMessage = {
   };
 };
 
+export type MetaEchoMessage = Omit<MetaInboundMessage, "externalSenderId" | "displayName" | "email" | "phone"> & {
+  externalRecipientId: string;
+};
+
 export type MetaWebhookEventSummary = {
   object: string;
   entryId?: string;
@@ -62,6 +66,11 @@ export function legacyConversationMatchesReceiver(metadata: unknown, receiverId:
   return (metadata as AnyRecord).receiverId === receiverId;
 }
 
+export function metaEchoConversationExternalIds(receiverId: string | undefined, recipientId: string, legacyMetadata: unknown) {
+  const scoped = metaConversationExternalId(receiverId, recipientId);
+  return scoped !== recipientId && legacyConversationMatchesReceiver(legacyMetadata, receiverId) ? [scoped, recipientId] : [scoped];
+}
+
 function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM") {
   const output: MetaInboundMessage[] = [];
   for (const entry of records(payload.entry)) for (const event of records(entry.messaging)) {
@@ -80,6 +89,27 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
     const content = String(message.text || attachments.map(x => attachmentLabel[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
     output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
+  }
+  return output;
+}
+
+export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
+  if (!payload || typeof payload !== "object") return [];
+  const value = payload as AnyRecord;
+  if (value.object !== "page" && value.object !== "instagram") return [];
+  const channel: MetaEchoMessage["channel"] = value.object === "page" ? "FACEBOOK" : "INSTAGRAM", output: MetaEchoMessage[] = [];
+  for (const entry of records(value.entry)) for (const event of records(entry.messaging)) {
+    const message = event.message;
+    if (!message?.mid || message.is_echo !== true || !event.recipient?.id) continue;
+    const attachments = records(message.attachments).map(x => ({
+      type: String(x.type || "file"),
+      ...(typeof x.payload?.url === "string" ? { url: x.payload.url } : {}),
+    }));
+    const attachmentTypes = attachments.map(x => x.type);
+    const labels: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
+    const content = String(message.text || attachments.map(x => labels[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
+    if (!content) continue;
+    output.push({ channel, externalRecipientId: String(event.recipient.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.sender?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
   }
   return output;
 }

@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConversationExternalId, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaWebhook, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaWebhook, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -25,6 +25,14 @@ test("Facebook sender profile is resolved and technical lead names are upgraded"
   assert.match(service,/fields:"name,first_name,last_name"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
   assert.match(service,/Facebook\|Instagram/);
+});
+
+test("Meta subscription and persistence include outbound message echoes", () => {
+  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,messaging_postbacks,message_reads,messaging_optins"/);
+  assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
+  assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
+  assert.match(service, /status:\s*MessageStatus\.SENT/);
+  assert.match(service, /source:\s*"META_ECHO"/);
 });
 
 test("Meta carries configured receiver ids for scope validation",()=>{
@@ -50,6 +58,12 @@ test("migrates a legacy PSID conversation only when its saved receiver matches t
   assert.equal(legacyConversationMatchesReceiver({ receiverId: "page-a" }, "page-b"), false);
   assert.equal(legacyConversationMatchesReceiver({}, "page-a"), false);
   assert.equal(legacyConversationMatchesReceiver(null, "page-a"), false);
+});
+
+test("echo lookup permits a legacy PSID only for the same saved Page receiver", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(metaEchoConversationExternalIds("page-a", "psid-1", { receiverId: "page-a" }))), ["page-a:psid-1", "psid-1"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(metaEchoConversationExternalIds("page-a", "psid-1", { receiverId: "page-b" }))), ["page-a:psid-1"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(metaEchoConversationExternalIds("page-a", "psid-1", null))), ["page-a:psid-1"]);
 });
 
 test("preserves Messenger attachment URLs and sticker metadata", () => {
@@ -79,6 +93,19 @@ test("summarizes every Messenger event before filtering without message text or 
 test("ignores delivery statuses and outgoing echo events", () => {
   assert.equal(normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "x" }, message: { mid: "m", text: "echo", is_echo: true } }] }] }).length, 0);
   assert.equal(normalizeMetaWebhook({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { statuses: [{ id: "status" }] } }] }] }).length, 0);
+});
+
+test("normalizes Facebook message echoes as outbound messages with text and attachments", () => {
+  const [echo] = normalizeMetaEchoMessages({ object: "page", entry: [{ id: "page-1", messaging: [{ sender: { id: "page-1" }, recipient: { id: "psid-1" }, timestamp: 42, message: { mid: "echo-mid", is_echo: true, text: "Ответ клиенту", attachments: [{ type: "image", payload: { url: "https://cdn.example/reply.jpg" } }] } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(echo)), {
+    channel: "FACEBOOK",
+    externalRecipientId: "psid-1",
+    externalMessageId: "echo-mid",
+    content: "Ответ клиенту",
+    receiverId: "page-1",
+    receivedAt: "1970-01-01T00:00:00.042Z",
+    metadata: { messageType: "text", attachmentTypes: ["image"], attachments: [{ type: "image", url: "https://cdn.example/reply.jpg" }] },
+  });
 });
 
 test("normalizes control events without creating inbound messages", () => {
