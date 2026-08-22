@@ -88,11 +88,12 @@ test("OAuth uses the temporary owner binding only when login is explicitly disab
 
 test("two cookieless review browsers receive isolated signed Meta setup bindings",()=>{
   const setup = loadSetupHelper(), secret = "review-mode-secret-that-is-long-enough";
-  const first = setup.issueMetaSetupToken(secret), second = setup.issueMetaSetupToken(secret);
+  const issuedAt = 1_000_000, first = setup.issueMetaSetupToken(secret, issuedAt), second = setup.issueMetaSetupToken(secret, issuedAt);
   assert.notEqual(first, second);
-  assert.notEqual(setup.metaSetupBinding(first, secret), setup.metaSetupBinding(second, secret));
-  assert.equal(setup.metaSetupBinding(first + "x", secret), null);
-  assert.equal(setup.metaSetupBinding("attacker-chosen", secret), null);
+  assert.notEqual(setup.metaSetupBinding(first, secret, issuedAt + 1), setup.metaSetupBinding(second, secret, issuedAt + 1));
+  assert.equal(setup.metaSetupBinding(first + "x", secret, issuedAt + 1), null);
+  assert.equal(setup.metaSetupBinding("attacker-chosen", secret, issuedAt + 1), null);
+  assert.equal(setup.metaSetupBinding(first, secret, issuedAt + 600_001), null);
 });
 
 test("OAuth keeps Graph tokens out of URLs",()=>{
