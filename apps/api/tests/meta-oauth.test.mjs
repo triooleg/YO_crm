@@ -26,6 +26,13 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
   assert.match(service, /subscribed_apps/);
 });
 
+test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
+  assert.match(service, /pages_manage_metadata/);
+  assert.match(service, /pages_messaging/);
+  assert.match(service, /requiredPagePermissions[\s\S]*pending\.permissions\.includes/);
+  assert.match(service, /subscribed_apps[\s\S]*fields:\s*"id,subscribed_fields"[\s\S]*confirmMetaPageSubscription/);
+});
+
 test("OAuth state is signed, expires and is bound to the current user", () => {
   assert.match(helper, /createHmac\("sha256"/);
   assert.match(helper, /timingSafeEqual/);

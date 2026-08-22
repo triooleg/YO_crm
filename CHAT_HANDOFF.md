@@ -1,5 +1,21 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (готово локально)
+
+- После отправки владельцем `CRM REAL TEST 001` с другого Facebook-аккаунта
+  новый POST отсутствовал и в Nginx Proxy Manager, и в structured API log;
+  сообщение не достигло CRM и не могло появиться в БД или «Входящих».
+- Production `POST /api/communications/meta/delivery/verify` получил от Graph
+  API отказ: текущему подключению не выдано обязательное разрешение
+  `pages_manage_metadata`. Требуется переподключение Facebook с выдачей
+  `pages_manage_metadata` и `pages_messaging`, затем повторный live тест.
+- OAuth connect усилен fail-closed: оба Page-разрешения проверяются до выбора
+  страницы, а после POST `subscribed_apps` CRM обязательно читает подписку
+  обратно и вызывает `confirmMetaPageSubscription`. Статус VERIFIED больше не
+  записывается без подтверждённого поля `messages`.
+- Проверка локального изменения: API 114/114, typecheck и build PASS. Prisma
+  migration не требуется.
+
 ## 2026-08-22 — диагностика и усиление Meta inbound (развёрнуто)
 
 - Production ingress доказал корневую причину текущего отсутствия Messenger:

@@ -367,17 +367,22 @@ export class CommunicationsService {
     this.requireMetaOauthAuth();
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
     if (!page) throw new BadRequestException("Выбранная страница отсутствует в авторизации Facebook");
+    const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging"];
+    const missingPagePermissions = requiredPagePermissions.filter(permission => !pending.permissions.includes(permission));
+    if (missingPagePermissions.length) throw new ForbiddenException("Facebook не предоставил обязательные разрешения для входящих сообщений: " + missingPagePermissions.join(", "));
     if(page.instagram_business_account&&(!pending.permissions.includes("instagram_basic")||!pending.permissions.includes("instagram_manage_messages")))throw new ForbiddenException("Facebook не предоставил разрешения для сообщений Instagram");
     const encrypted=await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});return row.value});
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
       await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
+      const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret);
+      const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
-        const values: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, pageName: page.name, instagramAccountId: page.instagram_business_account?.id || "", pageAccessTokenEncrypted: encryptSecret(page.access_token), subscriptionVerifiedAt: new Date().toISOString() };
-        for (const [key, value] of Object.entries(values)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
+        const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId: page.instagram_business_account?.id || "", pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
+        for (const [key, value] of Object.entries(connectedValues)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
         await tx.appSetting.upsert({where:{section_key:{section,key:"tokenExpiresAt"}},create:{section,key:"tokenExpiresAt",value:pending.tokenExpiresAt??0},update:{value:pending.tokenExpiresAt??0}});
-        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, pageId: page.id, instagramAccountId: page.instagram_business_account?.id || null } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, instagramAccountId: page.instagram_business_account?.id || null, ...confirmed.auditAfter } } });
       });
     } catch (error) {
       await this.p.$transaction(async tx=>{
