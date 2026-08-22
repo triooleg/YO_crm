@@ -35,7 +35,7 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
 });
 
 test("Facebook Page connection does not request unavailable Instagram scopes", () => {
-  assert.match(service, /scope",\s*"pages_show_list,pages_manage_metadata,pages_messaging"/);
+  assert.match(service, /scope",\s*"pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement"/);
   assert.doesNotMatch(service, /scope",[^\n]*instagram_basic/);
   assert.doesNotMatch(service, /scope",[^\n]*instagram_manage_messages/);
   assert.doesNotMatch(service, /if\(page\.instagram_business_account[\s\S]*Facebook не предоставил разрешения для сообщений Instagram/);
@@ -44,6 +44,7 @@ test("Facebook Page connection does not request unavailable Instagram scopes", (
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
   assert.match(service, /pages_manage_metadata/);
   assert.match(service, /pages_messaging/);
+  assert.match(service, /pages_read_engagement/);
   assert.match(service, /requiredPagePermissions[\s\S]*pending\.permissions\.includes/);
   assert.match(service, /subscribed_apps[\s\S]*fields:\s*"id,subscribed_fields"[\s\S]*confirmMetaPageSubscription/);
 });
@@ -108,4 +109,10 @@ test("OAuth keeps Graph tokens out of URLs",()=>{
   assert.match(service,/Content-Type":\s*"application\/x-www-form-urlencoded"/);
   assert.match(service,/fb_exchange_token/);
   assert.doesNotMatch(service,/access_token:\s*token\.access_token/);
+});
+
+test("non-send Meta Graph failures preserve the safe HTTP 502 contract", () => {
+  assert.match(service, /if \(structuredFailure\) throw new MetaGraphRequestError/);
+  assert.match(service, /throw new BadGatewayException\("Meta не выполнила запрос"\)/);
+  assert.match(service, /pageId \+ "\/messages"[\s\S]*appSecret,[\s\S]*true/);
 });

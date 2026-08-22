@@ -41,7 +41,7 @@ type Message = {
   createdAt: string;
   channel: string;
   status?: string;
-  metadata?: { attachments?: Attachment[] };
+  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number };
 };
 type Template = {
   id: string;
@@ -338,7 +338,10 @@ export function CommunicationsWorkspace() {
         body: JSON.stringify({ content: text.trim(), channel: channel(client), action, ...(action === "SEND" ? { clientRequestId: crypto.randomUUID() } : {}) }),
       });
       setMessages((x) => [...x, m]);
-      if (m.status === "FAILED") setError(ui.sendFailed);
+      if (m.status === "FAILED") {
+        const reasons = ui.sendFailureReasons as Record<string, string>;
+        setError(reasons[m.metadata?.reason || ""] || ui.sendFailed);
+      }
       else setText("");
     } catch (e) {
       setError((e as Error).message);
@@ -576,7 +579,7 @@ export function CommunicationsWorkspace() {
                       </div>
                     )}
                     <small>
-                      {message.status === "FAILED" ? ui.failed : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
+                      {message.status === "FAILED" ? (ui.sendFailureReasons as Record<string, string>)[message.metadata?.reason || ""] || ui.failed : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {new Date(message.createdAt).toLocaleString("ru")}
                     </small>
                   </article>

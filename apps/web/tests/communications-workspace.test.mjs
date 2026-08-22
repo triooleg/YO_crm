@@ -94,3 +94,10 @@ test("вложения Meta отображаются в истории пере�
   assert.match(component, /previewClose\.current\?\.focus/);
   assert.match(component, /previewTrigger\.current\?\.focus/);
 });
+
+test("ошибка отправки Meta показывает безопасную причину на русском", () => {
+  assert.match(component, /sendFailureReasons/);
+  assert.match(locale, /TOKEN_EXPIRED/);
+  assert.match(locale, /PERMISSION_REQUIRED/);
+  assert.match(locale, /REPLY_WINDOW_CLOSED/);
+});

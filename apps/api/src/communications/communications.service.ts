@@ -28,13 +28,13 @@ import {
   SendMessageDto,
 } from "./communications.dto";
 import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaInboundMessage } from "./meta-webhook";
+import { MetaGraphRequestError, metaRecipientId, metaSendFailure, metaTextMessageParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
-import { metaRecipientId, metaTextMessageParams, runMetaSendOnce } from "./meta-send";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
@@ -284,13 +284,16 @@ export class CommunicationsService {
   }
   private metaGraphVersion() { return process.env.META_GRAPH_VERSION || "v23.0"; }
   private metaOauthRedirect() { return this.publicOrigin() + "/api/communications/meta/oauth/callback"; }
-  private async metaGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", appSecret?: string) {
+  private async metaGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", appSecret?: string, structuredFailure = false) {
     const url = new URL("https://graph.facebook.com/" + this.metaGraphVersion() + "/" + path.replace(/^\//, ""));
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
     if (appSecret) url.searchParams.set("appsecret_proof", createHmac("sha256", appSecret).update(token).digest("hex"));
     const response = await fetch(url, { method, headers: { Authorization: "Bearer " + token }, signal: AbortSignal.timeout(15_000) });
-    const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
-    if (!response.ok || body.error) throw new BadGatewayException("Meta не выполнила запрос");
+    const body = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: number; error_subcode?: number } };
+    if (!response.ok || body.error) {
+      if (structuredFailure) throw new MetaGraphRequestError(metaSendFailure(body.error));
+      throw new BadGatewayException("Meta не выполнила запрос");
+    }
     return body;
   }
   private async metaTokenExchange(params: Record<string,string>) {
@@ -313,7 +316,7 @@ export class CommunicationsService {
     const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,pages_messaging");
+    url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement");
     return { url: url.toString() };
   }
   async metaOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
@@ -368,7 +371,7 @@ export class CommunicationsService {
   async metaOauthConnect(flowId:string,pageId: string, u: User,sessionHash:string) {
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
     if (!page) throw new BadRequestException("Выбранная страница отсутствует в авторизации Facebook");
-    const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging"];
+    const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging", "pages_read_engagement"];
     const missingPagePermissions = requiredPagePermissions.filter(permission => !pending.permissions.includes(permission));
     if (missingPagePermissions.length) throw new ForbiddenException("Facebook не предоставил обязательные разрешения для входящих сообщений: " + missingPagePermissions.join(", "));
     const encrypted=await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});return row.value});
@@ -778,13 +781,15 @@ export class CommunicationsService {
           metaTextMessageParams(recipientId, content),
           "POST",
           appSecret,
+          true,
           );
           if (!result.message_id)
             throw new BadGatewayException("Meta не вернула идентификатор сообщения");
           return result;
         },
         persistFailure: async (error) => this.p.$transaction(async (tx) => {
-          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content, authorId: u.id, metadata: { provider: "META", failureType: error instanceof Error ? error.constructor.name : "UnknownError" } } });
+          const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
+          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content, authorId: u.id, metadata: { provider: "META", failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...failure } } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
           await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
           await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: "Facebook не принял исходящее сообщение", metadata: { messageId: m.id, channel } } });
