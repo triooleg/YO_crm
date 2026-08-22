@@ -16,7 +16,7 @@ test("входящие используют централизованные р�
 });
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
-test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)=>chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
+test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
 
 test("поиск клиентов работает, а источник расположен рядом с именем", () => {
@@ -39,11 +39,13 @@ test("из активного входящего можно создать кл�
   assert.match(component, /createClient/);
   assert.match(component, /preferredChannel/);
   assert.match(component, /communications-create/);
+  assert.match(component, /promote-from-inbox/);
+  assert.match(component, /createFromMessage/);
 });
 
 test("каждое сообщение показывает канал Meta, Chatwoot или e-mail", () => {
   assert.match(component, /message\.channel/);
-  assert.match(component, /sourceBadge\(\{source:message\.channel/);
+  assert.match(component, /sourceBadge\(\{\s*source:\s*message\.channel/);
   assert.match(component, /communications-message-channel/);
   assert.match(locale, /FACEBOOK:\s*"Facebook"/);
   assert.match(locale, /INSTAGRAM:\s*"Instagram"/);
@@ -64,9 +66,22 @@ test("список входящих показывает последнее со
   assert.match(component, /communications-client-time/);
 });
 
+test("новые входящие автоматически поднимаются наверх и обновляются без перезагрузки", () => {
+  assert.match(component, /conversationTimestamp/);
+  assert.match(component, /sort\([\s\S]*conversationTimestamp\(b\)\s*-\s*conversationTimestamp\(a\)/);
+  assert.match(component, /setInterval\(\(\)\s*=>\s*void refreshInbox\(\),\s*5000\)/);
+  assert.match(component, /selectedClientId\.current/);
+  assert.match(component, /clearInterval\(timer\)/);
+});
+
 test("вложения Meta отображаются в истории переписки", () => {
   assert.match(component, /message\.metadata\?\.attachments/);
   assert.match(component, /communications-attachments/);
   assert.match(component, /ui\.openAttachment/);
   assert.match(locale, /openAttachment:/);
+  assert.match(component, /communications-lightbox/);
+  assert.match(component, /setPreview\(url\)/);
+  assert.match(component, /event\.key\s*===\s*"Escape"/);
+  assert.match(component, /previewClose\.current\?\.focus/);
+  assert.match(component, /previewTrigger\.current\?\.focus/);
 });

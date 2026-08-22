@@ -6,10 +6,11 @@ import ts from "typescript";
 import { createRequire } from "node:module";
 
 const source = await readFile(new URL("../src/communications/meta-webhook.ts", import.meta.url), "utf8");
+const service = await readFile(new URL("../src/communications/communications.service.ts", import.meta.url), "utf8");
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConversationExternalId, normalizeMetaControlEvents, normalizeMetaWebhook, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { legacyConversationMatchesReceiver, metaConversationExternalId, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaWebhook, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -18,6 +19,12 @@ test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", ()
   assert.deepEqual(JSON.parse(JSON.stringify(facebook.map(x => [x.channel, x.externalSenderId, x.externalMessageId, x.content]))), [["FACEBOOK", "fb-1", "fb-mid", "Facebook text"]]);
   assert.deepEqual(JSON.parse(JSON.stringify(instagram.map(x => [x.channel, x.externalSenderId, x.externalMessageId, x.content]))), [["INSTAGRAM", "ig-1", "ig-mid", "[Фото]"]]);
   assert.deepEqual(JSON.parse(JSON.stringify(whatsapp.map(x => [x.channel, x.externalSenderId, x.externalMessageId, x.displayName, x.content]))), [["WHATSAPP", "3801", "wa-mid", "Anna", "WhatsApp text"]]);
+});
+
+test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
+  assert.match(service,/fields:"name,first_name,last_name"/);
+  assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
+  assert.match(service,/Facebook\|Instagram/);
 });
 
 test("Meta carries configured receiver ids for scope validation",()=>{
@@ -30,6 +37,12 @@ test("scopes Messenger conversations by Page ID and PSID", () => {
   assert.equal(metaConversationExternalId("page-a", "same-psid"), "page-a:same-psid");
   assert.equal(metaConversationExternalId("page-b", "same-psid"), "page-b:same-psid");
   assert.notEqual(metaConversationExternalId("page-a", "same-psid"), metaConversationExternalId("page-b", "same-psid"));
+});
+
+test("profile enrichment keeps identical sender IDs isolated by Facebook Page",()=>{
+ const targets=metaProfileTargets([{channel:"FACEBOOK",receiverId:"page-a",externalSenderId:"same",externalMessageId:"1",content:"a",receivedAt:new Date(),metadata:{messageType:"text"}},{channel:"FACEBOOK",receiverId:"page-b",externalSenderId:"same",externalMessageId:"2",content:"b",receivedAt:new Date(),metadata:{messageType:"text"}}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{receiverId:"page-a",senderId:"same"},{receiverId:"page-b",senderId:"same"}]);
+ assert.match(service,/externalId_channel/);
 });
 
 test("migrates a legacy PSID conversation only when its saved receiver matches the Page", () => {

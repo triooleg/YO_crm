@@ -11,8 +11,16 @@ test("client routes require session and role guards", () => {
 });
 
 test("client, athlete and measurement creation append audit history", () => {
-  assert.equal((service.match(/auditLog\.create/g) ?? []).length, 3);
-  assert.equal((service.match(/activity\.create/g) ?? []).length, 3);
+  assert.equal((service.match(/auditLog\.create/g) ?? []).length, 4);
+  assert.equal((service.match(/activity\.create/g) ?? []).length, 4);
+});
+
+test("временный контакт из входящих оформляется без дублирования переписки",()=>{
+  assert.match(controller,/promote-from-inbox/);
+  assert.match(service,/status:"ACTIVE"/);
+  assert.match(service,/CLIENT_PROMOTED_FROM_INBOX/);
+  assert.match(service,/client-promote:/);
+  assert.match(service,/source:before\.source/);
 });
 
 test("measurement creation verifies athlete belongs to client", () => {

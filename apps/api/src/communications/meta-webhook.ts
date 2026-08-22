@@ -51,6 +51,12 @@ export function metaConversationExternalId(receiverId: string | undefined, sende
   return receiverId ? `${receiverId}:${senderId}` : senderId;
 }
 
+export function metaProfileTargets(events:MetaInboundMessage[]){
+  const unique=new Map<string,{receiverId:string;senderId:string}>();
+  for(const event of events)if(event.channel==="FACEBOOK"&&event.receiverId){const target={receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(metaConversationExternalId(target.receiverId,target.senderId),target)}
+  return [...unique.values()];
+}
+
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {
   if (!receiverId || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
   return (metadata as AnyRecord).receiverId === receiverId;

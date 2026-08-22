@@ -17,6 +17,7 @@ export class CreateClientDto {
   @ApiPropertyOptional({enum:ContactChannel}) @IsOptional() @IsEnum(ContactChannel) source?:ContactChannel;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?:string;
 }
+export class PromoteInboxClientDto extends CreateClientDto {}
 export class CreateAthleteDto {
   @ApiProperty() @IsString() @Length(1,100) firstName!:string;
   @ApiPropertyOptional() @IsOptional() @IsString() lastName?:string;

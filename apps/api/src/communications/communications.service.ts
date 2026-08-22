@@ -26,7 +26,7 @@ import {
   MetaIntegrationDto,
   SendMessageDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConversationExternalId, normalizeMetaControlEvents, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConversationExternalId, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaInboundMessage } from "./meta-webhook";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
@@ -529,17 +529,19 @@ export class CommunicationsService {
         this.logger.warn(JSON.stringify({ event: "META_WEBHOOK_SIGNATURE_REJECTED", timestamp, httpStatus: 403, channelEnabled: values.enabled === true, appSecretConfigured: Boolean(secret) }));
         throw new ForbiddenException("Подпись Meta webhook недействительна");
       }
-      const normalized = normalizeMetaWebhook(payload).slice(0, 100), events = normalized.filter(event => {
+      const normalized = normalizeMetaWebhook(payload).slice(0, 100), scopedEvents = normalized.filter(event => {
         const expected = event.channel === "FACEBOOK" ? values.pageId : event.channel === "INSTAGRAM" ? values.instagramAccountId : values.whatsappPhoneNumberId;
         const matches = typeof expected === "string" && expected !== "" && event.receiverId === expected;
         if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderId: event.externalSenderId, recipientId: event.receiverId, mid: event.externalMessageId }));
         return matches;
       });
+      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),events=scopedEvents;
       const persisted = await Promise.all(events.map(async event => {
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderId: event.externalSenderId, recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
         return this.persistInbound(event, "META");
       }));
       const accepted = persisted.filter(Boolean).length;
+      if(pageToken)void this.enrichMetaFacebookProfiles(events,pageToken,appSecret);
       const controls = normalizeMetaControlEvents(payload).filter(event => {
         const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
         return typeof expected === "string" && expected !== "" && event.receiverId === expected;
@@ -554,6 +556,13 @@ export class CommunicationsService {
       if (!(error instanceof ForbiddenException)) this.logger.error(JSON.stringify({ event: "META_MESSAGE_ERROR", timestamp, httpStatus: 500, errorType: error instanceof Error ? error.constructor.name : "UnknownError" }));
       throw error;
     }
+  }
+  private async enrichMetaFacebookProfiles(events:MetaInboundMessage[],pageToken:string,appSecret?:string){
+    const targets=metaProfileTargets(events).slice(0,20);
+    for(const {receiverId,senderId} of targets)try{
+      const profile=await this.metaGraph<{name?:string;first_name?:string;last_name?:string}>(senderId,pageToken,{fields:"name,first_name,last_name"},"GET",appSecret),displayName=String(profile.name||[profile.first_name,profile.last_name].filter(Boolean).join(" ")).trim();if(!displayName)continue;
+      await this.p.$transaction(async tx=>{const conversation=await tx.conversation.findUnique({where:{externalId_channel:{externalId:metaConversationExternalId(receiverId,senderId),channel:ContactChannel.FACEBOOK}},select:{client:{select:{id:true,firstName:true,displayName:true,archivedAt:true}}}}),before=conversation?.client;if(!before||before.archivedAt||!/^(Facebook|Instagram) \d+$/.test(before.displayName))return;const after=await tx.client.update({where:{id:before.id},data:{firstName:displayName,displayName}});await tx.activity.create({data:{clientId:before.id,type:"CLIENT_PROFILE_ENRICHED",summary:"Имя клиента получено из профиля Facebook",metadata:{source:"FACEBOOK_PROFILE"}}});await tx.auditLog.create({data:{action:"UPDATE",entityType:"Client",entityId:before.id,before,after:{id:after.id,firstName:after.firstName,displayName:after.displayName,source:"FACEBOOK_PROFILE"}}})});
+    }catch(error){this.logger.warn(JSON.stringify({event:"META_PROFILE_LOOKUP_FAILED",senderId,errorType:error instanceof Error?error.constructor.name:"UnknownError"}))}
   }
   private async applyMetaControl(event: MetaControlEvent) {
     if (!event.externalMessageId) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, recipientId: event.receiverId, reason: "noMessageId" })); return false; }
@@ -591,7 +600,7 @@ export class CommunicationsService {
       }
       const duplicate = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel } }, select: { id: true } });
       if (duplicate) { if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_DUPLICATE_SKIPPED", channel: event.channel, senderId: event.externalSenderId, mid: event.externalMessageId })); return false; }
-      let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true } }) : null;
+      let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } }) : null;
       let ambiguousMatches = 0;
       const match: Prisma.ClientWhereInput[] = [];
       if (event.email) match.push({ email: { equals: event.email, mode: "insensitive" } });
@@ -601,8 +610,8 @@ export class CommunicationsService {
       if (channel === ContactChannel.FACEBOOK && !sameChannelIdentity) match.push({ facebook: event.externalSenderId });
       if (channel === ContactChannel.INSTAGRAM && !sameChannelIdentity) match.push({ instagram: event.externalSenderId });
       if (!client && match.length) {
-        const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
-        const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
+        const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
+        const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
         const candidates = active.length ? active : archived;
         ambiguousMatches = candidates.length > 1 ? candidates.length : 0;
         client = uniqueCandidate(candidates);
@@ -612,15 +621,18 @@ export class CommunicationsService {
       if (client && provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_FOUND", channel: event.channel, senderId: event.externalSenderId, clientId: client.id }));
       if (client?.archivedAt) {
         const before = client;
-        client = await tx.client.update({ where: { id: client.id }, data: { archivedAt: null }, select: { id: true, archivedAt: true, lastContactAt: true } });
+        client = await tx.client.update({ where: { id: client.id }, data: { archivedAt: null }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } });
         await tx.auditLog.create({ data: { action: "REACTIVATE", entityType: "Client", entityId: client.id, before: { archived: true }, after: { archived: false, source: event.channel } } });
         await tx.activity.create({ data: { clientId: client.id, type: "CLIENT_REACTIVATED_BY_INBOUND", summary: "Клиент возвращён из архива новым входящим сообщением", metadata: { channel: event.channel, previousArchivedAt: before.archivedAt } } });
+      }
+      if(client&&event.displayName?.trim()&&/^(Facebook|Instagram) \d+$/.test(client.displayName)){
+        const displayName=event.displayName.trim();client=await tx.client.update({where:{id:client.id},data:{firstName:displayName,displayName},select:{id:true,archivedAt:true,lastContactAt:true,displayName:true}});
       }
       if (!clientId) {
         const fallback = event.channel === "WHATSAPP" ? "WhatsApp" : event.channel === "INSTAGRAM" ? "Instagram" : event.channel === "FACEBOOK" ? "Facebook" : event.channel === "EMAIL" ? "E-mail" : "Chatwoot", displayName = event.displayName?.trim() || fallback + " " + event.externalSenderId.slice(-6);
         const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email: event.email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: event.externalSenderId } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
         clientId = created.id;
-        client = { id: created.id, archivedAt: null, lastContactAt: created.lastContactAt };
+        client = { id: created.id, archivedAt: null, lastContactAt: created.lastContactAt,displayName:created.displayName };
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Client", entityId: created.id, after: { source: event.channel, createdFromInbound: true } } });
         if (ambiguousMatches) await tx.auditLog.create({ data: { action: "AMBIGUOUS", entityType: "InboundIdentity", entityId: created.id, after: { channel: event.channel, candidateCount: ambiguousMatches, resolution: "newLead" } } });
         await tx.activity.create({ data: { clientId: created.id, type: "CLIENT_CREATED_FROM_INBOUND", summary: "Клиент создан из входящего сообщения", metadata: { channel: event.channel } } });

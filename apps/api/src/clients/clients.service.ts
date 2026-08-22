@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
-import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto } from "./clients.dto";
+import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto } from "./clients.dto";
 
 @Injectable()
 export class ClientsService {
@@ -55,6 +55,11 @@ export class ClientsService {
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Client", entityId: client.id, after: client } });
       return client;
     });
+  }
+
+  async promoteFromInbox(id:string,dto:PromoteInboxClientDto,actor:User){
+    const {source:_source,...editable}=dto,firstName=dto.firstName.trim(),lastName=dto.lastName?.trim(),displayName=[firstName,lastName].filter(Boolean).join(" ");
+    return this.prisma.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-promote:"+id},0))`;const before=await tx.client.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Клиент не найден");if(before.status!=="LEAD")throw new BadRequestException("Карточка клиента уже оформлена");const client=await tx.client.update({where:{id},data:{...editable,source:before.source,firstName,lastName,displayName,status:"ACTIVE",responsibleManagerId:actor.id}});await tx.activity.create({data:{clientId:id,type:"CLIENT_PROMOTED_FROM_INBOX",summary:"Входящий контакт оформлен как клиент"}});await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before,after:client}});return client});
   }
 
   async addAthlete(clientId: string, dto: CreateAthleteDto, actor: User) {
