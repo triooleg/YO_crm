@@ -21,3 +21,8 @@ test("Meta app icon is a 1024 by 1024 PNG", async () => {
   assert.equal(png.readUInt32BE(16), 1024);
   assert.equal(png.readUInt32BE(20), 1024);
 });
+
+test("standalone Docker image includes public Meta assets", async () => {
+  const dockerfile = await readFile(new URL("../../../docker/web.Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /COPY --from=build \/app\/apps\/web\/public \/app\/apps\/web\/public/);
+});
