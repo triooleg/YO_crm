@@ -69,6 +69,10 @@ export class MetaOauthConnectDto {
   @IsString() @Length(1, 80) pageId!: string;
   @IsString() @Length(16, 80) flowId!: string;
 }
+export class MetaDataDeletionCompleteDto {
+  @IsString() @Length(1, 80) clientId!: string;
+  @IsOptional() @IsString() @MaxLength(500) retentionNote?: string;
+}
 export class AiRequestDto {
   @IsIn(["REPLY", "TRANSLATE", "IMPROVE", "TEMPLATE"] as const) action!:
     | "REPLY"

@@ -32,6 +32,10 @@ import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } from "./meta-delivery";
+import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
+import { unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { uploadsRoot } from "../uploads";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -444,6 +448,77 @@ export class CommunicationsService {
     const values = await this.sectionValues("integration.meta"), saved = this.secretValue(values, "verifyTokenEncrypted");
     if (isMetaAccessToken(saved) || mode !== "subscribe" || !safeTokenEqual(token, saved) || challenge === undefined) throw new ForbiddenException("Проверка Meta webhook не пройдена");
     return challenge;
+  }
+  async requestMetaDataDeletion(signedRequest?: string) {
+    const values = await this.sectionValues("integration.meta"), appSecret = this.secretValue(values, "appSecretEncrypted");
+    if (!appSecret) throw new BadRequestException("Удаление данных Meta не настроено");
+    let userId: string;
+    try { userId = parseMetaDataDeletionRequest(String(signedRequest || ""), appSecret).userId; }
+    catch { throw new BadRequestException("Запрос удаления данных Meta не прошёл проверку"); }
+    const requestKey = createHmac("sha256", appSecret).update(`meta-data-deletion:${userId}`).digest("hex"), confirmationCode = requestKey.slice(0, 32), requestedAt = new Date().toISOString(), encryptedIdentity = encryptSecret(userId), pageId = typeof values.pageId === "string" ? values.pageId : "";
+    const candidates = pageId ? await this.p.conversation.findMany({ where: { channel: "FACEBOOK", externalId: `${pageId}:${userId}` }, select: { clientId: true } }) : [];
+    const candidateIds = [...new Set(candidates.map(candidate => candidate.clientId))], matchedClientId = candidateIds.length === 1 ? candidateIds[0] : null;
+    await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-data-deletion:" + confirmationCode},0))`;
+      const existing = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: confirmationCode } } });
+      if (existing) return;
+      await tx.appSetting.create({ data: { section: "integration.meta.data-deletion", key: confirmationCode, value: { status: "PENDING", requestedAt, encryptedIdentity, matchedClientId } } });
+      await tx.auditLog.create({ data: { action: "REQUEST", entityType: "MetaDataDeletion", entityId: confirmationCode, after: { status: "PENDING", requestedAt, identityMatched: Boolean(matchedClientId) } } });
+    });
+    return { url: `${this.publicOrigin()}/legal/data-deletion?code=${confirmationCode}`, confirmation_code: confirmationCode };
+  }
+  async metaDataDeletionStatus(code?: string) {
+    if (!code || !/^[a-f0-9]{32}$/.test(code)) throw new NotFoundException("Запрос удаления не найден");
+    const row = await this.p.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: code } } });
+    if (!row || !row.value || typeof row.value !== "object" || Array.isArray(row.value)) throw new NotFoundException("Запрос удаления не найден");
+    const value = row.value as Record<string, unknown>;
+    return { confirmationCode: code, status: value.status === "COMPLETED" ? "COMPLETED" : "PENDING", requestedAt: typeof value.requestedAt === "string" ? value.requestedAt : null };
+  }
+  async listMetaDataDeletionRequests() {
+    const rows = await this.p.appSetting.findMany({ where: { section: "integration.meta.data-deletion" }, orderBy: { updatedAt: "desc" } });
+    return rows.map(row => { const value = row.value && typeof row.value === "object" && !Array.isArray(row.value) ? row.value as Record<string, unknown> : {}; return { confirmationCode: row.key, status: value.status === "COMPLETED" ? "COMPLETED" : "PENDING", requestedAt: typeof value.requestedAt === "string" ? value.requestedAt : null, completedAt: typeof value.completedAt === "string" ? value.completedAt : null, matchedClientId: typeof value.matchedClientId === "string" ? value.matchedClientId : null }; });
+  }
+  async completeMetaDataDeletion(code: string, clientId: string, retentionNote: string | undefined, u: User) {
+    if (!/^[a-f0-9]{32}$/.test(code)) throw new NotFoundException("Запрос удаления не найден");
+    const now = new Date(), completedAt = now.toISOString(), redacted = "[Удалено по запросу пользователя]";
+    const prepared = await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-data-deletion:" + code},0))`;
+      const request = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: code } } });
+      if (!request || !request.value || typeof request.value !== "object" || Array.isArray(request.value)) throw new NotFoundException("Запрос удаления не найден");
+      const value = request.value as Record<string, unknown>;
+      if (value.status === "COMPLETED") return { completed: true, paths: [] as string[] };
+      if (value.matchedClientId !== clientId) throw new BadRequestException("Запрос Meta не связан с выбранным клиентом");
+      if (value.status === "PROCESSING") return { completed: false, paths: Array.isArray(value.pendingAttachmentPaths) ? value.pendingAttachmentPaths.filter((path): path is string => typeof path === "string") : [] };
+      const client = await tx.client.findUnique({ where: { id: clientId }, select: { id: true } });
+      if (!client) throw new NotFoundException("Клиент не найден");
+      const attachments = await tx.taskAttachment.findMany({ where: { task: { clientId } }, select: { path: true } });
+      await tx.taskAttachment.deleteMany({ where: { task: { clientId } } });
+      await tx.message.updateMany({ where: { conversation: { clientId } }, data: { content: redacted, metadata: Prisma.JsonNull, externalId: null } });
+      await tx.conversation.updateMany({ where: { clientId }, data: { externalId: null, subject: null, unreadCount: 0, archivedAt: now } });
+      await tx.measurement.updateMany({ where: { athlete: { clientId } }, data: { notes: null, source: null } });
+      await tx.athlete.updateMany({ where: { clientId }, data: { firstName: "Удалено", lastName: null, birthDate: null, club: null, coach: null, country: null, notes: null, archivedAt: now } });
+      await tx.workTask.updateMany({ where: { clientId }, data: { title: redacted, description: null, labels: [], sourceMessageId: null, archivedAt: now } });
+      await tx.activity.updateMany({ where: { clientId }, data: { summary: redacted, metadata: Prisma.JsonNull } });
+      await tx.client.update({ where: { id: clientId }, data: { firstName: "Удалённый клиент", lastName: null, displayName: `Удалённый клиент • ${code.slice(0,6)}`, country: null, city: null, address: null, postalCode: null, email: null, phone: null, whatsapp: null, instagram: null, facebook: null, telegram: null, language: null, timezone: null, notes: null, archivedAt: now } });
+      const retained = ["orders", "payments", "invoices", "measurement snapshots", "audit"];
+      const paths = attachments.map(attachment => attachment.path);
+      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "PROCESSING", processingAt: completedAt, pendingAttachmentPaths: paths, retentionNote: retentionNote?.trim() || "Обязательная деловая история сохранена в обезличенном виде", retained } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "ANONYMIZE", entityType: "MetaDataDeletion", entityId: code, after: { status: "PROCESSING", clientId, processingAt: completedAt, retained, pendingFileCount: paths.length } } });
+      return { completed: false, paths };
+    });
+    if (prepared.completed) return this.metaDataDeletionStatus(code);
+    for (const path of prepared.paths) await unlink(join(uploadsRoot(), "task-images", path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new BadGatewayException("Не удалось удалить файл; запрос останется в обработке и может быть повторён"); });
+    await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-data-deletion:" + code},0))`;
+      const request = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: code } } });
+      if (!request || !request.value || typeof request.value !== "object" || Array.isArray(request.value)) throw new NotFoundException("Запрос удаления не найден");
+      const value = request.value as Record<string, unknown>;
+      if (value.status === "COMPLETED") return;
+      if (value.status !== "PROCESSING" || value.matchedClientId !== clientId) throw new BadRequestException("Запрос удаления находится в некорректном состоянии");
+      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "COMPLETED", completedAt, encryptedIdentity: null, pendingAttachmentPaths: [] } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "COMPLETE", entityType: "MetaDataDeletion", entityId: code, after: { status: "COMPLETED", clientId, completedAt, deletedFileCount: prepared.paths.length } } });
+    });
+    return this.metaDataDeletionStatus(code);
   }
   async receiveMetaWebhook(rawBody: Buffer, signature: string | undefined, payload: unknown) {
     const timestamp = new Date().toISOString(), summaries = summarizeMetaWebhook(payload);

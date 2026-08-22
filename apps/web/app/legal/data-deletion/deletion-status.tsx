@@ -1,0 +1,4 @@
+"use client";
+import {useEffect,useState} from "react";
+import {legalUi} from "../../../lib/i18n";
+export function DeletionStatus({code}:{code:string}){const [status,setStatus]=useState<"CHECKING"|"PENDING"|"COMPLETED"|"NOT_FOUND">("CHECKING");useEffect(()=>{const controller=new AbortController();fetch(`/api/communications/meta/data-deletion/${encodeURIComponent(code)}`,{signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const value=await response.json();setStatus(value.status==="COMPLETED"?"COMPLETED":"PENDING")}).catch(error=>{if(error?.name!=="AbortError")setStatus("NOT_FOUND")});return()=>controller.abort()},[code]);const text=status==="CHECKING"?legalUi.deletion.checking:status==="PENDING"?legalUi.deletion.pending:status==="COMPLETED"?legalUi.deletion.completed:legalUi.deletion.notFound;return <p aria-live="polite">{text}</p>}

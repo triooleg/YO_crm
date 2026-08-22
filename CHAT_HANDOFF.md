@@ -1,5 +1,26 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-22 — публичные документы и удаление данных Meta (готово к релизу)
+
+- Добавлены публичные страницы `/legal/privacy`, `/legal/terms` и
+  `/legal/data-deletion` в общей типографике Ubuntu и с русскими текстами из
+  централизованного словаря.
+- Добавлен публичный Meta callback
+  `/api/communications/meta/data-deletion`: `signed_request` проверяется через
+  HMAC-SHA256 сохранённым App Secret. Внешний Meta user ID не попадает в аудит:
+  для идемпотентного кода используется keyed HMAC, а временная идентичность в
+  очереди хранится только в зашифрованном виде.
+- Страница статуса проверяет код через безопасный публичный read endpoint.
+  Завершение доступно только OWNER/ADMIN и выполняется восстанавливаемой сагой:
+  анонимизация фиксируется со статусом `PROCESSING`, файлы удаляются после
+  commit, а `COMPLETED` записывается только после успешной очистки.
+- Подготовлена квадратная PNG-иконка приложения 1024×1024:
+  `/meta/yoleotard-crm-app-icon-1024.png`.
+- Для Meta Basic: privacy URL `https://crm.yoleotard.com/legal/privacy`, terms
+  URL `https://crm.yoleotard.com/legal/terms`, data deletion instructions
+  `https://crm.yoleotard.com/legal/data-deletion`, callback
+  `https://crm.yoleotard.com/api/communications/meta/data-deletion`.
+
 ## 2026-08-22 — Facebook OAuth отделён от Instagram scopes (развёрнуто)
 
 - Реальный OAuth после исправления домена дошёл до Meta и был отклонён как

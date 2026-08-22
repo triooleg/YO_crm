@@ -5,7 +5,7 @@ import{createHash}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MessageTemplateDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 
@@ -35,13 +35,17 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Get("meta/oauth/pages")@Roles("OWNER","ADMIN")metaOauthPages(@Req()r:Request&{user:User}){return this.c.metaOauthPages(r.user,this.sessionBinding(r,r.user))}
 @Post("meta/oauth/connect")@Roles("OWNER","ADMIN")metaOauthConnect(@Body()d:MetaOauthConnectDto,@Req()r:Request&{user:User}){return this.c.metaOauthConnect(d.flowId,d.pageId,r.user,this.sessionBinding(r,r.user))}
 @Post("meta/delivery/verify")@Roles("OWNER","ADMIN")verifyMetaDelivery(@Req()r:Request&{user:User}){return this.c.verifyMetaDelivery(r.user)}
+@Get("meta/data-deletion-requests")@Roles("OWNER","ADMIN")metaDataDeletionRequests(){return this.c.listMetaDataDeletionRequests()}
+@Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
 @Post(":clientId/messages")@Roles("OWNER","ADMIN","MANAGER")send(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}}
 
 @Controller("communications/meta")
 export class MetaWebhookController{constructor(private c:CommunicationsService){}
 @Get("webhook")@Header("Content-Type","text/plain")verify(@Query("hub.mode")mode?:string,@Query("hub.verify_token")token?:string,@Query("hub.challenge")challenge?:string){return this.c.verifyMetaWebhook(mode,token,challenge)}
-@Post("webhook")@HttpCode(200)receive(@Headers("x-hub-signature-256")signature:string|undefined,@Req()request:Request&{rawBody?:Buffer},@Body()body:unknown){return this.c.receiveMetaWebhook(request.rawBody??Buffer.from(JSON.stringify(body)),signature,body)}}
+@Post("webhook")@HttpCode(200)receive(@Headers("x-hub-signature-256")signature:string|undefined,@Req()request:Request&{rawBody?:Buffer},@Body()body:unknown){return this.c.receiveMetaWebhook(request.rawBody??Buffer.from(JSON.stringify(body)),signature,body)}
+@Post("data-deletion")@HttpCode(200)dataDeletion(@Body("signed_request")signedRequest?:string){return this.c.requestMetaDataDeletion(signedRequest)}
+@Get("data-deletion/:code")dataDeletionStatus(@Param("code")code:string){return this.c.metaDataDeletionStatus(code)}}
 
 @Controller("communications/chatwoot")
 export class ChatwootWebhookController{constructor(private c:CommunicationsService){}
