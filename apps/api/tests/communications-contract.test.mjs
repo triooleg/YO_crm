@@ -167,6 +167,9 @@ test("Meta inbound webhook is public but signed, idempotent and audited", () => 
   assert.match(service, /MessageDirection\.INBOUND/);
   assert.match(service, /unreadCount:\{increment:1\}/);
   assert.match(service, /INBOUND_MESSAGE_RECEIVED/);
+  for (const event of ["META_WEBHOOK_RECEIVED", "META_MESSAGE_PARSED", "META_CLIENT_CREATED", "META_CONVERSATION_CREATED", "META_MESSAGE_CREATED", "META_MESSAGE_DUPLICATE_SKIPPED", "META_MESSAGE_ERROR", "META_WEBHOOK_RESPONDED"])
+    assert.match(service, new RegExp(event));
+  assert.match(service, /summarizeMetaWebhook/);
 });
 
 test("Meta secrets are encrypted and settings return only safe connection status", () => {

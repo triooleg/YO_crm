@@ -577,6 +577,8 @@ export const communicationsUi = {
   selectClient: "Выберите клиента",
   selectClientHint: "Выберите клиента слева, чтобы открыть переписку",
   emptyMessages: "Сообщений пока нет",
+  openAttachment: "Открыть вложение",
+  attachmentTypes: { image: "Фото", video: "Видео", audio: "Аудио", file: "Файл", sticker: "Стикер", fallback: "Вложение" },
   resizeClients: "Изменить ширину списка клиентов",
   resizeOrders: "Изменить ширину заказов",
   ai: "✦ AI",

@@ -1,5 +1,33 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-22 — диагностика и усиление Meta inbound (готово локально)
+
+- Production ingress доказал корневую причину текущего отсутствия Messenger:
+  за 48 часов Meta не отправила ни одного POST на webhook. Контрольный POST с
+  неверной подписью дошёл через Nginx Proxy Manager до NestJS и ожидаемо
+  получил 403; значит домен, proxy, route и журнал POST исправны.
+- До любой фильтрации добавлены безопасные структурированные события
+  `META_WEBHOOK_RECEIVED`; этапы подписи, scope, parsing, client/conversation,
+  duplicate, message, control events и HTTP response видны без текста
+  сообщений, URL вложений или секретов.
+- Messenger normalizer сохраняет image/video/audio/file/sticker и несколько
+  attachments с URL/типом/sticker ID. Echo, read, delivery, reaction, edit и
+  postback не создают клиента; control event по известному mid обновляет только
+  существующее сообщение и аудитируется.
+- Диалог Meta теперь scoped связкой Page ID + PSID. Старый PSID-only диалог
+  мигрируется fail-closed только при точном совпадении receiverId последнего
+  сообщения; миграция атомарна и имеет audit `MIGRATE`.
+- «Входящие» показывают последнее сообщение, время и unread в списке, а в
+  истории — доступные ссылки и изображения вложений. Browser UAT с локальным
+  mock Meta: desktop 1912×871 и mobile 390×844 без overflow, Ubuntu 14 px,
+  preview/время/unread/attachment видимы, console warn/error пуст.
+- Новая Prisma migration не требуется. Проверка: API 113/113, web 98/98,
+  database 4/4, API/web typecheck и чистый production build PASS. Regression,
+  business/security и visual reviews PASS. Реальный Messenger E2E остаётся
+  pending: после deployment нужно отправить новые `CRM REAL TEST 001/002` с
+  другого Facebook-аккаунта и сопоставить ingress log, structured API log, DB
+  и «Входящие».
+
 ## 2026-08-21 — диагностика доставки входящих Meta (готово локально)
 
 - Тестовое сообщение `CRM TEST 123` отсутствовало не только во «Входящих», но

@@ -57,3 +57,16 @@ test("список клиентов показывает все связанны
   assert.match(component, /communications-source-icons/);
   assert.match(component, /badges\.map/);
 });
+
+test("список входящих показывает последнее сообщение и время", () => {
+  assert.match(component, /latestConversation/);
+  assert.match(component, /communications-client-preview/);
+  assert.match(component, /communications-client-time/);
+});
+
+test("вложения Meta отображаются в истории переписки", () => {
+  assert.match(component, /message\.metadata\?\.attachments/);
+  assert.match(component, /communications-attachments/);
+  assert.match(component, /ui\.openAttachment/);
+  assert.match(locale, /openAttachment:/);
+});

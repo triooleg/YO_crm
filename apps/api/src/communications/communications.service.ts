@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   HttpException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import {
@@ -25,7 +26,7 @@ import {
   MetaIntegrationDto,
   SendMessageDto,
 } from "./communications.dto";
-import { normalizeMetaWebhook, safeTokenEqual, verifyMetaSignature, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConversationExternalId, normalizeMetaControlEvents, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaInboundMessage } from "./meta-webhook";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
@@ -41,6 +42,7 @@ class TooManyRequestsException extends HttpException {
 }
 @Injectable()
 export class CommunicationsService {
+  private readonly logger = new Logger(CommunicationsService.name);
   constructor(private p: PrismaService) {}
   list() {
     return this.p.client.findMany({
@@ -445,41 +447,85 @@ export class CommunicationsService {
     return challenge;
   }
   async receiveMetaWebhook(rawBody: Buffer, signature: string | undefined, payload: unknown) {
-    const values = await this.sectionValues("integration.meta"), secret = this.secretValue(values, "appSecretEncrypted");
-    if (values.enabled !== true || !secret || !verifyMetaSignature(rawBody, signature, secret)) throw new ForbiddenException("Подпись Meta webhook недействительна");
-    const events = normalizeMetaWebhook(payload).slice(0, 100).filter(event => {
-      const expected = event.channel === "FACEBOOK" ? values.pageId : event.channel === "INSTAGRAM" ? values.instagramAccountId : values.whatsappPhoneNumberId;
-      return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+    const timestamp = new Date().toISOString(), summaries = summarizeMetaWebhook(payload);
+    for (const summary of summaries.length ? summaries : [{ object: "unknown", eventType: "unknown", hasText: false, attachmentCount: 0, attachmentTypes: [], isEcho: false, isTest: false }]) this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RECEIVED", timestamp, ...summary }));
+    try {
+      const values = await this.sectionValues("integration.meta"), secret = this.secretValue(values, "appSecretEncrypted");
+      if (values.enabled !== true || !secret || !verifyMetaSignature(rawBody, signature, secret)) {
+        this.logger.warn(JSON.stringify({ event: "META_WEBHOOK_SIGNATURE_REJECTED", timestamp, httpStatus: 403, channelEnabled: values.enabled === true, appSecretConfigured: Boolean(secret) }));
+        throw new ForbiddenException("Подпись Meta webhook недействительна");
+      }
+      const normalized = normalizeMetaWebhook(payload).slice(0, 100), events = normalized.filter(event => {
+        const expected = event.channel === "FACEBOOK" ? values.pageId : event.channel === "INSTAGRAM" ? values.instagramAccountId : values.whatsappPhoneNumberId;
+        const matches = typeof expected === "string" && expected !== "" && event.receiverId === expected;
+        if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderId: event.externalSenderId, recipientId: event.receiverId, mid: event.externalMessageId }));
+        return matches;
+      });
+      const persisted = await Promise.all(events.map(async event => {
+        this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderId: event.externalSenderId, recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
+        return this.persistInbound(event, "META");
+      }));
+      const accepted = persisted.filter(Boolean).length;
+      const controls = normalizeMetaControlEvents(payload).filter(event => {
+        const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
+        return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+      });
+      const controlResults = await Promise.all(controls.map(event => this.applyMetaControl(event)));
+      const controlsAccepted = controlResults.filter(Boolean).length;
+      if (events.length || controls.length) { const section = "integration.meta", key = "lastWebhookAt", value = new Date().toISOString(); await this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } }); }
+      const result = { received: true, accepted, ignored: Math.max(0, summaries.length - accepted - controlsAccepted) };
+      this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RESPONDED", timestamp, httpStatus: 200, normalized: normalized.length, scoped: events.length, accepted, controls: controls.length, controlsAccepted, ignored: result.ignored }));
+      return result;
+    } catch (error) {
+      if (!(error instanceof ForbiddenException)) this.logger.error(JSON.stringify({ event: "META_MESSAGE_ERROR", timestamp, httpStatus: 500, errorType: error instanceof Error ? error.constructor.name : "UnknownError" }));
+      throw error;
+    }
+  }
+  private async applyMetaControl(event: MetaControlEvent) {
+    if (!event.externalMessageId) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, recipientId: event.receiverId, reason: "noMessageId" })); return false; }
+    return this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-control:" + event.channel + ":" + event.externalMessageId}, 0))`;
+      const message = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel: event.channel as ContactChannel } }, select: { id: true, content: true, metadata: true } });
+      if (!message) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, mid: event.externalMessageId, recipientId: event.receiverId, reason: "messageNotFound" })); return false; }
+      const oldMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Prisma.JsonObject : {};
+      const updated = await tx.message.update({ where: { id: message.id }, data: { ...(event.editedText ? { content: event.editedText } : {}), metadata: { ...oldMetadata, lastMetaControl: { type: event.eventType, receivedAt: event.receivedAt.toISOString() } } } });
+      await tx.auditLog.create({ data: { action: "UPDATE", entityType: "InboundMessage", entityId: message.id, before: { contentChanged: false }, after: { metaControl: event.eventType, contentChanged: Boolean(event.editedText) } } });
+      this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_APPLIED", eventType: event.eventType, mid: event.externalMessageId, messageId: updated.id, recipientId: event.receiverId }));
+      return true;
     });
-    let accepted = 0;
-    for (const event of events) if (await this.persistInbound(event)) accepted++;
-    if (events.length) { const section = "integration.meta", key = "lastWebhookAt", value = new Date().toISOString(); await this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } }); }
-    return { received: true, accepted, ignored: events.length - accepted };
   }
   async receiveChatwootWebhook(rawBody: Buffer, signature: string | undefined, token: string | undefined, payload: unknown) {
     const values = await this.sectionValues("integration.chatwoot"), secret = this.secretValue(values, "webhookSecretEncrypted");
     if (values.enabled !== true || !secret || (!verifyChatwootSignature(rawBody, signature, secret) && !safeTokenEqual(token, secret))) throw new ForbiddenException("Проверка Chatwoot webhook не пройдена");
     const events = normalizeChatwootWebhook(payload).filter(event => chatwootScopeMatches(values, event));
     let accepted = 0;
-    for (const event of events) if (await this.persistInbound(event)) accepted++;
+    for (const event of events) if (await this.persistInbound(event, "CHATWOOT")) accepted++;
     return { received: true, accepted, ignored: events.length - accepted };
   }
-  private async persistInbound(event: MetaInboundMessage | ChatwootInboundMessage) {
+  private async persistInbound(event: MetaInboundMessage | ChatwootInboundMessage, provider: "META" | "CHATWOOT") {
     return this.p.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + event.externalMessageId}, 0))`;
-      const channel = event.channel as ContactChannel;
-      let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } } });
+      const channel = event.channel as ContactChannel, externalConversationId = provider === "META" ? metaConversationExternalId(event.receiverId, event.externalSenderId) : event.externalSenderId;
+      let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: externalConversationId, channel } } });
+      if (!conversation && provider === "META" && externalConversationId !== event.externalSenderId) {
+        const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
+        if (legacy && legacyConversationMatchesReceiver(legacy.messages[0]?.metadata, event.receiverId)) {
+          conversation = await tx.conversation.update({ where: { id: legacy.id }, data: { externalId: externalConversationId } });
+          await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel, identityScope: "receiverId+senderId" } } });
+        }
+      }
       const duplicate = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel } }, select: { id: true } });
-      if (duplicate) return false;
+      if (duplicate) { if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_DUPLICATE_SKIPPED", channel: event.channel, senderId: event.externalSenderId, mid: event.externalMessageId })); return false; }
       let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true } }) : null;
       let ambiguousMatches = 0;
       const match: Prisma.ClientWhereInput[] = [];
       if (event.email) match.push({ email: { equals: event.email, mode: "insensitive" } });
       const phone = event.phone || (channel === ContactChannel.WHATSAPP ? event.externalSenderId : undefined);
       if (phone) match.push({ phone: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } }, { whatsapp: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } });
-      if (channel === ContactChannel.FACEBOOK) match.push({ facebook: event.externalSenderId });
-      if (channel === ContactChannel.INSTAGRAM) match.push({ instagram: event.externalSenderId });
+      const sameChannelIdentity = provider === "META" && !conversation ? await tx.conversation.findFirst({ where: { channel, OR: [{ externalId: event.externalSenderId }, { externalId: { endsWith: ":" + event.externalSenderId } }] }, select: { id: true } }) : null;
+      if (channel === ContactChannel.FACEBOOK && !sameChannelIdentity) match.push({ facebook: event.externalSenderId });
+      if (channel === ContactChannel.INSTAGRAM && !sameChannelIdentity) match.push({ instagram: event.externalSenderId });
       if (!client && match.length) {
         const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
         const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true }, take: 2 });
@@ -489,6 +535,7 @@ export class CommunicationsService {
         clientId = client?.id;
         linkedByContact = Boolean(client);
       }
+      if (client && provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_FOUND", channel: event.channel, senderId: event.externalSenderId, clientId: client.id }));
       if (client?.archivedAt) {
         const before = client;
         client = await tx.client.update({ where: { id: client.id }, data: { archivedAt: null }, select: { id: true, archivedAt: true, lastContactAt: true } });
@@ -503,15 +550,17 @@ export class CommunicationsService {
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Client", entityId: created.id, after: { source: event.channel, createdFromInbound: true } } });
         if (ambiguousMatches) await tx.auditLog.create({ data: { action: "AMBIGUOUS", entityType: "InboundIdentity", entityId: created.id, after: { channel: event.channel, candidateCount: ambiguousMatches, resolution: "newLead" } } });
         await tx.activity.create({ data: { clientId: created.id, type: "CLIENT_CREATED_FROM_INBOUND", summary: "Клиент создан из входящего сообщения", metadata: { channel: event.channel } } });
+        if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_CREATED", channel: event.channel, senderId: event.externalSenderId, clientId: created.id }));
       }
       if (!conversation) {
-        conversation = await tx.conversation.upsert({ where: { clientId_channel: { clientId, channel } }, create: { clientId, channel, externalId: event.externalSenderId }, update: { externalId: event.externalSenderId, archivedAt: null } });
+        conversation = await tx.conversation.upsert({ where: { clientId_channel: { clientId, channel } }, create: { clientId, channel, externalId: externalConversationId }, update: { externalId: externalConversationId, archivedAt: null } });
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, createdFromInbound: true } } });
         if (linkedByContact) await tx.auditLog.create({ data: { action: "LINK", entityType: "InboundIdentity", entityId: conversation.id, after: { clientId, channel, matchedBy: event.email ? "email" : event.phone ? "phone" : "channelIdentifier" } } });
+        if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CONVERSATION_CREATED", channel: event.channel, senderId: event.externalSenderId, conversationId: conversation.id }));
       } else if (conversation.archivedAt) {
         conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { archivedAt: null } });
         await tx.auditLog.create({ data: { action: "REACTIVATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, archived: false } } });
-      }
+      } else if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CONVERSATION_FOUND", channel: event.channel, senderId: event.externalSenderId, conversationId: conversation.id }));
       const receivedAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
       const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, externalId: event.externalMessageId, createdAt: receivedAt, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined } as Prisma.InputJsonValue } });
       const conversationTime = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > receivedAt.getTime() ? conversation.lastMessageAt : receivedAt;
@@ -520,6 +569,7 @@ export class CommunicationsService {
       await tx.client.update({ where: { id: clientId }, data: { lastContactAt: contactTime } });
       await tx.activity.create({ data: { clientId, type: "INBOUND_MESSAGE_RECEIVED", summary: "Получено входящее сообщение: " + event.channel, metadata: { messageId: message.id, channel: event.channel } } });
       await tx.auditLog.create({ data: { action: "CREATE", entityType: "InboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId } } });
+      if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_CREATED", channel: event.channel, senderId: event.externalSenderId, recipientId: event.receiverId, mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id, attachmentCount: event.metadata.attachments?.length ?? 0 }));
       return true;
     });
   }
