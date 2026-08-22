@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-08-22 — публичные документы и удаление данных Meta (готово к релизу)
+## 2026-08-22 — публичные документы и удаление данных Meta (развёрнуто)
 
 - Добавлены публичные страницы `/legal/privacy`, `/legal/terms` и
   `/legal/data-deletion` в общей типографике Ubuntu и с русскими текстами из
@@ -20,6 +20,11 @@
   URL `https://crm.yoleotard.com/legal/terms`, data deletion instructions
   `https://crm.yoleotard.com/legal/data-deletion`, callback
   `https://crm.yoleotard.com/api/communications/meta/data-deletion`.
+- Коммиты `8a500fa` и `09cbe0d` отправлены в `origin/main` и развёрнуты в
+  `/home/trio/yoleotard-crm`; новая миграция не требовалась. Повторный smoke:
+  домен, `/api/health`, все три legal URL и PNG-иконка возвращают 200; неверный
+  `signed_request` безопасно отклоняется 400; API и web-контейнеры healthy,
+  новых ошибок в логах нет. Docker standalone теперь явно включает `public`.
 
 ## 2026-08-22 — Facebook OAuth отделён от Instagram scopes (развёрнуто)
 
