@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-08-22 — диагностика и усиление Meta inbound (готово локально)
+## 2026-08-22 — диагностика и усиление Meta inbound (развёрнуто)
 
 - Production ingress доказал корневую причину текущего отсутствия Messenger:
   за 48 часов Meta не отправила ни одного POST на webhook. Контрольный POST с
@@ -23,8 +23,14 @@
   preview/время/unread/attachment видимы, console warn/error пуст.
 - Новая Prisma migration не требуется. Проверка: API 113/113, web 98/98,
   database 4/4, API/web typecheck и чистый production build PASS. Regression,
-  business/security и visual reviews PASS. Реальный Messenger E2E остаётся
-  pending: после deployment нужно отправить новые `CRM REAL TEST 001/002` с
+  business/security, visual и release reviews PASS.
+- Коммит `1a1ae6a` отправлен в `origin/main` и развёрнут в compose-проект
+  `yoleotard-crm`. `https://crm.yoleotard.com/` и `/api/health` возвращают 200;
+  postgres, redis и uploads = `up`. Контрольный POST с неверной HMAC-подписью
+  после deployment вернул 403, а production API записал новые безопасные
+  `META_WEBHOOK_RECEIVED` и `META_WEBHOOK_SIGNATURE_REJECTED`.
+- Реальный Messenger E2E остаётся pending: нужно отправить новые
+  `CRM REAL TEST 001/002` с
   другого Facebook-аккаунта и сопоставить ingress log, structured API log, DB
   и «Входящие».
 
