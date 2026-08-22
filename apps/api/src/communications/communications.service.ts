@@ -307,7 +307,7 @@ export class CommunicationsService {
     const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_messages");
+    url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,pages_messaging");
     return { url: url.toString() };
   }
   async metaOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
@@ -323,7 +323,7 @@ export class CommunicationsService {
     const permissions = await this.metaGraph<{ data: Array<{ permission: string; status: string }> }>("me/permissions", token.access_token!, {}, "GET", appSecret);
     const granted = new Set((permissions.data || []).filter(x => x.status === "granted").map(x => x.permission));
     for (const required of ["pages_show_list","pages_manage_metadata","pages_messaging"]) if (!granted.has(required)) throw new ForbiddenException("Facebook не предоставил обязательное разрешение: " + required);
-    const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id: string; username?: string } }> }>("me/accounts", token.access_token!, { fields: "id,name,access_token,instagram_business_account{id,username}" }, "GET", appSecret);
+    const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string }> }>("me/accounts", token.access_token!, { fields: "id,name,access_token" }, "GET", appSecret);
     const pages = (result.data || []).filter(page => page.id && page.name && page.access_token).slice(0, 100);
     if (!pages.length) throw new BadRequestException("В доступе Facebook не найдено ни одной публичной страницы");
     const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], pages }));
@@ -341,7 +341,7 @@ export class CommunicationsService {
     return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Meta</title><body><h1>${ok?"Авторизация завершена":"Авторизация не завершена"}</h1><p>${ok?"Вернитесь в CRM и выберите страницу Facebook.":"Закройте окно и повторите подключение из CRM."}</p></body></html>`;
   }
   private decodeMetaOauthPending(encrypted:string,u:User,sessionHash:string){
-    let pending: { userId:string;sessionHash:string;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id: string; username?: string } }> };
+    let pending: { userId:string;sessionHash:string;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string }> };
     try { pending = JSON.parse(decryptSecret(encrypted)); } catch { throw new BadRequestException("Не удалось прочитать авторизацию Facebook"); }
     if (pending.userId!==u.id||pending.sessionHash!==sessionHash)throw new ForbiddenException("Авторизация Facebook принадлежит другой сессии");
     return pending;
@@ -357,7 +357,7 @@ export class CommunicationsService {
     const pointer=await this.p.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});
     if(!pointer||typeof pointer.value!=="string")throw new NotFoundException("Авторизация Facebook ещё не завершена");
     const pending = await this.metaOauthPending(pointer.value,u,sessionHash);
-    return { flowId:pointer.value,pages: pending.pages.map(page => ({ id: page.id, name: page.name, instagramAccountId: page.instagram_business_account?.id || "", instagramUsername: page.instagram_business_account?.username || "" })) };
+    return { flowId:pointer.value,pages: pending.pages.map(page => ({ id: page.id, name: page.name, instagramAccountId: "", instagramUsername: "" })) };
   }
   async metaOauthConnect(flowId:string,pageId: string, u: User,sessionHash:string) {
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
@@ -365,7 +365,6 @@ export class CommunicationsService {
     const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging"];
     const missingPagePermissions = requiredPagePermissions.filter(permission => !pending.permissions.includes(permission));
     if (missingPagePermissions.length) throw new ForbiddenException("Facebook не предоставил обязательные разрешения для входящих сообщений: " + missingPagePermissions.join(", "));
-    if(page.instagram_business_account&&(!pending.permissions.includes("instagram_basic")||!pending.permissions.includes("instagram_manage_messages")))throw new ForbiddenException("Facebook не предоставил разрешения для сообщений Instagram");
     const encrypted=await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});await tx.appSetting.delete({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});return row.value});
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
@@ -374,10 +373,10 @@ export class CommunicationsService {
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
-        const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId: page.instagram_business_account?.id || "", pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
+        const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
         for (const [key, value] of Object.entries(connectedValues)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
         await tx.appSetting.upsert({where:{section_key:{section,key:"tokenExpiresAt"}},create:{section,key:"tokenExpiresAt",value:pending.tokenExpiresAt??0},update:{value:pending.tokenExpiresAt??0}});
-        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, instagramAccountId: page.instagram_business_account?.id || null, ...confirmed.auditAfter } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, ...confirmed.auditAfter } } });
       });
     } catch (error) {
       await this.p.$transaction(async tx=>{

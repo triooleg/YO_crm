@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-22 — Facebook OAuth отделён от Instagram scopes (готово локально)
+
+- Реальный OAuth после исправления домена дошёл до Meta и был отклонён как
+  `Invalid Scopes: instagram_basic, instagram_manage_messages`: в приложении
+  пока включён Facebook Messenger, но не Instagram messaging use case.
+- Основной KeyCRM-подобный сценарий подключения Facebook Page теперь просит
+  только `pages_show_list`, `pages_manage_metadata`, `pages_messaging` и не
+  читает Instagram-поля через Graph. Существующий `instagramAccountId` при
+  переподключении Facebook не очищается. Instagram будет подключаться отдельным
+  явным сценарием после включения соответствующего продукта Meta.
+- Проверка: Meta OAuth tests 11/11, API typecheck и build PASS.
+
 ## 2026-08-22 — Meta OAuth в режиме временно отключённого входа (развёрнуто)
 
 - Кнопка «Переподключить Facebook» ошибочно отклоняла OAuth при

@@ -34,6 +34,13 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
   assert.match(service, /subscribed_apps/);
 });
 
+test("Facebook Page connection does not request unavailable Instagram scopes", () => {
+  assert.match(service, /scope",\s*"pages_show_list,pages_manage_metadata,pages_messaging"/);
+  assert.doesNotMatch(service, /scope",[^\n]*instagram_basic/);
+  assert.doesNotMatch(service, /scope",[^\n]*instagram_manage_messages/);
+  assert.doesNotMatch(service, /if\(page\.instagram_business_account[\s\S]*Facebook не предоставил разрешения для сообщений Instagram/);
+});
+
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
   assert.match(service, /pages_manage_metadata/);
   assert.match(service, /pages_messaging/);
