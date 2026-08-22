@@ -578,4 +578,6 @@
 - Facebook sender names are enriched asynchronously after message persistence, scoped by Page ID + PSID, with activity and audit history.
 - Inbound LEAD contacts can be promoted to ACTIVE clients without duplicating conversations; promotion is serialized and preserves acquisition source.
 - Image attachments open in an accessible lightbox with Escape, focus containment, and focus restoration.
-- Final `pnpm quality:check` and mandatory business, regression, and accessibility reviews passed. Production deployment and live visual smoke remain next.
+- Final `pnpm quality:check` passed: web 104 tests, API 124 tests, database tests, typecheck and production builds. Mandatory business, regression, release and accessibility reviews passed.
+- Deployment: commit `541b3db` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`; API and PostgreSQL/Redis health checks are green and the web container is running.
+- Production browser smoke: newest Facebook dialog is first; Facebook source badges are visible in the client list, header and message; the inbound-client action is visible. Clicking the real inbound image opens the accessible centered lightbox with dimmed backdrop and enlarged image. Existing placeholder sender names are upgraded on the next inbound event because enrichment is intentionally asynchronous after message persistence.
