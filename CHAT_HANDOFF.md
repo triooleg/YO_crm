@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-08-22 — Meta OAuth в режиме временно отключённого входа (готово локально)
+## 2026-08-22 — Meta OAuth в режиме временно отключённого входа (развёрнуто)
 
 - Кнопка «Переподключить Facebook» ошибочно отклоняла OAuth при
   `AUTH_DISABLED=true`, хотя SessionGuard в этом режиме уже назначает активного
@@ -14,6 +14,13 @@
 - Runtime-тест подтверждает изоляцию двух браузеров без входа и отклонение
   подделанной setup-cookie. Проверка: targeted Meta/auth tests 11/11, API
   typecheck и build PASS.
+- Сервер также подписывает `expiresAt` и сам отклоняет setup-cookie после 10
+  минут, независимо от поведения браузера. Финальная проверка: API 116/116 и
+  `pnpm quality:check` PASS; все mandatory reviews и release gate PASS.
+- Коммиты `cbc7ad3`, `65c3d10` и `1897546` развёрнуты. Production smoke:
+  `/api/health` = 200, postgres/redis/uploads = `up`; OAuth start = 200,
+  возвращает URL `www.facebook.com` и устанавливает cookie с HttpOnly, Secure,
+  SameSite=Lax и Max-Age=600.
 
 ## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (развёрнуто)
 
