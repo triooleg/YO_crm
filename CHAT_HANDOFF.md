@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (готово локально)
+## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (развёрнуто)
 
 - После отправки владельцем `CRM REAL TEST 001` с другого Facebook-аккаунта
   новый POST отсутствовал и в Nginx Proxy Manager, и в structured API log;
@@ -15,6 +15,10 @@
   записывается без подтверждённого поля `messages`.
 - Проверка локального изменения: API 114/114, typecheck и build PASS. Prisma
   migration не требуется.
+- Коммит `2cd7e95` отправлен в `origin/main` и развёрнут; production domain и
+  `/api/health` = 200, postgres/redis/uploads = `up`. Повторный real Messenger
+  тест возможен только после переподключения Facebook с обязательными Page
+  permissions.
 
 ## 2026-08-22 — диагностика и усиление Meta inbound (развёрнуто)
 
