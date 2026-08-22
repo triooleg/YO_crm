@@ -276,7 +276,6 @@ export class CommunicationsService {
     if (!secret || secret.length < 32) throw new BadRequestException("Не настроен ключ шифрования CRM");
     return secret;
   }
-  private requireMetaOauthAuth() { if (process.env.AUTH_DISABLED?.toLowerCase() === "true") throw new ForbiddenException("Для подключения Meta включите авторизацию CRM"); }
   private metaGraphVersion() { return process.env.META_GRAPH_VERSION || "v23.0"; }
   private metaOauthRedirect() { return this.publicOrigin() + "/api/communications/meta/oauth/callback"; }
   private async metaGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", appSecret?: string) {
@@ -295,7 +294,6 @@ export class CommunicationsService {
     return body;
   }
   async metaOauthStart(u: User, sessionHash: string) {
-    this.requireMetaOauthAuth();
     const values = await this.sectionValues("integration.meta"), appId = typeof values.appId === "string" ? values.appId : "";
     if (!appId || !this.secretValue(values, "appSecretEncrypted")) throw new BadRequestException("Сначала сохраните ID и секрет приложения Meta");
     const nonce = randomBytes(16).toString("hex");
@@ -313,7 +311,6 @@ export class CommunicationsService {
     return { url: url.toString() };
   }
   async metaOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
-    this.requireMetaOauthAuth();
     if (!code || !signedState || code.length > 2048 || signedState.length > 4096) throw new BadRequestException("Meta не вернула корректный код авторизации");
     let state; try { state = verifyMetaOauthState(signedState, this.metaOauthSecret()); } catch { throw new ForbiddenException("Сеанс подключения Meta недействителен или истёк"); }
     if (state.userId !== u.id || state.sessionHash !== sessionHash) throw new ForbiddenException("Сеанс подключения принадлежит другой сессии");
@@ -357,14 +354,12 @@ export class CommunicationsService {
     return pending;
   }
   async metaOauthPages(u: User,sessionHash:string) {
-    this.requireMetaOauthAuth();
     const pointer=await this.p.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});
     if(!pointer||typeof pointer.value!=="string")throw new NotFoundException("Авторизация Facebook ещё не завершена");
     const pending = await this.metaOauthPending(pointer.value,u,sessionHash);
     return { flowId:pointer.value,pages: pending.pages.map(page => ({ id: page.id, name: page.name, instagramAccountId: page.instagram_business_account?.id || "", instagramUsername: page.instagram_business_account?.username || "" })) };
   }
   async metaOauthConnect(flowId:string,pageId: string, u: User,sessionHash:string) {
-    this.requireMetaOauthAuth();
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
     if (!page) throw new BadRequestException("Выбранная страница отсутствует в авторизации Facebook");
     const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging"];

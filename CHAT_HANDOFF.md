@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-22 — Meta OAuth в режиме временно отключённого входа (готово локально)
+
+- Кнопка «Переподключить Facebook» ошибочно отклоняла OAuth при
+  `AUTH_DISABLED=true`, хотя SessionGuard в этом режиме уже назначает активного
+  OWNER для остальных административных операций.
+- OAuth session binding теперь использует реальную HttpOnly session cookie при
+  включённой авторизации. Только при явном `AUTH_DISABLED=true` применяется
+  стабильная привязка `auth-disabled:<owner id>`; роли OWNER/ADMIN продолжают
+  проверяться Guards. После возврата авторизации отсутствие cookie снова
+  автоматически даёт 401.
+- Проверка: targeted Meta/auth tests 10/10, API typecheck и build PASS.
+
 ## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (развёрнуто)
 
 - После отправки владельцем `CRM REAL TEST 001` с другого Facebook-аккаунта

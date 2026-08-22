@@ -69,8 +69,13 @@ test("page access tokens are encrypted and never returned in the page picker", (
   assert.doesNotMatch(service, /metaOauthPages[\s\S]*?return\s+\{\s*pages:[^;]*access_token/);
 });
 
-test("OAuth fails closed without login and keeps Graph tokens out of URLs",()=>{
-  assert.match(service,/AUTH_DISABLED[\s\S]*Для подключения Meta включите авторизацию CRM/);
+test("OAuth uses the temporary owner binding only when login is explicitly disabled",()=>{
+  assert.match(controller,/AUTH_DISABLED[\s\S]*auth-disabled:[\s\S]*u\.id/);
+  assert.match(controller,/Для подключения Meta войдите в CRM/);
+  assert.doesNotMatch(service,/AUTH_DISABLED[\s\S]*Для подключения Meta включите авторизацию CRM/);
+});
+
+test("OAuth keeps Graph tokens out of URLs",()=>{
   assert.match(service,/Authorization:\s*"Bearer "\s*\+\s*token/);
   assert.match(service,/Content-Type":\s*"application\/x-www-form-urlencoded"/);
   assert.match(service,/fb_exchange_token/);
