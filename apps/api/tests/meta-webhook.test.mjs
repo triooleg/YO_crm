@@ -28,7 +28,7 @@ test("Facebook sender profile is resolved and technical lead names are upgraded"
 });
 
 test("Meta subscription and persistence include outbound message echoes", () => {
-  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,messaging_postbacks,message_reads,messaging_optins"/);
+  assert.match(service, /subscribed_fields:\s*"messages,messaging_postbacks,message_reads,messaging_optins"/);
   assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
   assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
   assert.match(service, /status:\s*MessageStatus\.SENT/);

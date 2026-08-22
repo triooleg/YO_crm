@@ -29,8 +29,6 @@ export function confirmMetaPageSubscription(input: {
   const own = input.subscriptions.find((item) => item.id === input.appId);
   if (!own?.subscribed_fields?.includes("messages"))
     throw new Error("MESSAGES_NOT_SUBSCRIBED");
-  if (!own.subscribed_fields.includes("message_echoes"))
-    throw new Error("MESSAGE_ECHOES_NOT_SUBSCRIBED");
   return {
     settings: { subscriptionVerifiedAt: input.verifiedAt, pageName: input.page.name || "" },
     auditAfter: { deliveryVerified: true, pageId: input.pageId, subscribedFields: own.subscribed_fields },
