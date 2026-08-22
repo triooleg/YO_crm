@@ -7,10 +7,20 @@ import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
 import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MessageTemplateDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
+import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 
 @Controller("communications")@UseGuards(SessionGuard,RolesGuard)
 export class CommunicationsController{constructor(private c:CommunicationsService){}
-private sessionBinding(r:Request,u:User){const token=r.cookies?.yoleotard_crm_session;if(typeof token==="string"&&token)return createHash("sha256").update(token).digest("hex");if(process.env.AUTH_DISABLED?.toLowerCase()==="true")return createHash("sha256").update("auth-disabled:"+u.id).digest("hex");throw new UnauthorizedException("Для подключения Meta войдите в CRM")}
+private sessionBinding(r:Request,u:User,res?:Response,create=false){
+ const reviewMode=process.env.AUTH_DISABLED?.toLowerCase()==="true";
+ if(!reviewMode){const token=r.cookies?.yoleotard_crm_session;if(typeof token==="string"&&token)return createHash("sha256").update(token).digest("hex");throw new UnauthorizedException("Для подключения Meta войдите в CRM")}
+ const secret=process.env.SETTINGS_ENCRYPTION_KEY||"",cookieName="yoleotard_meta_setup";
+ if(!secret)throw new UnauthorizedException("Безопасная сессия подключения Meta не настроена");
+ let token=typeof r.cookies?.[cookieName]==="string"?r.cookies[cookieName]:undefined,binding=metaSetupBinding(token,secret);
+ if(!binding&&create&&res){token=issueMetaSetupToken(secret);binding=metaSetupBinding(token,secret);res.cookie(cookieName,token,{httpOnly:true,sameSite:"lax",secure:true,path:"/api/communications/meta/oauth",maxAge:10*60*1000})}
+ if(!binding)throw new UnauthorizedException("Сессия подключения Meta истекла. Нажмите «Переподключить Facebook» ещё раз");
+ return binding;
+}
 @Get()@Roles("OWNER","ADMIN","MANAGER")list(){return this.c.list()}
 @Get("templates")@Roles("OWNER","ADMIN","MANAGER")templates(){return this.c.templates()}
 @Post("templates")@Roles("OWNER","ADMIN")createTemplate(@Body()d:MessageTemplateDto,@Req()r:Request&{user:User}){return this.c.createTemplate(d,r.user)}
@@ -20,7 +30,7 @@ private sessionBinding(r:Request,u:User){const token=r.cookies?.yoleotard_crm_se
 @Patch("integrations/:channel")@Roles("OWNER","ADMIN")saveIntegration(@Param("channel")channel:string,@Body()d:IntegrationSettingsDto,@Req()r:Request&{user:User}){return this.c.saveIntegration(channel,d,r.user)}
 @Get("meta/settings")@Roles("OWNER","ADMIN")metaSettings(){return this.c.metaSettings()}
 @Patch("meta/settings")@Roles("OWNER","ADMIN")saveMetaSettings(@Body()d:MetaIntegrationDto,@Req()r:Request&{user:User}){return this.c.saveMetaSettings(d,r.user)}
-@Get("meta/oauth/start")@Roles("OWNER","ADMIN")metaOauthStart(@Req()r:Request&{user:User}){return this.c.metaOauthStart(r.user,this.sessionBinding(r,r.user))}
+@Get("meta/oauth/start")@Roles("OWNER","ADMIN")metaOauthStart(@Req()r:Request&{user:User},@Res({passthrough:true})res:Response){return this.c.metaOauthStart(r.user,this.sessionBinding(r,r.user,res,true))}
 @Get("meta/oauth/callback")@Roles("OWNER","ADMIN")async metaOauthCallback(@Query("code")code:string,@Query("state")state:string,@Req()r:Request&{user:User},@Res()res:Response){try{await this.c.metaOauthCallback(code,state,r.user,this.sessionBinding(r,r.user));res.type("html").send(this.c.metaOauthResultHtml(true))}catch{res.status(400).type("html").send(this.c.metaOauthResultHtml(false))}}
 @Get("meta/oauth/pages")@Roles("OWNER","ADMIN")metaOauthPages(@Req()r:Request&{user:User}){return this.c.metaOauthPages(r.user,this.sessionBinding(r,r.user))}
 @Post("meta/oauth/connect")@Roles("OWNER","ADMIN")metaOauthConnect(@Body()d:MetaOauthConnectDto,@Req()r:Request&{user:User}){return this.c.metaOauthConnect(d.flowId,d.pageId,r.user,this.sessionBinding(r,r.user))}

@@ -6,11 +6,14 @@
   `AUTH_DISABLED=true`, хотя SessionGuard в этом режиме уже назначает активного
   OWNER для остальных административных операций.
 - OAuth session binding теперь использует реальную HttpOnly session cookie при
-  включённой авторизации. Только при явном `AUTH_DISABLED=true` применяется
-  стабильная привязка `auth-disabled:<owner id>`; роли OWNER/ADMIN продолжают
-  проверяться Guards. После возврата авторизации отсутствие cookie снова
-  автоматически даёт 401.
-- Проверка: targeted Meta/auth tests 10/10, API typecheck и build PASS.
+  включённой авторизации. Только при явном `AUTH_DISABLED=true` сервер выдаёт
+  отдельную для каждого браузера случайную подписанную HttpOnly/Secure/SameSite
+  cookie `yoleotard_meta_setup` со сроком 10 минут; чужая или подделанная cookie
+  не принимается. Роли OWNER/ADMIN продолжают проверяться Guards. После возврата
+  авторизации отсутствие обычной session cookie снова автоматически даёт 401.
+- Runtime-тест подтверждает изоляцию двух браузеров без входа и отклонение
+  подделанной setup-cookie. Проверка: targeted Meta/auth tests 11/11, API
+  typecheck и build PASS.
 
 ## 2026-08-22 — реальный Messenger тест выявил недостающую подписку (развёрнуто)
 

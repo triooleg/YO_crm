@@ -8,9 +8,17 @@ import { createRequire } from "node:module";
 const controller = await readFile(new URL("../src/communications/communications.controller.ts", import.meta.url), "utf8");
 const service = await readFile(new URL("../src/communications/communications.service.ts", import.meta.url), "utf8");
 const helper = await readFile(new URL("../src/communications/meta-oauth.ts", import.meta.url), "utf8").catch(() => "");
+const setupHelper = await readFile(new URL("../src/communications/meta-setup-session.ts", import.meta.url), "utf8").catch(() => "");
 
 function loadHelper() {
   const javascript = ts.transpileModule(helper, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} }, require = createRequire(import.meta.url);
+  vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
+  return module.exports;
+}
+
+function loadSetupHelper() {
+  const javascript = ts.transpileModule(setupHelper, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} }, require = createRequire(import.meta.url);
   vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
   return module.exports;
@@ -70,9 +78,21 @@ test("page access tokens are encrypted and never returned in the page picker", (
 });
 
 test("OAuth uses the temporary owner binding only when login is explicitly disabled",()=>{
-  assert.match(controller,/AUTH_DISABLED[\s\S]*auth-disabled:[\s\S]*u\.id/);
+  assert.match(controller,/AUTH_DISABLED[\s\S]*yoleotard_meta_setup/);
+  assert.match(controller,/httpOnly:\s*true/);
+  assert.match(controller,/sameSite:\s*"lax"/);
+  assert.match(controller,/secure:\s*true/);
   assert.match(controller,/Для подключения Meta войдите в CRM/);
   assert.doesNotMatch(service,/AUTH_DISABLED[\s\S]*Для подключения Meta включите авторизацию CRM/);
+});
+
+test("two cookieless review browsers receive isolated signed Meta setup bindings",()=>{
+  const setup = loadSetupHelper(), secret = "review-mode-secret-that-is-long-enough";
+  const first = setup.issueMetaSetupToken(secret), second = setup.issueMetaSetupToken(secret);
+  assert.notEqual(first, second);
+  assert.notEqual(setup.metaSetupBinding(first, secret), setup.metaSetupBinding(second, secret));
+  assert.equal(setup.metaSetupBinding(first + "x", secret), null);
+  assert.equal(setup.metaSetupBinding("attacker-chosen", secret), null);
 });
 
 test("OAuth keeps Graph tokens out of URLs",()=>{
