@@ -44,8 +44,10 @@ generic order-status route.
 ## Phase 7 - Communications (in progress)
 
 Internal drafts, message references, templates, channel settings and timeline.
-External Chatwoot/e-mail ingestion and delivery remain pending credentials and
-integration work.
+Facebook Messenger inbound and text replies are implemented with scoped
+Page/PSID identity, audited delivery attempts and duplicate-send protection.
+Outbound attachments plus external Chatwoot/e-mail ingestion and delivery remain
+pending credentials and integration work.
 
 ## Phase 7.5 - Tasks Kanban (implemented locally; deployment pending)
 

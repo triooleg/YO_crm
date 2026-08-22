@@ -126,6 +126,29 @@ test("conversation and draft are created atomically", () => {
   );
   assert.doesNotMatch(x, /this\.p\.conversation\.upsert/);
 });
+test("outbound Facebook messages distinguish drafts from real Meta sends", () => {
+  assert.match(dto, /@IsIn\(\["DRAFT","SEND"\]asconst\)action/);
+  const x = service.slice(
+    service.indexOf("asyncsend"),
+    service.indexOf("@Injectable()exportclassAiAssistantService"),
+  );
+  assert.match(x, /d\.action==="SEND"/);
+  assert.match(x, /pageId\+"\/messages"/);
+  assert.match(x, /metaTextMessageParams\(recipientId,content\)/);
+  assert.match(x, /MessageStatus\.SENT/);
+  assert.match(x, /MessageStatus\.FAILED/);
+  assert.match(x, /externalId:result\.message_id/);
+  assert.match(x, /MESSAGE_SENT/);
+  assert.match(x, /MESSAGE_SEND_FAILED/);
+  assert.match(schema, /model MessageDeliveryAttempt/);
+  assert.match(schema, /clientRequestId\s+String\s+@unique/);
+  assert.match(x, /messageDeliveryAttempt\.findUnique/);
+  assert.match(x, /messageDeliveryAttempt\.create/);
+  assert.match(x, /runMetaSendOnce/);
+  assert.match(x, /archivedAt:null/);
+  assert.match(x, /GREATEST\(COALESCE\("lastMessageAt",\$\{m\.createdAt\}\),\$\{m\.createdAt\}\)/);
+  assert.match(x, /conversationId:conversation\.id,status:"PENDING"/);
+});
 test("AI requests are rate limited and concurrency bounded per user", () => {
   assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);
   assert.match(service, /AI_CONCURRENCY_LIMIT=2/);

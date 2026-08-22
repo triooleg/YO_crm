@@ -221,6 +221,7 @@ model Client {
   orders               Order[]
   activities           Activity[]
   conversations        Conversation[]
+  messageDeliveryAttempts MessageDeliveryAttempt[]
   workTasks            WorkTask[]
 
   @@index([displayName])
@@ -386,6 +387,7 @@ model Conversation {
   archivedAt DateTime?
   client Client @relation(fields:[clientId],references:[id],onDelete:Restrict)
   messages Message[]
+  deliveryAttempts MessageDeliveryAttempt[]
   @@unique([clientId,channel])
   @@unique([externalId,channel])
   @@index([lastMessageAt,archivedAt])
@@ -403,8 +405,23 @@ model Message {
   conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Restrict)
   author User? @relation("MessageAuthor",fields:[authorId],references:[id],onDelete:SetNull)
   workTasks WorkTask[]
+  deliveryAttempts MessageDeliveryAttempt[]
   @@index([conversationId, createdAt])
   @@unique([conversationId,externalId])
+}
+model MessageDeliveryAttempt {
+  id String @id @default(cuid())
+  clientRequestId String @unique
+  clientId String
+  conversationId String
+  status String
+  messageId String? @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  client Client @relation(fields:[clientId],references:[id],onDelete:Restrict)
+  conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Restrict)
+  message Message? @relation(fields:[messageId],references:[id],onDelete:Restrict)
+  @@index([conversationId, createdAt])
 }
 model TaskColumn {
   id String @id @default(cuid())

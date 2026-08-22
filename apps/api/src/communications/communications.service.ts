@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Injectable,
@@ -33,6 +34,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
+import { metaRecipientId, metaTextMessageParams, runMetaSendOnce } from "./meta-send";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
@@ -732,6 +734,77 @@ export class CommunicationsService {
     const content = d.content.trim();
     if (!content)
       throw new BadRequestException("Сообщение не может быть пустым");
+    if (d.action === "SEND") {
+      if (!d.clientRequestId)
+        throw new BadRequestException("Не задан идентификатор отправки");
+      if (channel !== ContactChannel.FACEBOOK)
+        throw new BadRequestException("Отправка для выбранного канала ещё не настроена. Сохраните сообщение как черновик");
+      const [conversation, values] = await Promise.all([
+        this.p.conversation.findFirst({ where: { clientId, channel, archivedAt: null } }),
+        this.sectionValues("integration.meta"),
+      ]);
+      const pageId = typeof values.pageId === "string" ? values.pageId : "",
+        pageToken = this.secretValue(values, "pageAccessTokenEncrypted"),
+        appSecret = this.secretValue(values, "appSecretEncrypted"),
+        recipientId = metaRecipientId(pageId, conversation?.externalId);
+      if (values.enabled !== true || !pageId || !pageToken)
+        throw new BadRequestException("Канал Facebook не подключён");
+      if (!conversation || !recipientId)
+        throw new BadRequestException("Для этого клиента нет активного диалога Facebook");
+      return runMetaSendOnce({
+        reserve: async () => {
+          const prior = await this.p.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
+            if (existing) return existing;
+            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
+            if (pending) return pending;
+            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
+            return null;
+          });
+          if (!prior) return { kind: "NEW" as const };
+          if (prior.clientId !== clientId || prior.conversationId !== conversation.id)
+            throw new ConflictException("Идентификатор отправки уже использован");
+          if (!prior.messageId) return { kind: "PENDING" as const };
+          const existing = await this.p.message.findUnique({ where: { id: prior.messageId } });
+          if (existing) return { kind: "DONE" as const, result: { ...existing, channel } };
+          throw new ConflictException("Результат отправки временно недоступен");
+        },
+        pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
+        deliver: async () => {
+          const result = await this.metaGraph<{ recipient_id?: string; message_id?: string }>(
+          pageId + "/messages",
+          pageToken,
+          metaTextMessageParams(recipientId, content),
+          "POST",
+          appSecret,
+          );
+          if (!result.message_id)
+            throw new BadGatewayException("Meta не вернула идентификатор сообщения");
+          return result;
+        },
+        persistFailure: async (error) => this.p.$transaction(async (tx) => {
+          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content, authorId: u.id, metadata: { provider: "META", failureType: error instanceof Error ? error.constructor.name : "UnknownError" } } });
+          await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
+          await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
+          await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: "Facebook не принял исходящее сообщение", metadata: { messageId: m.id, channel } } });
+          await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: m.id, after: { id: m.id, channel, status: m.status } } });
+          return { ...m, channel };
+        }),
+        persistSuccess: async (result) => this.p.$transaction(async (tx) => {
+        const m = await tx.message.upsert({
+          where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } },
+          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content, externalId: result.message_id, authorId: u.id, metadata: { provider: "META", recipientId, receiverId: pageId } },
+          update: { status: MessageStatus.SENT, content, authorId: u.id },
+        });
+        await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
+        await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "SENT", messageId: m.id } });
+        await tx.activity.create({ data: { clientId, type: "MESSAGE_SENT", summary: "Сообщение отправлено в Facebook", metadata: { messageId: m.id, channel } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "SEND", entityType: "Message", entityId: m.id, after: { id: m.id, channel, status: m.status, externalId: m.externalId } } });
+        return { ...m, channel };
+        }),
+      });
+    }
     return this.p.$transaction(async (tx) => {
       const c = await tx.conversation.upsert({
         where: { clientId_channel: { clientId, channel } },
@@ -768,7 +841,7 @@ export class CommunicationsService {
           after: m,
         },
       });
-      return m;
+      return { ...m, channel: c.channel };
     });
   }
 }

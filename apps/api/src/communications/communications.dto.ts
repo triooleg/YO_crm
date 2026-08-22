@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Length,
   Max,
   MaxLength,
@@ -25,6 +26,8 @@ export class ConversationQueryDto {
 export class SendMessageDto {
   @IsString() @Length(1, 5000) content!: string;
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
+  @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
+  @IsOptional() @IsUUID("4") clientRequestId?: string;
 }
 export class MessageTemplateDto {
   @IsString() @Length(1, 120) name!: string;

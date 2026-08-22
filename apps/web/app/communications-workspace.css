@@ -6,3 +6,8 @@
 @media(max-width:650px){.communications-client-side{display:none!important}}
 .communications-source-icons{display:inline-flex;align-items:center;gap:3px;flex-wrap:wrap}
 @media(max-width:650px){.communications-grid,.communications-chat,.communications-chat>header,.communications-chat>footer{width:100%;max-width:100%;min-width:0}.communications-chat{overflow:hidden}.communications-chat>header>*{min-width:0;overflow-wrap:anywhere}.communications-ai{max-width:100%}.communications-compose,.communications-compose textarea{min-width:0;width:100%}}
+.communications-compose{grid-template-columns:minmax(0,1fr) auto auto}
+.communications-compose .communications-draft{border:1px solid var(--line);background:#fff;color:var(--ink)}
+.communications-chat{min-height:0;height:100%}.communications-messages{min-height:0}
+@media(min-width:651px) and (max-width:1600px){.communications-compose{grid-template-columns:minmax(0,1fr) 150px}.communications-compose textarea{grid-row:1/3}.communications-compose button{grid-column:2}}
+@media(max-width:650px){.communications-compose{grid-template-columns:1fr 1fr}.communications-compose textarea{grid-column:1/-1}.communications-compose button{width:auto}}

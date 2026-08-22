@@ -11,8 +11,17 @@ test("входящие используют централизованные р�
   assert.match(component, /communicationsUi/);
   assert.match(component, /labels\.productionStatus/);
   assert.match(locale, /export const communicationsUi/);
-  for (const key of ["title", "search", "createClient", "loading", "emptyMessages", "saveDraft"])
+  for (const key of ["title", "search", "createClient", "loading", "emptyMessages", "saveDraft", "sendMessage", "sending"])
     assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("composer offers a real send action separately from saving a draft", () => {
+  assert.match(component, /async function save\(action: "DRAFT" \| "SEND"\)/);
+  assert.match(component, /JSON\.stringify\(\{ content: text\.trim\(\), channel: channel\(client\), action,/);
+  assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
+  assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
+  assert.match(component, /ui\.sendMessage/);
+  assert.match(component, /clientRequestId: crypto\.randomUUID\(\)/);
 });
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});

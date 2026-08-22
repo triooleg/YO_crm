@@ -40,6 +40,7 @@ type Message = {
   content: string;
   createdAt: string;
   channel: string;
+  status?: string;
   metadata?: { attachments?: Attachment[] };
 };
 type Template = {
@@ -327,17 +328,18 @@ export function CommunicationsWorkspace() {
     const d = e.key === "ArrowRight" ? 10 : -10;
     setWidth(side, widths.current[side] + d * (side === "left" ? 1 : -1), true);
   }
-  async function save() {
+  async function save(action: "DRAFT" | "SEND") {
     if (!client || !text.trim()) return;
     setBusy(true);
     setError("");
     try {
       const m = await api("/communications/" + client.id + "/messages", {
         method: "POST",
-        body: JSON.stringify({ content: text.trim() }),
+        body: JSON.stringify({ content: text.trim(), channel: channel(client), action, ...(action === "SEND" ? { clientRequestId: crypto.randomUUID() } : {}) }),
       });
       setMessages((x) => [...x, m]);
-      setText("");
+      if (m.status === "FAILED") setError(ui.sendFailed);
+      else setText("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -574,6 +576,7 @@ export function CommunicationsWorkspace() {
                       </div>
                     )}
                     <small>
+                      {message.status === "FAILED" ? ui.failed : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {new Date(message.createdAt).toLocaleString("ru")}
                     </small>
                   </article>
@@ -636,12 +639,20 @@ export function CommunicationsWorkspace() {
                 placeholder={ui.messagePlaceholder}
                 disabled={!client}
               />
-              <button
+              <button className="communications-draft"
                 disabled={busy || !client || !text.trim()}
-                onClick={() => void save()}
+                onClick={() => void save("DRAFT")}
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
+              {channel(client) === "FACEBOOK" && (
+                <button
+                  disabled={busy || !client || !text.trim()}
+                  onClick={() => void save("SEND")}
+                >
+                  {busy ? ui.sending : ui.sendMessage}
+                </button>
+              )}
             </div>
           </footer>
         </main>
