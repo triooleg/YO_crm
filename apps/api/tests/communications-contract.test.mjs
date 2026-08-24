@@ -84,12 +84,21 @@ test("channel credentials remain write-only and only safe status is returned", (
   assert.doesNotMatch(service, /accessToken:\s*v\.accessToken/);
   assert.doesNotMatch(service, /password:\s*v\.password/);
 });
-test("conversation reads do not mutate unread state", () => {
+test("opening a conversation explicitly marks its unread messages as read", () => {
+  assert.match(controller, /@Patch\(":clientId\/read"\)@Roles\("OWNER","ADMIN","MANAGER"\)/);
   const x = service.slice(
-    service.indexOf("async detail"),
-    service.indexOf("async send"),
+    service.indexOf("asyncmarkRead"),
+    service.indexOf("asyncdetail"),
   );
-  assert.doesNotMatch(x, /conversation\.update|unreadCount:0[^}]*update/);
+  assert.match(x, /clientId/);
+  assert.match(x, /archivedAt:null/);
+  assert.match(x, /newMap/);
+  assert.match(x, /"unreadVersion"=\$\{conversation\.unreadVersion\}/);
+  assert.match(x, /SET"unreadCount"=0/);
+  assert.match(x, /"clientId"=\$\{clientId\}/);
+  assert.match(x, /action:"READ"/);
+  assert.match(service, /unreadVersion:\{increment:1\}/);
+  assert.match(controller, /markRead\(id,d,r\.user\)/);
 });
 test("AI requires opt in and separate context consent", () => {
   assert.match(service, /enabled:v\.enabled===true/);

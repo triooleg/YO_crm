@@ -23,6 +23,7 @@ import {
   AiSettingsDto,
   ChatwootIntegrationDto,
   EmailIntegrationDto,
+  MarkConversationsReadDto,
   MessageTemplateDto,
   MetaIntegrationDto,
   SendMessageDto,
@@ -715,12 +716,47 @@ export class CommunicationsService {
       const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, externalId: event.externalMessageId, createdAt: receivedAt, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined } as Prisma.InputJsonValue } });
       const conversationTime = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > receivedAt.getTime() ? conversation.lastMessageAt : receivedAt;
       const contactTime = client?.lastContactAt && client.lastContactAt.getTime() > receivedAt.getTime() ? client.lastContactAt : receivedAt;
-      await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: conversationTime, unreadCount: { increment: 1 } } });
+      await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: conversationTime, unreadCount: { increment: 1 }, unreadVersion: { increment: 1 } } });
       await tx.client.update({ where: { id: clientId }, data: { lastContactAt: contactTime } });
       await tx.activity.create({ data: { clientId, type: "INBOUND_MESSAGE_RECEIVED", summary: "Получено входящее сообщение: " + event.channel, metadata: { messageId: message.id, channel: event.channel } } });
       await tx.auditLog.create({ data: { action: "CREATE", entityType: "InboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId } } });
       if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_CREATED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id, attachmentCount: event.metadata.attachments?.length ?? 0 }));
       return true;
+    });
+  }
+  async markRead(clientId: string, d: MarkConversationsReadDto, u: User) {
+    const client = await this.p.client.findFirst({
+      where: { id: clientId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!client) throw new NotFoundException("Клиент не найден");
+    return this.p.$transaction(async (tx) => {
+      let marked = 0;
+      const conversations = new Map(
+        d.conversations.map((conversation) => [conversation.id, conversation]),
+      );
+      for (const conversation of conversations.values()) {
+        const changed = await tx.$executeRaw`
+          UPDATE "Conversation"
+          SET "unreadCount" = 0
+          WHERE "id" = ${conversation.id}
+            AND "clientId" = ${clientId}
+            AND "archivedAt" IS NULL
+            AND "unreadVersion" = ${conversation.unreadVersion}
+            AND "unreadCount" > 0
+        `;
+        marked += changed;
+        if (changed) await tx.auditLog.create({
+          data: {
+            actorId: u.id,
+            action: "READ",
+            entityType: "Conversation",
+            entityId: conversation.id,
+            after: { clientId, unreadVersion: conversation.unreadVersion },
+          },
+        });
+      }
+      return { marked };
     });
   }
   async detail(clientId: string, channel?: ContactChannel) {

@@ -52,10 +52,9 @@ test("из активного входящего можно создать кл�
   assert.match(component, /createFromMessage/);
 });
 
-test("каждое сообщение показывает канал Meta, Chatwoot или e-mail", () => {
-  assert.match(component, /message\.channel/);
-  assert.match(component, /sourceBadge\(\{\s*source:\s*message\.channel/);
-  assert.match(component, /communications-message-channel/);
+test("канал Meta, Chatwoot или e-mail показывается возле клиента", () => {
+  assert.match(component, /clientBadges\(c\)/);
+  assert.match(component, /communications-source-icons/);
   assert.match(locale, /FACEBOOK:\s*"Facebook"/);
   assert.match(locale, /INSTAGRAM:\s*"Instagram"/);
   assert.match(locale, /WHATSAPP:\s*"WhatsApp"/);
@@ -94,6 +93,28 @@ test("новые входящие автоматически поднимают�
   assert.match(component, /setInterval\(\(\)\s*=>\s*void refreshInbox\(\),\s*5000\)/);
   assert.match(component, /selectedClientId\.current/);
   assert.match(component, /clearInterval\(timer\)/);
+});
+
+test("счётчик непрочитанных исчезает сразу после открытия диалога", () => {
+  assert.match(component, /function markClientRead/);
+  assert.match(component, /unreadCount:\s*0/);
+  assert.match(component, /\/communications\/" \+ c\.id \+ "\/read"/);
+  assert.match(component, /method:\s*"PATCH"/);
+  assert.match(component, /unreadVersion:\s*conversation\.unreadVersion/);
+  assert.match(component, /readVersion/);
+  assert.match(component, /readOperations/);
+  assert.match(component, /operation = \+\+readOperationSequence\.current/);
+  assert.match(component, /readOperations\.current\.get\(c\.id\) === operation/);
+  assert.match(component, /readOperations\.current\.delete\(c\.id\)/);
+  assert.match(component, /pendingReads/);
+  assert.match(component, /Math\.max/);
+  assert.doesNotMatch(component, /Promise\.all\(\[\s*api\("\/communications\/" \+ c\.id\)/);
+});
+
+test("канал показывается возле клиента, но не дублируется внутри сообщения", () => {
+  assert.match(component, /communications-source-icons/);
+  assert.match(component, /active\.label/);
+  assert.doesNotMatch(component, /communications-message-channel/);
 });
 
 test("вложения Meta отображаются в истории переписки", () => {

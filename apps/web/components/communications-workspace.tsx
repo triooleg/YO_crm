@@ -18,7 +18,9 @@ type Order = {
 };
 type Attachment = { type: string; url?: string; stickerId?: string };
 type ConversationPreview = {
+  id: string;
   unreadCount?: number;
+  unreadVersion?: number;
   channel?: string;
   lastMessageAt?: string;
   messages?: { content: string; createdAt: string }[];
@@ -142,6 +144,10 @@ export function CommunicationsWorkspace() {
   const widths = useRef({ ...defaults }),
     selectedClientId = useRef<string | undefined>(undefined),
     detailVersion = useRef(0),
+    readVersion = useRef(0),
+    readOperationSequence = useRef(0),
+    readOperations = useRef(new Map<string, number>()),
+    pendingReads = useRef(new Map<string, Map<string, number>>()),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
@@ -170,6 +176,84 @@ export function CommunicationsWorkspace() {
     side === "left" ? setLeft(n) : setRight(n);
     if (persist) persistWidths();
   }
+  async function markClientRead(c: Client) {
+    const conversations = c.conversations
+      .filter(
+        (conversation) =>
+          (conversation.unreadCount || 0) > 0,
+      )
+      .map((conversation) => ({
+        id: conversation.id,
+        unreadVersion: conversation.unreadVersion || 0,
+      }));
+    if (!conversations.length) return;
+    readVersion.current++;
+    const operation = ++readOperationSequence.current;
+    readOperations.current.set(c.id, operation);
+    const observed = new Map(
+      c.conversations.map((conversation) => [
+        conversation.id,
+        conversation.unreadCount || 0,
+      ]),
+    );
+    pendingReads.current.set(c.id, observed);
+    const readClient = {
+      ...c,
+      conversations: c.conversations.map((conversation) => ({
+        ...conversation,
+        unreadCount: 0,
+      })),
+    };
+    setClients((current) =>
+      current.map((candidate) =>
+        candidate.id === c.id ? readClient : candidate,
+      ),
+    );
+    setClient(readClient);
+    try {
+      await api("/communications/" + c.id + "/read", {
+        method: "PATCH",
+        body: JSON.stringify({ conversations }),
+      });
+    } catch {
+      if (readOperations.current.get(c.id) === operation) {
+        setClients((current) =>
+          current.map((candidate) =>
+            candidate.id === c.id
+              ? {
+                  ...candidate,
+                  conversations: candidate.conversations.map((conversation) => ({
+                    ...conversation,
+                    unreadCount:
+                      (conversation.unreadCount || 0) +
+                      (observed.get(conversation.id) || 0),
+                  })),
+                }
+              : candidate,
+          ),
+        );
+        setClient((current) =>
+          current?.id === c.id
+            ? {
+                ...current,
+                conversations: current.conversations.map((conversation) => ({
+                  ...conversation,
+                  unreadCount:
+                    (conversation.unreadCount || 0) +
+                    (observed.get(conversation.id) || 0),
+                })),
+              }
+            : current,
+        );
+      }
+    } finally {
+      if (readOperations.current.get(c.id) === operation) {
+        pendingReads.current.delete(c.id);
+        readOperations.current.delete(c.id);
+        readVersion.current++;
+      }
+    }
+  }
   async function open(c: Client) {
     selectedClientId.current = c.id;
     const request = { clientId: c.id, version: ++detailVersion.current };
@@ -178,6 +262,7 @@ export function CommunicationsWorkspace() {
     setMessagesLoading(true);
     setError("");
     try {
+      void markClientRead(c);
       const x = await api("/communications/" + c.id);
       if (
         isCurrentInboxDetailRequest(
@@ -231,8 +316,26 @@ export function CommunicationsWorkspace() {
   async function refreshInbox() {
     if (!canRefreshInbox(manualLoading.current, refreshing.current)) return;
     refreshing.current = true;
+    const observedReadVersion = readVersion.current;
     try {
-      const data = sortClients((await api("/communications")) as Client[]);
+      const data = sortClients((await api("/communications")) as Client[]).map(
+        (candidate) => {
+          const pending = pendingReads.current.get(candidate.id);
+          if (!pending) return candidate;
+          return {
+            ...candidate,
+            conversations: candidate.conversations.map((conversation) => ({
+              ...conversation,
+              unreadCount: Math.max(
+                (conversation.unreadCount || 0) -
+                  (pending.get(conversation.id) || 0),
+                0,
+              ),
+            })),
+          };
+        },
+      );
+      if (observedReadVersion !== readVersion.current) return;
       setClients(data);
       const selected = data.find((x) => x.id === selectedClientId.current);
       if (selected) {
@@ -529,21 +632,12 @@ export function CommunicationsWorkspace() {
               <State text={ui.loadingMessages} />
             ) : (
               messages.map((message) => {
-                const badge = sourceBadge({
-                    source: message.channel,
-                  } as Client),
-                  attachments = message.metadata?.attachments || [];
+                const attachments = message.metadata?.attachments || [];
                 return (
                   <article
                     key={message.id}
                     className={message.direction === "OUTBOUND" ? "out" : "in"}
                   >
-                    <span
-                      className="communications-message-channel"
-                      title={badge.label}
-                    >
-                      <span aria-hidden>{badge.icon}</span> {badge.label}
-                    </span>
                     <span>{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">

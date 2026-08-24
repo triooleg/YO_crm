@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsBoolean,
   IsEmail,
   IsEnum,
@@ -13,7 +15,9 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from "class-validator";
+import { Type } from "class-transformer";
 import { ContactChannel } from "@prisma/client";
 export const ALLOWED_AI_MODELS = [
   "gpt-4.1-mini",
@@ -22,6 +26,15 @@ export const ALLOWED_AI_MODELS = [
 ] as const;
 export class ConversationQueryDto {
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
+}
+export class ReadConversationDto {
+  @IsString() @Length(1, 80) id!: string;
+  @IsInt() @Min(0) unreadVersion!: number;
+}
+export class MarkConversationsReadDto {
+  @ArrayMinSize(1) @ArrayMaxSize(20) @ValidateNested({ each: true })
+  @Type(() => ReadConversationDto)
+  conversations!: ReadConversationDto[];
 }
 export class SendMessageDto {
   @IsString() @Length(1, 5000) content!: string;

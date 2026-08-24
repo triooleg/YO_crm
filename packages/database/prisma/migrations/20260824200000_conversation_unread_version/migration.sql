@@ -1,0 +1,2 @@
+ALTER TABLE "Conversation"
+ADD COLUMN "unreadVersion" INTEGER NOT NULL DEFAULT 0;
