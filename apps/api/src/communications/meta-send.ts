@@ -31,7 +31,7 @@ export function metaSendFailure(error: { code?: number; error_subcode?: number }
   const subcode = Number(error?.error_subcode) || undefined;
   let reason: MetaFailureReason = "PROVIDER_REJECTED";
   if (subcode === 2018278) reason = "REPLY_WINDOW_CLOSED";
-  else if (subcode === 2018300 || subcode === 2018171) reason = "THREAD_CONTROL_REQUIRED";
+  else if (subcode === 2018300 || subcode === 2018171 || (code === 27 && subcode === 1893034)) reason = "THREAD_CONTROL_REQUIRED";
   else if (code === 190) reason = "TOKEN_EXPIRED";
   else if (code === 10) reason = "PERMISSION_REQUIRED";
   else if (code === 551) reason = "RECIPIENT_UNAVAILABLE";

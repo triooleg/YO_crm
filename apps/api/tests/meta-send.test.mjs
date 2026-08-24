@@ -52,6 +52,13 @@ test("Meta send converts provider errors into safe actionable reasons", () => {
     reason: "THREAD_CONTROL_REQUIRED",
   });
   assert.equal(metaSendFailure({ code: 10, error_subcode: 2018171 }).reason, "THREAD_CONTROL_REQUIRED");
+  assert.deepEqual(JSON.parse(JSON.stringify(metaSendFailure({ code: 27, error_subcode: 1893034 }))), {
+    code: 27,
+    subcode: 1893034,
+    reason: "THREAD_CONTROL_REQUIRED",
+  });
+  assert.equal(metaSendFailure({ code: 27, error_subcode: 9999999 }).reason, "PROVIDER_REJECTED");
+  assert.equal(metaSendFailure({ code: 10, error_subcode: 1893034 }).reason, "PERMISSION_REQUIRED");
 });
 
 test("Meta send takes thread control once and retries the message once", async () => {
