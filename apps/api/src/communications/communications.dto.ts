@@ -36,17 +36,17 @@ export class MarkConversationsReadDto {
   @Type(() => ReadConversationDto)
   conversations!: ReadConversationDto[];
 }
+export class OutboundAttachmentDto {
+  @IsString() @Length(1, 120) path!: string;
+  @IsString() @Length(1, 180) name!: string;
+  @IsString() @IsIn(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "text/plain"]) mimeType!: string;
+}
 export class SendMessageDto {
   @ValidateIf((dto, value) => !dto.attachment || value !== undefined) @IsString() @Length(1, 5000) content?: string;
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
   @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
   @IsOptional() @IsUUID("4") clientRequestId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
-}
-export class OutboundAttachmentDto {
-  @IsString() @Length(1, 120) path!: string;
-  @IsString() @Length(1, 180) name!: string;
-  @IsString() @IsIn(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "text/plain"]) mimeType!: string;
 }
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;
