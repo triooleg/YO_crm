@@ -597,6 +597,7 @@ export const communicationsUi = {
   sendFailureReasons: {
     TOKEN_EXPIRED: "Токен Facebook истёк. Переподключите страницу в настройках",
     PERMISSION_REQUIRED: "Facebook не разрешил отправку. Переподключите страницу и подтвердите доступ к сообщениям",
+    THREAD_CONTROL_REQUIRED: "Диалог контролирует другое приложение Facebook. Назначьте YOLeotard CRM главным получателем сообщений",
     RECIPIENT_UNAVAILABLE: "Получатель сейчас недоступен для сообщений Facebook",
     REPLY_WINDOW_CLOSED: "Срок ответа Facebook истёк. Дождитесь нового сообщения клиента",
     RATE_LIMITED: "Facebook временно ограничил отправку. Повторите позже",

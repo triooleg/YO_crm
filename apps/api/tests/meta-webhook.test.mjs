@@ -21,6 +21,19 @@ test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", ()
   assert.deepEqual(JSON.parse(JSON.stringify(whatsapp.map(x => [x.channel, x.externalSenderId, x.externalMessageId, x.displayName, x.content]))), [["WHATSAPP", "3801", "wa-mid", "Anna", "WhatsApp text"]]);
 });
 
+test("normalizes Messenger standby messages while another app controls the thread", () => {
+  const [message] = normalizeMetaWebhook({ object: "page", entry: [{ id: "page-1", standby: [{ sender: { id: "psid-standby" }, recipient: { id: "page-1" }, timestamp: 1000, message: { mid: "standby-mid", text: "Standby text" } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(message)), {
+    channel: "FACEBOOK",
+    externalSenderId: "psid-standby",
+    externalMessageId: "standby-mid",
+    content: "Standby text",
+    receiverId: "page-1",
+    receivedAt: "1970-01-01T00:00:01.000Z",
+    metadata: { messageType: "text", handoverSource: "standby" },
+  });
+});
+
 test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
   assert.match(service,/fields:"name,first_name,last_name"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
@@ -28,7 +41,7 @@ test("Facebook sender profile is resolved and technical lead names are upgraded"
 });
 
 test("Meta subscription and persistence include outbound message echoes", () => {
-  assert.match(service, /subscribed_fields:\s*"messages,messaging_postbacks,message_reads,messaging_optins"/);
+  assert.match(service, /subscribed_fields:\s*"messages,standby,messaging_postbacks,message_reads,messaging_optins"/);
   assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
   assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
   assert.match(service, /status:\s*MessageStatus\.SENT/);

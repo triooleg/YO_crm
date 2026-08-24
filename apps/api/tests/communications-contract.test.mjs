@@ -149,6 +149,18 @@ test("outbound Facebook messages distinguish drafts from real Meta sends", () =>
   assert.match(x, /GREATEST\(COALESCE\("lastMessageAt",\$\{m\.createdAt\}\),\$\{m\.createdAt\}\)/);
   assert.match(x, /conversationId:conversation\.id,status:"PENDING"/);
 });
+
+test("Messenger thread-control mutations have separate durable history without customer data", () => {
+  assert.match(service, /THREAD_CONTROL_TAKEN/);
+  assert.match(service, /THREAD_CONTROL_FAILED/);
+  assert.match(service, /entityType:\s*"MetaThreadControl"/);
+  assert.match(service, /metaThreadControlHistory/);
+  const history = service.slice(service.indexOf("privatemetaThreadControlHistory"), service.indexOf("asyncreceiveChatwootWebhook"));
+  assert.match(history, /entityId:conversationId/);
+  assert.match(history, /metadata:\{channel:"FACEBOOK",outcome,clientId,pageId\}/);
+  assert.match(history, /after:\{channel:"FACEBOOK",outcome,clientId,pageId\}/);
+  assert.doesNotMatch(history, /(recipientId|content|pageToken)/);
+});
 test("AI requests are rate limited and concurrency bounded per user", () => {
   assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);
   assert.match(service, /AI_CONCURRENCY_LIMIT=2/);

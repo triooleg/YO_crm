@@ -73,7 +73,10 @@ export function metaEchoConversationExternalIds(receiverId: string | undefined, 
 
 function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM") {
   const output: MetaInboundMessage[] = [];
-  for (const entry of records(payload.entry)) for (const event of records(entry.messaging)) {
+  for (const entry of records(payload.entry)) for (const [source, event] of [
+    ...records(entry.messaging).map(event => ["messages", event] as const),
+    ...records(entry.standby).map(event => ["standby", event] as const),
+  ]) {
     const message = event.message;
     if (!message || message.is_echo === true || !event.sender?.id || !message.mid) continue;
     const attachments = records(message.attachments).map(x => {
@@ -88,7 +91,7 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
     const attachmentLabel: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
     const content = String(message.text || attachments.map(x => attachmentLabel[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
-    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
+    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
   }
   return output;
 }
@@ -130,7 +133,7 @@ export function summarizeMetaWebhook(payload: unknown): MetaWebhookEventSummary[
   if (!payload || typeof payload !== "object") return [];
   const value = payload as AnyRecord, object = String(value.object || "unknown"), output: MetaWebhookEventSummary[] = [];
   for (const entry of records(value.entry)) {
-    if (object === "page" || object === "instagram") for (const event of records(entry.messaging)) {
+    if (object === "page" || object === "instagram") for (const event of [...records(entry.messaging), ...records(entry.standby)]) {
       const attachments = records(event.message?.attachments), eventType = messengerEventType(event);
       output.push({
         object,

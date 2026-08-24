@@ -28,7 +28,7 @@ import {
   SendMessageDto,
 } from "./communications.dto";
 import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaWebhook, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaInboundMessage } from "./meta-webhook";
-import { MetaGraphRequestError, metaRecipientId, metaSendFailure, metaTextMessageParams, runMetaSendOnce } from "./meta-send";
+import { deliverMetaWithThreadControl, MetaGraphRequestError, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes } from "node:crypto";
@@ -378,7 +378,7 @@ export class CommunicationsService {
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
@@ -434,7 +434,7 @@ export class CommunicationsService {
     try {
       const page = await this.metaGraph<{ id: string; name?: string }>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
-      const fields = "messages,messaging_postbacks,message_reads,messaging_optins";
+      const fields = "messages,standby,messaging_postbacks,message_reads,messaging_optins";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
@@ -614,6 +614,12 @@ export class CommunicationsService {
       return true;
     });
   }
+  private metaThreadControlHistory(conversationId: string, clientId: string, pageId: string, actorId: string, outcome: "THREAD_CONTROL_TAKEN" | "THREAD_CONTROL_FAILED") {
+    return this.p.$transaction(async tx => {
+      await tx.activity.create({ data: { clientId, type: outcome, summary: outcome === "THREAD_CONTROL_TAKEN" ? "CRM получила управление диалогом Facebook" : "CRM не получила управление диалогом Facebook", metadata: { channel: "FACEBOOK", outcome, clientId, pageId } } });
+      await tx.auditLog.create({ data: { actorId, action: outcome === "THREAD_CONTROL_TAKEN" ? "TAKE_CONTROL" : "TAKE_CONTROL_FAILED", entityType: "MetaThreadControl", entityId: conversationId, after: { channel: "FACEBOOK", outcome, clientId, pageId } } });
+    });
+  }
   async receiveChatwootWebhook(rawBody: Buffer, signature: string | undefined, token: string | undefined, payload: unknown) {
     const values = await this.sectionValues("integration.chatwoot"), secret = this.secretValue(values, "webhookSecretEncrypted");
     if (values.enabled !== true || !secret || (!verifyChatwootSignature(rawBody, signature, secret) && !safeTokenEqual(token, secret))) throw new ForbiddenException("Проверка Chatwoot webhook не пройдена");
@@ -775,14 +781,21 @@ export class CommunicationsService {
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
         deliver: async () => {
-          const result = await this.metaGraph<{ recipient_id?: string; message_id?: string }>(
-          pageId + "/messages",
-          pageToken,
-          metaTextMessageParams(recipientId, content),
-          "POST",
-          appSecret,
-          true,
+          const send = () => this.metaGraph<{ recipient_id?: string; message_id?: string }>(
+            pageId + "/messages",
+            pageToken,
+            metaTextMessageParams(recipientId, content),
+            "POST",
+            appSecret,
+            true,
           );
+          const result = await deliverMetaWithThreadControl({
+            send,
+            takeControl: () => this.metaGraph("me/take_thread_control", pageToken, metaThreadControlParams(recipientId), "POST", appSecret, true),
+            isThreadControlError: error => error instanceof MetaGraphRequestError && error.failure.reason === "THREAD_CONTROL_REQUIRED",
+            onTakeControlSuccess: () => this.metaThreadControlHistory(conversation.id, clientId, pageId, u.id, "THREAD_CONTROL_TAKEN"),
+            onTakeControlFailure: () => this.metaThreadControlHistory(conversation.id, clientId, pageId, u.id, "THREAD_CONTROL_FAILED"),
+          });
           if (!result.message_id)
             throw new BadGatewayException("Meta не вернула идентификатор сообщения");
           return result;

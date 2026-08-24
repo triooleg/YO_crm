@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { metaRecipientId, metaTextMessageParams, metaSendFailure, runMetaSendOnce } = module.exports;
+const { metaRecipientId, metaTextMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -46,6 +46,87 @@ test("Meta send converts provider errors into safe actionable reasons", () => {
     reason: "REPLY_WINDOW_CLOSED",
   });
   assert.equal(metaSendFailure({ code: 10, error_subcode: 2018278 }).reason, "REPLY_WINDOW_CLOSED");
+  assert.deepEqual(JSON.parse(JSON.stringify(metaSendFailure({ code: 10, error_subcode: 2018300 }))), {
+    code: 10,
+    subcode: 2018300,
+    reason: "THREAD_CONTROL_REQUIRED",
+  });
+  assert.equal(metaSendFailure({ code: 10, error_subcode: 2018171 }).reason, "THREAD_CONTROL_REQUIRED");
+});
+
+test("Meta send takes thread control once and retries the message once", async () => {
+  const params = metaThreadControlParams("psid-7");
+  assert.deepEqual(JSON.parse(JSON.stringify(params)), { recipient: JSON.stringify({ id: "psid-7" }) });
+  const calls = [], audits = [];
+  const result = await deliverMetaWithThreadControl({
+    send: async () => {
+      calls.push("send");
+      if (calls.length === 1) {
+        const error = new Error("handover");
+        error.failure = { code: 10, subcode: 2018300, reason: "THREAD_CONTROL_REQUIRED" };
+        throw error;
+      }
+      return { message_id: "mid-after-control" };
+    },
+    takeControl: async () => { calls.push("take-control"); },
+    isThreadControlError: error => error?.failure?.reason === "THREAD_CONTROL_REQUIRED",
+    onTakeControlSuccess: async () => { audits.push("THREAD_CONTROL_TAKEN"); },
+    onTakeControlFailure: async () => { audits.push("THREAD_CONTROL_FAILED"); },
+  });
+  assert.deepEqual(calls, ["send", "take-control", "send"]);
+  assert.deepEqual(audits, ["THREAD_CONTROL_TAKEN"]);
+  assert.equal(result.message_id, "mid-after-control");
+});
+
+test("successful thread control is audited even when the retry fails", async () => {
+  let sends = 0;
+  const audits = [];
+  await assert.rejects(deliverMetaWithThreadControl({
+    send: async () => {
+      sends += 1;
+      const error = new Error(sends === 1 ? "handover" : "retry failed");
+      if (sends === 1) error.failure = { reason: "THREAD_CONTROL_REQUIRED" };
+      throw error;
+    },
+    takeControl: async () => undefined,
+    isThreadControlError: error => error?.failure?.reason === "THREAD_CONTROL_REQUIRED",
+    onTakeControlSuccess: async () => { audits.push("THREAD_CONTROL_TAKEN"); },
+    onTakeControlFailure: async () => { audits.push("THREAD_CONTROL_FAILED"); },
+  }), /retry failed/);
+  assert.equal(sends, 2);
+  assert.deepEqual(audits, ["THREAD_CONTROL_TAKEN"]);
+});
+
+test("failed thread control is audited and never triggers a second send", async () => {
+  let sends = 0;
+  const audits = [];
+  await assert.rejects(deliverMetaWithThreadControl({
+    send: async () => {
+      sends += 1;
+      const error = new Error("handover");
+      error.failure = { reason: "THREAD_CONTROL_REQUIRED" };
+      throw error;
+    },
+    takeControl: async () => { throw new Error("take failed"); },
+    isThreadControlError: error => error?.failure?.reason === "THREAD_CONTROL_REQUIRED",
+    onTakeControlSuccess: async () => { audits.push("THREAD_CONTROL_TAKEN"); },
+    onTakeControlFailure: async () => { audits.push("THREAD_CONTROL_FAILED"); },
+  }), /take failed/);
+  assert.equal(sends, 1);
+  assert.deepEqual(audits, ["THREAD_CONTROL_FAILED"]);
+});
+
+test("Meta send never retries unrelated failures", async () => {
+  let sends = 0, takeControl = 0;
+  await assert.rejects(deliverMetaWithThreadControl({
+    send: async () => { sends += 1; throw new Error("other"); },
+    takeControl: async () => { takeControl += 1; },
+    isThreadControlError: () => false,
+    onTakeControlSuccess: async () => undefined,
+    onTakeControlFailure: async () => undefined,
+  }), /other/);
+  assert.equal(sends, 1);
+  assert.equal(takeControl, 0);
 });
 
 test("concurrent and repeated delivery uses the provider exactly once", async () => {

@@ -1,5 +1,30 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-24 — Meta Handover: входящие и ответы исправлены локально
+
+- Production-диагностика исключила сеть, Nginx, Page ID, срок токена и scopes:
+  Page token действителен и содержит `pages_show_list`, `pages_messaging`,
+  `pages_read_engagement`, `pages_manage_metadata`; Page identity совпадает.
+- Реальные ответы отклонялись Meta с `code=10`, `subcode=2018300`: конкретный
+  Messenger-диалог контролировало другое приложение. Одновременно текущая
+  подписка не содержала `standby`, поэтому CRM не получала сообщения, которые
+  Handover Protocol направлял вторичному получателю.
+- CRM теперь подписывается на `messages` и `standby`, fail-closed проверяет оба
+  поля и сохраняет `entry.standby` тем же безопасным идемпотентным inbound
+  потоком. При `2018300` отправка один раз вызывает `me/take_thread_control` и
+  делает ровно один повтор; остальные ошибки не повторяются.
+- Получение или отказ thread control отдельно записываются в Activity/AuditLog
+  с `conversationId`, `clientId`, `pageId` и outcome, без PSID, текста,
+  токенов или сырого ответа Meta. Для `2018300/2018171` добавлена отдельная
+  русская причина.
+- Локальная финальная проверка: API 140/140, web 106/106, database 4/4,
+  `pnpm quality:check`, typecheck и production builds PASS. Regression,
+  business/security и visual reviews PASS; release gate и deployment ожидают.
+- После deployment необходимо нажать «Проверить и включить доставку сообщений»,
+  затем вручную отправить уникальное входящее и ответ из CRM. Если Meta не
+  разрешит `take_thread_control` с `2018171`, приложение YOLeotard CRM нужно
+  назначить главным получателем в Advanced Messaging страницы.
+
 ## 2026-08-23 — реальные исходящие ответы Facebook (готово локально)
 
 - «Входящие» теперь разделяют «Сохранить черновик» и «Отправить»; реальная
