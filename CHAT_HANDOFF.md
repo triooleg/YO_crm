@@ -19,7 +19,17 @@
   русская причина.
 - Локальная финальная проверка: API 140/140, web 106/106, database 4/4,
   `pnpm quality:check`, typecheck и production builds PASS. Regression,
-  business/security и visual reviews PASS; release gate и deployment ожидают.
+  business/security, visual и release reviews PASS.
+- Commit `3e7102c` отправлен в `origin/main` и развёрнут в
+  `/home/trio/yoleotard-crm`; API и web пересобраны и перезапущены. Production
+  `/api/health`: PostgreSQL, Redis и uploads = `up`.
+- Production delivery verify после deploy успешно вернул `RECEIVING` и новое
+  `subscriptionVerifiedAt`; так как проверка теперь fail-closed требует оба
+  поля, это подтверждает фактическую подписку Meta на `messages` и `standby`.
+- Browser smoke страницы «Входящие» PASS: диалог Facebook, вложение, канал,
+  composer и обе кнопки отображаются, новых console errors нет. Финальный
+  реальный inbound/outbound message smoke ожидает уникальное сообщение и ответ
+  пользователя; автоматическая отправка клиенту не выполнялась.
 - После deployment необходимо нажать «Проверить и включить доставку сообщений»,
   затем вручную отправить уникальное входящее и ответ из CRM. Если Meta не
   разрешит `take_thread_control` с `2018171`, приложение YOLeotard CRM нужно
