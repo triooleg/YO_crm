@@ -17,11 +17,11 @@ test("входящие используют централизованные р�
 
 test("composer offers a real send action separately from saving a draft", () => {
   assert.match(component, /async function save\(action: "DRAFT" \| "SEND"\)/);
-  assert.match(component, /JSON\.stringify\(\{ content: text\.trim\(\), channel: channel\(client\), action,/);
+  assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: channel\(client\), action,/);
   assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
   assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
   assert.match(component, /ui\.sendMessage/);
-  assert.match(component, /clientRequestId: crypto\.randomUUID\(\)/);
+  assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
 });
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
@@ -134,4 +134,24 @@ test("ошибка отправки Meta показывает безопасну
   assert.match(locale, /TOKEN_EXPIRED/);
   assert.match(locale, /PERMISSION_REQUIRED/);
   assert.match(locale, /REPLY_WINDOW_CLOSED/);
+});
+
+test("к сообщению можно прикрепить изображение или файл и сохранить его как черновик", () => {
+  assert.match(component, /type="file"/);
+  assert.match(component, /accept="image\/jpeg,image\/png,image\/webp,image\/gif,application\/pdf,text\/plain"/);
+  assert.match(component, /\/communications\/attachments/);
+  assert.match(component, /pendingSend/);
+  assert.match(component, /attachmentDelivered/);
+  assert.match(component, /prepareAttachmentAttempt\(pendingSend\.current/);
+  assert.match(component, /settleAttachmentAttempt\(pendingSend\.current, result\.status\)/);
+  assert.match(component, /pendingSend\.current\.textRequestId/);
+  assert.match(component, /shouldResetAttachmentForClient\(selectedClientId\.current, c\.id\)/);
+  assert.match(component, /setAttachment\(undefined\)[\s\S]*setAttachmentPreview\(""\)[\s\S]*pendingSend\.current\s*=\s*\{\}/);
+  assert.match(component, /readFile\(attachment\)/);
+  assert.match(component, /attachment: file/);
+  assert.match(component, /communications-selected-attachment/);
+  assert.match(component, /message\.status === "FAILED"/);
+  assert.match(css, /\.communications-attach/);
+  for (const key of ["attachFile", "selectedAttachment", "removeAttachment", "fileReadError"])
+    assert.match(locale, new RegExp(`${key}:`));
 });

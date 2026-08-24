@@ -1,13 +1,15 @@
 import{Body,Controller,Get,Header,Headers,HttpCode,Param,Patch,Post,Query,Req,Res,UnauthorizedException,UseGuards}from"@nestjs/common";
 import{type User}from"@prisma/client";
 import type{Request,Response}from"express";
-import{createHash}from"node:crypto";
+import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
+import{join}from"node:path";
+import{uploadsRoot}from"../uploads";
 
 @Controller("communications")@UseGuards(SessionGuard,RolesGuard)
 export class CommunicationsController{constructor(private c:CommunicationsService){}
@@ -37,9 +39,25 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("meta/delivery/verify")@Roles("OWNER","ADMIN")verifyMetaDelivery(@Req()r:Request&{user:User}){return this.c.verifyMetaDelivery(r.user)}
 @Get("meta/data-deletion-requests")@Roles("OWNER","ADMIN")metaDataDeletionRequests(){return this.c.listMetaDataDeletionRequests()}
 @Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
+@Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}
 @Patch(":clientId/read")@Roles("OWNER","ADMIN","MANAGER")markRead(@Param("clientId")id:string,@Body()d:MarkConversationsReadDto,@Req()r:Request&{user:User}){return this.c.markRead(id,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
 @Post(":clientId/messages")@Roles("OWNER","ADMIN","MANAGER")send(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}}
+
+@Controller("communications/files")@UseGuards(SessionGuard,RolesGuard)
+export class CommunicationFilesController{
+@Get(":name")@Roles("OWNER","ADMIN","MANAGER")file(@Param("name")name:string,@Res()res:Response){if(!/^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/.test(name))return res.status(404).end();return res.sendFile(join(uploadsRoot(),"communication-files",name))}}
+
+@Controller("communications/meta-files")
+export class CommunicationMetaFilesController{
+@Get(":name")file(@Param("name")name:string,@Query("expires")expiresRaw:string,@Query("signature")signature:string,@Res()res:Response){
+ if(!/^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/.test(name))return res.status(404).end();
+ const expires=Number(expiresRaw),now=Math.floor(Date.now()/1000),secret=process.env.SETTINGS_ENCRYPTION_KEY||"";
+ if(!secret||!Number.isInteger(expires)||expires<now||expires>now+20*60||!/^[a-f0-9]{64}$/.test(signature||""))return res.status(403).end();
+ const expected=createHmac("sha256",secret).update(`${name}:${expires}`).digest("hex"),a=Buffer.from(expected),b=Buffer.from(signature);
+ if(a.length!==b.length||!timingSafeEqual(a,b))return res.status(403).end();
+ return res.sendFile(join(uploadsRoot(),"communication-files",name));
+}}
 
 @Controller("communications/meta")
 export class MetaWebhookController{constructor(private c:CommunicationsService){}

@@ -13,6 +13,14 @@ export function metaTextMessageParams(recipientId: string, content: string) {
   };
 }
 
+export function metaAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string) {
+  return {
+    recipient: JSON.stringify({ id: recipientId }),
+    messaging_type: "RESPONSE",
+    message: JSON.stringify({ attachment: { type, payload: { url, is_reusable: true } } }),
+  };
+}
+
 export function metaThreadControlParams(recipientId: string) {
   return { recipient: JSON.stringify({ id: recipientId }) };
 }

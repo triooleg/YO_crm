@@ -7,6 +7,7 @@ import {
   isCurrentInboxDetailRequest,
 } from "../lib/inbox-request-guard";
 import { ClientAvatar } from "./client-avatar";
+import { prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 type Order = {
   id: string;
   number: string;
@@ -16,7 +17,8 @@ type Order = {
   priceMinor: number;
   currency: string;
 };
-type Attachment = { type: string; url?: string; stickerId?: string };
+type Attachment = { type: string; url?: string; stickerId?: string; name?: string; mimeType?: string };
+type UploadedAttachment = { path: string; name: string; mimeType: string; sizeBytes: number };
 type ConversationPreview = {
   id: string;
   unreadCount?: number;
@@ -125,6 +127,17 @@ const initials = (name: string) =>
     .slice(0, 2)
     .join("")
     .toUpperCase();
+function readFile(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error(ui.fileReadError));
+    reader.readAsDataURL(file);
+  });
+}
+function formatBytes(size: number) {
+  return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} КБ` : `${(size / 1024 / 1024).toFixed(1)} МБ`;
+}
 export function CommunicationsWorkspace() {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
@@ -137,6 +150,8 @@ export function CommunicationsWorkspace() {
     [loading, setLoading] = useState(true),
     [messagesLoading, setMessagesLoading] = useState(false),
     [error, setError] = useState(""),
+    [attachment, setAttachment] = useState<File>(),
+    [attachmentPreview, setAttachmentPreview] = useState(""),
     [creating, setCreating] = useState(false),
     [preview, setPreview] = useState<string>(),
     [left, setLeft] = useState(defaults.left),
@@ -148,6 +163,7 @@ export function CommunicationsWorkspace() {
     readOperationSequence = useRef(0),
     readOperations = useRef(new Map<string, number>()),
     pendingReads = useRef(new Map<string, Map<string, number>>()),
+    pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
@@ -255,6 +271,12 @@ export function CommunicationsWorkspace() {
     }
   }
   async function open(c: Client) {
+    if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
+      if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+      setAttachment(undefined);
+      setAttachmentPreview("");
+      pendingSend.current = {};
+    }
     selectedClientId.current = c.id;
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
@@ -434,25 +456,78 @@ export function CommunicationsWorkspace() {
     setWidth(side, widths.current[side] + d * (side === "left" ? 1 : -1), true);
   }
   async function save(action: "DRAFT" | "SEND") {
-    if (!client || !text.trim()) return;
+    if (!client || (!text.trim() && !attachment)) return;
     setBusy(true);
     setError("");
     try {
-      const m = await api("/communications/" + client.id + "/messages", {
-        method: "POST",
-        body: JSON.stringify({ content: text.trim(), channel: channel(client), action, ...(action === "SEND" ? { clientRequestId: crypto.randomUUID() } : {}) }),
-      });
-      setMessages((x) => [...x, m]);
-      if (m.status === "FAILED") {
-        const reasons = ui.sendFailureReasons as Record<string, string>;
-        setError(reasons[m.metadata?.reason || ""] || ui.sendFailed);
+      let uploaded: UploadedAttachment | undefined;
+      if (attachment) {
+        if (pendingSend.current.file === attachment && pendingSend.current.uploaded) uploaded = pendingSend.current.uploaded;
+        else {
+          uploaded = await api("/communications/attachments", {
+            method: "POST",
+            body: JSON.stringify({ name: attachment.name, mimeType: attachment.type, data: await readFile(attachment) }),
+          });
+          pendingSend.current = { file: attachment, uploaded };
+        }
       }
-      else setText("");
+      const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
+        const result = await api("/communications/" + client.id + "/messages", {
+          method: "POST",
+          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: channel(client), action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID() } : {}) }),
+        });
+        setMessages((current) => [...current, result]);
+        return result as Message;
+      };
+      const sent: Message[] = [];
+      if (action === "DRAFT") {
+        sent.push(await sendOne(text.trim() || undefined, uploaded));
+      } else {
+        if (uploaded && !pendingSend.current.attachmentDelivered) {
+          const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
+          pendingSend.current = attempt.state;
+          const { requestId } = attempt;
+          const result = await sendOne(undefined, uploaded, requestId);
+          sent.push(result);
+          pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
+        }
+        if (!sent.some((message) => message.status === "FAILED") && text.trim()) {
+          const content = text.trim();
+          const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
+            ? pendingSend.current.textRequestId
+            : crypto.randomUUID();
+          pendingSend.current = { ...pendingSend.current, textContent: content, textRequestId };
+          const result = await sendOne(content, undefined, textRequestId);
+          sent.push(result);
+          if (result.status === "FAILED") {
+            const { textContent: _content, textRequestId: _requestId, ...attachmentState } = pendingSend.current;
+            pendingSend.current = attachmentState;
+          }
+        }
+      }
+      const failed = sent.find((message) => message.status === "FAILED");
+      if (failed) {
+        const reasons = ui.sendFailureReasons as Record<string, string>;
+        setError(reasons[failed.metadata?.reason || ""] || ui.sendFailed);
+      }
+      else {
+        setText("");
+        setAttachment(undefined);
+        pendingSend.current = {};
+        if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+        setAttachmentPreview("");
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  function chooseAttachment(file?: File) {
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachment(file);
+    pendingSend.current = {};
+    setAttachmentPreview(file?.type.startsWith("image/") ? URL.createObjectURL(file) : "");
   }
   async function ai(action: string) {
     if (!client) return;
@@ -732,7 +807,18 @@ export function CommunicationsWorkspace() {
                 )}
               </span>
             </div>
+            {attachment && (
+              <div className="communications-selected-attachment">
+                {attachmentPreview && <img src={attachmentPreview} alt={ui.selectedAttachment} />}
+                <span><b>{attachment.name}</b><small>{formatBytes(attachment.size)}</small></span>
+                <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
+              </div>
+            )}
             <div className="communications-compose">
+              <label className="communications-attach" aria-label={ui.attachFile}>
+                <span aria-hidden>＋</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+              </label>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -740,14 +826,14 @@ export function CommunicationsWorkspace() {
                 disabled={!client}
               />
               <button className="communications-draft"
-                disabled={busy || !client || !text.trim()}
+                disabled={busy || !client || (!text.trim() && !attachment)}
                 onClick={() => void save("DRAFT")}
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
               {channel(client) === "FACEBOOK" && (
                 <button
-                  disabled={busy || !client || !text.trim()}
+                  disabled={busy || !client || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}
                 >
                   {busy ? ui.sending : ui.sendMessage}

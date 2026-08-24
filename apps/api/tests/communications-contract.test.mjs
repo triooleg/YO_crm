@@ -170,6 +170,30 @@ test("Messenger thread-control mutations have separate durable history without c
   assert.match(history, /after:\{channel:"FACEBOOK",outcome,clientId,pageId\}/);
   assert.doesNotMatch(history, /(recipientId|content|pageToken)/);
 });
+test("chat attachments are validated, stored outside the web root and sent through Messenger", () => {
+  assert.match(controller, /@Post\("attachments"\)@Roles\("OWNER","ADMIN","MANAGER"\)/);
+  assert.match(controller, /@Controller\("communications\/files"\)/);
+  assert.match(app, /CommunicationFilesController/);
+  assert.match(dto, /classUploadCommunicationAttachmentDto/);
+  assert.match(dto, /classOutboundAttachmentDto/);
+  assert.match(service, /COMMUNICATION_FILE/);
+  assert.match(service, /validCommunicationFile/);
+  assert.match(service, /5\*1024\*1024/);
+  assert.match(service, /communication-files/);
+  assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl\)/);
+  assert.match(controller, /@Controller\("communications\/files"\)@UseGuards\(SessionGuard,RolesGuard\)/);
+  assert.match(controller, /@Controller\("communications\/meta-files"\)/);
+  assert.match(controller, /timingSafeEqual/);
+  assert.match(service, /persistedAttachment/);
+  assert.match(service, /communicationAttachment/);
+  const upload = service.slice(service.indexOf("asyncuploadAttachment"), service.indexOf("asyncsend"));
+  assert.match(upload, /deleteMany\(\{where:\{id:item\.id,claimedAt:null,clientRequestId:null,messageId:null\}\}\)/);
+  assert.ok(upload.indexOf("deleteMany") < upload.indexOf("unlink(join(uploadsRoot(),\"communication-files\",item.path))"));
+  assert.match(upload, /if\(won\.count===1\)awaitunlink/);
+  assert.match(upload, /pg_advisory_xact_lock/);
+  assert.ok(upload.indexOf("pg_advisory_xact_lock") < upload.indexOf("communicationAttachment.count"));
+  assert.ok(upload.indexOf("communicationAttachment.count") < upload.indexOf("communicationAttachment.create"));
+});
 test("AI requests are rate limited and concurrency bounded per user", () => {
   assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);
   assert.match(service, /AI_CONCURRENCY_LIMIT=2/);

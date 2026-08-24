@@ -27,21 +27,36 @@ import {
   MessageTemplateDto,
   MetaIntegrationDto,
   SendMessageDto,
+  UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
-import { deliverMetaWithThreadControl, MetaGraphRequestError, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
+import { deliverMetaWithThreadControl, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
-import { unlink } from "node:fs/promises";
+import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
+const COMMUNICATION_FILE = /^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/;
+const communicationMime = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  "application/pdf": "pdf", "text/plain": "txt",
+} as const;
+function validCommunicationFile(bytes: Buffer, mimeType: string) {
+  if (!bytes.length || bytes.length > 5 * 1024 * 1024) return false;
+  if (mimeType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (mimeType === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mimeType === "image/webp") return bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
+  if (mimeType === "image/gif") return ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString());
+  if (mimeType === "application/pdf") return bytes.subarray(0, 5).toString() === "%PDF-";
+  return mimeType === "text/plain" && !bytes.includes(0);
+}
 class TooManyRequestsException extends HttpException {
   constructor(message: string) {
     super(message, 429);
@@ -492,13 +507,15 @@ export class CommunicationsService {
       const request = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: code } } });
       if (!request || !request.value || typeof request.value !== "object" || Array.isArray(request.value)) throw new NotFoundException("Запрос удаления не найден");
       const value = request.value as Record<string, unknown>;
-      if (value.status === "COMPLETED") return { completed: true, paths: [] as string[] };
+      if (value.status === "COMPLETED") return { completed: true, taskPaths: [] as string[], communicationPaths: [] as string[] };
       if (value.matchedClientId !== clientId) throw new BadRequestException("Запрос Meta не связан с выбранным клиентом");
-      if (value.status === "PROCESSING") return { completed: false, paths: Array.isArray(value.pendingAttachmentPaths) ? value.pendingAttachmentPaths.filter((path): path is string => typeof path === "string") : [] };
+      if (value.status === "PROCESSING") return { completed: false, taskPaths: Array.isArray(value.pendingTaskAttachmentPaths) ? value.pendingTaskAttachmentPaths.filter((path): path is string => typeof path === "string") : [], communicationPaths: Array.isArray(value.pendingCommunicationAttachmentPaths) ? value.pendingCommunicationAttachmentPaths.filter((path): path is string => typeof path === "string") : [] };
       const client = await tx.client.findUnique({ where: { id: clientId }, select: { id: true } });
       if (!client) throw new NotFoundException("Клиент не найден");
       const attachments = await tx.taskAttachment.findMany({ where: { task: { clientId } }, select: { path: true } });
+      const communicationAttachments = await tx.communicationAttachment.findMany({ where: { message: { conversation: { clientId } } }, select: { path: true } });
       await tx.taskAttachment.deleteMany({ where: { task: { clientId } } });
+      await tx.communicationAttachment.deleteMany({ where: { message: { conversation: { clientId } } } });
       await tx.message.updateMany({ where: { conversation: { clientId } }, data: { content: redacted, metadata: Prisma.JsonNull, externalId: null } });
       await tx.conversation.updateMany({ where: { clientId }, data: { externalId: null, subject: null, unreadCount: 0, archivedAt: now } });
       await tx.measurement.updateMany({ where: { athlete: { clientId } }, data: { notes: null, source: null } });
@@ -507,13 +524,14 @@ export class CommunicationsService {
       await tx.activity.updateMany({ where: { clientId }, data: { summary: redacted, metadata: Prisma.JsonNull } });
       await tx.client.update({ where: { id: clientId }, data: { firstName: "Удалённый клиент", lastName: null, displayName: `Удалённый клиент • ${code.slice(0,6)}`, avatarUrl: null, country: null, city: null, address: null, postalCode: null, email: null, phone: null, whatsapp: null, instagram: null, facebook: null, telegram: null, language: null, timezone: null, notes: null, archivedAt: now } });
       const retained = ["orders", "payments", "invoices", "measurement snapshots", "audit"];
-      const paths = attachments.map(attachment => attachment.path);
-      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "PROCESSING", processingAt: completedAt, pendingAttachmentPaths: paths, retentionNote: retentionNote?.trim() || "Обязательная деловая история сохранена в обезличенном виде", retained } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: "ANONYMIZE", entityType: "MetaDataDeletion", entityId: code, after: { status: "PROCESSING", clientId, processingAt: completedAt, retained, pendingFileCount: paths.length } } });
-      return { completed: false, paths };
+      const taskPaths = attachments.map(attachment => attachment.path), communicationPaths = communicationAttachments.map(attachment => attachment.path);
+      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "PROCESSING", processingAt: completedAt, pendingTaskAttachmentPaths: taskPaths, pendingCommunicationAttachmentPaths: communicationPaths, retentionNote: retentionNote?.trim() || "Обязательная деловая история сохранена в обезличенном виде", retained } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "ANONYMIZE", entityType: "MetaDataDeletion", entityId: code, after: { status: "PROCESSING", clientId, processingAt: completedAt, retained, pendingFileCount: taskPaths.length + communicationPaths.length } } });
+      return { completed: false, taskPaths, communicationPaths };
     });
     if (prepared.completed) return this.metaDataDeletionStatus(code);
-    for (const path of prepared.paths) await unlink(join(uploadsRoot(), "task-images", path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new BadGatewayException("Не удалось удалить файл; запрос останется в обработке и может быть повторён"); });
+    for (const path of prepared.taskPaths) await unlink(join(uploadsRoot(), "task-images", path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new BadGatewayException("Не удалось удалить файл; запрос останется в обработке и может быть повторён"); });
+    for (const path of prepared.communicationPaths) await unlink(join(uploadsRoot(), "communication-files", path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new BadGatewayException("Не удалось удалить файл; запрос останется в обработке и может быть повторён"); });
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-data-deletion:" + code},0))`;
       const request = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.data-deletion", key: code } } });
@@ -521,8 +539,8 @@ export class CommunicationsService {
       const value = request.value as Record<string, unknown>;
       if (value.status === "COMPLETED") return;
       if (value.status !== "PROCESSING" || value.matchedClientId !== clientId) throw new BadRequestException("Запрос удаления находится в некорректном состоянии");
-      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "COMPLETED", completedAt, encryptedIdentity: null, pendingAttachmentPaths: [] } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: "COMPLETE", entityType: "MetaDataDeletion", entityId: code, after: { status: "COMPLETED", clientId, completedAt, deletedFileCount: prepared.paths.length } } });
+      await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "COMPLETED", completedAt, encryptedIdentity: null, pendingTaskAttachmentPaths: [], pendingCommunicationAttachmentPaths: [] } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "COMPLETE", entityType: "MetaDataDeletion", entityId: code, after: { status: "COMPLETED", clientId, completedAt, deletedFileCount: prepared.taskPaths.length + prepared.communicationPaths.length } } });
     });
     return this.metaDataDeletionStatus(code);
   }
@@ -786,6 +804,49 @@ export class CommunicationsService {
       }
     );
   }
+  async uploadAttachment(d: UploadCommunicationAttachmentDto, u: User) {
+    const expiresAt = new Date(Date.now() - 60 * 60 * 1000);
+    const stale = await this.p.communicationAttachment.findMany({ where: { claimedAt: null, createdAt: { lt: expiresAt } }, select: { id: true, path: true }, take: 100 });
+    for (const item of stale) {
+      const won = await this.p.communicationAttachment.deleteMany({ where: { id: item.id, claimedAt: null, clientRequestId: null, messageId: null } });
+      if (won.count === 1) await unlink(join(uploadsRoot(), "communication-files", item.path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+    }
+    const extension = communicationMime[d.mimeType as keyof typeof communicationMime];
+    if (!extension) throw new BadRequestException("Допустимы изображения, PDF или TXT");
+    const bytes = Buffer.from(d.data.replace(/^data:[^;]+;base64,/, ""), "base64");
+    if (!validCommunicationFile(bytes, d.mimeType)) throw new BadRequestException("Файл повреждён, имеет неверный формат или превышает 5 МБ");
+    const directory = join(uploadsRoot(), "communication-files");
+    await mkdir(directory, { recursive: true });
+    const path = `${randomUUID()}.${extension}`;
+    await writeFile(join(directory, path), bytes, { flag: "wx" });
+    try {
+      const row = await this.p.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'communication-upload:' + u.id}))`;
+        const recent = await tx.communicationAttachment.count({ where: { createdById: u.id, createdAt: { gte: expiresAt } } });
+        if (recent >= 30) throw new TooManyRequestsException("Слишком много загрузок. Повторите попытку позже");
+        const created = await tx.communicationAttachment.create({ data: { path, originalName: d.name.slice(0, 180), mimeType: d.mimeType, sizeBytes: bytes.length, createdById: u.id } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPLOAD", entityType: "CommunicationAttachment", entityId: created.id, after: { mimeType: created.mimeType, sizeBytes: created.sizeBytes } } });
+        return created;
+      });
+      return { path: row.path, name: row.originalName, mimeType: row.mimeType, sizeBytes: row.sizeBytes };
+    } catch (error) {
+      await unlink(join(directory, path)).catch(() => undefined);
+      throw error;
+    }
+  }
+  private async outboundAttachment(input: { path: string; name: string; mimeType: string }, u: User, clientRequestId?: string) {
+    if (!COMMUNICATION_FILE.test(input.path)) throw new BadRequestException("Некорректное имя вложения");
+    const stored = await this.p.communicationAttachment.findUnique({ where: { path: input.path } });
+    if (!stored || stored.createdById !== u.id || stored.mimeType !== input.mimeType) throw new BadRequestException("Вложение не найдено");
+    if ((stored.claimedAt || stored.clientRequestId) && stored.clientRequestId !== clientRequestId) throw new ConflictException("Вложение уже использовано в другом сообщении");
+    const file = await stat(join(uploadsRoot(), "communication-files", input.path)).catch(() => null);
+    if (!file?.isFile() || file.size !== stored.sizeBytes || file.size > 5 * 1024 * 1024) throw new BadRequestException("Вложение не найдено");
+    const base = (process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim().replace(/\/$/, "");
+    const expires = Math.floor(Date.now() / 1000) + 15 * 60, secret = process.env.SETTINGS_ENCRYPTION_KEY;
+    if (!secret) throw new BadGatewayException("Безопасная отправка вложений не настроена");
+    const signature = createHmac("sha256", secret).update(`${stored.path}:${expires}`).digest("hex");
+    return { type: stored.mimeType.startsWith("image/") ? "image" as const : "file" as const, url: `${base}/api/communications/files/${stored.path}`, providerUrl: `${base}/api/communications/meta-files/${stored.path}?expires=${expires}&signature=${signature}`, name: stored.originalName, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, path: stored.path };
+  }
   async send(clientId: string, d: SendMessageDto, u: User) {
     const selected = await this.p.client.findFirst({
       where: { id: clientId, archivedAt: null },
@@ -797,8 +858,9 @@ export class CommunicationsService {
       selected.preferredChannel ||
       selected.source ||
       ContactChannel.MANUAL;
-    const content = d.content.trim();
-    if (!content)
+    const content = d.content?.trim() || "";
+    const attachment = d.attachment ? await this.outboundAttachment(d.attachment, u, d.clientRequestId) : undefined;
+    if (!content && !attachment)
       throw new BadRequestException("Сообщение не может быть пустым");
     if (d.action === "SEND") {
       if (!d.clientRequestId)
@@ -826,6 +888,10 @@ export class CommunicationsService {
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
             if (pending) return pending;
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
+            if (attachment) {
+              const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, clientRequestId: null, claimedAt: null }, data: { clientRequestId: d.clientRequestId! } });
+              if (claimed.count !== 1) throw new ConflictException("Вложение уже используется в другой отправке");
+            }
             return null;
           });
           if (!prior) return { kind: "NEW" as const };
@@ -841,7 +907,7 @@ export class CommunicationsService {
           const send = () => this.metaGraph<{ recipient_id?: string; message_id?: string }>(
             pageId + "/messages",
             pageToken,
-            metaTextMessageParams(recipientId, content),
+            attachment ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl) : metaTextMessageParams(recipientId, content),
             "POST",
             appSecret,
             true,
@@ -859,7 +925,9 @@ export class CommunicationsService {
         },
         persistFailure: async (error) => this.p.$transaction(async (tx) => {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
-          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content, authorId: u.id, metadata: { provider: "META", failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...failure } } });
+          const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
+          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: { provider: "META", ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}), failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...failure } } });
+          if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
           await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
           await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: "Facebook не принял исходящее сообщение", metadata: { messageId: m.id, channel } } });
@@ -867,11 +935,13 @@ export class CommunicationsService {
           return { ...m, channel };
         }),
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
+        const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
         const m = await tx.message.upsert({
           where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } },
-          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content, externalId: result.message_id, authorId: u.id, metadata: { provider: "META", recipientId, receiverId: pageId } },
-          update: { status: MessageStatus.SENT, content, authorId: u.id },
+          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", externalId: result.message_id, authorId: u.id, metadata: { provider: "META", recipientId, receiverId: pageId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } },
+          update: { status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: { provider: "META", recipientId, receiverId: pageId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } },
         });
+        if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
         await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
         await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "SENT", messageId: m.id } });
         await tx.activity.create({ data: { clientId, type: "MESSAGE_SENT", summary: "Сообщение отправлено в Facebook", metadata: { messageId: m.id, channel } } });
@@ -891,10 +961,15 @@ export class CommunicationsService {
           conversationId: c.id,
           direction: MessageDirection.OUTBOUND,
           status: MessageStatus.DRAFT,
-          content,
+          content: content || attachment?.name || "[Вложение]",
           authorId: u.id,
+          metadata: attachment ? { attachments: [attachment] } : undefined,
         },
       });
+      if (attachment) {
+        const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, claimedAt: null, clientRequestId: null }, data: { messageId: m.id, claimedAt: new Date() } });
+        if (claimed.count !== 1) throw new ConflictException("Вложение уже использовано в другом сообщении");
+      }
       await tx.conversation.update({
         where: { id: c.id },
         data: { lastMessageAt: m.createdAt },

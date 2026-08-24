@@ -173,6 +173,7 @@ model User {
   orders       Order[]    @relation("OrderManager")
   auditLogs    AuditLog[] @relation("AuditActor")
   authoredMessages Message[] @relation("MessageAuthor")
+  communicationAttachments CommunicationAttachment[]
   assignedTasks WorkTask[] @relation("TaskAssignee")
   createdTasks WorkTask[] @relation("TaskCreator")
 }
@@ -408,8 +409,25 @@ model Message {
   author User? @relation("MessageAuthor",fields:[authorId],references:[id],onDelete:SetNull)
   workTasks WorkTask[]
   deliveryAttempts MessageDeliveryAttempt[]
+  communicationAttachment CommunicationAttachment?
   @@index([conversationId, createdAt])
   @@unique([conversationId,externalId])
+}
+model CommunicationAttachment {
+  id String @id @default(cuid())
+  path String @unique
+  originalName String
+  mimeType String
+  sizeBytes Int
+  createdById String
+  clientRequestId String? @unique
+  messageId String? @unique
+  createdAt DateTime @default(now())
+  claimedAt DateTime?
+  createdBy User @relation(fields:[createdById],references:[id],onDelete:Restrict)
+  message Message? @relation(fields:[messageId],references:[id],onDelete:Restrict)
+  @@index([createdById, createdAt])
+  @@index([claimedAt, createdAt])
 }
 model MessageDeliveryAttempt {
   id String @id @default(cuid())

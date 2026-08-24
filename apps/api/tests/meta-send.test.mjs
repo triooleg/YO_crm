@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { metaRecipientId, metaTextMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl } = module.exports;
+const { metaRecipientId, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -22,6 +22,16 @@ test("Meta send builds a RESPONSE text payload without credentials", () => {
     recipient: JSON.stringify({ id: "psid-7" }),
     messaging_type: "RESPONSE",
     message: JSON.stringify({ text: "Здравствуйте" }),
+  });
+  assert.equal(JSON.stringify(params).includes("token"), false);
+});
+
+test("Meta send builds a reusable Messenger attachment payload", () => {
+  const params = metaAttachmentMessageParams("psid-7", "image", "https://crm.yoleotard.com/api/communications/files/example.jpg");
+  assert.deepEqual(JSON.parse(JSON.stringify(params)), {
+    recipient: JSON.stringify({ id: "psid-7" }),
+    messaging_type: "RESPONSE",
+    message: JSON.stringify({ attachment: { type: "image", payload: { url: "https://crm.yoleotard.com/api/communications/files/example.jpg", is_reusable: true } } }),
   });
   assert.equal(JSON.stringify(params).includes("token"), false);
 });
