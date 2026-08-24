@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { URL } from "node:url";
 
 export type MetaInboundMessage = {
   channel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP";
@@ -59,6 +60,106 @@ export function metaProfileTargets(events:MetaInboundMessage[]){
   const unique=new Map<string,{receiverId:string;senderId:string}>();
   for(const event of events)if(event.channel==="FACEBOOK"&&event.receiverId){const target={receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(metaConversationExternalId(target.receiverId,target.senderId),target)}
   return [...unique.values()];
+}
+
+export type MetaFacebookProfile = {
+  name?: unknown;
+  first_name?: unknown;
+  last_name?: unknown;
+  profile_pic?: unknown;
+  locale?: unknown;
+  timezone?: unknown;
+};
+
+export type NormalizedMetaFacebookProfile = {
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
+  avatarUrl?: string;
+  language?: string;
+  timezone?: string;
+};
+
+export type ExistingMetaClientProfile = {
+  firstName: string;
+  lastName?: string | null;
+  displayName: string;
+  avatarUrl?: string | null;
+  country?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  language?: string | null;
+  timezone?: string | null;
+};
+
+const cleanProfileText = (value: unknown, max = 160) =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
+
+export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): NormalizedMetaFacebookProfile {
+  const output: NormalizedMetaFacebookProfile = {};
+  const firstName = cleanProfileText(profile.first_name);
+  const lastName = cleanProfileText(profile.last_name);
+  const displayName = cleanProfileText(profile.name) || [firstName, lastName].filter(Boolean).join(" ");
+  if (displayName) {
+    output.displayName = displayName;
+    output.firstName = firstName || displayName;
+    if (lastName) output.lastName = lastName;
+  }
+
+  const avatarUrl = cleanProfileText(profile.profile_pic, 2048);
+  if (avatarUrl) {
+    try {
+      const parsed = new URL(avatarUrl);
+      if (parsed.protocol === "https:") output.avatarUrl = parsed.toString();
+    } catch {}
+  }
+
+  const locale = cleanProfileText(profile.locale, 16);
+  const localeMatch = /^([a-z]{2,3})(?:[_-]([A-Z]{2}))?$/.exec(locale);
+  // Meta locale is a UI preference, not verified residence. Never infer country from it.
+  if (localeMatch) output.language = localeMatch[1];
+
+  const timezone = profile.timezone;
+  if (typeof timezone === "number" && Number.isInteger(timezone) && timezone >= -12 && timezone <= 14) {
+    const sign = timezone >= 0 ? "+" : "-";
+    const absolute = Math.abs(timezone);
+    output.timezone = `UTC${sign}${absolute.toString().padStart(2, "0")}:00`;
+  }
+
+  return output;
+}
+
+export function metaFacebookProfilePatch(before: ExistingMetaClientProfile, profile: NormalizedMetaFacebookProfile) {
+  const patch: NormalizedMetaFacebookProfile = {};
+  const technical = /^(Facebook|Instagram) \d+$/.test(before.displayName);
+  if (technical) {
+    const displayName = profile.displayName;
+    const firstName = profile.firstName || displayName;
+    if (displayName && displayName !== before.displayName) patch.displayName = displayName;
+    if (firstName && firstName !== before.firstName) patch.firstName = firstName;
+    if (profile.lastName && profile.lastName !== before.lastName) patch.lastName = profile.lastName;
+  }
+  for (const key of ["avatarUrl", "language", "timezone"] as const) {
+    if (!before[key] && profile[key]) patch[key] = profile[key];
+  }
+  return patch;
+}
+
+export async function persistMetaFacebookProfilePatch(
+  before: ExistingMetaClientProfile,
+  profile: NormalizedMetaFacebookProfile,
+  updateActiveClient: (patch: NormalizedMetaFacebookProfile) => Promise<boolean>,
+  recordHistory: (changedFields: string[]) => Promise<void>,
+) {
+  const patch = metaFacebookProfilePatch(before, profile);
+  const changedFields = Object.keys(patch);
+  if (!changedFields.length || !(await updateActiveClient(patch))) return false;
+  await recordHistory(changedFields);
+  return true;
+}
+
+export function metaIdentityLogRef(value: string | undefined) {
+  return value ? createHash("sha256").update(value).digest("hex").slice(0, 12) : undefined;
 }
 
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {

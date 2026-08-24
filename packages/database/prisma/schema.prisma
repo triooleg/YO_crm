@@ -193,6 +193,7 @@ model Client {
   firstName            String
   lastName             String?
   displayName          String
+  avatarUrl            String?
   country              String?
   city                 String?
   address              String?

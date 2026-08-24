@@ -69,6 +69,19 @@ test("список клиентов показывает все связанны
   assert.match(component, /badges\.map/);
 });
 
+test("аватар Meta отображается в списке и заголовке чата с безопасным fallback", () => {
+  assert.match(component, /avatarUrl\?: string/);
+  assert.match(component, /<ClientAvatar[\s\S]*avatarUrl=\{c\.avatarUrl\}/);
+  assert.match(component, /<ClientAvatar[\s\S]*avatarUrl=\{client\?\.avatarUrl\}/);
+});
+
+test("заголовок чата удерживает источник при длинном имени клиента", () => {
+  assert.match(component, /className="communications-chat-header"/);
+  assert.match(css, /\.communications-chat-client\{[^}]*min-width:0;flex:1 1 auto/);
+  assert.match(css, /\.communications-chat-client>b\{[^}]*text-overflow:ellipsis/);
+  assert.match(css, /\.communications-chat-header>span:last-child\{flex-shrink:0\}/);
+});
+
 test("список входящих показывает последнее сообщение и время", () => {
   assert.match(component, /latestConversation/);
   assert.match(component, /communications-client-preview/);

@@ -6,10 +6,12 @@ import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
 import { OrdersWorkspace } from "./orders-workspace";
 import { clientAthleteUi } from "../lib/i18n";
+import { ClientAvatar } from "./client-avatar";
 
 type Client = {
   id: string;
   displayName: string;
+  avatarUrl?: string;
   country?: string;
   city?: string;
   phone?: string;
@@ -177,7 +179,7 @@ export function ClientWorkspace() {
                 key={c.id}
                 onClick={() => setSelected(c.id)}
               >
-                <span className="phase2-avatar">{initials(c.displayName)}</span>
+                <ClientAvatar className="phase2-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
                 {!collapsed && (
                   <span>
                     <strong>{c.displayName}</strong>
@@ -319,9 +321,7 @@ function Card({
     <section className="phase2-card">
       <div className="phase2-card-head">
         <div className="phase2-person">
-          <span className="phase2-avatar big">
-            {initials(detail.displayName)}
-          </span>
+          <ClientAvatar className="phase2-avatar big" displayName={detail.displayName} avatarUrl={detail.avatarUrl} />
           <div>
             <h2>{detail.displayName}</h2>
             <em>Активный клиент</em>

@@ -48,6 +48,8 @@ button { cursor: pointer; }
 .phase2-client small { color: var(--muted); }
 .phase2-avatar { flex: 0 0 38px; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: #e9e0ff; color: var(--violet); font-weight: 800; }
 .phase2-avatar.big { width: 52px; height: 52px; }
+.phase2-avatar { overflow: hidden; }
+.phase2-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .phase2-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 22px; }
 .phase2-card-head > button, .phase2-card-actions button, .phase2-section-title button { border: 0; background: transparent; color: var(--violet); font-weight: 700; }
 .phase2-card-actions{display:flex;gap:10px}.phase2-person { display: flex; align-items: center; gap: 13px; }

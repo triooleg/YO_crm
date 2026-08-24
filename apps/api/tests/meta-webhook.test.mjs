@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaWebhook, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -35,9 +35,56 @@ test("normalizes Messenger standby messages while another app controls the threa
 });
 
 test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
-  assert.match(service,/fields:"name,first_name,last_name"/);
+  assert.match(service,/fields:"name,first_name,last_name,profile_pic,locale,timezone"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
   assert.match(service,/Facebook\|Instagram/);
+});
+
+test("normalizes available Facebook profile details without inventing contacts",()=>{
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({
+    name:"Юлия Огилько",first_name:"Юлия",last_name:"Огилько",
+    profile_pic:"https://scontent.xx.fbcdn.net/avatar.jpg",locale:"uk_UA",timezone:2,
+  }))),{
+    displayName:"Юлия Огилько",firstName:"Юлия",lastName:"Огилько",
+    avatarUrl:"https://scontent.xx.fbcdn.net/avatar.jpg",language:"uk",
+    timezone:"UTC+02:00",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({name:"Anna",locale:"en"}))),{
+    displayName:"Anna",firstName:"Anna",language:"en",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({
+    profile_pic:"javascript:alert(1)",locale:"invalid_locale_value",
+  }))),{});
+});
+
+test("profile normalization rejects invented location and malformed timezone",()=>{
+  for (const timezone of [null,"",false,2.999]) assert.equal(normalizeMetaFacebookProfile({timezone}).timezone,undefined);
+  assert.equal(normalizeMetaFacebookProfile({locale:"uk_UA"}).country,undefined);
+});
+
+test("profile patch contains only real missing-field changes and preserves maintained values",()=>{
+  const empty={firstName:"Facebook 123",lastName:null,displayName:"Facebook 123",avatarUrl:null,country:null,email:null,phone:null,language:null,timezone:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(empty,{displayName:"Anna",firstName:"Anna"}))),{displayName:"Anna",firstName:"Anna"});
+  const maintained={...empty,firstName:"Manual",displayName:"Manual",avatarUrl:"https://example.com/a.jpg",language:"ru",timezone:"UTC+02:00"};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(maintained,{displayName:"Meta",firstName:"Meta",avatarUrl:"https://example.com/b.jpg",language:"uk",timezone:"UTC+03:00"}))),{});
+});
+
+test("profile persistence updates an active client before recording exact history",async()=>{
+  const calls=[];
+  const before={firstName:"Facebook 123",lastName:null,displayName:"Facebook 123",avatarUrl:null,country:null,email:null,phone:null,language:null,timezone:null};
+  assert.equal(await persistMetaFacebookProfilePatch(before,{displayName:"Anna",firstName:"Anna",avatarUrl:"https://example.com/a.jpg"},async patch=>(calls.push(["update",patch]),true),async fields=>{calls.push(["history",fields])}),true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[["update",{displayName:"Anna",firstName:"Anna",avatarUrl:"https://example.com/a.jpg"}],["history",["displayName","firstName","avatarUrl"]]]);
+  const blocked=[];
+  assert.equal(await persistMetaFacebookProfilePatch(before,{displayName:"Anna",firstName:"Anna"},async patch=>(blocked.push(["update",patch]),false),async fields=>{blocked.push(["history",fields])}),false);
+  assert.equal(blocked.some(([kind])=>kind==="history"),false);
+});
+
+test("profile enrichment guards archived clients and logs only pseudonymous Meta identities",()=>{
+  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null\}/);
+  assert.match(service,/persistMetaFacebookProfilePatch/);
+  assert.doesNotMatch(service,/senderId:event\.externalSenderId/);
+  assert.equal(metaIdentityLogRef("psid-123"),metaIdentityLogRef("psid-123"));
+  assert.notEqual(metaIdentityLogRef("psid-123"),"psid-123");
 });
 
 test("Meta subscription and persistence include outbound message echoes", () => {

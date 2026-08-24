@@ -6,6 +6,7 @@ import {
   canRefreshInbox,
   isCurrentInboxDetailRequest,
 } from "../lib/inbox-request-guard";
+import { ClientAvatar } from "./client-avatar";
 type Order = {
   id: string;
   number: string;
@@ -26,6 +27,7 @@ type Client = {
   id: string;
   displayName: string;
   firstName?: string;
+  avatarUrl?: string;
   status?: string;
   source: string;
   preferredChannel?: string;
@@ -461,9 +463,7 @@ export function CommunicationsWorkspace() {
                   className={client?.id === c.id ? "active" : ""}
                   onClick={() => void open(c)}
                 >
-                  <span className="communications-avatar">
-                    {initials(c.displayName)}
-                  </span>
+                  <ClientAvatar className="communications-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
                   <div>
                     <span className="communications-client-name">
                       <b>{c.displayName}</b>
@@ -513,8 +513,11 @@ export function CommunicationsWorkspace() {
           onKey={resizeByKeyboard}
         />
         <main className="communications-chat">
-          <header>
-            <b>{client?.displayName || ui.selectClient}</b>
+          <header className="communications-chat-header">
+            <span className="communications-chat-client">
+              {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
+              <b>{client?.displayName || ui.selectClient}</b>
+            </span>
             {client && (
               <span>
                 <span aria-hidden>{active.icon}</span> {active.label}
