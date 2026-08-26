@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-26 — Instagram OAuth: обязательное бизнес-разрешение
+
+- Реальный `INSTAGRAM_SUBSCRIBE` был отклонён Meta с HTTP 400 / code 3 после
+  получения `instagram_basic` и `instagram_manage_messages`.
+- В UI Meta для потока «Отправка сообщений в Instagram» явно указан также
+  `business_management`; CRM теперь запрашивает и fail-closed проверяет его
+  только в отдельном OAuth-потоке Instagram. Обычное переподключение Facebook
+  не меняется.
+- Локальная проверка: API 149/149, web 117/117, database 4/4, typecheck и
+  production builds проходят. Перед развёртыванием ожидаются обязательные
+  reviewer-гейты.
+
 ## 2026-08-24 — Meta Handover: входящие и ответы исправлены локально
 
 - Production-диагностика исключила сеть, Nginx, Page ID, срок токена и scopes:

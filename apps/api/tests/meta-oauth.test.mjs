@@ -37,11 +37,12 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
 test("Facebook reconnect stays compatible while an explicit Instagram flow requests Instagram messaging", () => {
   assert.match(controller, /channel==="instagram"/);
   assert.match(service, /const scopes=\["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"\]/);
-  assert.match(service, /if\(includeInstagram\)scopes\.push\("instagram_basic","instagram_manage_messages"\)/);
+  assert.match(service, /if\(includeInstagram\)scopes\.push\("instagram_basic","instagram_manage_messages","business_management"\)/);
   assert.match(service, /accountFields=includeInstagram\?"id,name,access_token,instagram_business_account\{id,username\}":"id,name,access_token"/);
   assert.match(service, /instagram_business_account\{id,username\}/);
   assert.match(service, /if \(pending\.includeInstagram\)/);
   assert.match(service, /instagram_manage_messages/);
+  assert.match(service, /business_management/);
   assert.match(service, /instagramAccountId \+ "\/subscribed_apps"/);
   assert.match(service, /instagramSubscribedFields=instagramApp\.subscribed_fields/);
   assert.match(service, /values\.pageId === page\.id[\s\S]*values\.instagramAccountId[\s\S]*:\s*""/);
