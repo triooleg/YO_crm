@@ -344,7 +344,7 @@ export class CommunicationsService {
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
     const scopes=["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"];
-    if(includeInstagram)scopes.push("instagram_business_basic","instagram_business_manage_messages","business_management");
+    if(includeInstagram)scopes.push("instagram_basic","instagram_manage_messages","business_management");
     url.searchParams.set("scope",scopes.join(","));
     return { url: url.toString() };
   }
@@ -366,7 +366,7 @@ export class CommunicationsService {
     const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> }>("me/accounts", token.access_token!, { fields: accountFields }, "GET", appSecret);
     const pages = (result.data || []).filter(page => page.id && page.name && page.access_token).slice(0, 100);
     if (!pages.length) throw new BadRequestException("В доступе Facebook не найдено ни одной публичной страницы");
-    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, includeInstagram, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], instagramAccessToken: includeInstagram ? token.access_token! : undefined, pages }));
+    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, includeInstagram, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], pages }));
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:" + sessionHash},0))`;
       const current = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } } });
@@ -382,7 +382,7 @@ export class CommunicationsService {
     return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Meta</title><body><h1>${ok?"Авторизация завершена":"Авторизация не завершена"}</h1><p>${ok?"Вернитесь в CRM и выберите страницу Facebook.":"Закройте окно и повторите подключение из CRM."}</p></body></html>`;
   }
   private decodeMetaOauthPending(encrypted:string,u:User,sessionHash:string){
-    let pending: { userId:string;sessionHash:string;includeInstagram?:boolean;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];instagramAccessToken?:string;pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> };
+    let pending: { userId:string;sessionHash:string;includeInstagram?:boolean;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> };
     try { pending = JSON.parse(decryptSecret(encrypted)); } catch { throw new BadRequestException("Не удалось прочитать авторизацию Facebook"); }
     if (pending.userId!==u.id||pending.sessionHash!==sessionHash)throw new ForbiddenException("Авторизация Facebook принадлежит другой сессии");
     return pending;
@@ -418,11 +418,10 @@ export class CommunicationsService {
       let instagramSubscribedFields:string[]=[];
       if (pending.includeInstagram) {
         if(!instagramAccountId)throw new BadRequestException("У выбранной страницы не найден связанный профессиональный аккаунт Instagram");
-        const missingInstagramPermissions=["instagram_business_basic","instagram_business_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
+        const missingInstagramPermissions=["instagram_basic","instagram_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
         if (missingInstagramPermissions.length) throw new ForbiddenException("Meta не предоставила разрешения Instagram: "+missingInstagramPermissions.join(", "));
-        if(!pending.instagramAccessToken)throw new BadRequestException("Meta не вернула токен доступа Instagram, подключитесь повторно");
-        await this.metaGraph(instagramAccountId + "/subscribed_apps",pending.instagramAccessToken,{ subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
-        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",pending.instagramAccessToken,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
+        await this.metaGraph(instagramAccountId + "/subscribed_apps",page.access_token,{ subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
+        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",page.access_token,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
         const instagramApp=instagramSubscriptions.data?.find(item=>item.id===(typeof values.appId==="string"?values.appId:""));
         if(!instagramApp?.subscribed_fields?.includes("messages"))throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
         instagramSubscribedFields=instagramApp.subscribed_fields;
@@ -432,7 +431,7 @@ export class CommunicationsService {
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
         const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
-        if (pending.includeInstagram) connectedValues.instagramAccessTokenEncrypted = encryptSecret(pending.instagramAccessToken!);
+        if (pending.includeInstagram) await tx.appSetting.deleteMany({ where: { section, key: "instagramAccessTokenEncrypted" } });
         for (const [key, value] of Object.entries(connectedValues)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
         if (!pending.includeInstagram && values.pageId !== page.id) {
           await tx.appSetting.deleteMany({ where: { section, key: { in: ["instagramAccountId", "instagramAccessTokenEncrypted"] } } });
@@ -460,7 +459,7 @@ export class CommunicationsService {
     const v = await this.sectionValues("integration.meta"), origin = this.publicOrigin();
     const verifyToken = this.secretValue(v, "verifyTokenEncrypted"), verifyTokenUnsafe = isMetaAccessToken(verifyToken);
     const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), verifyTokenConfigured = Boolean(verifyToken) && !verifyTokenUnsafe, pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), instagramAccessTokenConfigured = Boolean(this.secretValue(v, "instagramAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
-    const hasConfiguredChannel = Boolean(v.pageId && pageAccessTokenConfigured) || Boolean(v.instagramAccountId && instagramAccessTokenConfigured) || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
+    const hasConfiguredChannel = Boolean(v.pageId && pageAccessTokenConfigured) || Boolean(v.instagramAccountId && pageAccessTokenConfigured) || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
     const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel, verified = typeof v.subscriptionVerifiedAt === "string" && Boolean(v.subscriptionVerifiedAt), receiving = typeof v.lastWebhookAt === "string" && Boolean(v.lastWebhookAt);
     return { enabled: v.enabled === true, status: metaDeliveryStatus({ enabled: v.enabled === true, ready, verified, receiving, verifyTokenUnsafe }), subscriptionVerifiedAt: verified ? v.subscriptionVerifiedAt : null, lastWebhookAt: receiving ? v.lastWebhookAt : null, appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", pageName: typeof v.pageName === "string" ? v.pageName : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, verifyTokenConfigured, verifyTokenUnsafe, pageAccessTokenConfigured, instagramAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
   }
@@ -600,7 +599,7 @@ export class CommunicationsService {
         if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId }));
         return matches;
       });
-      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),events=scopedEvents;
+      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),events=scopedEvents;
       const persisted = await Promise.all(events.map(async event => {
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
         return this.persistInbound(event, "META");
@@ -608,7 +607,7 @@ export class CommunicationsService {
       const accepted = persisted.filter(Boolean).length;
       const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM");
       if(pageToken&&facebookEvents.length)void this.enrichMetaProfiles(facebookEvents,pageToken,appSecret);
-      if(instagramToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,instagramToken,appSecret);
+      if(pageToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,pageToken,appSecret);
       const echoes = normalizeMetaEchoMessages(payload).filter(event => {
         const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
         return typeof expected === "string" && expected !== "" && event.receiverId === expected;
@@ -920,7 +919,7 @@ export class CommunicationsService {
       const receiverId = channel === ContactChannel.INSTAGRAM
           ? (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "")
           : (typeof values.pageId === "string" ? values.pageId : ""),
-        pageToken = this.secretValue(values, channel === ContactChannel.INSTAGRAM ? "instagramAccessTokenEncrypted" : "pageAccessTokenEncrypted"),
+        pageToken = this.secretValue(values, "pageAccessTokenEncrypted"),
         appSecret = this.secretValue(values, "appSecretEncrypted"),
         recipientId = metaRecipientId(receiverId, conversation?.externalId);
       const channelName = channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
