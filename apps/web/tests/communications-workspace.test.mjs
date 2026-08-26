@@ -17,11 +17,20 @@ test("входящие используют централизованные р�
 
 test("composer offers a real send action separately from saving a draft", () => {
   assert.match(component, /async function save\(action: "DRAFT" \| "SEND"\)/);
-  assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: channel\(client\), action,/);
+  assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: activeChannel, action,/);
   assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
   assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
   assert.match(component, /ui\.sendMessage/);
   assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
+});
+
+test("composer sends both Facebook and Instagram conversations", () => {
+  assert.match(component, /\["FACEBOOK", "INSTAGRAM"\]\.includes\(activeChannel\)/);
+  assert.match(component, /value=\{activeChannel\}/);
+  assert.match(component, /setActiveChannel\(event\.target\.value\)/);
+  assert.match(component, /availableChannels\.map/);
+  assert.match(component, /availableChannels\.length > 1/);
+  assert.match(component, /active\.label/);
 });
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
@@ -131,9 +140,15 @@ test("вложения Meta отображаются в истории пере�
 
 test("ошибка отправки Meta показывает безопасную причину на русском", () => {
   assert.match(component, /sendFailureReasons/);
+  assert.match(component, /sendFailureText\(message\.metadata\?\.reason, message\.channel\)/);
+  assert.match(component, /messageChannel === "INSTAGRAM" \? "Instagram" : "Facebook"/);
   assert.match(locale, /TOKEN_EXPIRED/);
   assert.match(locale, /PERMISSION_REQUIRED/);
   assert.match(locale, /REPLY_WINDOW_CLOSED/);
+});
+test("переключатель канала не ломает заголовок на мобильном экране", () => {
+  assert.match(css, /communications-chat-header>label select/);
+  assert.match(css, /@media\(max-width:650px\)\{\.communications-chat-header>label/);
 });
 
 test("к сообщению можно прикрепить изображение или файл и сохранить его как черновик", () => {

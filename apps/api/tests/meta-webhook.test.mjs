@@ -35,7 +35,7 @@ test("normalizes Messenger standby messages while another app controls the threa
 });
 
 test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
-  assert.match(service,/fields:"name,first_name,last_name,profile_pic,locale,timezone"/);
+  assert.match(service,/"name,first_name,last_name,profile_pic,locale,timezone"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
   assert.match(service,/Facebook\|Instagram/);
 });
@@ -109,8 +109,17 @@ test("scopes Messenger conversations by Page ID and PSID", () => {
 
 test("profile enrichment keeps identical sender IDs isolated by Facebook Page",()=>{
  const targets=metaProfileTargets([{channel:"FACEBOOK",receiverId:"page-a",externalSenderId:"same",externalMessageId:"1",content:"a",receivedAt:new Date(),metadata:{messageType:"text"}},{channel:"FACEBOOK",receiverId:"page-b",externalSenderId:"same",externalMessageId:"2",content:"b",receivedAt:new Date(),metadata:{messageType:"text"}}]);
- assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{receiverId:"page-a",senderId:"same"},{receiverId:"page-b",senderId:"same"}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{channel:"FACEBOOK",receiverId:"page-a",senderId:"same"},{channel:"FACEBOOK",receiverId:"page-b",senderId:"same"}]);
  assert.match(service,/externalId_channel/);
+});
+
+test("Instagram sender profile is enriched with name and avatar in its own channel", () => {
+  const targets = metaProfileTargets([{channel:"INSTAGRAM",receiverId:"ig-business",externalSenderId:"igsid-1",externalMessageId:"1",content:"x",receivedAt:new Date(),metadata:{messageType:"text"}}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)), [{channel:"INSTAGRAM",receiverId:"ig-business",senderId:"igsid-1"}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({username:"gymnast",profile_pic:"https://cdn.example/avatar.jpg"}))), {
+    displayName:"gymnast", firstName:"gymnast", avatarUrl:"https://cdn.example/avatar.jpg",
+  });
+  assert.match(service, /eventChannel===ContactChannel\.INSTAGRAM/);
 });
 
 test("migrates a legacy PSID conversation only when its saved receiver matches the Page", () => {

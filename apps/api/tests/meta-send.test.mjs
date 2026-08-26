@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { metaRecipientId, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl } = module.exports;
+const { metaRecipientId, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -34,6 +34,20 @@ test("Meta send builds a reusable Messenger attachment payload", () => {
     message: JSON.stringify({ attachment: { type: "image", payload: { url: "https://crm.yoleotard.com/api/communications/files/example.jpg", is_reusable: true } } }),
   });
   assert.equal(JSON.stringify(params).includes("token"), false);
+});
+
+test("Instagram send uses the configured account scope and never invokes Facebook thread control", async () => {
+  assert.equal(metaRecipientId("ig-business-1", "ig-business-1:igsid-7"), "igsid-7");
+  const calls = [];
+  const result = await deliverMetaMessage("INSTAGRAM", {
+    send: async () => (calls.push("send"), { message_id: "ig-mid-1" }),
+    takeControl: async () => calls.push("take-control"),
+    isThreadControlError: () => true,
+    onTakeControlSuccess: async () => calls.push("audit-success"),
+    onTakeControlFailure: async () => calls.push("audit-failure"),
+  });
+  assert.equal(result.message_id, "ig-mid-1");
+  assert.deepEqual(calls, ["send"]);
 });
 
 test("Meta send converts provider errors into safe actionable reasons", () => {

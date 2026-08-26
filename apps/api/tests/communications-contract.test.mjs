@@ -135,14 +135,16 @@ test("conversation and draft are created atomically", () => {
   );
   assert.doesNotMatch(x, /this\.p\.conversation\.upsert/);
 });
-test("outbound Facebook messages distinguish drafts from real Meta sends", () => {
+test("outbound Facebook and Instagram messages distinguish drafts from real Meta sends", () => {
   assert.match(dto, /@IsIn\(\["DRAFT","SEND"\]asconst\)action/);
   const x = service.slice(
     service.indexOf("asyncsend"),
     service.indexOf("@Injectable()exportclassAiAssistantService"),
   );
   assert.match(x, /d\.action==="SEND"/);
-  assert.match(x, /pageId\+"\/messages"/);
+  assert.match(x, /receiverId\+"\/messages"/);
+  assert.match(x, /ContactChannel\.INSTAGRAM/);
+  assert.match(x, /deliverMetaMessage\(metaChannel/);
   assert.match(x, /metaTextMessageParams\(recipientId,content\)/);
   assert.match(x, /MessageStatus\.SENT/);
   assert.match(x, /MessageStatus\.FAILED/);

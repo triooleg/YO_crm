@@ -77,6 +77,11 @@ function sourceBadge(c?: Client) {
     label: ui.sources[key as keyof typeof ui.sources] || ui.sources.MANUAL,
   };
 }
+function sendFailureText(reason: string | undefined, messageChannel: string) {
+  const reasons = ui.sendFailureReasons as Record<string, string>;
+  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : "Facebook";
+  return (reasons[reason || ""] || ui.failed).replaceAll("Facebook", provider);
+}
 function clientBadges(c: Client) {
   const keys = [
     ...new Set(
@@ -141,6 +146,7 @@ function formatBytes(size: number) {
 export function CommunicationsWorkspace() {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
+    [activeChannel,setActiveChannel]=useState("MANUAL"),
     [messages, setMessages] = useState<Message[]>([]),
     [templates, setTemplates] = useState<Template[]>([]),
     [templatesOpen, setTemplatesOpen] = useState(false),
@@ -281,6 +287,7 @@ export function CommunicationsWorkspace() {
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
+    setActiveChannel(latestConversation(c)?.channel||channel(c));
     setMessagesLoading(true);
     setError("");
     try {
@@ -474,7 +481,7 @@ export function CommunicationsWorkspace() {
       const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
         const result = await api("/communications/" + client.id + "/messages", {
           method: "POST",
-          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: channel(client), action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID() } : {}) }),
+          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID() } : {}) }),
         });
         setMessages((current) => [...current, result]);
         return result as Message;
@@ -507,8 +514,7 @@ export function CommunicationsWorkspace() {
       }
       const failed = sent.find((message) => message.status === "FAILED");
       if (failed) {
-        const reasons = ui.sendFailureReasons as Record<string, string>;
-        setError(reasons[failed.metadata?.reason || ""] || ui.sendFailed);
+        setError(sendFailureText(failed.metadata?.reason, activeChannel));
       }
       else {
         setText("");
@@ -580,7 +586,8 @@ export function CommunicationsWorkspace() {
       setBusy(false);
     }
   }
-  const active = sourceBadge(client),
+  const active = sourceBadge({source:activeChannel} as Client),
+    availableChannels = client ? clientBadges(client) : [],
     grid = left + "px 6px minmax(380px,1fr) 6px " + right + "px";
   return (
     <div className="communications-page">
@@ -696,11 +703,11 @@ export function CommunicationsWorkspace() {
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <b>{client?.displayName || ui.selectClient}</b>
             </span>
-            {client && (
-              <span>
-                <span aria-hidden>{active.icon}</span> {active.label}
-              </span>
-            )}
+            {client && (availableChannels.length > 1 ? (
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>setActiveChannel(event.target.value)}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+            ) : (
+              <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
+            ))}
           </header>
           <div className="communications-messages">
             {messagesLoading ? (
@@ -751,7 +758,7 @@ export function CommunicationsWorkspace() {
                       </div>
                     )}
                     <small>
-                      {message.status === "FAILED" ? (ui.sendFailureReasons as Record<string, string>)[message.metadata?.reason || ""] || ui.failed : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
+                      {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {new Date(message.createdAt).toLocaleString("ru")}
                     </small>
                   </article>
@@ -831,7 +838,7 @@ export function CommunicationsWorkspace() {
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
-              {channel(client) === "FACEBOOK" && (
+              {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && (
                 <button
                   disabled={busy || !client || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}

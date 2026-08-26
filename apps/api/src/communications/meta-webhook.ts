@@ -57,13 +57,14 @@ export function metaConversationExternalId(receiverId: string | undefined, sende
 }
 
 export function metaProfileTargets(events:MetaInboundMessage[]){
-  const unique=new Map<string,{receiverId:string;senderId:string}>();
-  for(const event of events)if(event.channel==="FACEBOOK"&&event.receiverId){const target={receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(metaConversationExternalId(target.receiverId,target.senderId),target)}
+  const unique=new Map<string,{channel:"FACEBOOK"|"INSTAGRAM";receiverId:string;senderId:string}>();
+  for(const event of events)if((event.channel==="FACEBOOK"||event.channel==="INSTAGRAM")&&event.receiverId){const target={channel:event.channel,receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(event.channel+":"+metaConversationExternalId(target.receiverId,target.senderId),target)}
   return [...unique.values()];
 }
 
 export type MetaFacebookProfile = {
   name?: unknown;
+  username?: unknown;
   first_name?: unknown;
   last_name?: unknown;
   profile_pic?: unknown;
@@ -99,7 +100,7 @@ export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): Norm
   const output: NormalizedMetaFacebookProfile = {};
   const firstName = cleanProfileText(profile.first_name);
   const lastName = cleanProfileText(profile.last_name);
-  const displayName = cleanProfileText(profile.name) || [firstName, lastName].filter(Boolean).join(" ");
+  const displayName = cleanProfileText(profile.name) || [firstName, lastName].filter(Boolean).join(" ") || cleanProfileText(profile.username);
   if (displayName) {
     output.displayName = displayName;
     output.firstName = firstName || displayName;

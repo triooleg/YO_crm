@@ -69,6 +69,12 @@ export async function deliverMetaWithThreadControl<T>(operations: {
   }
 }
 
+export function deliverMetaMessage<T>(channel: "FACEBOOK" | "INSTAGRAM", operations: Parameters<typeof deliverMetaWithThreadControl<T>>[0]) {
+  return channel === "FACEBOOK"
+    ? deliverMetaWithThreadControl(operations)
+    : operations.send();
+}
+
 export class MetaGraphRequestError extends Error {
   constructor(public readonly failure: ReturnType<typeof metaSendFailure>) {
     super("Meta Graph request failed");

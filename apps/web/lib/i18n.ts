@@ -357,6 +357,7 @@ export const settingsUi = {
   metaAppSecret: "Секрет приложения Meta",
   metaContinue: "Продолжить с Facebook",
   metaReconnect: "Переподключить Facebook",
+  metaConnectInstagram: "Подключить Instagram",
   metaConnecting: "Ожидаем авторизацию Facebook…",
   metaChoosePage: "Выберите страницу Facebook",
   metaSelect: "Подключить",
@@ -559,6 +560,7 @@ export const tasksUi = {
 } as const;
 
 export const communicationsUi = {
+  replyChannel: "Канал ответа",
   templatesList: "Сохранённые шаблоны",
   eyebrow: "ЕДИНОЕ ОКНО ОБЩЕНИЯ",
   title: "Входящие",

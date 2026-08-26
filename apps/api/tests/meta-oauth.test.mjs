@@ -34,11 +34,19 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
   assert.match(service, /subscribed_apps/);
 });
 
-test("Facebook Page connection does not request unavailable Instagram scopes", () => {
-  assert.match(service, /scope",\s*"pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement"/);
-  assert.doesNotMatch(service, /scope",[^\n]*instagram_basic/);
-  assert.doesNotMatch(service, /scope",[^\n]*instagram_manage_messages/);
-  assert.doesNotMatch(service, /if\(page\.instagram_business_account[\s\S]*Facebook не предоставил разрешения для сообщений Instagram/);
+test("Facebook reconnect stays compatible while an explicit Instagram flow requests Instagram messaging", () => {
+  assert.match(controller, /channel==="instagram"/);
+  assert.match(service, /const scopes=\["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"\]/);
+  assert.match(service, /if\(includeInstagram\)scopes\.push\("instagram_basic","instagram_manage_messages"\)/);
+  assert.match(service, /accountFields=includeInstagram\?"id,name,access_token,instagram_business_account\{id,username\}":"id,name,access_token"/);
+  assert.match(service, /instagram_business_account\{id,username\}/);
+  assert.match(service, /if \(pending\.includeInstagram\)/);
+  assert.match(service, /instagram_manage_messages/);
+  assert.match(service, /instagramAccountId \+ "\/subscribed_apps"/);
+  assert.match(service, /instagramSubscribedFields=instagramApp\.subscribed_fields/);
+  assert.match(service, /values\.pageId === page\.id[\s\S]*values\.instagramAccountId[\s\S]*:\s*""/);
+  assert.match(service, /instagramAccessTokenEncrypted = encryptSecret\(page\.access_token\)/);
+  assert.match(service, /values\.pageId !== page\.id[\s\S]*instagramAccountId", "instagramAccessTokenEncrypted/);
 });
 
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
@@ -114,5 +122,5 @@ test("OAuth keeps Graph tokens out of URLs",()=>{
 test("non-send Meta Graph failures preserve the safe HTTP 502 contract", () => {
   assert.match(service, /if \(structuredFailure\) throw new MetaGraphRequestError/);
   assert.match(service, /throw new BadGatewayException\("Meta не выполнила запрос"\)/);
-  assert.match(service, /pageId \+ "\/messages"[\s\S]*appSecret,[\s\S]*true/);
+  assert.match(service, /receiverId \+ "\/messages"[\s\S]*appSecret,[\s\S]*true/);
 });

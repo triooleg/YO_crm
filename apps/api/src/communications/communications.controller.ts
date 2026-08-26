@@ -32,7 +32,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Patch("integrations/:channel")@Roles("OWNER","ADMIN")saveIntegration(@Param("channel")channel:string,@Body()d:IntegrationSettingsDto,@Req()r:Request&{user:User}){return this.c.saveIntegration(channel,d,r.user)}
 @Get("meta/settings")@Roles("OWNER","ADMIN")metaSettings(){return this.c.metaSettings()}
 @Patch("meta/settings")@Roles("OWNER","ADMIN")saveMetaSettings(@Body()d:MetaIntegrationDto,@Req()r:Request&{user:User}){return this.c.saveMetaSettings(d,r.user)}
-@Get("meta/oauth/start")@Roles("OWNER","ADMIN")metaOauthStart(@Req()r:Request&{user:User},@Res({passthrough:true})res:Response){return this.c.metaOauthStart(r.user,this.sessionBinding(r,r.user,res,true))}
+@Get("meta/oauth/start")@Roles("OWNER","ADMIN")metaOauthStart(@Query("channel")channel:string,@Req()r:Request&{user:User},@Res({passthrough:true})res:Response){return this.c.metaOauthStart(r.user,this.sessionBinding(r,r.user,res,true),channel==="instagram")}
 @Get("meta/oauth/callback")@Roles("OWNER","ADMIN")async metaOauthCallback(@Query("code")code:string,@Query("state")state:string,@Req()r:Request&{user:User},@Res()res:Response){try{await this.c.metaOauthCallback(code,state,r.user,this.sessionBinding(r,r.user));res.type("html").send(this.c.metaOauthResultHtml(true))}catch{res.status(400).type("html").send(this.c.metaOauthResultHtml(false))}}
 @Get("meta/oauth/pages")@Roles("OWNER","ADMIN")metaOauthPages(@Req()r:Request&{user:User}){return this.c.metaOauthPages(r.user,this.sessionBinding(r,r.user))}
 @Post("meta/oauth/connect")@Roles("OWNER","ADMIN")metaOauthConnect(@Body()d:MetaOauthConnectDto,@Req()r:Request&{user:User}){return this.c.metaOauthConnect(d.flowId,d.pageId,r.user,this.sessionBinding(r,r.user))}
