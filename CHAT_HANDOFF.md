@@ -729,3 +729,11 @@
 - Добавлен regression-тест на использование отдельного Instagram token при subscribe и его encrypted persistence. Targeted OAuth tests 12/12 PASS; полный API suite 149/149, typecheck и production build PASS. Обязательные regression, business/security и release/visual reviews PASS.
 - Deployment: commit `5ccfeb7` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`; API, web, PostgreSQL and Redis are running, API health is healthy, and public `https://crm.yoleotard.com/api/health` returns HTTP 200.
 - Теперь нужно один раз нажать «Переподключить Facebook» → «Подключить Instagram» → выбрать связанную Page и затем отправить тестовый Direct от другого Instagram-аккаунта; не подставлять Instagram App ID в поле ID аккаунта Instagram.
+
+## 2026-08-26 — актуальные права Instagram API с Facebook Login
+
+- После исправления отдельного Instagram token production-лог подтвердил следующий отказ Meta на `INSTAGRAM_SUBSCRIBE`: HTTP 400 / code 3. В текущем Meta-продукте «Instagram API с входом через Facebook» CRM продолжал запрашивать устаревшие права `instagram_basic` и `instagram_manage_messages`.
+- OAuth и серверная fail-closed проверка синхронно переведены на `instagram_business_basic`, `instagram_business_manage_messages` и `business_management`. Базовый набор прав Facebook/Messenger не изменён, поэтому обычное переподключение Facebook совместимо с существующей связью.
+- Проверка: targeted Meta OAuth 12/12, полный `pnpm quality:check` (API 149/149, web 117/117, database 4/4), typecheck и production builds PASS. Regression, business/security и visual/release reviewers дали PASS; frontend не менялся.
+- Deployment: commit `8dee997` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`. API контейнер healthy; API, web, PostgreSQL и Redis запущены. Внутренний и public `https://crm.yoleotard.com/api/health` return HTTP 200.
+- Для реальной проверки нужно запустить новый поток кнопкой «Подключить Instagram» и завершить Facebook OAuth: это ожидаемая авторизация именно для Meta product «Instagram API with Facebook Login». Предыдущая авторизация не содержит новых прав и не может быть использована повторно. После успешного подключения отправить Direct от другого Instagram-профиля и ответить из CRM.
