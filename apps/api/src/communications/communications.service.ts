@@ -344,7 +344,7 @@ export class CommunicationsService {
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
     const scopes=["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"];
-    if(includeInstagram)scopes.push("instagram_basic","instagram_manage_messages","business_management");
+    if(includeInstagram)scopes.push("instagram_business_basic","instagram_business_manage_messages","business_management");
     url.searchParams.set("scope",scopes.join(","));
     return { url: url.toString() };
   }
@@ -418,7 +418,7 @@ export class CommunicationsService {
       let instagramSubscribedFields:string[]=[];
       if (pending.includeInstagram) {
         if(!instagramAccountId)throw new BadRequestException("У выбранной страницы не найден связанный профессиональный аккаунт Instagram");
-        const missingInstagramPermissions=["instagram_basic","instagram_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
+        const missingInstagramPermissions=["instagram_business_basic","instagram_business_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
         if (missingInstagramPermissions.length) throw new ForbiddenException("Meta не предоставила разрешения Instagram: "+missingInstagramPermissions.join(", "));
         if(!pending.instagramAccessToken)throw new BadRequestException("Meta не вернула токен доступа Instagram, подключитесь повторно");
         await this.metaGraph(instagramAccountId + "/subscribed_apps",pending.instagramAccessToken,{ subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
