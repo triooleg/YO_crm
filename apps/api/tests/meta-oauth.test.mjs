@@ -119,8 +119,13 @@ test("OAuth keeps Graph tokens out of URLs",()=>{
   assert.doesNotMatch(service,/access_token:\s*token\.access_token/);
 });
 
-test("non-send Meta Graph failures preserve the safe HTTP 502 contract", () => {
+test("Meta connection failures identify the rejected subscription stage without exposing Graph details", () => {
   assert.match(service, /if \(structuredFailure\) throw new MetaGraphRequestError/);
-  assert.match(service, /throw new BadGatewayException\("Meta не выполнила запрос"\)/);
+  assert.match(service, /metaIntegrationFailure\(operation, response\.status, body\.error\)/);
+  assert.match(service, /META_GRAPH_FAILURE operation=/);
+  assert.match(service, /INSTAGRAM_SUBSCRIBE/);
+  assert.match(service, /FACEBOOK_SUBSCRIBE/);
+  assert.match(service, /Instagram не подтвердил подписку на сообщения/);
+  assert.match(service, /Facebook не подтвердил подписку страницы/);
   assert.match(service, /receiverId \+ "\/messages"[\s\S]*appSecret,[\s\S]*true/);
 });

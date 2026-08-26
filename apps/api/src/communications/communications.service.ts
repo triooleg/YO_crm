@@ -300,7 +300,17 @@ export class CommunicationsService {
   }
   private metaGraphVersion() { return process.env.META_GRAPH_VERSION || "v23.0"; }
   private metaOauthRedirect() { return this.publicOrigin() + "/api/communications/meta/oauth/callback"; }
-  private async metaGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", appSecret?: string, structuredFailure = false) {
+  private metaIntegrationFailure(operation: "INSTAGRAM_SUBSCRIBE" | "INSTAGRAM_VERIFY" | "FACEBOOK_SUBSCRIBE" | "FACEBOOK_VERIFY" | undefined, status: number, error: { code?: number; error_subcode?: number } | undefined) {
+    if (!operation) return new BadGatewayException("Meta не выполнила запрос");
+    const code = Number(error?.code) || 0, subcode = Number(error?.error_subcode) || 0;
+    this.logger.warn(`META_GRAPH_FAILURE operation=${operation} status=${status} code=${code || "unknown"} subcode=${subcode || "none"}`);
+    const suffix = code ? ` Код Meta: ${code}${subcode ? "/" + subcode : ""}.` : "";
+    if (operation === "INSTAGRAM_SUBSCRIBE" || operation === "INSTAGRAM_VERIFY") {
+      return new BadGatewayException("Instagram не подтвердил подписку на сообщения. Убедитесь, что это профессиональный аккаунт, привязанный к выбранной Facebook-странице, и повторите подключение Instagram." + suffix);
+    }
+    return new BadGatewayException("Facebook не подтвердил подписку страницы. Переподключите Facebook и подтвердите доступ к сообщениям страницы." + suffix);
+  }
+  private async metaGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", appSecret?: string, structuredFailure = false, operation?: "INSTAGRAM_SUBSCRIBE" | "INSTAGRAM_VERIFY" | "FACEBOOK_SUBSCRIBE" | "FACEBOOK_VERIFY") {
     const url = new URL("https://graph.facebook.com/" + this.metaGraphVersion() + "/" + path.replace(/^\//, ""));
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
     if (appSecret) url.searchParams.set("appsecret_proof", createHmac("sha256", appSecret).update(token).digest("hex"));
@@ -308,7 +318,7 @@ export class CommunicationsService {
     const body = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: number; error_subcode?: number } };
     if (!response.ok || body.error) {
       if (structuredFailure) throw new MetaGraphRequestError(metaSendFailure(body.error));
-      throw new BadGatewayException("Meta не выполнила запрос");
+      throw this.metaIntegrationFailure(operation, response.status, body.error);
     }
     return body;
   }
@@ -410,14 +420,14 @@ export class CommunicationsService {
         if(!instagramAccountId)throw new BadRequestException("У выбранной страницы не найден связанный профессиональный аккаунт Instagram");
         const missingInstagramPermissions=["instagram_basic","instagram_manage_messages"].filter(permission=>!pending.permissions.includes(permission));
         if (missingInstagramPermissions.length) throw new ForbiddenException("Meta не предоставила разрешения Instagram: "+missingInstagramPermissions.join(", "));
-        await this.metaGraph(instagramAccountId + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret);
-        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",page.access_token,{fields:"id,subscribed_fields"},"GET",appSecret);
+        await this.metaGraph(instagramAccountId + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
+        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",page.access_token,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
         const instagramApp=instagramSubscriptions.data?.find(item=>item.id===(typeof values.appId==="string"?values.appId:""));
         if(!instagramApp?.subscribed_fields?.includes("messages"))throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
         instagramSubscribedFields=instagramApp.subscribed_fields;
       }
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret);
-      const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret);
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
+      const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret, false, "FACEBOOK_VERIFY");
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
         const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
