@@ -702,3 +702,10 @@
 - До внешнего E2E остаётся deployment и ручной Instagram Direct smoke: подключить именно Instagram через отдельную кнопку, получить входящее сообщение от другого Instagram-аккаунта и ответить из CRM.
 - Deployment: commit `203068f` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`; no migration required. API, web, PostgreSQL and Redis are running, API health is healthy; `https://crm.yoleotard.com/` and `/api/health` return HTTP 200.
 - Production visual smoke: desktop and 390×844 mobile settings render the dedicated «Подключить Instagram» action alongside Facebook reconnect and delivery verification. Mobile document width is 375/390 (no horizontal overflow); no production console errors (only non-blocking browser autocomplete/form hints).
+
+## 2026-08-26 — диагностика подключения Instagram и защита от устаревшего UI
+
+- Ошибки подтверждения подписки Meta теперь различают этапы `Instagram subscribe/verify` и `Facebook subscribe/verify`. В UI выводится только безопасное русское действие и числовой код Meta; серверный журнал не содержит текста Graph-ответа, токенов, PSID или URL.
+- Корневая страница CRM переведена в динамический Next route, поэтому после следующего deployment браузер не сможет сохранить устаревшую HTML-оболочку/клиентский bundle на год и скрыть новые настройки.
+- Проверка: targeted OAuth tests 12/12, полный `pnpm quality:check`, API/Web typecheck и production builds PASS; regression, business/security и visual/release reviews PASS.
+- Deployment: commit `6a9f56b` pushed to `origin/main` and deployed. Production `/api/health` returns 200; API/PostgreSQL/Redis are healthy. Root response now uses `Cache-Control: private, no-cache, no-store`, not the prior year-long static cache.
