@@ -721,3 +721,10 @@
 - Корневая страница CRM переведена в динамический Next route, поэтому после следующего deployment браузер не сможет сохранить устаревшую HTML-оболочку/клиентский bundle на год и скрыть новые настройки.
 - Проверка: targeted OAuth tests 12/12, полный `pnpm quality:check`, API/Web typecheck и production builds PASS; regression, business/security и visual/release reviews PASS.
 - Deployment: commit `6a9f56b` pushed to `origin/main` and deployed. Production `/api/health` returns 200; API/PostgreSQL/Redis are healthy. Root response now uses `Cache-Control: private, no-cache, no-store`, not the prior year-long static cache.
+
+## 2026-08-26 — исправление токена подписки Instagram Direct (ожидает deployment)
+
+- Production-логи подтвердили, что выбор профессионального Instagram-аккаунта проходит, а Meta отклоняет следующий `INSTAGRAM_SUBSCRIBE` с HTTP 400 / code 3. Причина в CRM: для `/{instagramAccountId}/subscribed_apps` ошибочно использовался Page token Facebook.
+- Явный OAuth-поток Instagram теперь временно хранит полученный long-lived user token только внутри уже зашифрованного и привязанного к пользователю/сессии pending-state. Подписка и read-after-write проверка Instagram используют этот token; после успеха он отдельно шифруется как `instagramAccessTokenEncrypted` для входящих и исходящих Direct. Facebook-подписка и Page token не изменены.
+- Добавлен regression-тест на использование отдельного Instagram token при subscribe и его encrypted persistence. Targeted OAuth tests 12/12 PASS; полный API suite 149/149, typecheck и production build PASS. Обязательные regression, business/security и release/visual reviews PASS.
+- После deployment нужно один раз нажать «Переподключить Facebook» → «Подключить Instagram» → выбрать связанную Page и затем отправить тестовый Direct от другого Instagram-аккаунта; не подставлять Instagram App ID в поле ID аккаунта Instagram.

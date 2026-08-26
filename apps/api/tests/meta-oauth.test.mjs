@@ -44,9 +44,10 @@ test("Facebook reconnect stays compatible while an explicit Instagram flow reque
   assert.match(service, /instagram_manage_messages/);
   assert.match(service, /business_management/);
   assert.match(service, /instagramAccountId \+ "\/subscribed_apps"/);
+  assert.match(service, /instagramAccountId \+ "\/subscribed_apps",pending\.instagramAccessToken/);
   assert.match(service, /instagramSubscribedFields=instagramApp\.subscribed_fields/);
   assert.match(service, /values\.pageId === page\.id[\s\S]*values\.instagramAccountId[\s\S]*:\s*""/);
-  assert.match(service, /instagramAccessTokenEncrypted = encryptSecret\(page\.access_token\)/);
+  assert.match(service, /instagramAccessTokenEncrypted = encryptSecret\(pending\.instagramAccessToken!?\)/);
   assert.match(service, /values\.pageId !== page\.id[\s\S]*instagramAccountId", "instagramAccessTokenEncrypted/);
 });
 

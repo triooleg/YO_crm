@@ -366,7 +366,7 @@ export class CommunicationsService {
     const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> }>("me/accounts", token.access_token!, { fields: accountFields }, "GET", appSecret);
     const pages = (result.data || []).filter(page => page.id && page.name && page.access_token).slice(0, 100);
     if (!pages.length) throw new BadRequestException("В доступе Facebook не найдено ни одной публичной страницы");
-    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, includeInstagram, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], pages }));
+    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, includeInstagram, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], instagramAccessToken: includeInstagram ? token.access_token! : undefined, pages }));
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:" + sessionHash},0))`;
       const current = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } } });
@@ -382,7 +382,7 @@ export class CommunicationsService {
     return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Meta</title><body><h1>${ok?"Авторизация завершена":"Авторизация не завершена"}</h1><p>${ok?"Вернитесь в CRM и выберите страницу Facebook.":"Закройте окно и повторите подключение из CRM."}</p></body></html>`;
   }
   private decodeMetaOauthPending(encrypted:string,u:User,sessionHash:string){
-    let pending: { userId:string;sessionHash:string;includeInstagram?:boolean;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> };
+    let pending: { userId:string;sessionHash:string;includeInstagram?:boolean;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];instagramAccessToken?:string;pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> };
     try { pending = JSON.parse(decryptSecret(encrypted)); } catch { throw new BadRequestException("Не удалось прочитать авторизацию Facebook"); }
     if (pending.userId!==u.id||pending.sessionHash!==sessionHash)throw new ForbiddenException("Авторизация Facebook принадлежит другой сессии");
     return pending;
@@ -420,8 +420,9 @@ export class CommunicationsService {
         if(!instagramAccountId)throw new BadRequestException("У выбранной страницы не найден связанный профессиональный аккаунт Instagram");
         const missingInstagramPermissions=["instagram_basic","instagram_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
         if (missingInstagramPermissions.length) throw new ForbiddenException("Meta не предоставила разрешения Instagram: "+missingInstagramPermissions.join(", "));
-        await this.metaGraph(instagramAccountId + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
-        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",page.access_token,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
+        if(!pending.instagramAccessToken)throw new BadRequestException("Meta не вернула токен доступа Instagram, подключитесь повторно");
+        await this.metaGraph(instagramAccountId + "/subscribed_apps",pending.instagramAccessToken,{ subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
+        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",pending.instagramAccessToken,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
         const instagramApp=instagramSubscriptions.data?.find(item=>item.id===(typeof values.appId==="string"?values.appId:""));
         if(!instagramApp?.subscribed_fields?.includes("messages"))throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
         instagramSubscribedFields=instagramApp.subscribed_fields;
@@ -431,7 +432,7 @@ export class CommunicationsService {
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
         const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
-        if (pending.includeInstagram) connectedValues.instagramAccessTokenEncrypted = encryptSecret(page.access_token);
+        if (pending.includeInstagram) connectedValues.instagramAccessTokenEncrypted = encryptSecret(pending.instagramAccessToken!);
         for (const [key, value] of Object.entries(connectedValues)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
         if (!pending.includeInstagram && values.pageId !== page.id) {
           await tx.appSetting.deleteMany({ where: { section, key: { in: ["instagramAccountId", "instagramAccessTokenEncrypted"] } } });
