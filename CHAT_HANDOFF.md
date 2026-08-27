@@ -19,6 +19,9 @@
   для отдельного отправителя Meta не вернула профиль; Instagram `Test message`
   до webhook не дошёл, а попытка `INSTAGRAM_SUBSCRIBE` получила Meta code 3.
   Это состояние внешнего канала, а не подтверждённое рабочее подключение CRM.
+- 2026-08-27: коммит `aeabd76f` развёрнут на production. Контейнеры API, web,
+  PostgreSQL и Redis healthy; внешний `https://crm.yoleotard.com/api/health`
+  возвращает HTTP 200. После развёртывания визуально открыта рабочая CRM.
 
 ## 2026-08-26 — Instagram OAuth: обязательное бизнес-разрешение
 
