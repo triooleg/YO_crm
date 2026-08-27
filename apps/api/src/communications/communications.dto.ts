@@ -82,14 +82,17 @@ export class MetaIntegrationDto {
   @IsOptional() @IsString() @MaxLength(80) appId?: string;
   @IsOptional() @IsString() @MaxLength(80) pageId?: string;
   @IsOptional() @IsString() @MaxLength(80) instagramAccountId?: string;
+  @IsOptional() @IsString() @MaxLength(80) instagramAppId?: string;
   @IsOptional() @IsString() @MaxLength(80) whatsappPhoneNumberId?: string;
   @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(8, 500) appSecret?: string;
   @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(8, 500) verifyToken?: string;
   @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(20, 1000) pageAccessToken?: string;
+  @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(8, 500) instagramAppSecret?: string;
   @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(20, 1000) whatsappAccessToken?: string;
   @IsOptional() @IsBoolean() removeAppSecret?: boolean;
   @IsOptional() @IsBoolean() removeVerifyToken?: boolean;
   @IsOptional() @IsBoolean() removePageAccessToken?: boolean;
+  @IsOptional() @IsBoolean() removeInstagramAppSecret?: boolean;
   @IsOptional() @IsBoolean() removeWhatsappAccessToken?: boolean;
 }
 export class MetaOauthConnectDto {

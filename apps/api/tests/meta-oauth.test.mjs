@@ -34,25 +34,24 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
   assert.match(service, /subscribed_apps/);
 });
 
-test("Facebook reconnect stays compatible while an explicit Instagram flow requests Instagram messaging", () => {
-  assert.match(controller, /channel==="instagram"/);
-  assert.match(service, /const scopes=\["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"\]/);
-  assert.match(service, /if\(includeInstagram\)scopes\.push\("instagram_basic","instagram_manage_messages","business_management"\)/);
-  assert.match(service, /accountFields=includeInstagram\?"id,name,access_token,instagram_business_account\{id,username\}":"id,name,access_token"/);
-  assert.match(service, /instagram_business_account\{id,username\}/);
-  assert.match(service, /if \(pending\.includeInstagram\)/);
-  assert.match(service, /instagram_manage_messages/);
-  assert.doesNotMatch(service, /scopes\.push\("instagram_business_basic","instagram_business_manage_messages"/);
-  assert.match(service, /business_management/);
+test("Facebook and Instagram use isolated OAuth applications and credentials", () => {
+  assert.match(controller, /meta\/instagram\/oauth\/start/);
+  assert.match(controller, /meta\/instagram\/oauth\/callback/);
+  assert.match(service, /pages_show_list[\s\S]*pages_manage_metadata[\s\S]*pages_messaging[\s\S]*pages_read_engagement/);
+  assert.match(service, /https:\/\/www\.instagram\.com\/oauth\/authorize/);
+  assert.match(service, /instagram_business_basic,instagram_business_manage_messages/);
+  assert.match(service, /instagramAppId/);
+  assert.match(service, /instagramAppSecretEncrypted/);
+  assert.match(service, /instagramAccessTokenEncrypted/);
+  assert.match(service, /graph\.instagram\.com/);
   assert.match(service, /instagramAccountId \+ "\/subscribed_apps"/);
-  assert.match(service, /instagramAccountId \+ "\/subscribed_apps",page\.access_token/);
-  assert.match(service, /instagramSubscribedFields=instagramApp\.subscribed_fields/);
-  assert.match(service, /values\.pageId === page\.id[\s\S]*values\.instagramAccountId[\s\S]*:\s*""/);
-  assert.doesNotMatch(service, /instagramAccessTokenEncrypted = encryptSecret\(pending\.instagramAccessToken!?\)/);
-  assert.match(service, /values\.pageId !== page\.id[\s\S]*instagramAccountId", "instagramAccessTokenEncrypted/);
-  assert.match(service, /pageToken = this\.secretValue\(values, "pageAccessTokenEncrypted"\)/);
-  assert.match(service, /if\(pageToken&&instagramEvents\.length\)void this\.enrichMetaProfiles\(instagramEvents,pageToken,appSecret\)/);
-  assert.doesNotMatch(service, /instagramToken=this\.secretValue\(values,"instagramAccessTokenEncrypted"\)/);
+  assert.match(service, /instagramGraph\(instagramAccountId \+ "\/subscribed_apps", token\.accessToken/);
+  assert.doesNotMatch(service, /values\.pageId !== page\.id[\s\S]*instagramAccountId", "instagramAccessTokenEncrypted/);
+  assert.match(service, /const connectedValues: Record<string, Prisma\.InputJsonValue> = \{ enabled: true, pageId: page\.id/);
+  assert.match(service, /instagramCredentialsChanged[\s\S]*integration\.meta\.instagram\.oauth\.attempt/);
+  assert.match(service, /facebookCredentialsChanged[\s\S]*integration\.meta\.oauth\.pointer/);
+  assert.match(service, /instagramToken=this\.secretValue\(values,"instagramAccessTokenEncrypted"\)/);
+  assert.match(service, /enrichMetaProfiles\(instagramEvents,instagramToken,undefined,"instagram"\)/);
 });
 
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
@@ -82,12 +81,36 @@ test("starting a reconnect invalidates a stale pending page picker", () => {
   assert.match(service, /metaOauthStart[\s\S]*?integration\.meta\.oauth\.pointer/);
   assert.match(service, /oldPointer[\s\S]*?deleteMany\(\{where:\{section:"integration\.meta\.oauth",key:oldPointer\.value/);
   assert.match(service, /integration\.meta\.oauth\.attempt/);
-  assert.match(service, /attempt\.value\s*!==\s*state\.nonce/);
+  assert.match(service, /parseMetaOauthAttempt\(attempt\.value\)/);
   assert.match(service, /meta-oauth-session:/);
 });
 
+test("changing provider credentials atomically invalidates stale OAuth callbacks", async () => {
+  assert.match(service, /meta-oauth-config/);
+  assert.match(service, /instagram-oauth-config/);
+  assert.match(service, /configRevision/);
+  assert.match(service, /Настройки Facebook изменились; подключитесь повторно/);
+  assert.match(service, /Настройки Instagram изменились; подключитесь повторно/);
+  let currentAppId = "old-app", revision = 0, tail = Promise.resolve();
+  const exclusively = operation => {
+    const previous = tail;
+    let release;
+    tail = new Promise(resolve => { release = resolve; });
+    return previous.then(async () => { try { return await operation(); } finally { release(); } });
+  };
+  // OAuth starts from the old configuration. Two saves race: the second request
+  // carries a stale browser value, but its delta is compared only after the lock.
+  const attemptRevision = revision;
+  await Promise.all([
+    exclusively(() => { if (currentAppId !== "new-app") { currentAppId = "new-app"; revision += 1; } }),
+    exclusively(() => { if (currentAppId !== "old-app") { currentAppId = "old-app"; revision += 1; } }),
+  ]);
+  assert.equal(revision, 2);
+  assert.notEqual(attemptRevision, revision);
+});
+
 test("a failed old connection never restores over a newer OAuth flow", () => {
-  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async metaSettings"));
+  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async instagramOauthStart"));
   assert.doesNotMatch(oauthConnect, /catch \(error\)[\s\S]*integration\.meta\.oauth\.pointer/);
   assert.doesNotMatch(oauthConnect, /catch \(error\)[\s\S]*instagramSubscriptionVerifiedAt/);
   assert.match(service, /Подключение Facebook уже заменено новой попыткой/);
@@ -95,7 +118,7 @@ test("a failed old connection never restores over a newer OAuth flow", () => {
 });
 
 test("an older successful flow cannot overwrite a newer Meta connection", () => {
-  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async metaSettings"));
+  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async instagramOauthStart"));
   const finalCommit = oauthConnect.slice(oauthConnect.indexOf("const confirmed"));
   assert.match(finalCommit, /meta-oauth-session:\"\+sessionHash/);
   assert.match(finalCommit, /const pointer = await tx\.appSetting\.findUnique/);
@@ -145,5 +168,6 @@ test("Meta connection failures identify the rejected subscription stage without 
   assert.match(service, /FACEBOOK_SUBSCRIBE/);
   assert.match(service, /Instagram не подтвердил подписку на сообщения/);
   assert.match(service, /Facebook не подтвердил подписку страницы/);
-  assert.match(service, /receiverId \+ "\/messages"[\s\S]*appSecret,[\s\S]*true/);
+  assert.match(service, /channel === ContactChannel\.INSTAGRAM[\s\S]*instagramAccessTokenEncrypted/);
+  assert.match(service, /channel === ContactChannel\.INSTAGRAM[\s\S]*instagramGraph/);
 });

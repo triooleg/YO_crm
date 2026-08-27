@@ -57,6 +57,14 @@ function validCommunicationFile(bytes: Buffer, mimeType: string) {
   if (mimeType === "application/pdf") return bytes.subarray(0, 5).toString() === "%PDF-";
   return mimeType === "text/plain" && !bytes.includes(0);
 }
+type MetaOauthAttempt = { nonce: string; configRevision: number };
+function parseMetaOauthAttempt(value: unknown): MetaOauthAttempt | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.nonce === "string" && Number.isInteger(candidate.configRevision) && Number(candidate.configRevision) >= 0
+    ? { nonce: candidate.nonce, configRevision: Number(candidate.configRevision) }
+    : null;
+}
 class TooManyRequestsException extends HttpException {
   constructor(message: string) {
     super(message, 429);
@@ -300,13 +308,14 @@ export class CommunicationsService {
   }
   private metaGraphVersion() { return process.env.META_GRAPH_VERSION || "v23.0"; }
   private metaOauthRedirect() { return this.publicOrigin() + "/api/communications/meta/oauth/callback"; }
+  private instagramOauthRedirect() { return this.publicOrigin() + "/api/communications/meta/instagram/oauth/callback"; }
   private metaIntegrationFailure(operation: "INSTAGRAM_SUBSCRIBE" | "INSTAGRAM_VERIFY" | "FACEBOOK_SUBSCRIBE" | "FACEBOOK_VERIFY" | "PROFILE_LOOKUP" | undefined, status: number, error: { code?: number; error_subcode?: number } | undefined) {
     if (!operation) return new BadGatewayException("Meta не выполнила запрос");
     const code = Number(error?.code) || 0, subcode = Number(error?.error_subcode) || 0;
     this.logger.warn(`META_GRAPH_FAILURE operation=${operation} status=${status} code=${code || "unknown"} subcode=${subcode || "none"}`);
     const suffix = code ? ` Код Meta: ${code}${subcode ? "/" + subcode : ""}.` : "";
     if (operation === "INSTAGRAM_SUBSCRIBE" || operation === "INSTAGRAM_VERIFY") {
-      return new BadGatewayException("Instagram не подтвердил подписку на сообщения. Убедитесь, что это профессиональный аккаунт, привязанный к выбранной Facebook-странице, и повторите подключение Instagram." + suffix);
+      return new BadGatewayException("Instagram не подтвердил подписку на сообщения. Убедитесь, что авторизация выполнена для профессионального аккаунта Instagram, и повторите подключение Instagram." + suffix);
     }
     if (operation === "PROFILE_LOOKUP") return new BadGatewayException("Meta не вернула данные профиля отправителя." + suffix);
     return new BadGatewayException("Facebook не подтвердил подписку страницы. Переподключите Facebook и подтвердите доступ к сообщениям страницы." + suffix);
@@ -329,24 +338,53 @@ export class CommunicationsService {
     if (!response.ok || body.error || !body.access_token) throw new BadGatewayException("Meta не выдала токен доступа");
     return body;
   }
-  async metaOauthStart(u: User, sessionHash: string, includeInstagram=false) {
-    const values = await this.sectionValues("integration.meta"), appId = typeof values.appId === "string" ? values.appId : "";
-    if (!appId || !this.secretValue(values, "appSecretEncrypted")) throw new BadRequestException("Сначала сохраните ID и секрет приложения Meta");
+  private async instagramGraph<T>(path: string, token: string, params: Record<string, string> = {}, method = "GET", structuredFailure = false, operation?: "INSTAGRAM_SUBSCRIBE" | "INSTAGRAM_VERIFY" | "PROFILE_LOOKUP") {
+    const url = new URL("https://graph.instagram.com/" + this.metaGraphVersion() + "/" + path.replace(/^\//, ""));
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+    const response = await fetch(url, { method, headers: { Authorization: "Bearer " + token }, signal: AbortSignal.timeout(15_000) });
+    const body = await response.json().catch(() => ({})) as T & { error?: { message?: string; code?: number; error_subcode?: number } };
+    if (!response.ok || body.error) {
+      if (structuredFailure) throw new MetaGraphRequestError(metaSendFailure(body.error));
+      throw this.metaIntegrationFailure(operation, response.status, body.error);
+    }
+    return body;
+  }
+  private async instagramTokenExchange(code: string, appId: string, appSecret: string) {
+    const response = await fetch("https://api.instagram.com/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: appId, client_secret: appSecret, grant_type: "authorization_code", redirect_uri: this.instagramOauthRedirect(), code }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = await response.json().catch(() => ({})) as { access_token?: string; user_id?: string; error_type?: string };
+    if (!response.ok || !body.access_token || !body.user_id) throw new BadGatewayException("Instagram не выдал токен доступа");
+    const longLived = await fetch("https://graph.instagram.com/access_token?" + new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: appSecret, access_token: body.access_token }), { signal: AbortSignal.timeout(15_000) });
+    const extended = await longLived.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
+    if (!longLived.ok || !extended.access_token) throw new BadGatewayException("Instagram не подтвердил долгосрочный токен доступа");
+    return { accessToken: extended.access_token, expiresAt: extended.expires_in ? Date.now() + extended.expires_in * 1000 : null, accountId: String(body.user_id) };
+  }
+  async metaOauthStart(u: User, sessionHash: string) {
+    let appId = "";
     const nonce = randomBytes(16).toString("hex");
     await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:" + sessionHash},0))`;
+      const rows = await tx.appSetting.findMany({ where: { section: "integration.meta" } });
+      const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
+      appId = typeof values.appId === "string" ? values.appId : "";
+      if (!appId || !this.secretValue(values, "appSecretEncrypted")) throw new BadRequestException("Сначала сохраните ID и секрет приложения Meta");
+      const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "facebook" } } });
+      const configRevision = typeof config?.value === "number" ? config.value : 0;
       const oldPointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});
       if(oldPointer&&typeof oldPointer.value==="string")await tx.appSetting.deleteMany({where:{section:"integration.meta.oauth",key:oldPointer.value}});
       await tx.appSetting.deleteMany({where:{section:"integration.meta.oauth.pointer",key:sessionHash}});
-      await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } }, create: { section: "integration.meta.oauth.attempt", key: sessionHash, value: nonce }, update: { value: nonce } });
-      await tx.appSetting.upsert({where:{section_key:{section:"integration.meta.oauth.mode",key:sessionHash}},create:{section:"integration.meta.oauth.mode",key:sessionHash,value:includeInstagram},update:{value:includeInstagram}});
+      const attempt: MetaOauthAttempt = { nonce, configRevision };
+      await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } }, create: { section: "integration.meta.oauth.attempt", key: sessionHash, value: attempt }, update: { value: attempt } });
     });
     const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
-    const scopes=["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"];
-    if(includeInstagram)scopes.push("instagram_basic","instagram_manage_messages","business_management");
-    url.searchParams.set("scope",scopes.join(","));
+    url.searchParams.set("scope",["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"].join(","));
     return { url: url.toString() };
   }
   async metaOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
@@ -354,8 +392,8 @@ export class CommunicationsService {
     let state; try { state = verifyMetaOauthState(signedState, this.metaOauthSecret()); } catch { throw new ForbiddenException("Сеанс подключения Meta недействителен или истёк"); }
     if (state.userId !== u.id || state.sessionHash !== sessionHash) throw new ForbiddenException("Сеанс подключения принадлежит другой сессии");
     const attempt = await this.p.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } } });
-    if (!attempt || attempt.value !== state.nonce) throw new ForbiddenException("Эта попытка подключения Facebook уже заменена новой");
-    const mode=await this.p.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.mode",key:sessionHash}}}),includeInstagram=mode?.value===true;
+    const attemptInfo = attempt ? parseMetaOauthAttempt(attempt.value) : null;
+    if (!attemptInfo || attemptInfo.nonce !== state.nonce) throw new ForbiddenException("Эта попытка подключения Facebook уже заменена новой");
     const values = await this.sectionValues("integration.meta"), appId = String(values.appId || ""), appSecret = this.secretValue(values, "appSecretEncrypted");
     if (!appId || !appSecret) throw new BadRequestException("Приложение Meta не настроено");
     const short = await this.metaTokenExchange({ client_id: appId, client_secret: appSecret, redirect_uri: this.metaOauthRedirect(), code });
@@ -363,19 +401,21 @@ export class CommunicationsService {
     const permissions = await this.metaGraph<{ data: Array<{ permission: string; status: string }> }>("me/permissions", token.access_token!, {}, "GET", appSecret);
     const granted = new Set((permissions.data || []).filter(x => x.status === "granted").map(x => x.permission));
     for (const required of ["pages_show_list","pages_manage_metadata","pages_messaging"]) if (!granted.has(required)) throw new ForbiddenException("Facebook не предоставил обязательное разрешение: " + required);
-    const accountFields=includeInstagram?"id,name,access_token,instagram_business_account{id,username}":"id,name,access_token";
-    const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> }>("me/accounts", token.access_token!, { fields: accountFields }, "GET", appSecret);
+    const result = await this.metaGraph<{ data: Array<{ id: string; name: string; access_token: string }> }>("me/accounts", token.access_token!, { fields: "id,name,access_token" }, "GET", appSecret);
     const pages = (result.data || []).filter(page => page.id && page.name && page.access_token).slice(0, 100);
     if (!pages.length) throw new BadRequestException("В доступе Facebook не найдено ни одной публичной страницы");
-    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, includeInstagram, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], pages }));
+    const pending = encryptSecret(JSON.stringify({ userId:u.id, sessionHash, configRevision: attemptInfo.configRevision, expiresAt: Date.now() + 15 * 60_000, tokenExpiresAt: token.expires_in ? Date.now()+token.expires_in*1000 : null, permissions:[...granted], pages }));
     await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:" + sessionHash},0))`;
+      const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "facebook" } } });
+      if ((typeof config?.value === "number" ? config.value : 0) !== attemptInfo.configRevision) throw new ForbiddenException("Настройки Facebook изменились; подключитесь повторно");
       const current = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } } });
-      if (!current || current.value !== state.nonce) throw new ForbiddenException("Эта попытка подключения Facebook уже заменена новой");
+      const currentAttempt = current ? parseMetaOauthAttempt(current.value) : null;
+      if (!currentAttempt || currentAttempt.nonce !== state.nonce || currentAttempt.configRevision !== attemptInfo.configRevision) throw new ForbiddenException("Эта попытка подключения Facebook уже заменена новой");
       await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth", key: state.nonce } }, create: { section: "integration.meta.oauth", key: state.nonce, value: pending }, update: { value: pending } });
       await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth.pointer", key: sessionHash } }, create: { section: "integration.meta.oauth.pointer", key: sessionHash, value: state.nonce }, update: { value: state.nonce } });
       await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.oauth.attempt", key: sessionHash } } });
-      await tx.appSetting.deleteMany({where:{section:"integration.meta.oauth.mode",key:sessionHash}});
     });
     return { accepted: true };
   }
@@ -383,9 +423,9 @@ export class CommunicationsService {
     return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Meta</title><body><h1>${ok?"Авторизация завершена":"Авторизация не завершена"}</h1><p>${ok?"Вернитесь в CRM и выберите страницу Facebook.":"Закройте окно и повторите подключение из CRM."}</p></body></html>`;
   }
   private decodeMetaOauthPending(encrypted:string,u:User,sessionHash:string){
-    let pending: { userId:string;sessionHash:string;includeInstagram?:boolean;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string; instagram_business_account?: { id?: string; username?: string } }> };
+    let pending: { userId:string;sessionHash:string;configRevision:number;expiresAt: number; tokenExpiresAt:number|null;permissions:string[];pages: Array<{ id: string; name: string; access_token: string }> };
     try { pending = JSON.parse(decryptSecret(encrypted)); } catch { throw new BadRequestException("Не удалось прочитать авторизацию Facebook"); }
-    if (pending.userId!==u.id||pending.sessionHash!==sessionHash)throw new ForbiddenException("Авторизация Facebook принадлежит другой сессии");
+    if (pending.userId!==u.id||pending.sessionHash!==sessionHash||!Number.isInteger(pending.configRevision))throw new ForbiddenException("Авторизация Facebook принадлежит другой сессии");
     return pending;
   }
   private async metaOauthPending(flowId:string,u: User,sessionHash:string) {
@@ -399,7 +439,7 @@ export class CommunicationsService {
     const pointer=await this.p.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});
     if(!pointer||typeof pointer.value!=="string")throw new NotFoundException("Авторизация Facebook ещё не завершена");
     const pending = await this.metaOauthPending(pointer.value,u,sessionHash);
-    return { flowId:pointer.value,pages: pending.pages.map(page => ({ id: page.id, name: page.name, instagramAccountId: page.instagram_business_account?.id || "", instagramUsername: page.instagram_business_account?.username || "" })) };
+    return { flowId:pointer.value,pages: pending.pages.map(page => ({ id: page.id, name: page.name })) };
   }
   async metaOauthConnect(flowId:string,pageId: string, u: User,sessionHash:string) {
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
@@ -407,48 +447,27 @@ export class CommunicationsService {
     const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging", "pages_read_engagement"];
     const missingPagePermissions = requiredPagePermissions.filter(permission => !pending.permissions.includes(permission));
     if (missingPagePermissions.length) throw new ForbiddenException("Facebook не предоставил обязательные разрешения для входящих сообщений: " + missingPagePermissions.join(", "));
-    await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");});
+    await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const config=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.config",key:"facebook"}}});if((typeof config?.value === "number" ? config.value : 0)!==pending.configRevision)throw new ForbiddenException("Настройки Facebook изменились; подключитесь повторно");const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");});
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      const instagramAccountId = pending.includeInstagram
-        ? page.instagram_business_account?.id || ""
-        : values.pageId === page.id && typeof values.instagramAccountId === "string"
-          ? values.instagramAccountId
-          : "";
-      let instagramSubscribedFields:string[]=[];
-      if (pending.includeInstagram) {
-        if(!instagramAccountId)throw new BadRequestException("У выбранной страницы не найден связанный профессиональный аккаунт Instagram");
-        const missingInstagramPermissions=["instagram_basic","instagram_manage_messages","business_management"].filter(permission=>!pending.permissions.includes(permission));
-        if (missingInstagramPermissions.length) throw new ForbiddenException("Meta не предоставила разрешения Instagram: "+missingInstagramPermissions.join(", "));
-        await this.metaGraph(instagramAccountId + "/subscribed_apps",page.access_token,{ subscribed_fields: "messages,messaging_postbacks" }, "POST", appSecret, false, "INSTAGRAM_SUBSCRIBE");
-        const instagramSubscriptions=await this.metaGraph<{data:Array<{id:string;subscribed_fields?:string[]}>}>(instagramAccountId+"/subscribed_apps",page.access_token,{fields:"id,subscribed_fields"},"GET",appSecret,false,"INSTAGRAM_VERIFY");
-        const instagramApp=instagramSubscriptions.data?.find(item=>item.id===(typeof values.appId==="string"?values.appId:""));
-        if(!instagramApp?.subscribed_fields?.includes("messages"))throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
-        instagramSubscribedFields=instagramApp.subscribed_fields;
-      }
       await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret, false, "FACEBOOK_VERIFY");
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;
+        const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "facebook" } } });
+        if ((typeof config?.value === "number" ? config.value : 0) !== pending.configRevision) throw new ForbiddenException("Настройки Facebook изменились; подключитесь повторно");
         const pointer = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.pointer", key: sessionHash } } });
         if (!pointer || pointer.value !== flowId) throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");
         const activeFlow = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth", key: flowId } } });
         if (!activeFlow || typeof activeFlow.value !== "string") throw new NotFoundException("Подключение Facebook уже обработано");
-        const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, instagramAccountId, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
-        if (pending.includeInstagram) {
-          connectedValues.instagramSubscriptionVerifiedAt = new Date().toISOString();
-          connectedValues.instagramSubscribedFields = instagramSubscribedFields;
-          await tx.appSetting.deleteMany({ where: { section, key: "instagramAccessTokenEncrypted" } });
-        }
+        const connectedValues: Record<string, Prisma.InputJsonValue> = { enabled: true, pageId: page.id, pageAccessTokenEncrypted: encryptSecret(page.access_token), ...confirmed.settings };
         for (const [key, value] of Object.entries(connectedValues)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
-        if (!pending.includeInstagram && values.pageId !== page.id) {
-          await tx.appSetting.deleteMany({ where: { section, key: { in: ["instagramAccountId", "instagramAccessTokenEncrypted", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt"] } } });
-        }
         await tx.appSetting.upsert({where:{section_key:{section,key:"tokenExpiresAt"}},create:{section,key:"tokenExpiresAt",value:pending.tokenExpiresAt??0},update:{value:pending.tokenExpiresAt??0}});
-        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, instagramConnected:pending.includeInstagram===true, instagramAccountId:pending.includeInstagram?instagramAccountId:undefined, instagramSubscribedFields, ...confirmed.auditAfter } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { oauthConnected: true, ...confirmed.auditAfter } } });
         await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.oauth", key: flowId } } });
         await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.oauth.pointer", key: sessionHash } } });
       });
@@ -459,31 +478,108 @@ export class CommunicationsService {
     }
     return this.metaSettings();
   }
+  async instagramOauthStart(u: User, sessionHash: string) {
+    let appId = "";
+    const nonce = randomBytes(16).toString("hex");
+    await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-session:" + sessionHash},0))`;
+      const rows = await tx.appSetting.findMany({ where: { section: "integration.meta" } });
+      const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
+      appId = typeof values.instagramAppId === "string" ? values.instagramAppId : "";
+      if (!appId || !this.secretValue(values, "instagramAppSecretEncrypted")) throw new BadRequestException("Сначала сохраните ID и секрет приложения Instagram из Meta for Developers");
+      const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } } });
+      const attempt: MetaOauthAttempt = { nonce, configRevision: typeof config?.value === "number" ? config.value : 0 };
+      await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } }, create: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash, value: attempt }, update: { value: attempt } });
+    });
+    const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
+    const url = new URL("https://www.instagram.com/oauth/authorize");
+    url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.instagramOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", "instagram_business_basic,instagram_business_manage_messages");
+    url.searchParams.set("force_reauth", "true"); url.searchParams.set("enable_fb_login", "false");
+    return { url: url.toString() };
+  }
+  async instagramOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
+    if (!code || !signedState || code.length > 2048 || signedState.length > 4096) throw new BadRequestException("Instagram не вернул корректный код авторизации");
+    let state; try { state = verifyMetaOauthState(signedState, this.metaOauthSecret()); } catch { throw new ForbiddenException("Сеанс подключения Instagram недействителен или истёк"); }
+    if (state.userId !== u.id || state.sessionHash !== sessionHash) throw new ForbiddenException("Сеанс подключения принадлежит другой сессии");
+    const attempt = await this.p.appSetting.findUnique({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
+    const attemptInfo = attempt ? parseMetaOauthAttempt(attempt.value) : null;
+    if (!attemptInfo || attemptInfo.nonce !== state.nonce) throw new ForbiddenException("Эта попытка подключения Instagram уже заменена новой");
+    const values = await this.sectionValues("integration.meta"), appId = typeof values.instagramAppId === "string" ? values.instagramAppId : "", appSecret = this.secretValue(values, "instagramAppSecretEncrypted");
+    if (!appId || !appSecret) throw new BadRequestException("Приложение Instagram не настроено");
+    const token = await this.instagramTokenExchange(code, appId, appSecret);
+    const profile = await this.instagramGraph<{ id?: string; username?: string; account_type?: string }>("me", token.accessToken, { fields: "id,username,account_type" });
+    const instagramAccountId = profile.id || token.accountId;
+    if (!instagramAccountId) throw new BadGatewayException("Instagram не вернул идентификатор профессионального аккаунта");
+    await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages,messaging_postbacks" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    const subscriptions = await this.instagramGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
+    const subscription = (subscriptions.data || []).find(item => item.id === appId);
+    if (!subscription?.subscribed_fields?.includes("messages")) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
+    await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-session:" + sessionHash},0))`;
+      const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } } });
+      if ((typeof config?.value === "number" ? config.value : 0) !== attemptInfo.configRevision) throw new ForbiddenException("Настройки Instagram изменились; подключитесь повторно");
+      const current = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
+      const currentAttempt = current ? parseMetaOauthAttempt(current.value) : null;
+      if (!currentAttempt || currentAttempt.nonce !== state.nonce || currentAttempt.configRevision !== attemptInfo.configRevision) throw new NotFoundException("Подключение Instagram уже заменено новой попыткой");
+      const now = new Date().toISOString();
+      const updates: Record<string, Prisma.InputJsonValue> = { enabled: true, instagramAccountId, instagramAccessTokenEncrypted: encryptSecret(token.accessToken), instagramSubscriptionVerifiedAt: now, instagramSubscribedFields: subscription.subscribed_fields || [], instagramUsername: profile.username || "", instagramTokenExpiresAt: token.expiresAt || 0 };
+      for (const [key, value] of Object.entries(updates)) await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta", key } }, create: { section: "integration.meta", key, value }, update: { value } });
+      await tx.appSetting.deleteMany({ where: { section: "integration.meta", key: "lastInstagramWebhookAt" } });
+      await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { instagramConnected: true, instagramAccountId, subscribedFields: subscription.subscribed_fields } } });
+    });
+    return this.metaSettings();
+  }
+  instagramOauthResultHtml(ok: boolean) {
+    return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Instagram</title><body><h1>${ok ? "Instagram подключён" : "Instagram не подключён"}</h1><p>${ok ? "Вернитесь в CRM и отправьте тестовое сообщение из Instagram Direct." : "Закройте окно и повторите подключение из CRM."}</p></body></html>`;
+  }
   async metaSettings() {
     const v = await this.sectionValues("integration.meta"), origin = this.publicOrigin();
     const verifyToken = this.secretValue(v, "verifyTokenEncrypted"), verifyTokenUnsafe = isMetaAccessToken(verifyToken);
-    const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), verifyTokenConfigured = Boolean(verifyToken) && !verifyTokenUnsafe, pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), instagramAccessTokenConfigured = Boolean(this.secretValue(v, "instagramAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
-    const instagramConfigured = Boolean(v.instagramAccountId && pageAccessTokenConfigured);
+    const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), instagramAppSecretConfigured = Boolean(this.secretValue(v, "instagramAppSecretEncrypted")), verifyTokenConfigured = Boolean(verifyToken) && !verifyTokenUnsafe, pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), instagramAccessTokenConfigured = Boolean(this.secretValue(v, "instagramAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
+    const instagramConfigured = Boolean(v.instagramAccountId && v.instagramAppId && instagramAppSecretConfigured && instagramAccessTokenConfigured);
     const instagramVerified = typeof v.instagramSubscriptionVerifiedAt === "string" && Array.isArray(v.instagramSubscribedFields) && v.instagramSubscribedFields.includes("messages");
     const instagramReceiving = typeof v.lastInstagramWebhookAt === "string";
     const hasConfiguredChannel = Boolean(v.pageId && pageAccessTokenConfigured) || instagramConfigured || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
     const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel, verified = typeof v.subscriptionVerifiedAt === "string" && Boolean(v.subscriptionVerifiedAt), receiving = typeof v.lastWebhookAt === "string" && Boolean(v.lastWebhookAt);
-    return { enabled: v.enabled === true, status: metaDeliveryStatus({ enabled: v.enabled === true, ready, verified, receiving, verifyTokenUnsafe }), subscriptionVerifiedAt: verified ? v.subscriptionVerifiedAt : null, lastWebhookAt: receiving ? v.lastWebhookAt : null, instagramStatus: metaChannelDeliveryStatus({ configured: instagramConfigured, verified: instagramVerified, receiving: instagramReceiving }), instagramSubscriptionVerifiedAt: instagramVerified ? v.instagramSubscriptionVerifiedAt : null, lastInstagramWebhookAt: instagramReceiving ? v.lastInstagramWebhookAt : null, appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", pageName: typeof v.pageName === "string" ? v.pageName : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, verifyTokenConfigured, verifyTokenUnsafe, pageAccessTokenConfigured, instagramAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
+    return { enabled: v.enabled === true, status: metaDeliveryStatus({ enabled: v.enabled === true, ready, verified, receiving, verifyTokenUnsafe }), subscriptionVerifiedAt: verified ? v.subscriptionVerifiedAt : null, lastWebhookAt: receiving ? v.lastWebhookAt : null, instagramStatus: metaChannelDeliveryStatus({ configured: instagramConfigured, verified: instagramVerified, receiving: instagramReceiving }), instagramSubscriptionVerifiedAt: instagramVerified ? v.instagramSubscriptionVerifiedAt : null, lastInstagramWebhookAt: instagramReceiving ? v.lastInstagramWebhookAt : null, appId: typeof v.appId === "string" ? v.appId : "", pageId: typeof v.pageId === "string" ? v.pageId : "", pageName: typeof v.pageName === "string" ? v.pageName : "", instagramAccountId: typeof v.instagramAccountId === "string" ? v.instagramAccountId : "", instagramAppId: typeof v.instagramAppId === "string" ? v.instagramAppId : "", whatsappPhoneNumberId: typeof v.whatsappPhoneNumberId === "string" ? v.whatsappPhoneNumberId : "", appSecretConfigured, instagramAppSecretConfigured, verifyTokenConfigured, verifyTokenUnsafe, pageAccessTokenConfigured, instagramAccessTokenConfigured, whatsappAccessTokenConfigured, webhookUrl: origin + "/api/communications/meta/webhook" };
   }
   async saveMetaSettings(d: MetaIntegrationDto, u: User) {
-    const section = "integration.meta", publicKeys = ["enabled", "appId", "pageId", "instagramAccountId", "whatsappPhoneNumberId"] as const;
-    const secrets = [{ input: "appSecret", stored: "appSecretEncrypted", remove: "removeAppSecret" }, { input: "verifyToken", stored: "verifyTokenEncrypted", remove: "removeVerifyToken" }, { input: "pageAccessToken", stored: "pageAccessTokenEncrypted", remove: "removePageAccessToken" }, { input: "whatsappAccessToken", stored: "whatsappAccessTokenEncrypted", remove: "removeWhatsappAccessToken" }] as const;
+    const section = "integration.meta", publicKeys = ["enabled", "appId", "pageId", "instagramAccountId", "instagramAppId", "whatsappPhoneNumberId"] as const;
+    const secrets = [{ input: "appSecret", stored: "appSecretEncrypted", remove: "removeAppSecret" }, { input: "verifyToken", stored: "verifyTokenEncrypted", remove: "removeVerifyToken" }, { input: "pageAccessToken", stored: "pageAccessTokenEncrypted", remove: "removePageAccessToken" }, { input: "instagramAppSecret", stored: "instagramAppSecretEncrypted", remove: "removeInstagramAppSecret" }, { input: "whatsappAccessToken", stored: "whatsappAccessTokenEncrypted", remove: "removeWhatsappAccessToken" }] as const;
     if (typeof d.verifyToken === "string" && isMetaAccessToken(d.verifyToken)) throw new BadRequestException("Проверочный токен webhook не должен быть токеном доступа Meta");
-    const current = await this.sectionValues(section), deliveryChanged = (d.appId !== undefined && d.appId !== current.appId) || (d.pageId !== undefined && d.pageId !== current.pageId) || (d.instagramAccountId !== undefined && d.instagramAccountId !== current.instagramAccountId) || Boolean(d.appSecret || d.removeAppSecret || d.pageAccessToken || d.removePageAccessToken);
     await this.p.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
+      const rows = await tx.appSetting.findMany({ where: { section } });
+      const current = Object.fromEntries(rows.map(row => [row.key, row.value]));
+      const instagramCredentialsChanged = (d.instagramAppId !== undefined && d.instagramAppId !== current.instagramAppId) || Boolean(d.instagramAppSecret || d.removeInstagramAppSecret);
+      const facebookCredentialsChanged = (d.appId !== undefined && d.appId !== current.appId) || Boolean(d.appSecret || d.removeAppSecret);
+      const deliveryChanged = (d.appId !== undefined && d.appId !== current.appId) || (d.pageId !== undefined && d.pageId !== current.pageId) || (d.instagramAccountId !== undefined && d.instagramAccountId !== current.instagramAccountId) || instagramCredentialsChanged || Boolean(d.appSecret || d.removeAppSecret || d.pageAccessToken || d.removePageAccessToken);
       for (const key of publicKeys) if (d[key] !== undefined) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value: d[key] as Prisma.InputJsonValue }, update: { value: d[key] as Prisma.InputJsonValue } });
       for (const item of secrets) {
         if (d[item.remove]) await tx.appSetting.deleteMany({ where: { section, key: item.stored } });
         const value = d[item.input];
         if (typeof value === "string" && value.trim()) { const encrypted = encryptSecret(value.trim()); await tx.appSetting.upsert({ where: { section_key: { section, key: item.stored } }, create: { section, key: item.stored, value: encrypted }, update: { value: encrypted } }); }
       }
-      if (deliveryChanged) await tx.appSetting.deleteMany({ where: { section, key: { in: ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt"] } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { enabled: d.enabled, appId: d.appId, pageId: d.pageId, instagramAccountId: d.instagramAccountId, whatsappPhoneNumberId: d.whatsappPhoneNumberId, secretsUpdated: secrets.filter(x => Boolean(d[x.input])).map(x => x.input), secretsRemoved: secrets.filter(x => d[x.remove]).map(x => x.input) } } });
+      if (deliveryChanged) await tx.appSetting.deleteMany({ where: { section, key: { in: ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt", "instagramAccessTokenEncrypted", "instagramTokenExpiresAt"] } } });
+      if (instagramCredentialsChanged) await tx.appSetting.deleteMany({ where: { section: "integration.meta.instagram.oauth.attempt" } });
+      if (instagramCredentialsChanged) {
+        const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } } });
+        const configRevision = (typeof config?.value === "number" ? config.value : 0) + 1;
+        await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } }, create: { section: "integration.meta.oauth.config", key: "instagram", value: configRevision }, update: { value: configRevision } });
+      }
+      if (facebookCredentialsChanged) {
+        await tx.appSetting.deleteMany({ where: { section: "integration.meta.oauth" } });
+        await tx.appSetting.deleteMany({ where: { section: "integration.meta.oauth.pointer" } });
+        const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "facebook" } } });
+        const configRevision = (typeof config?.value === "number" ? config.value : 0) + 1;
+        await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta.oauth.config", key: "facebook" } }, create: { section: "integration.meta.oauth.config", key: "facebook", value: configRevision }, update: { value: configRevision } });
+      }
+      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { enabled: d.enabled, appId: d.appId, pageId: d.pageId, instagramAccountId: d.instagramAccountId, instagramAppId: d.instagramAppId, whatsappPhoneNumberId: d.whatsappPhoneNumberId, secretsUpdated: secrets.filter(x => Boolean(d[x.input])).map(x => x.input), secretsRemoved: secrets.filter(x => d[x.remove]).map(x => x.input) } } });
     });
     return this.metaSettings();
   }
@@ -595,7 +691,11 @@ export class CommunicationsService {
       this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RECEIVED", timestamp, ...safeSummary, senderRef: metaIdentityLogRef(senderId) }));
     }
     try {
-      const values = await this.sectionValues("integration.meta"), secret = this.secretValue(values, "appSecretEncrypted");
+      const values = await this.sectionValues("integration.meta");
+      const object = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as { object?: unknown }).object : undefined;
+      const secret = object === "instagram"
+        ? this.secretValue(values, "instagramAppSecretEncrypted")
+        : this.secretValue(values, "appSecretEncrypted");
       if (values.enabled !== true || !secret || !verifyMetaSignature(rawBody, signature, secret)) {
         this.logger.warn(JSON.stringify({ event: "META_WEBHOOK_SIGNATURE_REJECTED", timestamp, httpStatus: 403, channelEnabled: values.enabled === true, appSecretConfigured: Boolean(secret) }));
         throw new ForbiddenException("Подпись Meta webhook недействительна");
@@ -606,7 +706,7 @@ export class CommunicationsService {
         if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId }));
         return matches;
       });
-      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),events=scopedEvents;
+      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),events=scopedEvents;
       const persisted = await Promise.all(events.map(async event => {
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
         return this.persistInbound(event, "META");
@@ -614,7 +714,7 @@ export class CommunicationsService {
       const accepted = persisted.filter(Boolean).length;
       const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM");
       if(pageToken&&facebookEvents.length)void this.enrichMetaProfiles(facebookEvents,pageToken,appSecret);
-      if(pageToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,pageToken,appSecret);
+      if(instagramToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,instagramToken,undefined,"instagram");
       const echoes = normalizeMetaEchoMessages(payload).filter(event => {
         const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
         return typeof expected === "string" && expected !== "" && event.receiverId === expected;
@@ -641,14 +741,16 @@ export class CommunicationsService {
       throw error;
     }
   }
-  private async enrichMetaProfiles(events:MetaInboundMessage[],pageToken:string,appSecret?:string){
+  private async enrichMetaProfiles(events:MetaInboundMessage[],accessToken:string,appSecret?:string,provider:"facebook"|"instagram"="facebook"){
     const targets=metaProfileTargets(events).slice(0,20);
     for(const {channel,receiverId,senderId} of targets)try{
       const eventChannel=channel as ContactChannel;
       const fields=eventChannel===ContactChannel.INSTAGRAM
         ? "name,username,profile_pic"
         : "name,first_name,last_name,profile_pic,locale,timezone";
-      const rawProfile=await this.metaGraph<MetaFacebookProfile>(senderId,pageToken,{fields},"GET",appSecret,false,"PROFILE_LOOKUP");
+      const rawProfile=provider==="instagram"
+        ? await this.instagramGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",false,"PROFILE_LOOKUP")
+        : await this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,false,"PROFILE_LOOKUP");
       const profile=normalizeMetaFacebookProfile(rawProfile);
       if(!Object.keys(profile).length)continue;
       await this.p.$transaction(async tx=>{
@@ -931,8 +1033,12 @@ export class CommunicationsService {
       const receiverId = channel === ContactChannel.INSTAGRAM
           ? (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "")
           : (typeof values.pageId === "string" ? values.pageId : ""),
-        pageToken = this.secretValue(values, "pageAccessTokenEncrypted"),
-        appSecret = this.secretValue(values, "appSecretEncrypted"),
+        pageToken = channel === ContactChannel.INSTAGRAM
+          ? this.secretValue(values, "instagramAccessTokenEncrypted")
+          : this.secretValue(values, "pageAccessTokenEncrypted"),
+        appSecret = channel === ContactChannel.INSTAGRAM
+          ? this.secretValue(values, "instagramAppSecretEncrypted")
+          : this.secretValue(values, "appSecretEncrypted"),
         recipientId = metaRecipientId(receiverId, conversation?.externalId);
       const channelName = channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
       if (values.enabled !== true || !receiverId || !pageToken)
@@ -964,17 +1070,15 @@ export class CommunicationsService {
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
         deliver: async () => {
-          const send = () => this.metaGraph<{ recipient_id?: string; message_id?: string }>(
-            receiverId + "/messages",
-            pageToken,
-            attachment ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl) : metaTextMessageParams(recipientId, content),
-            "POST",
-            appSecret,
-            true,
-          );
+          const params = attachment ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl) : metaTextMessageParams(recipientId, content);
+          const send = () => channel === ContactChannel.INSTAGRAM
+            ? this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params, "POST", true)
+            : this.metaGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params, "POST", appSecret, true);
           const result = await deliverMetaMessage(metaChannel, {
             send,
-            takeControl: () => this.metaGraph("me/take_thread_control", pageToken, metaThreadControlParams(recipientId), "POST", appSecret, true),
+            takeControl: () => channel === ContactChannel.FACEBOOK
+              ? this.metaGraph("me/take_thread_control", pageToken, metaThreadControlParams(recipientId), "POST", appSecret, true)
+              : Promise.resolve(),
             isThreadControlError: error => error instanceof MetaGraphRequestError && error.failure.reason === "THREAD_CONTROL_REQUIRED",
             onTakeControlSuccess: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_TAKEN"),
             onTakeControlFailure: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_FAILED"),
