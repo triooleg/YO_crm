@@ -785,3 +785,13 @@
 - TDD: targeted Meta OAuth 15/15, web 120/120; полный `pnpm quality:check` PASS (API 157/157, web 120/120, database 4/4, typecheck и production builds). Deployment и внешний Instagram OAuth/Direct smoke пока не заявлены.
 - Deployment: commit `db879ac` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`; API, PostgreSQL and Redis are healthy, web is running. Production browser smoke подтвердил: `?section=settings` открывает «Настройки», обычное обновление сохраняет этот раздел, переход во «Входящие» меняет URL на `?section=inbox` и показывает «Входящие».
 - Реальный Instagram OAuth/Direct inbound/outbound smoke после этого deployment всё ещё требует внешнего сообщения и ответа через Meta; успешная сборка и health сами по себе его не подтверждают.
+
+## 2026-08-27 — восстановление действия «Подключить Instagram»
+
+- Production API подтвердил, что в текущих настройках отсутствуют отдельные ID и секрет Instagram-приложения. При этом UI молча делал кнопку недоступной, поэтому пользователь не видел ни действия, ни причины блокировки.
+- Кнопка больше не отключается из-за отсутствующих credentials: при клике CRM сразу показывает русское объяснение о необходимости сохранить ID и секрет Instagram-приложения. Popup OAuth создаётся синхронно из пользовательского клика, получает `opener = null`, закрывается при ошибке, отмене и таймауте.
+- Повторное подключение защищено от ложного успеха: ранее подтверждённый timestamp подписки не считается результатом нового OAuth-сеанса; CRM ждёт его фактического изменения.
+- TDD: добавлены проверки доступной кнопки и понятной ошибки, синхронного popup/lifecycle и stale subscription timestamp. Targeted web tests 7/7 PASS; полный `pnpm quality:check` PASS (API 157/157, database 4/4, typecheck, web tests и production builds).
+- Mandatory reviews по `.agents/README.md`: compatibility/visual, business/security и release/regression — PASS после устранения замечаний по lifecycle popup и устаревшему timestamp.
+- Deployment: commit `e191498` pushed to `origin/main` и развернут в `/home/trio/yoleotard-crm`. Во время первой пересборки Docker daemon вернул EOF и остановил существующий Nginx Proxy Manager; compose был безопасно повторён, контейнер `proxy-nginx-proxy-manager-1` запущен снова. Public `https://crm.yoleotard.com/api/health` возвращает HTTP 200, PostgreSQL/Redis/uploads — `up`.
+- Полный внешний Instagram OAuth пока не может завершиться без сохранения production Instagram App ID и App Secret. Это теперь отображается как явная причина, а не как неработающая кнопка. Авторизация CRM остаётся намеренно отключённой для проверки проекта.
