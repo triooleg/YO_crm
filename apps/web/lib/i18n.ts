@@ -353,6 +353,8 @@ export const settingsUi = {
   metaAppId: "ID приложения Meta",
   metaPageId: "ID страницы Facebook",
   metaInstagramId: "ID аккаунта Instagram",
+  metaInstagramStatus: "Instagram",
+  metaFacebookStatus: "Facebook",
   metaWhatsappId: "ID номера WhatsApp",
   metaAppSecret: "Секрет приложения Meta",
   metaContinue: "Продолжить с Facebook",

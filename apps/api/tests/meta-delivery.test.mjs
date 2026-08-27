@@ -9,7 +9,7 @@ const source = await readFile(new URL("../src/communications/meta-delivery.ts", 
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require });
-const { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus } = module.exports;
+const { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus, metaChannelDeliveryStatus } = module.exports;
 
 test("successful Meta Page subscription produces verified state and safe audit", () => {
   const result = confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1", name: "YOLeotard" }, subscriptions: [{ id: "app-1", subscribed_fields: ["messages", "standby", "message_reads"] }], verifiedAt: "2026-08-21T12:00:00.000Z" });
@@ -32,4 +32,10 @@ test("unsafe or disabled Meta delivery is never reported ready", () => {
   assert.equal(metaDeliveryStatus({ enabled: true, ready: true, verified: true, receiving: true, verifyTokenUnsafe: true }), "VERIFY_TOKEN_UNSAFE");
   assert.equal(metaDeliveryStatus({ enabled: false, ready: false, verified: true, receiving: true, verifyTokenUnsafe: false }), "NOT_CONNECTED");
   assert.equal(metaDeliveryStatus({ enabled: true, ready: true, verified: false, receiving: false, verifyTokenUnsafe: false }), "NOT_VERIFIED");
+});
+
+test("Instagram is not reported connected merely because its identifier is saved", () => {
+  assert.equal(metaChannelDeliveryStatus({ configured: true, verified: false, receiving: false }), "NOT_CONNECTED");
+  assert.equal(metaChannelDeliveryStatus({ configured: true, verified: true, receiving: false }), "SUBSCRIBED");
+  assert.equal(metaChannelDeliveryStatus({ configured: true, verified: true, receiving: true }), "RECEIVING");
 });

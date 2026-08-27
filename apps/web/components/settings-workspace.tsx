@@ -21,6 +21,9 @@ type IntegrationData = {
     pageId: string;
     pageName: string;
     instagramAccountId: string;
+    instagramStatus: string;
+    instagramSubscriptionVerifiedAt: string | null;
+    lastInstagramWebhookAt: string | null;
     whatsappPhoneNumberId: string;
     appSecretConfigured: boolean;
     verifyTokenConfigured: boolean;
@@ -143,7 +146,7 @@ function CommunicationsSettings() {
     );
   const status = (value: string) =>
     value === "CONFIGURED" ? settingsUi.configured : settingsUi.notConnected;
-  const metaStatus = (value: string) => value === "VERIFY_TOKEN_UNSAFE" ? settingsUi.metaVerifyTokenUnsafe : value === "RECEIVING" ? settingsUi.metaDeliveryReceiving : value === "VERIFIED" ? settingsUi.metaDeliveryVerified : value === "NOT_VERIFIED" ? settingsUi.metaDeliveryNotVerified : settingsUi.notConnected;
+  const metaStatus = (value: string) => value === "VERIFY_TOKEN_UNSAFE" ? settingsUi.metaVerifyTokenUnsafe : value === "RECEIVING" ? settingsUi.metaDeliveryReceiving : value === "VERIFIED" || value === "SUBSCRIBED" ? settingsUi.metaDeliveryVerified : value === "NOT_VERIFIED" ? settingsUi.metaDeliveryNotVerified : settingsUi.notConnected;
   return (
     <section id="settings-communications-panel" role="tabpanel">
       <div className="settings-card">
@@ -161,9 +164,9 @@ function CommunicationsSettings() {
         </div>
       )}
       <form className="settings-card settings-meta-card" onSubmit={submitMeta}>
-        <h2>{settingsUi.metaTitle} · {metaStatus(data.meta.status)}</h2>
+        <h2>{settingsUi.metaTitle}</h2>
         <p>{settingsUi.metaHint}</p>
-        {data.meta.pageId&&<div className="settings-meta-current"><b>{data.meta.pageName||settingsUi.metaConnectedPage}</b><span>ID {data.meta.pageId}{data.meta.instagramAccountId?` · Instagram ${data.meta.instagramAccountId}`:""}</span></div>}
+        {data.meta.pageId&&<div className="settings-meta-current"><b>{data.meta.pageName||settingsUi.metaConnectedPage}</b><span>ID {data.meta.pageId}{data.meta.instagramAccountId?` · Instagram ${data.meta.instagramAccountId}`:""}</span><small>{settingsUi.metaFacebookStatus}: {metaStatus(data.meta.status)}</small>{data.meta.instagramAccountId&&<small>{settingsUi.metaInstagramStatus}: {metaStatus(data.meta.instagramStatus)}</small>}</div>}
         <div className="settings-meta-actions">
           <button type="button" className="settings-facebook-button" onClick={()=>connectFacebook(false)} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</button>
           <button type="button" className="phase2-primary" onClick={()=>connectFacebook(true)} disabled={oauthLoading||saving}>{settingsUi.metaConnectInstagram}</button>

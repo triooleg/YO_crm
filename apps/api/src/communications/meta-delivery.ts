@@ -18,6 +18,15 @@ export function metaDeliveryStatus(input: {
   return "NOT_VERIFIED";
 }
 
+export function metaChannelDeliveryStatus(input: {
+  configured: boolean;
+  verified: boolean;
+  receiving: boolean;
+}) {
+  if (!input.configured || !input.verified) return "NOT_CONNECTED";
+  return input.receiving ? "RECEIVING" : "SUBSCRIBED";
+}
+
 export function confirmMetaPageSubscription(input: {
   pageId: string;
   appId: string;

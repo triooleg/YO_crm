@@ -265,6 +265,18 @@ test("Meta delivery is verified by a real Page subscription before it is reporte
   assert.match(service, /isMetaAccessToken\(saved\)/);
 });
 
+test("changing Meta delivery identity invalidates both Facebook and Instagram readiness", () => {
+  assert.match(service, /d\.instagramAccountId\s*!==\s*undefined\s*&&\s*d\.instagramAccountId\s*!==\s*current\.instagramAccountId/);
+  for (const key of ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt"])
+    assert.match(service, new RegExp(key));
+});
+test("a failed OAuth attempt cannot erase or resurrect a newer Meta connection", () => {
+  const oauthConnect = service.slice(service.indexOf("asyncmetaOauthConnect"), service.indexOf("asyncmetaSettings"));
+  assert.doesNotMatch(oauthConnect, /catch\(error\)\{[^}]*deleteMany/);
+  assert.doesNotMatch(oauthConnect, /catch\(error\)\{[^}]*integration\.meta\.oauth\.pointer/);
+  assert.match(oauthConnect, /catch\(error\)\{\/\/Afailed,consumedOAuthflowmustnotrewriteproviderreadinessor\/\/resurrectitself:anewerconnectionmayalreadyhavecompleted\.throwerror;\}/);
+});
+
 test("Chatwoot webhook receives native, social and e-mail inbox messages safely", () => {
   assert.match(controller, /Controller\("communications\/chatwoot"\)/);
   assert.match(controller, /x-chatwoot-signature/);

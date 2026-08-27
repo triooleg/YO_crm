@@ -87,10 +87,22 @@ test("starting a reconnect invalidates a stale pending page picker", () => {
 });
 
 test("a failed old connection never restores over a newer OAuth flow", () => {
-  assert.match(service, /const \[attempt,currentPointer\]=await Promise\.all/);
-  assert.match(service, /if\(!attempt&&!currentPointer\)/);
+  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async metaSettings"));
+  assert.doesNotMatch(oauthConnect, /catch \(error\)[\s\S]*integration\.meta\.oauth\.pointer/);
+  assert.doesNotMatch(oauthConnect, /catch \(error\)[\s\S]*instagramSubscriptionVerifiedAt/);
   assert.match(service, /Подключение Facebook уже заменено новой попыткой/);
   assert.match(service, /try\s*\{[\s\S]*subscribed_apps[\s\S]*auditLog\.create[\s\S]*catch \(error\)/);
+});
+
+test("an older successful flow cannot overwrite a newer Meta connection", () => {
+  const oauthConnect = service.slice(service.indexOf("async metaOauthConnect"), service.indexOf("async metaSettings"));
+  const finalCommit = oauthConnect.slice(oauthConnect.indexOf("const confirmed"));
+  assert.match(finalCommit, /meta-oauth-session:\"\+sessionHash/);
+  assert.match(finalCommit, /const pointer = await tx\.appSetting\.findUnique/);
+  assert.match(finalCommit, /pointer\.value !== flowId/);
+  assert.match(finalCommit, /const activeFlow = await tx\.appSetting\.findUnique/);
+  assert.match(finalCommit, /await tx\.appSetting\.delete\(\{ where: \{ section_key: \{ section: "integration\.meta\.oauth", key: flowId \} \} \}\)/);
+  assert.match(finalCommit, /await tx\.appSetting\.delete\(\{ where: \{ section_key: \{ section: "integration\.meta\.oauth\.pointer", key: sessionHash \} \} \}\)/);
 });
 
 test("page access tokens are encrypted and never returned in the page picker", () => {
