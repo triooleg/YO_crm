@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
 import { settingsUi } from "../lib/i18n";
 type Setting = { key: string; section: string; value: unknown };
 type AiData = {
@@ -56,10 +56,13 @@ type IntegrationData = {
     passwordConfigured: boolean;
   };
 };
-function Secret({ name, label, saved }: { name: string; label: string; saved: boolean }) {
-  return <label>{label}<input name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/></label>;
+function Secret({ name, label, saved, inputRef }: { name: string; label: string; saved: boolean; inputRef?: Ref<HTMLInputElement> }) {
+  return <label>{label}<input ref={inputRef} name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/></label>;
 }
 function CommunicationsSettings() {
+  const instagramAdvancedRef = useRef<HTMLDetailsElement>(null);
+  const instagramAppIdRef = useRef<HTMLInputElement>(null);
+  const instagramAppSecretRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<IntegrationData>(),
     [error, setError] = useState(""),
     [saved, setSaved] = useState<"meta" | "chatwoot" | "email" | null>(null),
@@ -129,7 +132,13 @@ function CommunicationsSettings() {
   }
   async function fetchMetaPages(){const r=await fetch("/api/communications/meta/oauth/pages",{credentials:"include"});if(!r.ok)return false;const result=await r.json();setMetaFlowId(result.flowId||"");setMetaPages(result.pages||[]);return true}
   async function connectFacebook(){setError("");setOauthLoading(true);try{const r=await fetch("/api/communications/meta/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();const popup=window.open(url,"yoleotard-meta-oauth","popup,width=620,height=760");if(!popup)throw new Error(settingsUi.metaPopupBlocked);for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));if(await fetchMetaPages())break;if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}}catch(x){setError((x as Error).message)}finally{setOauthLoading(false)}}
-  async function connectInstagram(){setError("");if(!data?.meta.instagramAppId||!data.meta.instagramAppSecretConfigured){setError(settingsUi.metaInstagramCredentialsNeeded);return}const subscriptionBaseline=data.meta.instagramSubscriptionVerifiedAt;const popup=window.open("about:blank","yoleotard-instagram-oauth","popup,width=620,height=760");if(!popup){setError(settingsUi.metaPopupBlocked);return}popup.opener=null;setOauthLoading(true);try{const r=await fetch("/api/communications/meta/instagram/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();popup.location.href=url;let connected=false;for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));const latest=await load();if((latest.meta.instagramStatus==="SUBSCRIBED"||latest.meta.instagramStatus==="RECEIVING")&&latest.meta.instagramSubscriptionVerifiedAt!==subscriptionBaseline){connected=true;break}if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}if(!connected)throw new Error(settingsUi.metaOauthNotFinished);popup.close()}catch(x){if(!popup.closed)popup.close();setError((x as Error).message)}finally{setOauthLoading(false)}}
+  function showInstagramCredentials(){
+    setError(settingsUi.metaInstagramCredentialsHelp);
+    if(instagramAdvancedRef.current)instagramAdvancedRef.current.open=true;
+    if(!data?.meta.instagramAppId)instagramAppIdRef.current?.focus();
+    else instagramAppSecretRef.current?.focus();
+  }
+  async function connectInstagram(){setError("");if(!data?.meta.instagramAppId||!data.meta.instagramAppSecretConfigured){showInstagramCredentials();return}const subscriptionBaseline=data.meta.instagramSubscriptionVerifiedAt;const popup=window.open("about:blank","yoleotard-instagram-oauth","popup,width=620,height=760");if(!popup){setError(settingsUi.metaPopupBlocked);return}popup.opener=null;setOauthLoading(true);try{const r=await fetch("/api/communications/meta/instagram/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();popup.location.href=url;let connected=false;for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));const latest=await load();if((latest.meta.instagramStatus==="SUBSCRIBED"||latest.meta.instagramStatus==="RECEIVING")&&latest.meta.instagramSubscriptionVerifiedAt!==subscriptionBaseline){connected=true;break}if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}if(!connected)throw new Error(settingsUi.metaOauthNotFinished);popup.close()}catch(x){if(!popup.closed)popup.close();setError((x as Error).message)}finally{setOauthLoading(false)}}
   async function selectMetaPage(pageId:string){setSaving(true);setError("");try{const r=await fetch("/api/communications/meta/oauth/connect",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({flowId:metaFlowId,pageId})});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.channelsSaveError)}await load();setMetaFlowId("");setMetaPages([]);setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   async function verifyMetaDelivery(){setSaving(true);setSaved(null);setError("");try{const r=await fetch("/api/communications/meta/delivery/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaVerifyDeliveryError)}await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   if (!data)
@@ -179,7 +188,8 @@ function CommunicationsSettings() {
           {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<button type="button" className="phase2-primary" onClick={verifyMetaDelivery} disabled={saving}>{settingsUi.metaVerifyDelivery}</button>}
         </div>
         {metaPages.length>0&&<div className="settings-meta-pages" role="group" aria-label={settingsUi.metaChoosePage}><h3>{settingsUi.metaChoosePage}</h3>{metaPages.map(page=><button type="button" key={page.id} onClick={()=>selectMetaPage(page.id)} disabled={saving}><span><b>{page.name}</b><small>ID {page.id}{page.instagramUsername?` · @${page.instagramUsername}`:""}</small></span><span>{settingsUi.metaSelect}</span></button>)}</div>}
-        <details className="settings-meta-advanced">
+        {(!data.meta.instagramAppId||!data.meta.instagramAppSecretConfigured)&&<div className="phase2-warning" role="status">{settingsUi.metaInstagramCredentialsHelp} <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">{settingsUi.metaOpenMetaDevelopers}</a></div>}
+        <details ref={instagramAdvancedRef} className="settings-meta-advanced">
           <summary>{settingsUi.metaAdvanced}</summary>
           <p>{settingsUi.metaAdvancedHint}</p>
           <label className="settings-channel-toggle"><input name="enabled" type="checkbox" defaultChecked={data.meta.enabled}/>{settingsUi.channelEnabled}</label>
@@ -188,10 +198,10 @@ function CommunicationsSettings() {
             <label>{settingsUi.metaAppId}<input name="appId" defaultValue={data.meta.appId}/></label>
             <label>{settingsUi.metaPageId}<input name="pageId" defaultValue={data.meta.pageId}/></label>
             <label>{settingsUi.metaInstagramId}<input name="instagramAccountId" defaultValue={data.meta.instagramAccountId} readOnly/></label>
-            <label>{settingsUi.metaInstagramAppId}<input name="instagramAppId" defaultValue={data.meta.instagramAppId}/></label>
+            <label>{settingsUi.metaInstagramAppId}<input ref={instagramAppIdRef} name="instagramAppId" defaultValue={data.meta.instagramAppId}/></label>
             <label>{settingsUi.metaWhatsappId}<input name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/></label>
             <Secret name="appSecret" label={settingsUi.metaAppSecret} saved={data.meta.appSecretConfigured}/>
-            <Secret name="instagramAppSecret" label={settingsUi.metaInstagramAppSecret} saved={data.meta.instagramAppSecretConfigured}/>
+            <Secret inputRef={instagramAppSecretRef} name="instagramAppSecret" label={settingsUi.metaInstagramAppSecret} saved={data.meta.instagramAppSecretConfigured}/>
             <Secret name="verifyToken" label={settingsUi.metaVerifyToken} saved={data.meta.verifyTokenConfigured}/>
             <Secret name="pageAccessToken" label={settingsUi.metaPageToken} saved={data.meta.pageAccessTokenConfigured}/>
             <Secret name="whatsappAccessToken" label={settingsUi.metaWhatsappToken} saved={data.meta.whatsappAccessTokenConfigured}/>

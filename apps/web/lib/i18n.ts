@@ -364,6 +364,8 @@ export const settingsUi = {
   metaConnectInstagram: "Подключить Instagram",
   metaConnecting: "Ожидаем авторизацию…",
   metaInstagramCredentialsNeeded: "Сначала сохраните ID и секрет приложения Instagram из Meta for Developers.",
+  metaInstagramCredentialsHelp: "Для подключения Instagram нужны отдельные ID и секрет приложения Instagram. Заполните нужное поле ниже, сохраните технические настройки и повторите подключение.",
+  metaOpenMetaDevelopers: "Открыть Meta for Developers",
   metaChoosePage: "Выберите страницу Facebook",
   metaSelect: "Подключить",
   metaConnectedPage: "Подключённая страница Facebook",
