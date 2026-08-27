@@ -34,3 +34,22 @@ test("Instagram OAuth polling evaluates the freshly loaded integration status", 
   assert.match(source, /const latest\s*=\s*await load\(\);[\s\S]*?latest\.meta\.instagramStatus/);
   assert.doesNotMatch(source, /await load\(\);if\(data\?\.meta\.instagramStatus/);
 });
+
+test("Instagram connect stays actionable and opens its popup synchronously", () => {
+  assert.match(source, /async function connectInstagram\(\)\{[\s\S]*?if\(!data\?\.meta\.instagramAppId\|\|!data\.meta\.instagramAppSecretConfigured\)\{setError\(settingsUi\.metaInstagramCredentialsNeeded\);return\}[\s\S]*?const popup=window\.open\("about:blank","yoleotard-instagram-oauth"/);
+  assert.match(source, /const r=await fetch\("\/api\/communications\/meta\/instagram\/oauth\/start"[\s\S]*?popup\.location\.href=url/);
+  assert.doesNotMatch(source, /disabled=\{oauthLoading\|\|saving\|\|!data\.meta\.instagramAppId\|\|!data\.meta\.instagramAppSecretConfigured\}/);
+});
+
+test("Instagram OAuth popup has explicit success, cancellation and timeout cleanup", () => {
+  assert.match(source, /popup\.opener=null/);
+  assert.match(source, /let connected=false;[\s\S]*?connected=true;break[\s\S]*?if\(popup\.closed\)throw new Error\(settingsUi\.metaOauthNotFinished\)/);
+  assert.match(source, /if\(!connected\)throw new Error\(settingsUi\.metaOauthNotFinished\);popup\.close\(\)/);
+  assert.match(source, /catch\(x\)\{if\(!popup\.closed\)popup\.close\(\);setError/);
+});
+
+test("Instagram reconnect ignores a subscription timestamp from an older OAuth attempt", () => {
+  assert.match(source, /const subscriptionBaseline=data\.meta\.instagramSubscriptionVerifiedAt/);
+  assert.match(source, /latest\.meta\.instagramSubscriptionVerifiedAt!==subscriptionBaseline/);
+  assert.doesNotMatch(source, /if\(latest\.meta\.instagramStatus==="SUBSCRIBED"\|\|latest\.meta\.instagramStatus==="RECEIVING"\)\{connected=true/);
+});
