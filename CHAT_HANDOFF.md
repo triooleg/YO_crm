@@ -769,3 +769,17 @@
 - Проверка: `pnpm quality:check` PASS (API 149/149, web 117/117, database 4/4, typecheck и production builds), targeted OAuth 12/12 PASS, `git diff --check` без ошибок. Финальные regression и visual/release reviews PASS; business/security выявил и после исправления подтвердил отсутствие token-flow разрыва.
 - Deployment: commit `cc92912` pushed to `origin/main` and deployed to `/home/trio/yoleotard-crm`. API container healthy; PostgreSQL, Redis и uploads healthy; internal и public `https://crm.yoleotard.com/api/health` return HTTP 200.
 - Обязательный внешний smoke ещё ожидает ручной Meta-сеанс: Ctrl+F5 → «Подключить Instagram» → выбрать связанную Page → завершить OAuth → отправить Direct от другого Instagram-аккаунта и ответить из CRM. Не объявлять интеграцию полностью подтверждённой до этого реального входящего и исходящего теста.
+
+## 2026-08-27 — распознавание имени и аватара отправителя Facebook
+
+- Причина технических имён вида `Facebook 544602` найдена в запросе Messenger User Profile: CRM одним запросом запрашивала как основные, так и необязательные поля (`name`, `locale`, `timezone`). Если Meta не разрешала хотя бы одно поле для PSID/Page, отклонялся весь профиль и имя с аватаром не сохранялись.
+- Facebook profile lookup разделён на два этапа: обязательные identity-поля `first_name,last_name,profile_pic` и отдельный best-effort запрос `locale,timezone`. Отказ необязательного запроса больше не блокирует имя и аватар, но язык и часовой пояс сохраняются, когда Meta их возвращает. Instagram profile lookup и маршрутизация Facebook/Instagram/WhatsApp не изменены; вручную поддерживаемые данные клиента по-прежнему не перезаписываются.
+- Добавлены исполняемые regression-тесты на отказ необязательных полей и их успешное сохранение. Targeted Meta webhook tests 23/23 PASS; полный `pnpm quality:check` PASS (API 156/156, web 117/117, database 4/4, typecheck и production builds).
+- Meta не предоставляет через Messenger profile lookup email, телефон или подтверждённую страну клиента; CRM не должна выдумывать эти данные. Имя и аватар сохраняются при наличии разрешения Meta на Business Asset User Profile Access.
+
+## 2026-08-27 — обязательное поле Instagram Direct и сохранение раздела CRM
+
+- Production-журнал подтвердил точный отказ Meta на этапе `INSTAGRAM_SUBSCRIBE`: HTTP 400 / code 3. CRM отправляла обязательное поле `messages` вместе с необязательным `messaging_postbacks`; недоступность второго поля отклоняла всю подписку.
+- Подписка Instagram Direct теперь запрашивает только обязательное `messages`, а read-after-write проверка по-прежнему требует фактического присутствия `messages`. Facebook, WhatsApp и обработка webhook не изменены.
+- Текущий раздел CRM хранится в allowlisted URL-параметре `section`; обновление страницы, прямые ссылки и кнопки браузера сохраняют выбранный раздел. Неизвестное значение безопасно открывает «Клиенты».
+- TDD: targeted Meta OAuth 15/15, web 120/120; полный `pnpm quality:check` PASS (API 157/157, web 120/120, database 4/4, typecheck и production builds). Deployment и внешний Instagram OAuth/Direct smoke пока не заявлены.

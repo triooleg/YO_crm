@@ -29,7 +29,7 @@ import {
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -512,7 +512,10 @@ export class CommunicationsService {
     const profile = await this.instagramGraph<{ id?: string; username?: string; account_type?: string }>("me", token.accessToken, { fields: "id,username,account_type" });
     const instagramAccountId = profile.id || token.accountId;
     if (!instagramAccountId) throw new BadGatewayException("Instagram не вернул идентификатор профессионального аккаунта");
-    await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages,messaging_postbacks" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    // `messages` is the only field required for Direct delivery. Asking for an
+    // optional field in the same call makes Meta reject the entire subscription
+    // for applications where that capability is not enabled (Graph code 3).
+    await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
     const subscriptions = await this.instagramGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
     const subscription = (subscriptions.data || []).find(item => item.id === appId);
     if (!subscription?.subscribed_fields?.includes("messages")) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
@@ -745,12 +748,9 @@ export class CommunicationsService {
     const targets=metaProfileTargets(events).slice(0,20);
     for(const {channel,receiverId,senderId} of targets)try{
       const eventChannel=channel as ContactChannel;
-      const fields=eventChannel===ContactChannel.INSTAGRAM
-        ? "name,username,profile_pic"
-        : "name,first_name,last_name,profile_pic,locale,timezone";
       const rawProfile=provider==="instagram"
-        ? await this.instagramGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",false,"PROFILE_LOOKUP")
-        : await this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,false,"PROFILE_LOOKUP");
+        ? await this.instagramGraph<MetaFacebookProfile>(senderId,accessToken,{fields:"name,username,profile_pic"},"GET",false,"PROFILE_LOOKUP")
+        : await resolveMetaFacebookProfile(fields=>this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,false,fields==="locale,timezone"?undefined:"PROFILE_LOOKUP"));
       const profile=normalizeMetaFacebookProfile(rawProfile);
       if(!Object.keys(profile).length)continue;
       await this.p.$transaction(async tx=>{

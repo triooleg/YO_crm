@@ -10,20 +10,24 @@ import { navigationUi } from "../lib/i18n";
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
+import { crmSectionHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
 
-const items=[[navigationUi.overview,"⌂"],[navigationUi.inbox,"✉"],[navigationUi.clients,"●"],[navigationUi.orders,"▣"],[navigationUi.production,"⚙"],[navigationUi.finance,"₴"],[navigationUi.shipping,"➜"],[navigationUi.tasks,"✓"],[navigationUi.settings,"☰"]] as const;
+const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbox,"✉"],["clients",navigationUi.clients,"●"],["orders",navigationUi.orders,"▣"],["production",navigationUi.production,"⚙"],["finance",navigationUi.finance,"₴"],["shipping",navigationUi.shipping,"➜"],["tasks",navigationUi.tasks,"✓"],["settings",navigationUi.settings,"☰"]] as const;
 
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 
-export function CrmShell(){
-  const[collapsed,setCollapsed]=useState(false),[section,setSection]=useState("Клиенты");
+export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSectionId}){
+  const[collapsed,setCollapsed]=useState(false),[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId);
+  const navigate=(next:CrmSectionId)=>{if (next === sectionId) return;setSectionId(next);window.history.pushState(null,"",crmSectionHref(next,window.location.search))};
+  useEffect(()=>{const sync=()=>setSectionId(parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined));window.addEventListener("popstate",sync);return()=>window.removeEventListener("popstate",sync)},[]);
+  const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   return <main className={`crm-shell ${collapsed?"nav-collapsed":""}`}>
     <aside className="crm-nav">
       <div className="crm-brand"><span>Y</span>{!collapsed&&<div><strong>Yoleotard</strong><small>CRM</small></div>}</div>
       <button className="crm-collapse" onClick={()=>setCollapsed(v=>!v)} title={collapsed?navigationUi.expand:navigationUi.collapse}>{collapsed?"›":"‹"}</button>
-      <nav>{items.map(([name,icon])=><button key={name} className={section===name?"active":""} onClick={()=>setSection(name)} title={name} aria-label={name}><i>{icon}</i>{!collapsed&&<span>{name}</span>}</button>)}</nav>
+      <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name}><i>{icon}</i>{!collapsed&&<span>{name}</span>}</button>)}</nav>
     </aside>
-    <section className="crm-content">{section===items[2][0]?<ClientWorkspace/>:section===items[1][0]?<CommunicationsWorkspace/>:section===items[3][0]?<OrdersWorkspace onClients={()=>setSection(items[2][0])}/>:section===items[4][0]?<ProductionWorkspace/>:section===items[5][0]?<FinanceWorkspace/>:section===items[6][0]?<ShippingWorkspace/>:section===items[7][0]?<TasksWorkspace/>:section===items[8][0]?<SettingsWorkspace/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace/>:sectionId==="orders"?<OrdersWorkspace onClients={()=>navigate("clients")}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace/>:<ComingSoon name={section}/>}</section>
   </main>
 }
 

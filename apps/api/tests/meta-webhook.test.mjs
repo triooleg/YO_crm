@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -35,9 +35,28 @@ test("normalizes Messenger standby messages while another app controls the threa
 });
 
 test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
-  assert.match(service,/"name,first_name,last_name,profile_pic,locale,timezone"/);
+  assert.match(source,/"first_name,last_name,profile_pic"/);
+  assert.match(source,/"locale,timezone"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
   assert.match(service,/Facebook\|Instagram/);
+});
+
+test("Facebook identity survives an unavailable optional profile lookup",async()=>{
+  const requested=[];
+  const profile=await resolveMetaFacebookProfile(async fields=>{
+    requested.push(fields);
+    if(fields==="locale,timezone")throw new Error("optional fields unavailable");
+    return {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"};
+  });
+  assert.deepEqual(requested,["first_name,last_name,profile_pic","locale,timezone"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
+});
+
+test("Facebook optional profile details are preserved when Meta returns them",async()=>{
+  const profile=await resolveMetaFacebookProfile(async fields=>fields==="locale,timezone"
+    ? {locale:"uk_UA",timezone:2}
+    : {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg",locale:"uk_UA",timezone:2});
 });
 
 test("normalizes available Facebook profile details without inventing contacts",()=>{
@@ -119,7 +138,8 @@ test("Instagram sender profile is enriched with name and avatar in its own chann
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({username:"gymnast",profile_pic:"https://cdn.example/avatar.jpg"}))), {
     displayName:"gymnast", firstName:"gymnast", avatarUrl:"https://cdn.example/avatar.jpg",
   });
-  assert.match(service, /eventChannel===ContactChannel\.INSTAGRAM/);
+  assert.match(service, /provider==="instagram"/);
+  assert.match(service, /instagramGraph<MetaFacebookProfile>/);
 });
 
 test("migrates a legacy PSID conversation only when its saved receiver matches the Page", () => {

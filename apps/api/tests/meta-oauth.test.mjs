@@ -54,6 +54,13 @@ test("Facebook and Instagram use isolated OAuth applications and credentials", (
   assert.match(service, /enrichMetaProfiles\(instagramEvents,instagramToken,undefined,"instagram"\)/);
 });
 
+test("Instagram connection subscribes only to the required messages field", () => {
+  const callback = service.slice(service.indexOf("async instagramOauthCallback"), service.indexOf("instagramOauthResultHtml"));
+  assert.match(callback, /subscribed_fields:\s*"messages"/);
+  assert.doesNotMatch(callback, /subscribed_fields:\s*"messages,messaging_postbacks"/);
+  assert.match(callback, /subscribed_fields\?\.includes\("messages"\)/);
+});
+
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {
   assert.match(service, /pages_manage_metadata/);
   assert.match(service, /pages_messaging/);

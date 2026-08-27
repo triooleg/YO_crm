@@ -81,6 +81,20 @@ export type NormalizedMetaFacebookProfile = {
   timezone?: string;
 };
 
+export async function resolveMetaFacebookProfile(
+  lookup: (fields: string) => Promise<MetaFacebookProfile>,
+): Promise<MetaFacebookProfile> {
+  const identity = await lookup("first_name,last_name,profile_pic");
+  try {
+    const optional = await lookup("locale,timezone");
+    return { ...optional, ...identity };
+  } catch {
+    // Some Page/profile combinations reject optional fields. Identity must
+    // still be usable so the conversation is not left with a technical name.
+    return identity;
+  }
+}
+
 export type ExistingMetaClientProfile = {
   firstName: string;
   lastName?: string | null;

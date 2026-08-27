@@ -27,3 +27,10 @@ test("Meta settings expose a delivery verification action and honest status", ()
   assert.match(source, /metaDeliveryNotVerified/);
   assert.match(source, /settings-meta-actions/);
 });
+
+test("Instagram OAuth polling evaluates the freshly loaded integration status", () => {
+  assert.match(source, /async function load\(\)[\s\S]*?const result\s*=\s*await r\.json\(\)/);
+  assert.match(source, /setData\(result\);[\s\S]*?return result/);
+  assert.match(source, /const latest\s*=\s*await load\(\);[\s\S]*?latest\.meta\.instagramStatus/);
+  assert.doesNotMatch(source, /await load\(\);if\(data\?\.meta\.instagramStatus/);
+});
