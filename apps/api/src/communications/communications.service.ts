@@ -37,6 +37,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
+import { classifyInstagramOauthError, sanitizeInstagramOauthResponse } from "./instagram-oauth-diagnostics";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
@@ -73,6 +74,7 @@ class TooManyRequestsException extends HttpException {
 @Injectable()
 export class CommunicationsService {
   private readonly logger = new Logger(CommunicationsService.name);
+  private readonly instagramOauthFailures = new WeakMap<object, { correlationId: string; stage: string }>();
   constructor(private p: PrismaService) {}
   list() {
     return this.p.client.findMany({
@@ -349,17 +351,41 @@ export class CommunicationsService {
     }
     return body;
   }
-  private async instagramTokenExchange(code: string, appId: string, appSecret: string) {
-    const response = await fetch("https://api.instagram.com/oauth/access_token", {
+  private logInstagramOauth(event: string, correlationId: string, details: Record<string, unknown> = {}, level: "log" | "warn" = "log") {
+    this.logger[level](JSON.stringify({ event, provider: "instagram", correlationId, ...details }));
+  }
+  logInstagramOauthCallbackFailure(error: unknown) {
+    const context = error && typeof error === "object" ? this.instagramOauthFailures.get(error) : undefined;
+    this.logInstagramOauth("INSTAGRAM_OAUTH_CALLBACK_FAILED", context?.correlationId ?? randomUUID(), { stage: context?.stage ?? "CONTROLLER", failureClass: classifyInstagramOauthError(error) }, "warn");
+  }
+  private async instagramTokenExchange(code: string, appId: string, appSecret: string, correlationId: string) {
+    let response: Response;
+    try { response = await fetch("https://api.instagram.com/oauth/access_token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: appId, client_secret: appSecret, grant_type: "authorization_code", redirect_uri: this.instagramOauthRedirect(), code }),
       signal: AbortSignal.timeout(15_000),
-    });
-    const body = await response.json().catch(() => ({})) as { access_token?: string; user_id?: string; error_type?: string };
+    }); } catch (error) {
+      this.logInstagramOauth("INSTAGRAM_OAUTH_SHORT_TOKEN_RESPONSE", correlationId, { failureClass: classifyInstagramOauthError(error) }, "warn");
+      throw error;
+    }
+    const text = await response.text();
+    let parsed: unknown;
+    try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = null; }
+    const body = (parsed && typeof parsed === "object" ? parsed : {}) as { access_token?: string; user_id?: string; error_type?: string };
+    this.logInstagramOauth("INSTAGRAM_OAUTH_SHORT_TOKEN_RESPONSE", correlationId, { httpStatus: response.status, ...sanitizeInstagramOauthResponse(parsed) }, response.ok && body.access_token && body.user_id ? "log" : "warn");
     if (!response.ok || !body.access_token || !body.user_id) throw new BadGatewayException("Instagram не выдал токен доступа");
-    const longLived = await fetch("https://graph.instagram.com/access_token?" + new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: appSecret, access_token: body.access_token }), { signal: AbortSignal.timeout(15_000) });
-    const extended = await longLived.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
+    let longLived: Response;
+    try { longLived = await fetch("https://graph.instagram.com/access_token?" + new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: appSecret, access_token: body.access_token }), { signal: AbortSignal.timeout(15_000) }); }
+    catch (error) {
+      this.logInstagramOauth("INSTAGRAM_OAUTH_LONG_TOKEN_RESPONSE", correlationId, { failureClass: classifyInstagramOauthError(error) }, "warn");
+      throw error;
+    }
+    const longText = await longLived.text();
+    let longParsed: unknown;
+    try { longParsed = longText ? JSON.parse(longText) : {}; } catch { longParsed = null; }
+    const extended = (longParsed && typeof longParsed === "object" ? longParsed : {}) as { access_token?: string; expires_in?: number };
+    this.logInstagramOauth("INSTAGRAM_OAUTH_LONG_TOKEN_RESPONSE", correlationId, { httpStatus: longLived.status, ...sanitizeInstagramOauthResponse(longParsed) }, longLived.ok && extended.access_token ? "log" : "warn");
     if (!longLived.ok || !extended.access_token) throw new BadGatewayException("Instagram не подтвердил долгосрочный токен доступа");
     return { accessToken: extended.access_token, expiresAt: extended.expires_in ? Date.now() + extended.expires_in * 1000 : null, accountId: String(body.user_id) };
   }
@@ -500,25 +526,38 @@ export class CommunicationsService {
     return { url: url.toString() };
   }
   async instagramOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
+    const correlationId = randomUUID();
+    let stage = "INPUT";
+    this.logInstagramOauth("INSTAGRAM_OAUTH_CALLBACK_STARTED", correlationId);
+    try {
     if (!code || !signedState || code.length > 2048 || signedState.length > 4096) throw new BadRequestException("Instagram не вернул корректный код авторизации");
+    stage = "STATE_SIGNATURE";
     let state; try { state = verifyMetaOauthState(signedState, this.metaOauthSecret()); } catch { throw new ForbiddenException("Сеанс подключения Instagram недействителен или истёк"); }
+    stage = "SESSION_BINDING";
     if (state.userId !== u.id || state.sessionHash !== sessionHash) throw new ForbiddenException("Сеанс подключения принадлежит другой сессии");
+    this.logInstagramOauth("INSTAGRAM_OAUTH_STATE_VALIDATED", correlationId);
+    stage = "ATTEMPT";
     const attempt = await this.p.appSetting.findUnique({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
     const attemptInfo = attempt ? parseMetaOauthAttempt(attempt.value) : null;
     if (!attemptInfo || attemptInfo.nonce !== state.nonce) throw new ForbiddenException("Эта попытка подключения Instagram уже заменена новой");
     const values = await this.sectionValues("integration.meta"), appId = typeof values.instagramAppId === "string" ? values.instagramAppId : "", appSecret = this.secretValue(values, "instagramAppSecretEncrypted");
     if (!appId || !appSecret) throw new BadRequestException("Приложение Instagram не настроено");
-    const token = await this.instagramTokenExchange(code, appId, appSecret);
+    stage = "TOKEN_EXCHANGE";
+    const token = await this.instagramTokenExchange(code, appId, appSecret, correlationId);
+    stage = "PROFILE";
     const profile = await this.instagramGraph<{ id?: string; username?: string; account_type?: string }>("me", token.accessToken, { fields: "id,username,account_type" });
     const instagramAccountId = profile.id || token.accountId;
     if (!instagramAccountId) throw new BadGatewayException("Instagram не вернул идентификатор профессионального аккаунта");
     // `messages` is the only field required for Direct delivery. Asking for an
     // optional field in the same call makes Meta reject the entire subscription
     // for applications where that capability is not enabled (Graph code 3).
+    stage = "SUBSCRIBE";
     await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    stage = "VERIFY";
     const subscriptions = await this.instagramGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
     const subscription = (subscriptions.data || []).find(item => item.id === appId);
     if (!subscription?.subscribed_fields?.includes("messages")) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
+    stage = "PERSIST";
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-session:" + sessionHash},0))`;
@@ -534,7 +573,12 @@ export class CommunicationsService {
       await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
       await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { instagramConnected: true, instagramAccountId, subscribedFields: subscription.subscribed_fields } } });
     });
+    this.logInstagramOauth("INSTAGRAM_OAUTH_TOKEN_PERSISTED", correlationId);
     return this.metaSettings();
+    } catch (error) {
+      if (error && typeof error === "object") this.instagramOauthFailures.set(error, { correlationId, stage });
+      throw error;
+    }
   }
   instagramOauthResultHtml(ok: boolean) {
     return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Подключение Instagram</title><body><h1>${ok ? "Instagram подключён" : "Instagram не подключён"}</h1><p>${ok ? "Вернитесь в CRM и отправьте тестовое сообщение из Instagram Direct." : "Закройте окно и повторите подключение из CRM."}</p></body></html>`;

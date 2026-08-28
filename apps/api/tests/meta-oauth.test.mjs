@@ -9,6 +9,7 @@ const controller = await readFile(new URL("../src/communications/communications.
 const service = await readFile(new URL("../src/communications/communications.service.ts", import.meta.url), "utf8");
 const helper = await readFile(new URL("../src/communications/meta-oauth.ts", import.meta.url), "utf8").catch(() => "");
 const setupHelper = await readFile(new URL("../src/communications/meta-setup-session.ts", import.meta.url), "utf8").catch(() => "");
+const instagramDiagnostics = await readFile(new URL("../src/communications/instagram-oauth-diagnostics.ts", import.meta.url), "utf8").catch(() => "");
 
 function loadHelper() {
   const javascript = ts.transpileModule(helper, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -21,6 +22,13 @@ function loadSetupHelper() {
   const javascript = ts.transpileModule(setupHelper, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} }, require = createRequire(import.meta.url);
   vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
+  return module.exports;
+}
+
+function loadInstagramDiagnostics() {
+  const javascript = ts.transpileModule(instagramDiagnostics, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} }, require = createRequire(import.meta.url);
+  vm.runInNewContext(javascript, { module, exports: module.exports, require });
   return module.exports;
 }
 
@@ -59,6 +67,48 @@ test("Instagram connection subscribes only to the required messages field", () =
   assert.match(callback, /subscribed_fields:\s*"messages"/);
   assert.doesNotMatch(callback, /subscribed_fields:\s*"messages,messaging_postbacks"/);
   assert.match(callback, /subscribed_fields\?\.includes\("messages"\)/);
+});
+
+test("Instagram OAuth callback logs safe stages and preserves generic browser errors", () => {
+  assert.match(service, /INSTAGRAM_OAUTH_CALLBACK_STARTED/);
+  assert.match(service, /INSTAGRAM_OAUTH_STATE_VALIDATED/);
+  assert.match(service, /INSTAGRAM_OAUTH_SHORT_TOKEN_RESPONSE/);
+  assert.match(service, /INSTAGRAM_OAUTH_LONG_TOKEN_RESPONSE/);
+  assert.match(service, /INSTAGRAM_OAUTH_TOKEN_PERSISTED/);
+  assert.match(service, /instagramOauthFailures\.set\(error, \{ correlationId, stage \}\)/);
+  assert.match(service, /context\?\.correlationId/);
+  assert.match(controller, /logInstagramOauthCallbackFailure\(error\)/);
+  assert.match(controller, /instagramOauthResultHtml\(false\)/);
+  assert.doesNotMatch(controller, /JSON\.stringify\((?:code|state|r\.query)/);
+});
+
+test("Instagram OAuth diagnostics allowlist provider errors and never expose credentials", () => {
+  const diagnostics = loadInstagramDiagnostics();
+  assert.equal(typeof diagnostics.sanitizeInstagramOauthResponse, "function");
+  const safe = diagnostics.sanitizeInstagramOauthResponse({
+    error_type: "OAuthException",
+    code: 400,
+    error_message: "Invalid authorization code",
+    error_subcode: 123,
+    access_token: "IG-SECRET-TOKEN",
+    refresh_token: "REFRESH-SECRET",
+    client_secret: "APP-SECRET",
+    state: "SIGNED-STATE",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(safe)), {
+    providerErrorType: "OAuthException",
+    providerErrorCode: 400,
+    providerErrorSubcode: 123,
+  });
+  const serialized = JSON.stringify(safe);
+  assert.doesNotMatch(serialized, /IG-SECRET-TOKEN|REFRESH-SECRET|APP-SECRET|SIGNED-STATE/);
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.sanitizeInstagramOauthResponse("not-json-secret"))), { responseShape: "non_object" });
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.sanitizeInstagramOauthResponse({ error: { type: "OAuthException", code: 190, error_subcode: 460 }, access_token: "SECRET" }))), {
+    providerErrorType: "OAuthException",
+    providerErrorCode: 190,
+    providerErrorSubcode: 460,
+  });
+  assert.equal(diagnostics.classifyInstagramOauthError(new TypeError("request contains SECRET")), "network");
 });
 
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {

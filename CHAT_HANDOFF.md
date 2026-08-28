@@ -804,3 +804,10 @@
 - TDD и полный `pnpm quality:check` PASS: web 125/125, API 157/157, database 4/4, typecheck и production builds. Mandatory compatibility/visual, business/security и release/regression reviews — PASS.
 - Deployment: commit `85c7b14` pushed to `origin/main` и развернут в `/home/trio/yoleotard-crm`. Public `/api/health` возвращает HTTP 200; PostgreSQL, Redis и uploads — `up`.
 - Production browser smoke подтвердил: при клике открываются расширенные настройки, активным становится пустое поле «ID приложения Instagram», OAuth popup не возникает, console errors/warnings — 0. Для завершения Instagram OAuth владелец должен вручную скопировать текущие Instagram App ID и App Secret из Meta for Developers, сохранить их в CRM и повторить подключение; реальный Direct inbound/outbound smoke после этого всё ещё обязателен.
+
+## 2026-08-28 — безопасная диагностика Instagram OAuth callback
+
+- Production callback получал authorization code, но прежний общий `catch` удалял точную причину отказа; исторический журнал поэтому не позволяет восстановить ответ Instagram задним числом.
+- Добавлена серверная stage-диагностика с одним случайным correlation ID: state/session, OAuth attempt, short/long token exchange, profile, subscribe, verify и transaction persistence. В журнал попадают только HTTP status, allowlisted тип/код/subcode ошибки, форма ответа и фиксированный класс сбоя.
+- Authorization code, state, session hash, nonce, cookie, App Secret, access/refresh tokens, URL и произвольный текст ответа провайдера не журналируются. Пользовательский callback HTML остаётся общим и безопасным.
+- `pnpm quality:check` PASS: API 159/159, web 125/125, database 4/4, typecheck и production builds. Compatibility, regression, business/security и visual reviews — PASS; deployment и одна новая ручная OAuth-попытка нужны для получения точной production-причины.
