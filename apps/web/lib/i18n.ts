@@ -362,6 +362,8 @@ export const settingsUi = {
   metaContinue: "Продолжить с Facebook",
   metaReconnect: "Переподключить Facebook",
   metaConnectInstagram: "Подключить Instagram",
+  metaInstagramRouting: "Настроить маршрутизацию Instagram",
+  metaInstagramRoutingHint: "Одновременно отвечать может только приложение, выбранное в Meta по умолчанию. Здесь можно переключить ответы между Yoleotard CRM-IG и keyCRM.",
   metaConnecting: "Ожидаем авторизацию…",
   metaInstagramCredentialsNeeded: "Сначала сохраните ID и секрет приложения Instagram из Meta for Developers.",
   metaInstagramCredentialsHelp: "Для подключения Instagram нужны отдельные ID и секрет приложения Instagram. Заполните нужное поле ниже, сохраните технические настройки и повторите подключение.",

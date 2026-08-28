@@ -28,6 +28,15 @@ test("Meta settings expose a delivery verification action and honest status", ()
   assert.match(source, /settings-meta-actions/);
 });
 
+test("Instagram settings link directly to Meta conversation routing", () => {
+  assert.match(source, /https:\/\/www\.facebook\.com\/settings\/\?tab=ig_conversation_routing/);
+  assert.match(source, /settingsUi\.metaInstagramRouting/);
+  assert.match(source, /settingsUi\.metaInstagramRoutingHint/);
+  assert.match(source, /target="_blank" rel="noreferrer"/);
+  assert.match(i18n, /metaInstagramRouting:\s*"Настроить маршрутизацию Instagram"/);
+  assert.match(i18n, /Одновременно отвечать может только приложение/);
+});
+
 test("Instagram OAuth polling evaluates the freshly loaded integration status", () => {
   assert.match(source, /async function load\(\)[\s\S]*?const result\s*=\s*await r\.json\(\)/);
   assert.match(source, /setData\(result\);[\s\S]*?return result/);
