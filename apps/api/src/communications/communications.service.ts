@@ -552,7 +552,8 @@ export class CommunicationsService {
     // optional field in the same call makes Meta reject the entire subscription
     // for applications where that capability is not enabled (Graph code 3).
     stage = "SUBSCRIBE";
-    await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    const subscribeResult = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    if (subscribeResult.success !== true) throw new BadGatewayException("Instagram не подтвердил запрос подписки на входящие сообщения");
     stage = "VERIFY";
     const subscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
     const subscription = findInstagramMessagesSubscription(subscriptions.data || [], instagramAccountId, appId);

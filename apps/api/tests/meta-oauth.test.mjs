@@ -53,7 +53,8 @@ test("Facebook and Instagram use isolated OAuth applications and credentials", (
   assert.match(service, /instagramAccessTokenEncrypted/);
   assert.match(service, /graph\.instagram\.com/);
   assert.match(service, /instagramAccountId \+ "\/subscribed_apps"/);
-  assert.match(service, /instagramGraph\(instagramAccountId \+ "\/subscribed_apps", token\.accessToken/);
+  assert.match(service, /const subscribeResult = await this\.instagramGraph/);
+  assert.match(service, /instagramAccountId \+ "\/subscribed_apps", token\.accessToken/);
   assert.doesNotMatch(service, /values\.pageId !== page\.id[\s\S]*instagramAccountId", "instagramAccessTokenEncrypted/);
   assert.match(service, /const connectedValues: Record<string, Prisma\.InputJsonValue> = \{ enabled: true, pageId: page\.id/);
   assert.match(service, /instagramCredentialsChanged[\s\S]*integration\.meta\.instagram\.oauth\.attempt/);
@@ -65,6 +66,7 @@ test("Facebook and Instagram use isolated OAuth applications and credentials", (
 test("Instagram connection subscribes only to the required messages field", () => {
   const callback = service.slice(service.indexOf("async instagramOauthCallback"), service.indexOf("instagramOauthResultHtml"));
   assert.match(callback, /subscribed_fields:\s*"messages"/);
+  assert.match(callback, /subscribeResult\.success !== true/);
   assert.doesNotMatch(callback, /subscribed_fields:\s*"messages,messaging_postbacks"/);
   assert.match(callback, /findInstagramMessagesSubscription\(subscriptions\.data \|\| \[\], instagramAccountId, appId\)/);
 });
@@ -122,9 +124,6 @@ test("Instagram subscription verification accepts the Instagram Login account re
     { id: "subscription", application: { id: appId }, subscribed_fields: ["messages"] },
   ], accountId, appId))), { id: "subscription", application: { id: appId }, subscribed_fields: ["messages"] });
   assert.equal(diagnostics.findInstagramMessagesSubscription([
-    { id: "other-account", subscribed_fields: ["messages"] },
-  ], accountId, appId), undefined);
-  assert.equal(diagnostics.findInstagramMessagesSubscription([
     { id: accountId, subscribed_fields: ["comments"] },
   ], accountId, appId), undefined);
   assert.equal(diagnostics.findInstagramMessagesSubscription([
@@ -132,6 +131,13 @@ test("Instagram subscription verification accepts the Instagram Login account re
   ], accountId, appId), undefined);
   assert.equal(diagnostics.findInstagramMessagesSubscription([
     { id: appId, application: { id: "other-app" }, subscribed_fields: ["messages"] },
+  ], accountId, appId), undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
+    { id: "provider-subscription-id", subscribed_fields: ["messages"] },
+  ], accountId, appId))), { id: "provider-subscription-id", subscribed_fields: ["messages"] });
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: "provider-subscription-1", subscribed_fields: ["messages"] },
+    { id: "provider-subscription-2", subscribed_fields: ["messages"] },
   ], accountId, appId), undefined);
 });
 

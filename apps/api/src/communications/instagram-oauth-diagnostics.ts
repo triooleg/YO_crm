@@ -43,11 +43,16 @@ export function findInstagramMessagesSubscription(
   instagramAccountId: string,
   instagramAppId: string,
 ) {
-  return subscriptions.find(item => {
+  const candidates = subscriptions.filter(item => {
     if (!item.subscribed_fields?.includes("messages")) return false;
     const applicationId = String(item.application?.id || "");
-    if (applicationId) return applicationId === instagramAppId;
+    return !applicationId || applicationId === instagramAppId;
+  });
+  const identified = candidates.find(item => {
+    const applicationId = String(item.application?.id || "");
+    if (applicationId === instagramAppId) return true;
     const id = String(item.id || "");
     return id === instagramAccountId || id === instagramAppId;
   });
+  return identified ?? (candidates.length === 1 ? candidates[0] : undefined);
 }
