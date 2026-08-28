@@ -23,6 +23,7 @@ services:
       BACKUP_STORAGE_PATH: /backups
     command: >
       sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
+      && touch /tmp/backup-test-ready
       && tail -f /dev/null"
     volumes:
       - backup_test_uploads:/app/uploads
