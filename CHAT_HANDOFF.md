@@ -1,5 +1,15 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-29 — deployment, backup and restore foundation
+
+- Persistence audit confirmed that PostgreSQL lives in `crm_postgres`, Redis in `crm_redis`, and all durable application files use `/app/uploads` backed by `crm_uploads`; generated Next/Nest images and caches are rebuildable. A separate access-controlled host directory is mounted at `/backups` for backup artifacts.
+- Added migration-managed `Backup` and singleton `BackupSetting` metadata, OWNER/ADMIN API boundaries, `BackupService`, `BackupRepository`, `RestoreService`, a scheduler/job contract and `LocalBackupStorage`. S3 remains an interface/enum only; no false connected state or provider credentials are introduced.
+- `scripts/backup.sh` creates DATA or FULL v2 artifacts containing PostgreSQL custom dump, persistent uploads, strict JSON manifest, application/Git/database/schema versions and SHA-256 checksums. FULL currently records the stronger compatibility metadata but intentionally does not archive rebuildable application images.
+- `scripts/restore.sh` is fail-closed (`ALLOW_RESTORE=true`, explicit `APP_ENV=backup-drill`), refuses active/default or nonempty databases, verifies safe archive paths, v2 identity/checksum/size against completed DB metadata and remains compatible with historical v1 `manifest.txt` backups whose schema predates the `Backup` table.
+- Automatic physical retention deletion is intentionally disabled until an actor-bound, audited, locked and idempotent deletion lifecycle is implemented. Settings and candidate calculation are present without a destructive scheduler path.
+- A real isolated Compose drill on the deployment host created representative DB/file data, backed it up, deleted it, restored into new isolated databases and directories, and verified both current v2 and legacy v1 artifacts. The isolated containers, volumes and temporary server directories were removed afterward; production volumes and ports were never attached.
+- Operational documentation now lives in `docs/DEPLOYMENT.md`, `docs/BACKUP_RESTORE.md` and `docs/DISASTER_RECOVERY.md`; CI validates Prisma and both normal and isolated Compose configurations. Deployment to production is not part of this change and remains pending final review/release approval.
+
 ## 2026-08-28 — Facebook profile fallback и безопасный backfill
 
 - Production dry-run нашёл 11 активных клиентов с техническими именами

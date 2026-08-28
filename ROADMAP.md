@@ -1,11 +1,14 @@
 # Yoleotard CRM roadmap
 
-## Phase 0 - Infrastructure discovery (complete; audit gap closed locally)
+## Phase 0 - Infrastructure and recovery foundation (implemented locally)
 
 Docker/Portainer/Nginx Proxy Manager topology, occupied ports, deployment access
-and reusable patterns documented. Executable database/upload backup and restore
-scripts now match the operations guide; a production restore drill is still a
-release operation, not claimed here.
+and reusable patterns are documented. PostgreSQL, uploads and backup artifacts
+have explicit persistent storage. Migration-managed backup metadata, local
+storage abstraction, DATA/FULL manifest format, checksums, guarded CLI and a real
+isolated v2 plus legacy-v1 restore drill are implemented. Automated scheduling,
+audited retention deletion, off-server S3 storage and production recovery remain
+explicit later release work.
 
 ## Phase 1 - Foundation (complete; auth UX follow-up deferred)
 

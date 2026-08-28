@@ -42,7 +42,7 @@ test("restore script requires explicit safe targets and refuses the production d
   assert.match(source, /manifest\.txt/);
   assert.match(source, /format_version=1/);
   assert.match(source, /to_regclass/);
-  assert.match(source, /Target database must be empty/);
+  assert.match(source, /freshly created and contain no user objects/);
   assert.match(source, /backup id mismatch/);
   assert.match(source, /--uploads-target/);
   assert.doesNotMatch(source, /rm\s+-rf/);
@@ -54,8 +54,8 @@ test("automated restore drill creates, destroys, restores and verifies represent
   assert.match(source, /APP_ENV=backup-drill/);
   assert.match(source, /backup\.sh/);
   assert.match(source, /restore\.sh/);
-  assert.match(source, /INSERT INTO/);
   assert.match(source, /DELETE FROM/);
+  assert.doesNotMatch(source, /CREATE TABLE/);
   assert.match(source, /pg_restore|restore/);
   assert.match(source, /verify/i);
 });
