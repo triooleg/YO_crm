@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -94,6 +94,16 @@ test("connected account labels expose no credentials", () => {
   assert.equal(metaConnectedAccountLabel("INSTAGRAM", settings), "@yoleotard");
   assert.equal(metaConnectedAccountLabel("EMAIL", settings), "");
   assert.equal(JSON.stringify(metaConnectedAccountLabel("FACEBOOK", settings)).includes("secret"), false);
+});
+
+test("Meta conversation links are scoped and reject unsafe identifiers", () => {
+  assert.equal(metaConversationInboxUrl("FACEBOOK", "261203841288993:27352420207764662", { pageId: "261203841288993" }), "https://business.facebook.com/latest/inbox/messenger?asset_id=261203841288993&selected_item_id=27352420207764662");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramAccountId: "17841407931852361" }), "https://business.facebook.com/latest/inbox/instagram_direct?asset_id=261203841288993&selected_item_id=708610235356092");
+  assert.equal(metaConversationInboxUrl("FACEBOOK", "999:2", { pageId: "1" }), "");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "999:2", { pageId: "1", instagramAccountId: "8" }), "");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "8:2", { pageId: "1", instagramAccountId: "unsafe" }), "");
+  assert.equal(metaConversationInboxUrl("FACEBOOK", "1:javascript:alert(1)", { pageId: "1" }), "");
+  assert.equal(metaConversationInboxUrl("EMAIL", "1:2", { pageId: "1" }), "");
 });
 
 test("profile persistence updates an active client before recording exact history",async()=>{

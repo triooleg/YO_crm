@@ -27,6 +27,7 @@ type ConversationPreview = {
   lastMessageAt?: string;
   messages?: { content: string; createdAt: string }[];
   connectedAccountLabel?: string;
+  connectedAccountUrl?: string;
 };
 type Client = {
   id: string;
@@ -109,6 +110,12 @@ function connectedAccountLabel(c: Client | undefined, activeChannel: string) {
     .filter((conversation) => conversation.channel === activeChannel && conversation.connectedAccountLabel)
     .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0]?.connectedAccountLabel || "";
 }
+function connectedAccountUrl(c: Client | undefined, activeChannel: string) {
+  if (!c) return "";
+  return [...c.conversations]
+    .filter((conversation) => conversation.channel === activeChannel && conversation.connectedAccountUrl)
+    .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0]?.connectedAccountUrl || "";
+}
 function conversationTimestamp(c: Client) {
   const latest = latestConversation(c);
   return new Date(
@@ -182,6 +189,7 @@ export function CommunicationsWorkspace() {
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null);
   const accountLabel = connectedAccountLabel(client, activeChannel);
+  const accountUrl = connectedAccountUrl(client, activeChannel);
   async function api(path: string, init?: RequestInit) {
     const r = await fetch("/api" + path, {
       credentials: "include",
@@ -711,7 +719,9 @@ export function CommunicationsWorkspace() {
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {accountLabel && <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>}
+                {accountLabel && (accountUrl
+                  ? <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}>{ui.connectedAccount}: {accountLabel} ↗</a>
+                  : <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>)}
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (

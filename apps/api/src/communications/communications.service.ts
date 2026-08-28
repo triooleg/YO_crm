@@ -29,7 +29,7 @@ import {
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -100,6 +100,7 @@ export class CommunicationsService {
       conversations: client.conversations.map(conversation => ({
         ...conversation,
         connectedAccountLabel: metaConnectedAccountLabel(conversation.channel, metaSettings),
+        connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, metaSettings),
       })),
     }));
   }

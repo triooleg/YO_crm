@@ -191,6 +191,20 @@ export function metaConnectedAccountLabel(channel: string | undefined, settings:
   return "";
 }
 
+export function metaConversationInboxUrl(channel: string | undefined, externalId: string | null | undefined, settings: Record<string, unknown>) {
+  if (channel !== "FACEBOOK" && channel !== "INSTAGRAM") return "";
+  const match = /^(\d+):(\d+)$/.exec(externalId || "");
+  const pageId = typeof settings.pageId === "string" ? settings.pageId.trim() : "";
+  if (!match || !/^\d+$/.test(pageId)) return "";
+  if (channel === "FACEBOOK" && match[1] !== pageId) return "";
+  if (channel === "INSTAGRAM") {
+    const instagramAccountId = typeof settings.instagramAccountId === "string" ? settings.instagramAccountId.trim() : "";
+    if (!/^\d+$/.test(instagramAccountId) || match[1] !== instagramAccountId) return "";
+  }
+  const section = channel === "FACEBOOK" ? "messenger" : "instagram_direct";
+  return `https://business.facebook.com/latest/inbox/${section}?asset_id=${pageId}&selected_item_id=${match[2]}`;
+}
+
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {
   if (!receiverId || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
   return (metadata as AnyRecord).receiverId === receiverId;

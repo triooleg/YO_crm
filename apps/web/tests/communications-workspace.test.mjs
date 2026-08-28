@@ -94,6 +94,10 @@ test("заголовок чата показывает привязанный б
   assert.match(component, /connectedAccountLabel/);
   assert.match(component, /communications-chat-account/);
   assert.match(component, /communications-chat-client-copy/);
+  assert.match(component, /connectedAccountUrl/);
+  assert.match(component, /target="_blank"/);
+  assert.match(component, /rel="noopener noreferrer"/);
+  assert.match(component, /ui\.openInSocialNetwork/);
   assert.match(component, /ui\.connectedAccount/);
   assert.match(css, /\.communications-chat-account\{/);
   assert.match(css, /\.communications-chat-client-copy\{[^}]*min-width:0;flex:1 1 0/);

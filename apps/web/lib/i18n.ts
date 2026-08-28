@@ -569,6 +569,7 @@ export const tasksUi = {
 export const communicationsUi = {
     replyChannel: "Канал ответа",
     connectedAccount: "Аккаунт",
+    openInSocialNetwork: "Открыть этот диалог в социальной сети",
   templatesList: "Сохранённые шаблоны",
   eyebrow: "ЕДИНОЕ ОКНО ОБЩЕНИЯ",
   title: "Входящие",
