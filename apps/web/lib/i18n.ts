@@ -567,7 +567,8 @@ export const tasksUi = {
 } as const;
 
 export const communicationsUi = {
-  replyChannel: "Канал ответа",
+    replyChannel: "Канал ответа",
+    connectedAccount: "Аккаунт",
   templatesList: "Сохранённые шаблоны",
   eyebrow: "ЕДИНОЕ ОКНО ОБЩЕНИЯ",
   title: "Входящие",

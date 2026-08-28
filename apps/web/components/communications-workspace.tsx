@@ -26,6 +26,7 @@ type ConversationPreview = {
   channel?: string;
   lastMessageAt?: string;
   messages?: { content: string; createdAt: string }[];
+  connectedAccountLabel?: string;
 };
 type Client = {
   id: string;
@@ -102,6 +103,12 @@ function latestConversation(c: Client) {
       new Date(a.lastMessageAt || a.messages?.[0]?.createdAt || 0).getTime(),
   )[0];
 }
+function connectedAccountLabel(c: Client | undefined, activeChannel: string) {
+  if (!c) return "";
+  return [...c.conversations]
+    .filter((conversation) => conversation.channel === activeChannel && conversation.connectedAccountLabel)
+    .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0]?.connectedAccountLabel || "";
+}
 function conversationTimestamp(c: Client) {
   const latest = latestConversation(c);
   return new Date(
@@ -174,6 +181,7 @@ export function CommunicationsWorkspace() {
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null);
+  const accountLabel = connectedAccountLabel(client, activeChannel);
   async function api(path: string, init?: RequestInit) {
     const r = await fetch("/api" + path, {
       credentials: "include",
@@ -702,6 +710,7 @@ export function CommunicationsWorkspace() {
             <span className="communications-chat-client">
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <b>{client?.displayName || ui.selectClient}</b>
+              {accountLabel && <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>}
             </span>
             {client && (availableChannels.length > 1 ? (
               <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>setActiveChannel(event.target.value)}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>

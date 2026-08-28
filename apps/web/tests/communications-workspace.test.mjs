@@ -90,6 +90,13 @@ test("заголовок чата удерживает источник при �
   assert.match(css, /\.communications-chat-header>span:last-child\{flex-shrink:0\}/);
 });
 
+test("заголовок чата показывает привязанный бизнес-аккаунт Meta", () => {
+  assert.match(component, /connectedAccountLabel/);
+  assert.match(component, /communications-chat-account/);
+  assert.match(component, /ui\.connectedAccount/);
+  assert.match(css, /\.communications-chat-account\{/);
+});
+
 test("список входящих показывает последнее сообщение и время", () => {
   assert.match(component, /latestConversation/);
   assert.match(component, /communications-client-preview/);

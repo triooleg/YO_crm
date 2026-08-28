@@ -29,7 +29,7 @@ import {
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -76,8 +76,8 @@ export class CommunicationsService {
   private readonly logger = new Logger(CommunicationsService.name);
   private readonly instagramOauthFailures = new WeakMap<object, { correlationId: string; stage: string }>();
   constructor(private p: PrismaService) {}
-  list() {
-    return this.p.client.findMany({
+  async list() {
+    const [clients, metaSettings] = await Promise.all([this.p.client.findMany({
       where: { archivedAt: null },
       orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }],
       include: {
@@ -94,7 +94,14 @@ export class CommunicationsService {
         },
       },
       take: 100,
-    });
+    }), this.sectionValues("integration.meta")]);
+    return clients.map(client => ({
+      ...client,
+      conversations: client.conversations.map(conversation => ({
+        ...conversation,
+        connectedAccountLabel: metaConnectedAccountLabel(conversation.channel, metaSettings),
+      })),
+    }));
   }
   templates() {
     return this.p.messageTemplate.findMany({

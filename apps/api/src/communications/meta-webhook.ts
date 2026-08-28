@@ -177,6 +177,20 @@ export function metaIdentityLogRef(value: string | undefined) {
   return value ? createHash("sha256").update(value).digest("hex").slice(0, 12) : undefined;
 }
 
+export function metaConnectedAccountLabel(channel: string | undefined, settings: Record<string, unknown>) {
+  if (channel === "FACEBOOK") {
+    return typeof settings.pageName === "string" && settings.pageName.trim()
+      ? settings.pageName.trim()
+      : typeof settings.pageId === "string" ? settings.pageId.trim() : "";
+  }
+  if (channel === "INSTAGRAM") {
+    const username = typeof settings.instagramUsername === "string" ? settings.instagramUsername.trim().replace(/^@/, "") : "";
+    if (username) return `@${username}`;
+    return typeof settings.instagramAccountId === "string" ? settings.instagramAccountId.trim() : "";
+  }
+  return "";
+}
+
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {
   if (!receiverId || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
   return (metadata as AnyRecord).receiverId === receiverId;
