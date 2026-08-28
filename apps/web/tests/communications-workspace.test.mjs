@@ -83,6 +83,25 @@ test("composer sends both Facebook and Instagram conversations", () => {
 });
 
 test("template action loads a saved template into the composer instead of invoking AI",()=>{assert.match(component,/\/communications\/templates/);assert.match(component,/setText\(template\.content\)/);assert.match(component,/communications-template-menu/);assert.doesNotMatch(component,/\['TEMPLATE',ui\.template\]/)});
+test("исходящий ответ можно сохранить как шаблон, выбрать и архивировать из меню",()=>{
+  assert.match(component,/async function saveAsTemplate\(content:string,channel:string,language="ru"\)/);
+  assert.match(component,/method:"POST",body:JSON\.stringify\(\{name,content:content\.trim\(\),channel,language\}\)/);
+  assert.match(component,/message\.direction === "OUTBOUND" && <button[^>]*communications-save-template/s);
+  assert.match(component,/async function archiveTemplate\(template:Template\)/);
+  assert.match(component,/\/communications\/templates\/"\+template\.id\+"\/archive/);
+  assert.match(component,/setTemplates\(current=>current\.filter\(item=>item\.id!==template\.id\)\)/);
+  assert.match(component,/communications-template-delete/);
+  assert.match(component,/className="communications-template-row" role="none"/);
+  assert.match(menuCss,/\.communications-save-template\{[^}]*min-height:32px/);
+  for(const key of["saveAsTemplate","templateNamePrompt","templateSaved","deleteTemplate","deleteTemplateConfirm"])assert.match(locale,new RegExp(`${key}:`));
+});
+test("сообщения показывают время без секунд и сохраняют абзацы",()=>{
+  assert.match(component,/function formatMessageDateTime\(value:string\)/);
+  assert.match(component,/hour:"2-digit",minute:"2-digit"/);
+  assert.doesNotMatch(component,/second:"2-digit"/);
+  assert.match(component,/className="communications-message-content"/);
+  assert.match(css,/\.communications-message-content,\.communications-message-translation span\{[^}]*white-space:pre-wrap/);
+});
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
 

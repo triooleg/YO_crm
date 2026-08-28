@@ -31,7 +31,7 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
+import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
@@ -1212,13 +1212,18 @@ export class CommunicationsService {
       const receiverId = channel === ContactChannel.INSTAGRAM
           ? (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "")
           : (typeof values.pageId === "string" ? values.pageId : ""),
+        instagramWebhookReceiverId = channel === ContactChannel.INSTAGRAM && typeof values.instagramWebhookReceiverId === "string" && /^\d+$/.test(values.instagramWebhookReceiverId)
+          ? values.instagramWebhookReceiverId
+          : "",
         pageToken = channel === ContactChannel.INSTAGRAM
           ? this.secretValue(values, "instagramAccessTokenEncrypted")
           : this.secretValue(values, "pageAccessTokenEncrypted"),
         appSecret = channel === ContactChannel.INSTAGRAM
           ? this.secretValue(values, "instagramAppSecretEncrypted")
           : this.secretValue(values, "appSecretEncrypted"),
-        recipientId = metaRecipientId(receiverId, conversation?.externalId);
+        recipientId = channel === ContactChannel.INSTAGRAM
+          ? metaRecipientIdForReceivers([receiverId, instagramWebhookReceiverId], conversation?.externalId)
+          : metaRecipientId(receiverId, conversation?.externalId);
       const channelName = channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
       if (values.enabled !== true || !receiverId || !pageToken)
         throw new BadRequestException(`Канал ${channelName} не подключён`);

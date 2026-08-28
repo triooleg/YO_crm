@@ -191,6 +191,7 @@ test("outbound Facebook and Instagram messages distinguish drafts from real Meta
   assert.match(x, /ContactChannel\.INSTAGRAM/);
   assert.match(x, /deliverMetaMessage\(metaChannel/);
   assert.match(x, /metaTextMessageParams\(recipientId,content\)/);
+  assert.match(x, /metaRecipientIdForReceivers\(\[receiverId,instagramWebhookReceiverId\],conversation\?\.externalId\)/);
   assert.match(x, /MessageStatus\.SENT/);
   assert.match(x, /MessageStatus\.FAILED/);
   assert.match(x, /externalId:result\.message_id/);

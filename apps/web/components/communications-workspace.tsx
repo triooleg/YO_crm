@@ -162,6 +162,9 @@ function readFile(file: File) {
 function formatBytes(size: number) {
   return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} КБ` : `${(size / 1024 / 1024).toFixed(1)} МБ`;
 }
+function formatMessageDateTime(value:string){
+  return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+}
 export function CommunicationsWorkspace() {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
@@ -169,6 +172,8 @@ export function CommunicationsWorkspace() {
     [messages, setMessages] = useState<Message[]>([]),
     [templates, setTemplates] = useState<Template[]>([]),
     [templatesOpen, setTemplatesOpen] = useState(false),
+    [templateBusy,setTemplateBusy]=useState(false),
+    [templateNotice,setTemplateNotice]=useState(""),
     [text, setText] = useState(""),
     [selectedMessageIds,setSelectedMessageIds]=useState<string[]>([]),
     [replyInstruction,setReplyInstruction]=useState(""),
@@ -672,6 +677,19 @@ export function CommunicationsWorkspace() {
     try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content,channel:activeChannel,action:"SEND",clientRequestId:requestId})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;setMessages(current=>[...current,result]);if(result.status==="FAILED"){pendingAiSend.current={};setError(sendFailureText(result.metadata?.reason,activeChannel));return}pendingAiSend.current={};setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("")}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setBusy(false)}
   }
+  async function saveAsTemplate(content:string,channel:string,language="ru"){
+    const suggested=content.replace(/\s+/g," ").trim().slice(0,60),entered=window.prompt(ui.templateNamePrompt,suggested);
+    const name=entered?.trim().slice(0,120);if(!name||!content.trim())return;
+    setTemplateBusy(true);setError("");setTemplateNotice("");
+    try{const created=await api("/communications/templates",{method:"POST",body:JSON.stringify({name,content:content.trim(),channel,language})});setTemplates(current=>[...current,created].sort((a,b)=>a.name.localeCompare(b.name,"ru")));setTemplateNotice(ui.templateSaved)}
+    catch(e){setError((e as Error).message)}finally{setTemplateBusy(false)}
+  }
+  async function archiveTemplate(template:Template){
+    if(!window.confirm(ui.deleteTemplateConfirm.replace("{name}",template.name)))return;
+    setTemplateBusy(true);setError("");setTemplateNotice("");
+    try{await api("/communications/templates/"+template.id+"/archive",{method:"POST",body:"{}"});setTemplates(current=>current.filter(item=>item.id!==template.id))}
+    catch(e){setError((e as Error).message)}finally{setTemplateBusy(false)}
+  }
   function chooseTemplate(template: Template) {
     invalidateAiOperation();
     setText(template.content);
@@ -745,6 +763,7 @@ export function CommunicationsWorkspace() {
           <button onClick={() => setError("")}>{ui.close}</button>
         </div>
       )}
+      {templateNotice && <div className="communications-template-notice" role="status">{templateNotice}<button type="button" onClick={()=>setTemplateNotice("")}>{ui.close}</button></div>}
       <section
         className="communications-grid"
         style={{ gridTemplateColumns: grid }}
@@ -847,7 +866,7 @@ export function CommunicationsWorkspace() {
                     className={message.direction === "OUTBOUND" ? "out" : "in"}
                   >
                     {(message.direction === "INBOUND"||message.status === "DRAFT") && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
-                    <span>{message.content}</span>
+                    <span className="communications-message-content">{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">
                         {attachments.map((attachment, index) => {
@@ -887,9 +906,10 @@ export function CommunicationsWorkspace() {
                     {message.metadata?.translation?.text && <div className="communications-message-translation"><span>{message.metadata.translation.text}</span></div>}
                     <small>
                       {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
-                      {new Date(message.createdAt).toLocaleString("ru")}
+                      {formatMessageDateTime(message.createdAt)}
                     </small>
                     {message.direction === "INBOUND" && <button type="button" className="communications-message-translate" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate}</button>}
+                    {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}>{ui.saveAsTemplate}</button>}
                     {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>
                 );
@@ -900,6 +920,7 @@ export function CommunicationsWorkspace() {
               <textarea ref={aiDraftEditor} value={aiDraftText} disabled={aiPreparing||busy} onChange={event=>{invalidateAiOperation();setAiDraftText(event.target.value)}} aria-label={aiReply.phase==="RUSSIAN"?ui.aiRussianDraftTitle:ui.aiTranslatedDraftTitle}/>
               <small>{aiReply.phase==="RUSSIAN"?ui.russianDraftHint:ui.translatedDraftHint}</small>
               <div>
+                <button type="button" className="secondary" disabled={templateBusy||!aiDraftText.trim()} onClick={()=>void saveAsTemplate(aiDraftText,activeChannel,aiReply.targetLanguage||"ru")}>{ui.saveAsTemplate}</button>
                 <button type="button" className="secondary" onClick={()=>{invalidateAiOperation();setAiReply(null);setAiDraftText("")}}>{ui.cancelAiDraft}</button>
                 <button type="button" disabled={busy||aiPreparing||!aiDraftText.trim()} onClick={()=>void(aiReply.phase==="RUSSIAN"?prepareAiTranslation():sendConfirmedAiReply())}>{aiPreparing?ui.aiPreparing:aiReply.phase==="RUSSIAN"?ui.prepareTranslation:ui.confirmTranslationAndSend}</button>
               </div>
@@ -937,17 +958,10 @@ export function CommunicationsWorkspace() {
                 </button>
                 {templatesOpen && (
                   <div role="menu" aria-label={ui.templatesList}>
-                    {templates.map((template) => (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        key={template.id}
-                        onClick={() => chooseTemplate(template)}
-                      >
-                        <b>{template.name}</b>
-                        <small>{template.language}</small>
-                      </button>
-                    ))}
+                    {templates.map((template) => <span className="communications-template-row" role="none" key={template.id}>
+                      <button type="button" role="menuitem" onClick={() => chooseTemplate(template)}><b>{template.name}</b><small>{template.language}</small></button>
+                      <button type="button" role="menuitem" className="communications-template-delete" disabled={templateBusy} aria-label={`${ui.deleteTemplate}: ${template.name}`} title={ui.deleteTemplate} onClick={()=>void archiveTemplate(template)}>×</button>
+                    </span>)}
                   </div>
                 )}
               </span>

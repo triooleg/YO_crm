@@ -5,6 +5,14 @@ export function metaRecipientId(pageId: string, conversationExternalId?: string 
     : "";
 }
 
+export function metaRecipientIdForReceivers(receiverIds: string[], conversationExternalId?: string | null) {
+  for (const receiverId of new Set(receiverIds.filter(Boolean))) {
+    const recipientId = metaRecipientId(receiverId, conversationExternalId);
+    if (recipientId) return recipientId;
+  }
+  return "";
+}
+
 export function metaTextMessageParams(recipientId: string, content: string) {
   return {
     recipient: JSON.stringify({ id: recipientId }),

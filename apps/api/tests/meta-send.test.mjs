@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { metaRecipientId, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -48,6 +48,17 @@ test("Instagram send uses the configured account scope and never invokes Faceboo
   });
   assert.equal(result.message_id, "ig-mid-1");
   assert.deepEqual(calls, ["send"]);
+});
+
+test("Instagram send resolves a conversation saved under the verified webhook receiver namespace", () => {
+  assert.equal(metaRecipientIdForReceivers(
+    ["28156785147355107", "17841407931852361"],
+    "17841407931852361:2164323137740727",
+  ), "2164323137740727");
+  assert.equal(metaRecipientIdForReceivers(
+    ["28156785147355107", "17841407931852361"],
+    "999999:2164323137740727",
+  ), "");
 });
 
 test("Meta send converts provider errors into safe actionable reasons", () => {
