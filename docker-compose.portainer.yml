@@ -50,7 +50,7 @@ services:
     ports: ["${API_PUBLIC_PORT:-4500}:4500"]
     volumes:
       - crm_uploads:/app/uploads
-      - ${BACKUP_STORAGE_PATH}:/backups
+      - ${BACKUP_STORAGE_PATH:-/home/trio/yoleotard-crm-backups}:/backups
     healthcheck:
       test:
         [

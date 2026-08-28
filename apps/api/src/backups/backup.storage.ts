@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -12,6 +13,12 @@ export interface BackupStorage {
 }
 
 export const BACKUP_STORAGE = Symbol("BACKUP_STORAGE");
+
+async function sha256File(path: string) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
 
 @Injectable()
 export class LocalBackupStorage implements BackupStorage {
@@ -57,8 +64,10 @@ export class LocalBackupStorage implements BackupStorage {
     for (const name of ["postgres.dump", "uploads.tar.gz", "manifest.json"]) {
       const digest = expected.get(name);
       if (!digest) throw new Error(`Отсутствует checksum для ${name}`);
-      const bytes = name === "manifest.json" ? manifest : await readFile(join(directory, name));
-      if (createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error(`Checksum не совпадает: ${name}`);
+      const actual = name === "manifest.json"
+        ? createHash("sha256").update(manifest).digest("hex")
+        : await sha256File(join(directory, name));
+      if (actual !== digest) throw new Error(`Checksum не совпадает: ${name}`);
     }
     const files = await Promise.all(["postgres.dump", "uploads.tar.gz", "manifest.json", "SHA256SUMS"].map(name => stat(join(directory, name))));
     return { checksum: createHash("sha256").update(manifest).digest("hex"), sizeBytes: files.reduce((sum, file) => sum + BigInt(file.size), 0n) };
