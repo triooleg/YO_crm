@@ -9,6 +9,8 @@ coverage/
 !.env.portainer.example
 uploads/
 backups/
+!apps/api/src/backups/
+!apps/api/src/backups/**
 *.log
 *.tar
 *.tgz

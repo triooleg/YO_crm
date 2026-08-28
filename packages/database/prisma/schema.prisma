@@ -158,6 +158,25 @@ enum PaymentMethod {
   OTHER
 }
 
+enum BackupType {
+  DATA
+  FULL
+}
+
+enum BackupStatus {
+  PENDING
+  RUNNING
+  VERIFYING
+  COMPLETED
+  FAILED
+  RESTORING
+}
+
+enum BackupStorageProvider {
+  LOCAL
+  S3
+}
+
 model User {
   id           String     @id @default(cuid())
   email        String     @unique
@@ -176,6 +195,7 @@ model User {
   communicationAttachments CommunicationAttachment[]
   assignedTasks WorkTask[] @relation("TaskAssignee")
   createdTasks WorkTask[] @relation("TaskCreator")
+  createdBackups Backup[] @relation("BackupCreator")
 }
 
 model Session {
@@ -607,4 +627,44 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+}
+
+model Backup {
+  id              String                @id
+  type            BackupType
+  status          BackupStatus          @default(PENDING)
+  storageProvider BackupStorageProvider @default(LOCAL)
+  storagePath     String?
+  sizeBytes       BigInt?
+  checksum        String?
+  appVersion      String?
+  gitCommit       String?
+  databaseVersion String?
+  schemaVersion   String?
+  createdById     String?
+  errorMessage    String?
+  metadata        Json?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  archivedAt      DateTime?
+  createdBy       User?                 @relation("BackupCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@index([archivedAt, createdAt])
+}
+
+model BackupSetting {
+  id              String                @id @default("default")
+  enabled         Boolean               @default(false)
+  frequency       String                @default("DAILY")
+  time            String                @default("03:00")
+  timezone        String                @default("Europe/Kiev")
+  backupType      BackupType            @default(DATA)
+  retentionCount  Int                   @default(10)
+  storageProvider BackupStorageProvider @default(LOCAL)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 }

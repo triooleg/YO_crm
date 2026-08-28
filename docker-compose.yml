@@ -39,9 +39,12 @@ services:
       REDIS_URL: redis://redis:6379
       API_PORT: 4500
       UPLOADS_DIR: /app/uploads
+      BACKUP_STORAGE_PATH: /backups
+      ALLOW_RESTORE: ${ALLOW_RESTORE:-false}
     ports: ["${API_PUBLIC_PORT:-4500}:4500"]
     volumes:
       - crm_uploads:/app/uploads
+      - ${BACKUP_STORAGE_PATH:-./.local/backups}:/backups
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

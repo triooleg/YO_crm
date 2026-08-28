@@ -19,4 +19,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
+      - run: pnpm --filter @yoleotard-crm/database exec prisma validate --schema prisma/schema.prisma
+      - run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
+      - run: docker compose --env-file .env.example -f docker-compose.backup-test.yml config --quiet
       - run: pnpm quality:check

@@ -41,12 +41,16 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN}
       API_PORT: 4500
       UPLOADS_DIR: /app/uploads
+      BACKUP_STORAGE_PATH: /backups
+      ALLOW_RESTORE: ${ALLOW_RESTORE:-false}
     command: >
       sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
       && pnpm --filter @yoleotard-crm/database seed
       && pnpm --filter @yoleotard-crm/api start"
     ports: ["${API_PUBLIC_PORT:-4500}:4500"]
-    volumes: [crm_uploads:/app/uploads]
+    volumes:
+      - crm_uploads:/app/uploads
+      - ${BACKUP_STORAGE_PATH}:/backups
     healthcheck:
       test:
         [

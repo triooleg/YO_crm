@@ -18,9 +18,10 @@ import { AiAssistantController, ChatwootWebhookController, CommunicationFilesCon
 import { AiAssistantService, CommunicationsService } from "./communications/communications.service";
 import { TasksController } from "./tasks/tasks.controller";
 import { TasksService } from "./tasks/tasks.service";
+import { BackupsModule } from "./backups/backups.module";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true })],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), BackupsModule],
   controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController],
   providers: [PrismaService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, CommunicationsService, AiAssistantService, TasksService],
 })

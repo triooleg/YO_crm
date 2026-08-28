@@ -1,0 +1,32 @@
+name: yoleotard-crm-backup-drill
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-backup_test}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-backup-test-only}
+      POSTGRES_DB: ${POSTGRES_DB:-yoleotard_crm_backup_test}
+    volumes: [backup_test_postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-backup_test} -d ${POSTGRES_DB:-yoleotard_crm_backup_test}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    build: { context: ., dockerfile: docker/api.Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://${POSTGRES_USER:-backup_test}:${POSTGRES_PASSWORD:-backup-test-only}@postgres:5432/${POSTGRES_DB:-yoleotard_crm_backup_test}?schema=public
+      UPLOADS_DIR: /app/uploads
+      BACKUP_STORAGE_PATH: /backups
+    command: >
+      sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
+      && tail -f /dev/null"
+    volumes:
+      - backup_test_uploads:/app/uploads
+      - ${BACKUP_STORAGE_PATH:-./.local/backup-test}:/backups
+volumes:
+  backup_test_postgres:
+  backup_test_uploads:
