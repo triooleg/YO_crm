@@ -86,15 +86,17 @@ test("аватар Meta отображается в списке и заголо
 test("заголовок чата удерживает источник при длинном имени клиента", () => {
   assert.match(component, /className="communications-chat-header"/);
   assert.match(css, /\.communications-chat-client\{[^}]*min-width:0;flex:1 1 auto/);
-  assert.match(css, /\.communications-chat-client>b\{[^}]*text-overflow:ellipsis/);
+  assert.match(css, /\.communications-chat-client-copy>b\{[^}]*text-overflow:ellipsis/);
   assert.match(css, /\.communications-chat-header>span:last-child\{flex-shrink:0\}/);
 });
 
 test("заголовок чата показывает привязанный бизнес-аккаунт Meta", () => {
   assert.match(component, /connectedAccountLabel/);
   assert.match(component, /communications-chat-account/);
+  assert.match(component, /communications-chat-client-copy/);
   assert.match(component, /ui\.connectedAccount/);
   assert.match(css, /\.communications-chat-account\{/);
+  assert.match(css, /\.communications-chat-client-copy\{[^}]*min-width:0;flex:1 1 0/);
 });
 
 test("список входящих показывает последнее сообщение и время", () => {

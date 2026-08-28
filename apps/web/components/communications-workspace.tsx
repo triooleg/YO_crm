@@ -709,8 +709,10 @@ export function CommunicationsWorkspace() {
           <header className="communications-chat-header">
             <span className="communications-chat-client">
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
-              <b>{client?.displayName || ui.selectClient}</b>
-              {accountLabel && <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>}
+              <span className="communications-chat-client-copy">
+                <b>{client?.displayName || ui.selectClient}</b>
+                {accountLabel && <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>}
+              </span>
             </span>
             {client && (availableChannels.length > 1 ? (
               <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>setActiveChannel(event.target.value)}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
