@@ -147,6 +147,17 @@ test("сохранение покупателя использует имя пр
   assert.match(locale, /profileName:\s*"Название профиля клиента"/);
 });
 
+test("Facebook SID виден в карточке и форме, но не редактирует scoped identity", () => {
+  assert.match(component, /client\.facebook&&<p><span>\{ui\.facebookSid\}<\/span><b>\{client\.facebook\}<\/b><\/p>/);
+  assert.match(component, /client\?\.status==="LEAD"&&client\.facebook&&<label>[\s\S]*ui\.facebookSid[\s\S]*value=\{client\.facebook\}[\s\S]*readOnly/);
+  assert.match(component, /!\(client\?\.status==="LEAD"&&client\.facebook\)&&<label>/);
+  assert.doesNotMatch(component, /name="facebook"/);
+  assert.match(locale, /facebookSid:\s*"Facebook SID"/);
+  assert.match(locale, /facebookSidHint:\s*"Заполняется автоматически из Facebook"/);
+  assert.match(css, /communications-buyer-card>p b\{[^}]*min-width:0;[^}]*overflow-wrap:anywhere/);
+  assert.match(css, /communications-create input:read-only/);
+});
+
 test("канал Meta, Chatwoot или e-mail показывается возле клиента", () => {
   assert.match(component, /clientBadges\(c\)/);
   assert.match(component, /communications-source-icons/);

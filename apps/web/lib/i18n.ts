@@ -661,6 +661,8 @@ export const communicationsUi = {
   phone: "Телефон",
   email: "E-mail",
   instagram: "Instagram",
+  facebookSid: "Facebook SID",
+  facebookSidHint: "Заполняется автоматически из Facebook",
   source: "Источник",
   note: "Комментарий",
   cancel: "Отмена",

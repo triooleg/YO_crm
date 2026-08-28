@@ -42,6 +42,7 @@ type Client = {
   phone?: string;
   email?: string;
   instagram?: string;
+  facebook?: string;
   orders: Order[];
   buyerSummary?: { purchaseCount: number; paymentTotals: { currency: string; amountMinor: number }[] };
   conversations: ConversationPreview[];
@@ -1016,7 +1017,7 @@ export function CommunicationsWorkspace() {
           onKey={resizeByKeyboard}
         />
         <aside className="communications-orders">
-          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagram&&<p><span>{ui.instagram}</span><b>{client.instagram}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
+          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagram&&<p><span>{ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
           {client?.status!=="LEAD"&&<header>
             <b>{ui.activeOrders}</b>
             <small>{activeOrders.length}</small>
@@ -1087,10 +1088,11 @@ export function CommunicationsWorkspace() {
               {ui.email}
               <input name="email" type="email" defaultValue={client?.status==="LEAD"?client.email||"":""}/>
             </label>
-            <label>
+            {client?.status==="LEAD"&&client.facebook&&<label>{ui.facebookSid}<input value={client.facebook} readOnly/><small>{ui.facebookSidHint}</small></label>}
+            {!(client?.status==="LEAD"&&client.facebook)&&<label>
               {ui.instagram}
               <input name="instagram" defaultValue={client?.status==="LEAD"?client.instagram||"":""}/>
-            </label>
+            </label>}
             <label>
               {ui.source}
               <select name="source" defaultValue={channel(client)}>
