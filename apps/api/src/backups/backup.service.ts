@@ -28,14 +28,16 @@ export class BackupService {
     if (!backup) throw new NotFoundException("Резервная копия не найдена");
     if (!(await this.storage.exists(id))) throw new BadRequestException("Файлы резервной копии отсутствуют");
     const verified = await this.storage.verify(id);
+    if (backup.checksum && backup.checksum !== verified.checksum) throw new BadRequestException("Checksum резервной копии не соответствует метаданным");
+    if (backup.sizeBytes !== null && backup.sizeBytes !== verified.sizeBytes) throw new BadRequestException("Размер резервной копии не соответствует метаданным");
+    if (verified.manifest.type.toUpperCase() !== backup.type) throw new BadRequestException("Тип резервной копии не соответствует метаданным");
     this.logger.log(JSON.stringify({ event: "BACKUP_VERIFIED", backupId: id, provider: this.storage.provider, sizeBytes: verified.sizeBytes.toString() }));
     return { ...verified, sizeBytes: verified.sizeBytes.toString() };
   }
 
-  async applyRetentionPolicy(execute = false) {
+  async applyRetentionPolicy() {
     const settings = await this.repository.settings();
     const candidates = await this.repository.retentionCandidates(settings.retentionCount);
-    if (execute) for (const backup of candidates) { await this.storage.remove(backup.id); await this.repository.archive(backup.id); }
-    return { keep: settings.retentionCount, candidates: candidates.map(item => item.id), executed: execute };
+    return { keep: settings.retentionCount, candidates: candidates.map(item => item.id), executed: false, note: "Автоматическое удаление отключено до реализации блокировки, аудита и идемпотентного жизненного цикла" };
   }
 }

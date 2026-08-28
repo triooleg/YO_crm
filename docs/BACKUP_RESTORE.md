@@ -45,10 +45,10 @@ COMPLETED is recorded only after checksum verification. Metadata records app ver
 
 ## Restore drill
 
-Restore requires `ALLOW_RESTORE=true`, refuses `APP_ENV=production`, refuses the active/default production database, requires an existing isolated database and extracts files only to an empty isolated directory.
+Restore requires `ALLOW_RESTORE=true` and explicit `APP_ENV=backup-drill`, refuses the active/default production database, requires an existing empty isolated database and extracts files only to an empty isolated directory.
 
 ```bash
-export APP_ENV=development ALLOW_RESTORE=true
+export APP_ENV=backup-drill ALLOW_RESTORE=true
 export BACKUP_STORAGE_PATH=/srv/backups/yoleotard-crm
 ./scripts/restore.sh --backup-id 20260829T030000Z-example1 \
   --target-database yoleotard_crm_restore_drill \
@@ -63,7 +63,7 @@ Checksums and manifest version are validated before `pg_restore`. Absolute and p
 The drill creates a representative DB row and persistent file, backs up, deletes both probes, restores to isolated targets and verifies both values:
 
 ```bash
-BACKUP_RESTORE_INTEGRATION=true APP_ENV=development \
+BACKUP_RESTORE_INTEGRATION=true APP_ENV=backup-drill \
 BACKUP_STORAGE_PATH=/tmp/yoleotard-crm-backup-test \
 ./scripts/backup-restore-test.sh
 ```

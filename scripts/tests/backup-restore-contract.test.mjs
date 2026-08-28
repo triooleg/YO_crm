@@ -9,8 +9,8 @@ test("backup script captures PostgreSQL, persistent files, version metadata and 
 
   assert.match(source, /set -Eeuo pipefail/);
   assert.match(source, /COMPOSE_PROJECT_NAME=.*yoleotard-crm/);
-  assert.match(source, /COMPOSE_FILE="docker-compose\.portainer\.yml"/);
-  assert.match(source, /ENV_FILE="\.env"/);
+  assert.match(source, /COMPOSE_FILE=.*docker-compose\.portainer\.yml/);
+  assert.match(source, /ENV_FILE=.*\.env/);
   assert.match(source, /--env-file/);
   assert.match(source, /pg_dump/);
   assert.match(source, /--format=custom/);
@@ -30,8 +30,8 @@ test("restore script requires explicit safe targets and refuses the production d
 
   assert.match(source, /set -Eeuo pipefail/);
   assert.match(source, /COMPOSE_PROJECT_NAME=.*yoleotard-crm/);
-  assert.match(source, /COMPOSE_FILE="docker-compose\.portainer\.yml"/);
-  assert.match(source, /ENV_FILE="\.env"/);
+  assert.match(source, /COMPOSE_FILE=.*docker-compose\.portainer\.yml/);
+  assert.match(source, /ENV_FILE=.*\.env/);
   assert.match(source, /--env-file/);
   assert.match(source, /--backup-dir/);
   assert.match(source, /--target-database/);
@@ -39,6 +39,11 @@ test("restore script requires explicit safe targets and refuses the production d
   assert.match(source, /ALLOW_RESTORE/);
   assert.match(source, /pg_restore/);
   assert.match(source, /sha256sum --check/);
+  assert.match(source, /manifest\.txt/);
+  assert.match(source, /format_version=1/);
+  assert.match(source, /to_regclass/);
+  assert.match(source, /Target database must be empty/);
+  assert.match(source, /backup id mismatch/);
   assert.match(source, /--uploads-target/);
   assert.doesNotMatch(source, /rm\s+-rf/);
 });
@@ -46,6 +51,7 @@ test("restore script requires explicit safe targets and refuses the production d
 test("automated restore drill creates, destroys, restores and verifies representative data", async () => {
   const source = await readScript("backup-restore-test.sh");
   assert.match(source, /BACKUP_RESTORE_INTEGRATION/);
+  assert.match(source, /APP_ENV=backup-drill/);
   assert.match(source, /backup\.sh/);
   assert.match(source, /restore\.sh/);
   assert.match(source, /INSERT INTO/);
