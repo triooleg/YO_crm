@@ -203,6 +203,7 @@ model Client {
   phone                String?
   whatsapp             String?
   instagram            String?
+  instagramUsername    String?
   facebook             String?
   telegram             String?
   preferredChannel     ContactChannel?

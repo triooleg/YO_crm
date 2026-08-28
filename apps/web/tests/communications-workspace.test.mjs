@@ -36,7 +36,7 @@ test("каждое входящее переводится внутри сооб
 
 test("AI ответ использует выбранные входящие и черновики и требует подтверждения",()=>{
   assert.match(component,/selectedMessageIds/);
-  assert.match(component,/message\.direction === "INBOUND"\|\|message\.status === "DRAFT"/);
+  assert.match(component,/message\.direction === "INBOUND" \|\| message\.status === "DRAFT"/);
   assert.match(component,/replyInstruction/);
   assert.match(component,/action:"REPLY"[\s\S]*messageIds:selectedMessageIds/);
   assert.match(component,/action:"FINALIZE_REPLY"[\s\S]*messageIds:aiReply\.messageIds/);
@@ -63,6 +63,19 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/if\(action==="DRAFT"\)\{setAiReply\(null\);setAiDraftText\(""\)\}/);
   assert.match(component,/ui\.confirmTranslationAndSend/);
   for(const key of["selectDraftForReply","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
+});
+
+test("чекбоксы ответа появляются только в режиме ответа и не показываются для фото и видео", () => {
+  assert.match(component, /hasVisualAttachment = attachments\.some/);
+  assert.match(component, /\["image", "sticker", "video"\]/);
+  assert.match(component, /canSelectForReply = replyMode && !hasVisualAttachment/);
+  assert.match(component, /\{canSelectForReply && <label className="communications-message-select">/);
+  assert.match(component, /replyMode\?ui\.cancelReplySelection:ui\.reply/);
+  assert.match(component, /canSelectForReply \? " selectable"/);
+  assert.match(component, /invalidateAiOperation\(\);setSelectedMessageIds/);
+  assert.match(component, /setAiReply\(null\);setAiDraftText\(""\)/);
+  assert.match(css, /article\.selectable\.in/);
+  assert.match(locale, /cancelReplySelection:\s*"Отменить выбор"/);
 });
 test("сохранённый черновик имеет собственную идемпотентную отправку из ленты",()=>{
   assert.match(component,/async function sendSavedDraft/);
@@ -150,12 +163,23 @@ test("сохранение покупателя использует имя пр
 test("Facebook SID виден в карточке и форме, но не редактирует scoped identity", () => {
   assert.match(component, /client\.facebook&&<p><span>\{ui\.facebookSid\}<\/span><b>\{client\.facebook\}<\/b><\/p>/);
   assert.match(component, /client\?\.status==="LEAD"&&client\.facebook&&<label>[\s\S]*ui\.facebookSid[\s\S]*value=\{client\.facebook\}[\s\S]*readOnly/);
-  assert.match(component, /!\(client\?\.status==="LEAD"&&client\.facebook\)&&<label>/);
+  assert.match(component, /!\(client\?\.status==="LEAD"&&\(client\.facebook\|\|isInstagramScopedId\(client\.instagram\)\)\)&&<label>/);
   assert.doesNotMatch(component, /name="facebook"/);
   assert.match(locale, /facebookSid:\s*"Facebook SID"/);
   assert.match(locale, /facebookSidHint:\s*"Заполняется автоматически из Facebook"/);
   assert.match(css, /communications-buyer-card>p b\{[^}]*min-width:0;[^}]*overflow-wrap:anywhere/);
   assert.match(css, /communications-create input:read-only/);
+});
+
+test("Instagram SID только для чтения, а username показывается отдельно", () => {
+  assert.match(component, /instagramUsername\?: string/);
+  assert.match(component, /ui\.instagramSid/);
+  assert.match(component, /isInstagramScopedId/);
+  assert.match(component, /value=\{client\.instagram\} readOnly/);
+  assert.doesNotMatch(component, /name="instagram"[^>]*value=\{client\.instagram\}/);
+  assert.match(component, /instagramHandle\(client\.instagramUsername\)/);
+  assert.match(locale, /instagramSid:\s*"Instagram SID"/);
+  assert.match(locale, /instagramUsername:\s*"Имя в Instagram"/);
 });
 
 test("канал Meta, Chatwoot или e-mail показывается возле клиента", () => {
@@ -272,6 +296,8 @@ test("вложения Meta отображаются в истории пере�
   assert.match(locale, /openAttachment:/);
   assert.match(component, /communications-lightbox/);
   assert.match(component, /setPreview\(\{url,type:/);
+  assert.match(component, /className="communications-media-save"[^>]*\/api\/communications\/messages\/\$\{encodeURIComponent\(message\.id\)\}\/attachments\/\$\{index\}\/download[^>]*download/);
+  assert.match(locale, /saveAttachment:\s*"Сохранить"/);
   assert.match(component, /event\.key\s*===\s*"Escape"/);
   assert.match(component, /previewClose\.current\?\.focus/);
   assert.match(component, /previewTrigger\.current\?\.focus/);

@@ -94,7 +94,19 @@ test("Facebook backfill targets only exact fallback clients and deduplicates cli
     {externalId:"page-1:102",client:{id:"c2",displayName:"Manual name"}},
     {externalId:"page-2:103",client:{id:"c3",displayName:"Facebook 103"}},
   ],"page-1");
-  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{clientId:"c1",psid:"101"}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{clientId:"c1",psid:"101",needsName:true,needsAvatar:false}]);
+});
+
+test("Facebook backfill retries a missing avatar without changing a real name", async()=>{
+  const rows=[{externalId:"page-1:101",client:{id:"client-1",displayName:"Nastasya Ty",avatarUrl:null}}];
+  const writes=[];
+  const result=await runFacebookProfileBackfillBatch(rows,"page-1",50,false,async()=>({source:"USER_PROFILE",profile:{displayName:"Nastasya Ty",avatarUrl:"https://example.com/avatar.jpg"}}),async(psid,profile)=>(writes.push([psid,profile]),true));
+  assert.equal(result.fallbackClientsFound,0);
+  assert.equal(result.avatarClientsFound,1);
+  assert.equal(result.avatarsResolvedViaUserProfile,1);
+  assert.equal(result.avatarsUnavailable,0);
+  assert.equal(result.updated,1);
+  assert.deepEqual(writes,[["101",{displayName:"Nastasya Ty",avatarUrl:"https://example.com/avatar.jpg"}]]);
 });
 
 test("Facebook backfill dry-run is write-free and cursor advances across ineligible rows",async()=>{
@@ -104,7 +116,7 @@ test("Facebook backfill dry-run is write-free and cursor advances across ineligi
   ];
   let resolves=0,writes=0;
   const first=await runFacebookProfileBackfillBatch(rows,"page-1",1,true,async()=>{resolves++;return{source:"USER_PROFILE",profile:{displayName:"Ignored"}}},async()=>{writes++;return true});
-  assert.deepEqual(JSON.parse(JSON.stringify(first)),{dryRun:true,fallbackClientsFound:0,resolvedViaUserProfile:0,resolvedViaConversations:0,unresolved:0,updated:0,nextCursor:"c1"});
+  assert.deepEqual(JSON.parse(JSON.stringify(first)),{dryRun:true,fallbackClientsFound:0,avatarClientsFound:0,resolvedViaUserProfile:0,resolvedViaConversations:0,avatarsResolvedViaUserProfile:0,avatarsUnavailable:0,unresolved:0,updated:0,nextCursor:"c1"});
   assert.equal(resolves,0);assert.equal(writes,0);
   const second=await runFacebookProfileBackfillBatch(rows.slice(1),"page-1",1,true,async()=>({source:"CONVERSATIONS",profile:{displayName:"Rachel Smith",firstName:"Rachel Smith"}}),async()=>{writes++;return true});
   assert.equal(second.fallbackClientsFound,1);assert.equal(second.resolvedViaConversations,1);assert.equal(second.nextCursor,null);assert.equal(writes,0);
@@ -169,9 +181,10 @@ test("connected account labels expose no credentials", () => {
 
 test("Meta conversation links are scoped and reject unsafe identifiers", () => {
   assert.equal(metaConversationInboxUrl("FACEBOOK", "261203841288993:27352420207764662", { pageId: "261203841288993" }), "https://business.facebook.com/latest/inbox/messenger?asset_id=261203841288993&selected_item_id=27352420207764662");
-  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramAccountId: "17841407931852361" }), "https://business.facebook.com/latest/inbox/instagram_direct?asset_id=261203841288993&selected_item_id=708610235356092");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { instagramClientUsername: "client.name" }), "https://ig.me/m/client.name");
   assert.equal(metaConversationInboxUrl("FACEBOOK", "999:2", { pageId: "1" }), "");
-  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramAccountId: "28156785147355107" }), "https://business.facebook.com/latest/inbox/instagram_direct?asset_id=261203841288993&selected_item_id=708610235356092");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993" }), "");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramClientUsername: "bad/name" }), "");
   assert.equal(metaConversationInboxUrl("FACEBOOK", "1:javascript:alert(1)", { pageId: "1" }), "");
   assert.equal(metaConversationInboxUrl("EMAIL", "1:2", { pageId: "1" }), "");
 });
@@ -186,8 +199,14 @@ test("profile persistence updates an active client before recording exact histor
   assert.equal(blocked.some(([kind])=>kind==="history"),false);
 });
 
+test("Instagram username patch is separate and idempotent", () => {
+  const before={firstName:"Manual name",lastName:null,displayName:"Manual name",avatarUrl:null,country:null,email:null,phone:null,language:null,timezone:null,instagramUsername:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(before,{displayName:"Provider name",firstName:"Provider name",instagramUsername:"gymnast"}))),{instagramUsername:"gymnast"});
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch({...before,instagramUsername:"gymnast"},{instagramUsername:"gymnast"}))),{});
+});
+
 test("profile enrichment guards archived clients and logs only pseudonymous Meta identities",()=>{
-  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null,displayName:before\.displayName,firstName:before\.firstName,lastName:before\.lastName,avatarUrl:before\.avatarUrl,language:before\.language,timezone:before\.timezone\}/);
+  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null,displayName:before\.displayName,firstName:before\.firstName,lastName:before\.lastName,avatarUrl:before\.avatarUrl,language:before\.language,timezone:before\.timezone,instagramUsername:before\.instagramUsername\}/);
   assert.match(service,/persistMetaFacebookProfilePatch/);
   assert.doesNotMatch(service,/senderId:event\.externalSenderId/);
   assert.equal(metaIdentityLogRef("psid-123"),metaIdentityLogRef("psid-123"));
@@ -241,7 +260,7 @@ test("Instagram sender profile is enriched with name and avatar in its own chann
   const targets = metaProfileTargets([{channel:"INSTAGRAM",receiverId:"ig-business",externalSenderId:"igsid-1",externalMessageId:"1",content:"x",receivedAt:new Date(),metadata:{messageType:"text"}}]);
   assert.deepEqual(JSON.parse(JSON.stringify(targets)), [{channel:"INSTAGRAM",receiverId:"ig-business",senderId:"igsid-1"}]);
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({username:"gymnast",profile_pic:"https://cdn.example/avatar.jpg"}))), {
-    displayName:"gymnast", firstName:"gymnast", avatarUrl:"https://cdn.example/avatar.jpg",
+    displayName:"gymnast", firstName:"gymnast", avatarUrl:"https://cdn.example/avatar.jpg", instagramUsername:"gymnast",
   });
   assert.match(service, /provider==="instagram"/);
   assert.match(service, /instagramGraph<MetaFacebookProfile>/);

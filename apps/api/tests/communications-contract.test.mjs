@@ -46,6 +46,16 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
   assert.match(service, /buyerSummary:\{purchaseCount:/);
   assert.match(service, /paymentTotals:/);
 });
+
+test("Instagram profile identity keeps scoped ID immutable and persists username separately", () => {
+  assert.match(schema, /instagramUsername\s+String\?/);
+  assert.match(service, /instagramUsername:before\.instagramUsername/);
+  assert.match(service, /channel===\"INSTAGRAM\"/);
+  assert.match(controller.replace(/\s+/g, ""), /meta\/instagram\/profiles\/backfill/);
+  assert.match(service, /receiverAliases/);
+  assert.match(service, /OR:receiverAliases\.map\(receiverId=>\(\{externalId:\{startsWith:receiverId\+":"\}\}\)\)/);
+  assert.match(service, /receiverAliases\.includes\(receiverId\)/);
+});
 test("communications persist conversations and messages", () => {
   assert.match(schema, /model Conversation/);
   assert.match(schema, /model Message/);
@@ -254,6 +264,21 @@ test("chat attachments are validated, stored outside the web root and sent throu
   assert.match(upload, /pg_advisory_xact_lock/);
   assert.ok(upload.indexOf("pg_advisory_xact_lock") < upload.indexOf("communicationAttachment.count"));
   assert.ok(upload.indexOf("communicationAttachment.count") < upload.indexOf("communicationAttachment.create"));
+});
+
+test("inbound Meta media is downloaded through an authenticated same-origin endpoint", () => {
+  assert.match(controller, /messages\/:messageId\/attachments\/:index\/download/);
+  assert.match(controller, /Content-Disposition/);
+  assert.match(controller, /res\.send\(download\.body\)/);
+  assert.match(service, /downloadMessageAttachment/);
+  assert.match(service, /REMOTE_MEDIA_HOST/);
+  assert.match(service, /redirect:\s*"manual"/);
+  assert.match(service, /REMOTE_MEDIA_MAX_BYTES/);
+  assert.match(service, /boundedRemoteMedia/);
+  assert.match(service, /\["image","sticker","video"\]/);
+  assert.match(service, /candidateLocal\.origin===webOrigin\.origin/);
+  assert.match(service, /readFile\(path\)/);
+  assert.match(service, /type==="video"\|\|contentType\.startsWith\("video\/"\)/);
 });
 test("AI requests are rate limited and concurrency bounded per user", () => {
   assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);

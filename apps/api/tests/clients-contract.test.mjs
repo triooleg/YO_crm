@@ -32,6 +32,8 @@ test("временный контакт из входящих оформляет
   assert.match(service,/CLIENT_PROMOTED_FROM_INBOX/);
   assert.match(service,/client-promote:/);
   assert.match(service,/source:before\.source/);
+  assert.match(service,/preserveInstagramSid=before\.source==="INSTAGRAM"&&\/\^\\d\+\$\//);
+  assert.match(service,/preserveInstagramSid\?\{instagram:before\.instagram\}/);
 });
 
 test("пустой e-mail клиента считается отсутствующим необязательным полем",()=>{

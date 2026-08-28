@@ -39,7 +39,7 @@ import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
 import { classifyInstagramOauthError, findInstagramMessagesSubscription, sanitizeInstagramOauthResponse } from "./instagram-oauth-diagnostics";
-import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
 import { normalizeClientLanguageCode } from "./ai-language";
@@ -52,6 +52,35 @@ const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
   "application/pdf": "pdf", "text/plain": "txt",
 } as const;
+const REMOTE_MEDIA_HOST = /(^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com)$/i;
+const REMOTE_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+function remoteMediaUrl(value: unknown) {
+  if (typeof value !== "string") return;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" && REMOTE_MEDIA_HOST.test(url.hostname)) return url;
+  } catch {}
+}
+function messageAttachments(metadata: Prisma.JsonValue | null) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
+  const attachments = (metadata as { attachments?: unknown }).attachments;
+  return Array.isArray(attachments) ? attachments : [];
+}
+async function boundedRemoteMedia(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader(), chunks: Buffer[] = [];
+  let size = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    size += part.value.byteLength;
+    if (size > REMOTE_MEDIA_MAX_BYTES) {
+      await reader.cancel();
+      throw new BadRequestException("Вложение превышает 50 МБ");
+    }
+    chunks.push(Buffer.from(part.value));
+  }
+  return Buffer.concat(chunks, size);
+}
 function validCommunicationFile(bytes: Buffer, mimeType: string) {
   if (!bytes.length || bytes.length > 5 * 1024 * 1024) return false;
   if (mimeType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8;
@@ -98,6 +127,7 @@ export class CommunicationsService {
         { phone: { contains: search, mode: "insensitive" } },
         { email: { contains: search, mode: "insensitive" } },
         { instagram: { contains: search, mode: "insensitive" } },
+        { instagramUsername: { contains: search, mode: "insensitive" } },
         { conversations: { some: { externalId: { contains: search, mode: "insensitive" }, archivedAt: null } } },
         ...(channelSearch ? [{ source: channelSearch }, { preferredChannel: channelSearch }, { conversations: { some: { channel: channelSearch, archivedAt: null } } }] : []),
       ] } : {}),
@@ -141,7 +171,10 @@ export class CommunicationsService {
       conversations: client.conversations.map(conversation => ({
         ...conversation,
         connectedAccountLabel: metaConnectedAccountLabel(conversation.channel, metaSettings),
-        connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, metaSettings),
+        connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, {
+          ...metaSettings,
+          instagramClientUsername: client.instagramUsername,
+        }),
       })),
     }));
     return { items, total, hasMore: (query.offset ?? 0) + items.length < total };
@@ -788,7 +821,7 @@ export class CommunicationsService {
       await tx.athlete.updateMany({ where: { clientId }, data: { firstName: "Удалено", lastName: null, birthDate: null, club: null, coach: null, country: null, notes: null, archivedAt: now } });
       await tx.workTask.updateMany({ where: { clientId }, data: { title: redacted, description: null, labels: [], sourceMessageId: null, archivedAt: now } });
       await tx.activity.updateMany({ where: { clientId }, data: { summary: redacted, metadata: Prisma.JsonNull } });
-      await tx.client.update({ where: { id: clientId }, data: { firstName: "Удалённый клиент", lastName: null, displayName: `Удалённый клиент • ${code.slice(0,6)}`, avatarUrl: null, country: null, city: null, address: null, postalCode: null, email: null, phone: null, whatsapp: null, instagram: null, facebook: null, telegram: null, language: null, timezone: null, notes: null, archivedAt: now } });
+      await tx.client.update({ where: { id: clientId }, data: { firstName: "Удалённый клиент", lastName: null, displayName: `Удалённый клиент • ${code.slice(0,6)}`, avatarUrl: null, country: null, city: null, address: null, postalCode: null, email: null, phone: null, whatsapp: null, instagram: null, instagramUsername: null, facebook: null, telegram: null, language: null, timezone: null, notes: null, archivedAt: now } });
       const retained = ["orders", "payments", "invoices", "measurement snapshots", "audit"];
       const taskPaths = attachments.map(attachment => attachment.path), communicationPaths = communicationAttachments.map(attachment => attachment.path);
       await tx.appSetting.update({ where: { section_key: { section: "integration.meta.data-deletion", key: code } }, data: { value: { ...value, status: "PROCESSING", processingAt: completedAt, pendingTaskAttachmentPaths: taskPaths, pendingCommunicationAttachmentPaths: communicationPaths, retentionNote: retentionNote?.trim() || "Обязательная деловая история сохранена в обезличенном виде", retained } } });
@@ -881,14 +914,14 @@ export class CommunicationsService {
     return this.p.$transaction(async tx=>{
       const conversation=await tx.conversation.findUnique({
         where:{externalId_channel:{externalId:metaConversationExternalId(receiverId,senderId),channel:eventChannel}},
-        select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,email:true,phone:true,language:true,timezone:true,archivedAt:true}}},
+        select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,email:true,phone:true,language:true,timezone:true,instagramUsername:true,archivedAt:true}}},
       });
       const before=conversation?.client;
       if(!before||before.archivedAt)return false;
       return persistMetaFacebookProfilePatch(
         before,
         profile,
-        async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null,displayName:before.displayName,firstName:before.firstName,lastName:before.lastName,avatarUrl:before.avatarUrl,language:before.language,timezone:before.timezone},data})).count>0,
+        async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null,displayName:before.displayName,firstName:before.firstName,lastName:before.lastName,avatarUrl:before.avatarUrl,language:before.language,timezone:before.timezone,instagramUsername:before.instagramUsername},data})).count>0,
         async changedFields=>{
           const source=channel==="INSTAGRAM"?"INSTAGRAM_PROFILE":actorId?"FACEBOOK_PROFILE_BACKFILL":"FACEBOOK_PROFILE";
           await tx.activity.create({data:{clientId:before.id,type:"CLIENT_PROFILE_ENRICHED",summary:`Профиль клиента дополнен данными ${channel==="INSTAGRAM"?"Instagram":"Facebook"}`,metadata:{source,changedFields}}});
@@ -902,9 +935,9 @@ export class CommunicationsService {
     if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
     const boundedLimit=Math.max(1,Math.min(50,limit));
     const conversations=await this.p.conversation.findMany({
-      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,displayName:{startsWith:"Facebook "}}},
+      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null}]}},
       orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
-      select:{externalId:true,client:{select:{id:true,displayName:true}}},
+      select:{externalId:true,client:{select:{id:true,displayName:true,avatarUrl:true}}},
     });
     return runFacebookProfileBackfillBatch(
       conversations,pageId,boundedLimit,dryRun,
@@ -912,6 +945,31 @@ export class CommunicationsService {
       (psid,profile)=>this.persistResolvedMetaProfile("FACEBOOK",pageId,psid,profile,u.id),
       (psid,error)=>this.logger.warn(JSON.stringify({event:"META_PROFILE_BACKFILL_FAILED",senderRef:metaIdentityLogRef(psid),errorType:error instanceof Error?error.constructor.name:"UnknownError"})),
     );
+  }
+  async backfillInstagramProfiles(dryRun:boolean,limit=50,cursor:string|undefined,u:User){
+    const values=await this.sectionValues("integration.meta"),token=this.secretValue(values,"instagramAccessTokenEncrypted");
+    if(!token)throw new BadRequestException("Сначала подключите Instagram");
+    const receiverAliases=[...new Set([values.instagramAccountId,values.instagramWebhookReceiverId].filter((value):value is string=>typeof value==="string"&&/^\d+$/.test(value)))];
+    if(!receiverAliases.length)throw new BadRequestException("Instagram receiver не подтверждён");
+    const boundedLimit=Math.max(1,Math.min(50,limit));
+    const conversations=await this.p.conversation.findMany({
+      where:{channel:ContactChannel.INSTAGRAM,archivedAt:null,OR:receiverAliases.map(receiverId=>({externalId:{startsWith:receiverId+":"}})),...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,instagram:{not:null}}},
+      orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
+      select:{clientId:true,externalId:true},
+    });
+    const page=conversations.slice(0,boundedLimit);let resolved=0,unresolved=0,updated=0;
+    for(const conversation of page){
+      const parts=(conversation.externalId||"").split(":");const senderId=parts.at(-1)||"",receiverId=parts.length>1?parts.slice(0,-1).join(":"):"";
+      if(!/^\d+$/.test(senderId)||!receiverAliases.includes(receiverId)){unresolved++;continue}
+      try{
+        const raw=await this.instagramGraph<MetaFacebookProfile>(senderId,token,{fields:"name,username,profile_pic"},"GET",false,"PROFILE_LOOKUP");
+        const profile=normalizeMetaFacebookProfile(raw);
+        if(!profile.instagramUsername){unresolved++;continue}
+        resolved++;
+        if(!dryRun&&await this.persistResolvedMetaProfile("INSTAGRAM",receiverId,senderId,profile,u.id))updated++;
+      }catch(error){unresolved++;this.logger.warn(JSON.stringify({event:"INSTAGRAM_PROFILE_BACKFILL_FAILED",senderRef:metaIdentityLogRef(senderId),errorType:error instanceof Error?error.constructor.name:"UnknownError"}))}
+    }
+    return{found:page.length,resolved,unresolved,updated:dryRun?0:updated,nextCursor:conversations.length>boundedLimit?page.at(-1)?.clientId??null:null};
   }
   private async enrichMetaProfiles(events:MetaInboundMessage[],accessToken:string,appSecret?:string,provider:"facebook"|"instagram"="facebook"){
     const targets=metaProfileTargets(events).slice(0,20);
@@ -1142,6 +1200,51 @@ export class CommunicationsService {
       await unlink(join(directory, path)).catch(() => undefined);
       throw error;
     }
+  }
+  async downloadMessageAttachment(messageId: string, index: number) {
+    if (!Number.isInteger(index) || index < 0 || index > 99) throw new NotFoundException("Вложение не найдено");
+    const message = await this.p.message.findFirst({
+      where: { id: messageId, conversation: { archivedAt: null, client: { archivedAt: null } } },
+      select: { metadata: true },
+    });
+    const attachment = messageAttachments(message?.metadata ?? null)[index];
+    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) throw new NotFoundException("Вложение не найдено");
+    const type = String((attachment as { type?: unknown }).type || "");
+    const rawUrl = (attachment as { url?: unknown }).url;
+    if (!["image", "sticker", "video"].includes(type) || typeof rawUrl !== "string") throw new NotFoundException("Вложение не найдено");
+    const webOrigin = new URL((process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim());
+    const candidateLocal = new URL(rawUrl, webOrigin);
+    const localMatch = candidateLocal.origin === webOrigin.origin ? /^\/api\/communications\/files\/([a-f0-9-]+\.(?:jpg|png|webp|gif))$/.exec(candidateLocal.pathname) : null;
+    if (localMatch?.[1] && COMMUNICATION_FILE.test(localMatch[1])) {
+      const path = join(uploadsRoot(), "communication-files", localMatch[1]);
+      const file = await stat(path).catch(() => null);
+      if (!file?.isFile() || file.size > REMOTE_MEDIA_MAX_BYTES) throw new NotFoundException("Вложение не найдено");
+      const extension = localMatch[1].split(".").at(-1) || "jpg";
+      const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : "image/jpeg";
+      return { body: await readFile(path), contentType, contentLength: file.size, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
+    }
+    let url = remoteMediaUrl(rawUrl);
+    if (!url) throw new NotFoundException("Вложение не найдено");
+    let response: Response | undefined;
+    for (let redirect = 0; redirect < 4; redirect++) {
+      response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+      if (!response) throw new BadGatewayException("Не удалось загрузить вложение");
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        url = remoteMediaUrl(location ? new URL(location, url).toString() : undefined);
+        if (!url) throw new BadGatewayException("Источник вложения отклонил загрузку");
+        continue;
+      }
+      break;
+    }
+    if (!response?.ok || !response.body) throw new BadGatewayException("Не удалось загрузить вложение");
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > REMOTE_MEDIA_MAX_BYTES) throw new BadRequestException("Вложение превышает 50 МБ");
+    const contentType = ((response.headers.get("content-type") || "application/octet-stream").split(";")[0] || "application/octet-stream").trim().toLowerCase();
+    if (!(contentType.startsWith("image/") || contentType.startsWith("video/") || contentType === "application/octet-stream")) throw new BadGatewayException("Источник вернул неподдерживаемый формат");
+    const extension = type === "video" || contentType.startsWith("video/") ? "mp4" : contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : contentType === "image/gif" ? "gif" : "jpg";
+    const body = await boundedRemoteMedia(response.body);
+    return { body, contentType, contentLength: body.length, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
   }
   private async outboundAttachment(input: { path: string; name: string; mimeType: string }, u: User, clientRequestId?: string) {
     if (!COMMUNICATION_FILE.test(input.path)) throw new BadRequestException("Некорректное имя вложения");

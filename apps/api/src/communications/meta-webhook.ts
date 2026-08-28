@@ -79,6 +79,7 @@ export type NormalizedMetaFacebookProfile = {
   avatarUrl?: string;
   language?: string;
   timezone?: string;
+  instagramUsername?: string;
 };
 
 export async function resolveMetaFacebookProfile(
@@ -125,23 +126,25 @@ export async function resolveMetaFacebookProfileWithFallback(
 }
 
 export function facebookFallbackProfileTargets(
-  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string } }>,
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null } }>,
   pageId: string,
 ) {
-  const targets = new Map<string, { clientId: string; psid: string }>();
+  const targets = new Map<string, { clientId: string; psid: string; needsName: boolean; needsAvatar: boolean }>();
   const prefix = pageId + ":";
   for (const conversation of conversations) {
-    if (!/^Facebook \d+$/.test(conversation.client.displayName) || targets.has(conversation.client.id)) continue;
+    const needsName = /^Facebook \d+$/.test(conversation.client.displayName);
+    const needsAvatar = conversation.client.avatarUrl === null;
+    if ((!needsName && !needsAvatar) || targets.has(conversation.client.id)) continue;
     const externalId = conversation.externalId || "";
     const psid = externalId.startsWith(prefix) ? externalId.slice(prefix.length) : "";
     if (!/^\d+$/.test(psid)) continue;
-    targets.set(conversation.client.id, { clientId: conversation.client.id, psid });
+    targets.set(conversation.client.id, { clientId: conversation.client.id, psid, needsName, needsAvatar });
   }
   return [...targets.values()];
 }
 
 export async function runFacebookProfileBackfillBatch(
-  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string } }>,
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null } }>,
   pageId: string,
   limit: number,
   dryRun: boolean,
@@ -151,23 +154,31 @@ export async function runFacebookProfileBackfillBatch(
 ) {
   const page = conversations.slice(0, limit);
   const targets = facebookFallbackProfileTargets(page, pageId);
-  let resolvedViaUserProfile = 0, resolvedViaConversations = 0, unresolved = 0, updated = 0;
+  let resolvedViaUserProfile = 0, resolvedViaConversations = 0, unresolved = 0, updated = 0, avatarsResolvedViaUserProfile = 0, avatarsUnavailable = 0;
   for (const target of targets) try {
     const result = await resolve(target.psid);
-    if (result.profile.displayName) {
+    if (target.needsName && result.profile.displayName) {
       if (result.source === "USER_PROFILE") resolvedViaUserProfile++;
       else resolvedViaConversations++;
-    } else unresolved++;
+    } else if (target.needsName) unresolved++;
+    if (target.needsAvatar) {
+      if (result.source === "USER_PROFILE" && result.profile.avatarUrl) avatarsResolvedViaUserProfile++;
+      else avatarsUnavailable++;
+    }
     if (!dryRun && Object.keys(result.profile).length && await persist(target.psid, result.profile)) updated++;
   } catch (error) {
-    unresolved++;
+    if (target.needsName) unresolved++;
+    if (target.needsAvatar) avatarsUnavailable++;
     onFailure?.(target.psid, error);
   }
   return {
     dryRun,
-    fallbackClientsFound: targets.length,
+    fallbackClientsFound: targets.filter(target => target.needsName).length,
+    avatarClientsFound: targets.filter(target => target.needsAvatar).length,
     resolvedViaUserProfile,
     resolvedViaConversations,
+    avatarsResolvedViaUserProfile,
+    avatarsUnavailable,
     unresolved,
     updated: dryRun ? 0 : updated,
     nextCursor: conversations.length > limit ? page.at(-1)?.client.id ?? null : null,
@@ -184,6 +195,7 @@ export type ExistingMetaClientProfile = {
   phone?: string | null;
   language?: string | null;
   timezone?: string | null;
+  instagramUsername?: string | null;
 };
 
 const cleanProfileText = (value: unknown, max = 160) =>
@@ -199,6 +211,9 @@ export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): Norm
     output.firstName = firstName || displayName;
     if (lastName) output.lastName = lastName;
   }
+
+  const instagramUsername = cleanProfileText(profile.username).replace(/^@/, "");
+  if (instagramUsername) output.instagramUsername = instagramUsername;
 
   const avatarUrl = cleanProfileText(profile.profile_pic, 2048);
   if (avatarUrl) {
@@ -236,6 +251,7 @@ export function metaFacebookProfilePatch(before: ExistingMetaClientProfile, prof
   for (const key of ["avatarUrl", "language", "timezone"] as const) {
     if (!before[key] && profile[key]) patch[key] = profile[key];
   }
+  if (profile.instagramUsername && profile.instagramUsername !== before.instagramUsername) patch.instagramUsername = profile.instagramUsername;
   return patch;
 }
 
@@ -290,11 +306,17 @@ export function metaConnectedAccountLabel(channel: string | undefined, settings:
 export function metaConversationInboxUrl(channel: string | undefined, externalId: string | null | undefined, settings: Record<string, unknown>) {
   if (channel !== "FACEBOOK" && channel !== "INSTAGRAM") return "";
   const match = /^(\d+):(\d+)$/.exec(externalId || "");
-  const pageId = typeof settings.pageId === "string" ? settings.pageId.trim() : "";
-  if (!match || !/^\d+$/.test(pageId)) return "";
-  if (channel === "FACEBOOK" && match[1] !== pageId) return "";
-  const section = channel === "FACEBOOK" ? "messenger" : "instagram_direct";
-  return `https://business.facebook.com/latest/inbox/${section}?asset_id=${pageId}&selected_item_id=${match[2]}`;
+  if (!match) return "";
+  if (channel === "FACEBOOK") {
+    const pageId = typeof settings.pageId === "string" ? settings.pageId.trim() : "";
+    if (!/^\d+$/.test(pageId)) return "";
+    if (match[1] !== pageId) return "";
+    return `https://business.facebook.com/latest/inbox/messenger?asset_id=${pageId}&selected_item_id=${match[2]}`;
+  }
+  const username = typeof settings.instagramClientUsername === "string"
+    ? settings.instagramClientUsername.trim().replace(/^@/, "")
+    : "";
+  return /^[A-Za-z0-9._]+$/.test(username) ? `https://ig.me/m/${username}` : "";
 }
 
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {

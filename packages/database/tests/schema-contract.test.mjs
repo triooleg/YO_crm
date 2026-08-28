@@ -21,3 +21,8 @@ test("orders reference immutable measurement snapshots", () => {
   assert.match(schema, /measuredAt\s+DateTime/);
   assert.match(schema, /measurementId\s+String\?/);
 });
+
+test("Instagram scoped ID and username are stored separately", () => {
+  assert.match(schema, /instagram\s+String\?/);
+  assert.match(schema, /instagramUsername\s+String\?/);
+});

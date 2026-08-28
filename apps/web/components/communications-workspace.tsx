@@ -42,6 +42,7 @@ type Client = {
   phone?: string;
   email?: string;
   instagram?: string;
+  instagramUsername?: string;
   facebook?: string;
   orders: Order[];
   buyerSummary?: { purchaseCount: number; paymentTotals: { currency: string; amountMinor: number }[] };
@@ -78,6 +79,8 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
     MANUAL: "✎",
   };
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
+const isInstagramScopedId = (value?: string) => /^\d+$/.test(value || "");
+const instagramHandle = (value?: string) => value ? `@${value.replace(/^@/, "")}` : "";
 function sourceBadge(c?: Client) {
   const key = channel(c);
   return {
@@ -872,12 +875,14 @@ export function CommunicationsWorkspace() {
             ) : (
               messages.map((message) => {
                 const attachments = message.metadata?.attachments || [];
+                const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
+                const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
                 return (
                   <article
                     key={message.id}
-                    className={message.direction === "OUTBOUND" ? "out" : "in"}
+                    className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}`}
                   >
-                    {(message.direction === "INBOUND"||message.status === "DRAFT") && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
+                    {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     <span className="communications-message-content">{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">
@@ -889,9 +894,9 @@ export function CommunicationsWorkspace() {
                               ] || ui.attachmentTypes.fallback;
                           return url &&
                             ["image", "sticker", "video"].includes(attachment.type) ? (
+                            <span className="communications-media-attachment" key={index}>
                             <button
                               type="button"
-                              key={index}
                               className={attachment.type==="video"?"communications-video-preview":undefined}
                               onClick={(event) => {
                                 previewTrigger.current = event.currentTarget;
@@ -901,6 +906,8 @@ export function CommunicationsWorkspace() {
                             >
                               {attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label} />}
                             </button>
+                              <a className="communications-media-save" href={`/api/communications/messages/${encodeURIComponent(message.id)}/attachments/${index}/download`} download>{ui.saveAttachment}</a>
+                            </span>
                           ) : url ? (
                             <a
                               key={index}
@@ -946,7 +953,7 @@ export function CommunicationsWorkspace() {
           <footer>
             <div className="communications-ai">
               <b>{ui.ai}</b>
-              <button type="button" disabled={busy||!client||!selectedMessageIds.length} onClick={()=>setReplyMode(true)}>{ui.reply}{selectedMessageIds.length?` (${selectedMessageIds.length})`:""}</button>
+              <button type="button" disabled={busy||!client} onClick={()=>{if(replyMode){invalidateAiOperation();setSelectedMessageIds([]);setReplyInstruction("");setAiReply(null);setAiDraftText("")}setReplyMode(!replyMode)}}>{replyMode?ui.cancelReplySelection:ui.reply}{selectedMessageIds.length?` (${selectedMessageIds.length})`:""}</button>
               {(
                 [
                   ["IMPROVE", ui.improve],
@@ -1022,7 +1029,7 @@ export function CommunicationsWorkspace() {
           onKey={resizeByKeyboard}
         />
         <aside className="communications-orders">
-          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagram&&<p><span>{ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
+          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
           {client?.status!=="LEAD"&&<header>
             <b>{ui.activeOrders}</b>
             <small>{activeOrders.length}</small>
@@ -1094,7 +1101,8 @@ export function CommunicationsWorkspace() {
               <input name="email" type="email" defaultValue={client?.status==="LEAD"?client.email||"":""}/>
             </label>
             {client?.status==="LEAD"&&client.facebook&&<label>{ui.facebookSid}<input value={client.facebook} readOnly/><small>{ui.facebookSidHint}</small></label>}
-            {!(client?.status==="LEAD"&&client.facebook)&&<label>
+            {client?.status==="LEAD"&&isInstagramScopedId(client.instagram)&&<><label>{ui.instagramSid}<input value={client.instagram} readOnly/><small>{ui.instagramSidHint}</small></label>{client.instagramUsername&&<label>{ui.instagramUsername}<input value={instagramHandle(client.instagramUsername)} readOnly/></label>}</>}
+            {!(client?.status==="LEAD"&&(client.facebook||isInstagramScopedId(client.instagram)))&&<label>
               {ui.instagram}
               <input name="instagram" defaultValue={client?.status==="LEAD"?client.instagram||"":""}/>
             </label>}
