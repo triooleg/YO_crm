@@ -24,7 +24,8 @@ echo "Creating PostgreSQL custom dump...";"${compose[@]}" exec -T postgres sh -c
 echo "Archiving persistent uploads...";"${compose[@]}" exec -T api tar -C /app/uploads -czf - . > "$BACKUP_DIR/uploads.tar.gz"
 APP_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json|head -n1)";GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null||echo unknown)"
 SCHEMA_VERSION="$(psql_exec --tuples-only --no-align --command='SELECT "migration_name" FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL ORDER BY "finished_at" DESC LIMIT 1;'|tr -d '\r')";DATABASE_VERSION="$(psql_exec --tuples-only --no-align --command='SHOW server_version;'|tr -d '\r')"
-[[ "$APP_VERSION" =~ ^[A-Za-z0-9._-]+$ && "$GIT_COMMIT" =~ ^([a-f0-9]{40}|unknown)$ && "$SCHEMA_VERSION" =~ ^[A-Za-z0-9._-]+$ && "$DATABASE_VERSION" =~ ^[A-Za-z0-9._ -]+$ ]]||{ echo "Unsafe version metadata" >&2;exit 1; }
+case "$APP_VERSION:$SCHEMA_VERSION" in *[!A-Za-z0-9._:-]*|:) echo "Unsafe application or schema version" >&2;exit 1;;esac
+[[ "$GIT_COMMIT" =~ ^([a-f0-9]{40}|unknown)$ && "$DATABASE_VERSION" =~ ^[0-9.]+$ ]]||{ echo "Unsafe Git or database version" >&2;exit 1; }
 (cd -- "$BACKUP_DIR"&&sha256sum postgres.dump uploads.tar.gz > SHA256SUMS);ARTIFACT_CHECKSUM="$(sha256sum "$BACKUP_DIR/SHA256SUMS"|cut -d' ' -f1)"
 cat > "$BACKUP_DIR/manifest.json" <<JSON
 {"format_version":2,"backup_id":"$BACKUP_ID","type":"$BACKUP_TYPE","created_at":"$STAMP","app_version":"$APP_VERSION","git_commit":"$GIT_COMMIT","schema_version":"$SCHEMA_VERSION","database_version":"$DATABASE_VERSION","storage_provider":"local","artifact_checksum":"$ARTIFACT_CHECKSUM","files":["postgres.dump","uploads.tar.gz"]}
