@@ -1,5 +1,22 @@
 export type MetaSubscription = { id: string; subscribed_fields?: string[] };
 
+export type MetaPageIdentity = {
+  id: string;
+  name?: string;
+  instagram_business_account?: { id?: string; username?: string };
+};
+
+export function resolveInstagramWebhookReceiver(page: MetaPageIdentity, pageId: string, expectedUsername: string) {
+  if (page.id !== pageId) throw new Error("PAGE_TOKEN_MISMATCH");
+  const account = page.instagram_business_account;
+  if (!account) throw new Error("INSTAGRAM_RELATIONSHIP_MISSING");
+  if (!account.id || !/^\d+$/.test(account.id)) throw new Error("INSTAGRAM_RECEIVER_INVALID");
+  const actual = String(account.username || "").trim().replace(/^@/, "").toLocaleLowerCase("en-US");
+  const expected = expectedUsername.trim().replace(/^@/, "").toLocaleLowerCase("en-US");
+  if (!expected || actual !== expected) throw new Error("INSTAGRAM_USERNAME_MISMATCH");
+  return account.id;
+}
+
 export function isMetaAccessToken(value?: string) {
   return Boolean(value && /^EAA[A-Za-z0-9]/.test(value.trim()));
 }
@@ -30,7 +47,7 @@ export function metaChannelDeliveryStatus(input: {
 export function confirmMetaPageSubscription(input: {
   pageId: string;
   appId: string;
-  page: { id: string; name?: string };
+  page: MetaPageIdentity;
   subscriptions: MetaSubscription[];
   verifiedAt: string;
 }) {

@@ -95,6 +95,85 @@ export async function resolveMetaFacebookProfile(
   }
 }
 
+export type MetaConversationsResponse = {
+  data?: Array<{ id?: unknown; participants?: { data?: Array<{ id?: unknown; name?: unknown }> } }>;
+};
+
+export async function resolveMetaFacebookProfileWithFallback(
+  profileLookup: (fields: string) => Promise<MetaFacebookProfile>,
+  conversationsLookup: () => Promise<MetaConversationsResponse>,
+  isObjectUnavailable: (error: unknown) => boolean,
+  psid: string,
+  pageId: string,
+) {
+  try {
+    return { profile: await resolveMetaFacebookProfile(profileLookup), source: "USER_PROFILE" as const };
+  } catch (error) {
+    if (!isObjectUnavailable(error)) throw error;
+  }
+  const conversations = await conversationsLookup();
+  const names = new Set<string>();
+  for (const conversation of records(conversations.data)) {
+    for (const participant of records(conversation.participants?.data)) {
+      if (String(participant.id || "") !== psid || String(participant.id || "") === pageId) continue;
+      const name = cleanProfileText(participant.name);
+      if (name) names.add(name);
+    }
+  }
+  if (names.size === 1) return { profile: { name: [...names][0] }, source: "CONVERSATIONS" as const };
+  return { profile: {}, source: "CONVERSATIONS" as const };
+}
+
+export function facebookFallbackProfileTargets(
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string } }>,
+  pageId: string,
+) {
+  const targets = new Map<string, { clientId: string; psid: string }>();
+  const prefix = pageId + ":";
+  for (const conversation of conversations) {
+    if (!/^Facebook \d+$/.test(conversation.client.displayName) || targets.has(conversation.client.id)) continue;
+    const externalId = conversation.externalId || "";
+    const psid = externalId.startsWith(prefix) ? externalId.slice(prefix.length) : "";
+    if (!/^\d+$/.test(psid)) continue;
+    targets.set(conversation.client.id, { clientId: conversation.client.id, psid });
+  }
+  return [...targets.values()];
+}
+
+export async function runFacebookProfileBackfillBatch(
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string } }>,
+  pageId: string,
+  limit: number,
+  dryRun: boolean,
+  resolve: (psid: string) => Promise<{ profile: NormalizedMetaFacebookProfile; source: "USER_PROFILE" | "CONVERSATIONS" }>,
+  persist: (psid: string, profile: NormalizedMetaFacebookProfile) => Promise<boolean>,
+  onFailure?: (psid: string, error: unknown) => void,
+) {
+  const page = conversations.slice(0, limit);
+  const targets = facebookFallbackProfileTargets(page, pageId);
+  let resolvedViaUserProfile = 0, resolvedViaConversations = 0, unresolved = 0, updated = 0;
+  for (const target of targets) try {
+    const result = await resolve(target.psid);
+    if (result.profile.displayName) {
+      if (result.source === "USER_PROFILE") resolvedViaUserProfile++;
+      else resolvedViaConversations++;
+    } else unresolved++;
+    if (!dryRun && Object.keys(result.profile).length && await persist(target.psid, result.profile)) updated++;
+  } catch (error) {
+    unresolved++;
+    onFailure?.(target.psid, error);
+  }
+  return {
+    dryRun,
+    fallbackClientsFound: targets.length,
+    resolvedViaUserProfile,
+    resolvedViaConversations,
+    unresolved,
+    updated: dryRun ? 0 : updated,
+    nextCursor: conversations.length > limit ? page.at(-1)?.client.id ?? null : null,
+  };
+}
+
 export type ExistingMetaClientProfile = {
   firstName: string;
   lastName?: string | null;
@@ -175,6 +254,23 @@ export async function persistMetaFacebookProfilePatch(
 
 export function metaIdentityLogRef(value: string | undefined) {
   return value ? createHash("sha256").update(value).digest("hex").slice(0, 12) : undefined;
+}
+
+export function metaWebhookReceiverMatches(
+  channel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP",
+  receiverId: string | undefined,
+  settings: Record<string, unknown>,
+) {
+  if (!receiverId) return false;
+  if (channel === "FACEBOOK") return receiverId === settings.pageId;
+  if (channel === "WHATSAPP") return receiverId === settings.whatsappPhoneNumberId;
+  const oauthAccountId = typeof settings.instagramAccountId === "string" && /^\d+$/.test(settings.instagramAccountId)
+    ? settings.instagramAccountId
+    : "";
+  const verifiedReceiverId = typeof settings.instagramWebhookReceiverId === "string" && /^\d+$/.test(settings.instagramWebhookReceiverId)
+    ? settings.instagramWebhookReceiverId
+    : "";
+  return receiverId === oauthAccountId || receiverId === verifiedReceiverId;
 }
 
 export function metaConnectedAccountLabel(channel: string | undefined, settings: Record<string, unknown>) {

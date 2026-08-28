@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
 import { settingsUi } from "../lib/i18n";
+const AI_MODEL_OPTIONS = ["gpt-4.1-mini", "gpt-4.1", "gpt-5-mini"] as const;
 type Setting = { key: string; section: string; value: unknown };
 type AiData = {
   enabled: boolean;
@@ -697,7 +698,9 @@ function AiSettings() {
         </label>
         <label>
           {settingsUi.aiModel}
-          <input name="model" defaultValue={data.model} required />
+          <select name="model" defaultValue={data.model} required>
+            {AI_MODEL_OPTIONS.map((model) => <option key={model} value={model}>{model}</option>)}
+          </select>
         </label>
         <label>
           {settingsUi.aiLanguage}

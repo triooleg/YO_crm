@@ -27,6 +27,12 @@ test("AI настройки имеют доступные состояния з�
   assert.match(source, /role="status"/);
   assert.match(source, /disabled=\{saving\}/);
 });
+test("AI модель выбирается только из поддерживаемого списка", () => {
+  assert.match(source, /constAI_MODEL_OPTIONS=\["gpt-4\.1-mini","gpt-4\.1","gpt-5-mini"\]asconst/);
+  assert.match(source, /<selectname="model"defaultValue=\{data\.model\}required>/);
+  assert.match(source, /AI_MODEL_OPTIONS\.map/);
+  assert.doesNotMatch(source, /<inputname="model"/);
+});
 test("AI токен можно безопасно сохранить, заменить и удалить", () => {
   assert.match(source, /name="apiKey"/);
   assert.match(source, /type="password"/);

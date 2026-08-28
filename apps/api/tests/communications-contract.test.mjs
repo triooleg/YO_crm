@@ -267,8 +267,14 @@ test("Meta delivery is verified by a real Page subscription before it is reporte
 
 test("changing Meta delivery identity invalidates both Facebook and Instagram readiness", () => {
   assert.match(service, /d\.instagramAccountId\s*!==\s*undefined\s*&&\s*d\.instagramAccountId\s*!==\s*current\.instagramAccountId/);
-  for (const key of ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt"])
+  for (const key of ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt", "instagramWebhookReceiverId"])
     assert.match(service, new RegExp(key));
+});
+test("Facebook fallback backfill is role protected dry-run capable and idempotent",()=>{
+  assert.match(controller, /Post\("meta\/profiles\/backfill"\).*Roles\("OWNER","ADMIN"\)/);
+  assert.match(service, /runFacebookProfileBackfillBatch/);
+  assert.match(service, /persistMetaFacebookProfilePatch/);
+  assert.match(service, /dryRun/);
 });
 test("a failed OAuth attempt cannot erase or resurrect a newer Meta connection", () => {
   const oauthConnect = service.slice(service.indexOf("asyncmetaOauthConnect"), service.indexOf("asyncmetaSettings"));

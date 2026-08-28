@@ -99,6 +99,11 @@ export class MetaOauthConnectDto {
   @IsString() @Length(1, 80) pageId!: string;
   @IsString() @Length(16, 80) flowId!: string;
 }
+export class MetaProfileBackfillDto {
+  @IsBoolean() dryRun!: boolean;
+  @IsOptional() @IsInt() @Min(1) @Max(50) limit?: number;
+  @IsOptional() @IsString() @MaxLength(80) cursor?: string;
+}
 export class MetaDataDeletionCompleteDto {
   @IsString() @Length(1, 80) clientId!: string;
   @IsOptional() @IsString() @MaxLength(500) retentionNote?: string;

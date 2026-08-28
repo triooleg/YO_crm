@@ -29,13 +29,13 @@ import {
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage } from "./meta-webhook";
+import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
-import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus } from "./meta-delivery";
+import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
 import { classifyInstagramOauthError, findInstagramMessagesSubscription, sanitizeInstagramOauthResponse } from "./instagram-oauth-diagnostics";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
@@ -566,8 +566,16 @@ export class CommunicationsService {
     const subscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
     const subscription = findInstagramMessagesSubscription(subscriptions.data || [], instagramAccountId, appId);
     if (!subscription) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
+    stage = "RECEIVER";
+    let instagramWebhookReceiverId="";
+    const pageId=typeof values.pageId==="string"?values.pageId:"",pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),pageAppSecret=this.secretValue(values,"appSecretEncrypted");
+    if(pageId&&pageToken&&pageAppSecret&&profile.username)try{
+      const linkedPage=await this.metaGraph<MetaPageIdentity>(pageId,pageToken,{fields:"id,instagram_business_account{id,username}"},"GET",pageAppSecret);
+      instagramWebhookReceiverId=resolveInstagramWebhookReceiver(linkedPage,pageId,profile.username);
+    }catch{this.logInstagramOauth("INSTAGRAM_OAUTH_RECEIVER_UNAVAILABLE",correlationId,{stage:"RECEIVER"},"warn");}
     stage = "PERSIST";
     await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-session:" + sessionHash},0))`;
       const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } } });
@@ -575,12 +583,16 @@ export class CommunicationsService {
       const current = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
       const currentAttempt = current ? parseMetaOauthAttempt(current.value) : null;
       if (!currentAttempt || currentAttempt.nonce !== state.nonce || currentAttempt.configRevision !== attemptInfo.configRevision) throw new NotFoundException("Подключение Instagram уже заменено новой попыткой");
+      const currentRows=await tx.appSetting.findMany({where:{section:"integration.meta"}}),currentValues=Object.fromEntries(currentRows.map(row=>[row.key,row.value]));
+      const receiverSnapshotFresh=["pageId","pageAccessTokenEncrypted","appSecretEncrypted"].every(key=>currentValues[key]===values[key]);
       const now = new Date().toISOString();
+      await tx.appSetting.deleteMany({ where: { section: "integration.meta", key: "instagramWebhookReceiverId" } });
       const updates: Record<string, Prisma.InputJsonValue> = { enabled: true, instagramAccountId, instagramAccessTokenEncrypted: encryptSecret(token.accessToken), instagramSubscriptionVerifiedAt: now, instagramSubscribedFields: subscription.subscribed_fields || [], instagramUsername: profile.username || "", instagramTokenExpiresAt: token.expiresAt || 0 };
       for (const [key, value] of Object.entries(updates)) await tx.appSetting.upsert({ where: { section_key: { section: "integration.meta", key } }, create: { section: "integration.meta", key, value }, update: { value } });
+      if(receiverSnapshotFresh&&instagramWebhookReceiverId)await tx.appSetting.upsert({where:{section_key:{section:"integration.meta",key:"instagramWebhookReceiverId"}},create:{section:"integration.meta",key:"instagramWebhookReceiverId",value:instagramWebhookReceiverId},update:{value:instagramWebhookReceiverId}});
       await tx.appSetting.deleteMany({ where: { section: "integration.meta", key: "lastInstagramWebhookAt" } });
       await tx.appSetting.delete({ where: { section_key: { section: "integration.meta.instagram.oauth.attempt", key: sessionHash } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { instagramConnected: true, instagramAccountId, subscribedFields: subscription.subscribed_fields } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { instagramConnected: true, instagramAccountId, subscribedFields: subscription.subscribed_fields,instagramWebhookReceiverVerified:Boolean(receiverSnapshotFresh&&instagramWebhookReceiverId) } } });
     });
     this.logInstagramOauth("INSTAGRAM_OAUTH_TOKEN_PERSISTED", correlationId);
     return this.metaSettings();
@@ -597,7 +609,7 @@ export class CommunicationsService {
     const verifyToken = this.secretValue(v, "verifyTokenEncrypted"), verifyTokenUnsafe = isMetaAccessToken(verifyToken);
     const appSecretConfigured = Boolean(this.secretValue(v, "appSecretEncrypted")), instagramAppSecretConfigured = Boolean(this.secretValue(v, "instagramAppSecretEncrypted")), verifyTokenConfigured = Boolean(verifyToken) && !verifyTokenUnsafe, pageAccessTokenConfigured = Boolean(this.secretValue(v, "pageAccessTokenEncrypted")), instagramAccessTokenConfigured = Boolean(this.secretValue(v, "instagramAccessTokenEncrypted")), whatsappAccessTokenConfigured = Boolean(this.secretValue(v, "whatsappAccessTokenEncrypted"));
     const instagramConfigured = Boolean(v.instagramAccountId && v.instagramAppId && instagramAppSecretConfigured && instagramAccessTokenConfigured);
-    const instagramVerified = typeof v.instagramSubscriptionVerifiedAt === "string" && Array.isArray(v.instagramSubscribedFields) && v.instagramSubscribedFields.includes("messages");
+    const instagramVerified = typeof v.instagramSubscriptionVerifiedAt === "string" && Array.isArray(v.instagramSubscribedFields) && v.instagramSubscribedFields.includes("messages") && typeof v.instagramWebhookReceiverId === "string" && /^\d+$/.test(v.instagramWebhookReceiverId);
     const instagramReceiving = typeof v.lastInstagramWebhookAt === "string";
     const hasConfiguredChannel = Boolean(v.pageId && pageAccessTokenConfigured) || instagramConfigured || Boolean(v.whatsappPhoneNumberId && whatsappAccessTokenConfigured);
     const ready = v.enabled === true && Boolean(v.appId) && appSecretConfigured && verifyTokenConfigured && hasConfiguredChannel, verified = typeof v.subscriptionVerifiedAt === "string" && Boolean(v.subscriptionVerifiedAt), receiving = typeof v.lastWebhookAt === "string" && Boolean(v.lastWebhookAt);
@@ -621,7 +633,7 @@ export class CommunicationsService {
         const value = d[item.input];
         if (typeof value === "string" && value.trim()) { const encrypted = encryptSecret(value.trim()); await tx.appSetting.upsert({ where: { section_key: { section, key: item.stored } }, create: { section, key: item.stored, value: encrypted }, update: { value: encrypted } }); }
       }
-      if (deliveryChanged) await tx.appSetting.deleteMany({ where: { section, key: { in: ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt", "instagramAccessTokenEncrypted", "instagramTokenExpiresAt"] } } });
+      if (deliveryChanged) await tx.appSetting.deleteMany({ where: { section, key: { in: ["subscriptionVerifiedAt", "lastWebhookAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "lastInstagramWebhookAt", "instagramWebhookReceiverId", "instagramAccessTokenEncrypted", "instagramTokenExpiresAt"] } } });
       if (instagramCredentialsChanged) await tx.appSetting.deleteMany({ where: { section: "integration.meta.instagram.oauth.attempt" } });
       if (instagramCredentialsChanged) {
         const config = await tx.appSetting.findUnique({ where: { section_key: { section: "integration.meta.oauth.config", key: "instagram" } } });
@@ -640,22 +652,38 @@ export class CommunicationsService {
     return this.metaSettings();
   }
   async verifyMetaDelivery(u: User) {
-    const section = "integration.meta", values = await this.sectionValues(section), pageId = typeof values.pageId === "string" ? values.pageId : "", appId = typeof values.appId === "string" ? values.appId : "", appSecret = this.secretValue(values, "appSecretEncrypted"), pageToken = this.secretValue(values, "pageAccessTokenEncrypted");
+    const section = "integration.meta", values = await this.sectionValues(section), pageId = typeof values.pageId === "string" ? values.pageId : "", appId = typeof values.appId === "string" ? values.appId : "", appSecret = this.secretValue(values, "appSecretEncrypted"), pageToken = this.secretValue(values, "pageAccessTokenEncrypted"), instagramAccountId = typeof values.instagramAccountId === "string" ? values.instagramAccountId : "", instagramUsername = typeof values.instagramUsername === "string" ? values.instagramUsername : "";
     if (values.enabled !== true || !pageId || !appId || !appSecret || !pageToken) throw new BadRequestException("Сначала заполните и сохраните настройки страницы Facebook");
     try {
-      const page = await this.metaGraph<{ id: string; name?: string }>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
+      const page = await this.metaGraph<MetaPageIdentity>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
       const fields = "messages,standby,messaging_postbacks,message_reads,messaging_optins";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
       const confirmed = confirmMetaPageSubscription({ pageId, appId, page, subscriptions: subscriptions.data || [], verifiedAt });
+      let instagramWebhookReceiverId="",instagramReceiverOutcome:"VERIFIED"|"NOT_CONFIGURED"|"RELATIONSHIP_UNAVAILABLE"="NOT_CONFIGURED";
+      const completeInstagramIdentity=/^\d+$/.test(instagramAccountId)&&Boolean(instagramUsername)&&typeof values.instagramAccessTokenEncrypted==="string"&&typeof values.instagramSubscriptionVerifiedAt==="string"&&Array.isArray(values.instagramSubscribedFields)&&values.instagramSubscribedFields.includes("messages");
+      if(completeInstagramIdentity)try{
+        const linkedPage=await this.metaGraph<MetaPageIdentity>(pageId,pageToken,{fields:"id,instagram_business_account{id,username}"},"GET",appSecret);
+        instagramWebhookReceiverId=resolveInstagramWebhookReceiver(linkedPage,pageId,instagramUsername);
+        instagramReceiverOutcome="VERIFIED";
+      }catch{instagramReceiverOutcome="RELATIONSHIP_UNAVAILABLE";}
       await this.p.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
+        const currentRows = await tx.appSetting.findMany({ where: { section } });
+        const current = Object.fromEntries(currentRows.map(row => [row.key, row.value]));
+        for (const key of ["enabled", "pageId", "appId", "instagramAccountId", "instagramUsername", "instagramAppId", "appSecretEncrypted", "pageAccessTokenEncrypted", "instagramAppSecretEncrypted", "instagramAccessTokenEncrypted", "instagramTokenExpiresAt", "instagramSubscriptionVerifiedAt", "instagramSubscribedFields", "instagramWebhookReceiverId"] as const) {
+          if (JSON.stringify(current[key]) !== JSON.stringify(values[key])) throw new ConflictException("Настройки Meta изменились во время проверки; повторите проверку доставки");
+        }
         for (const [key, value] of Object.entries(confirmed.settings)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
-        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: confirmed.auditAfter } });
+        if (instagramWebhookReceiverId) await tx.appSetting.upsert({ where: { section_key: { section, key: "instagramWebhookReceiverId" } }, create: { section, key: "instagramWebhookReceiverId", value: instagramWebhookReceiverId }, update: { value: instagramWebhookReceiverId } });
+        else await tx.appSetting.deleteMany({where:{section,key:"instagramWebhookReceiverId"}});
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { ...confirmed.auditAfter, instagramWebhookReceiverVerified: Boolean(instagramWebhookReceiverId),instagramReceiverOutcome } } });
       });
     } catch (error) {
-      if (error instanceof BadRequestException) throw error;
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException("Meta не разрешила подписать страницу. Переподключите Facebook и предоставьте разрешение pages_manage_metadata");
     }
     return this.metaSettings();
@@ -757,8 +785,7 @@ export class CommunicationsService {
         throw new ForbiddenException("Подпись Meta webhook недействительна");
       }
       const normalized = normalizeMetaWebhook(payload).slice(0, 100), scopedEvents = normalized.filter(event => {
-        const expected = event.channel === "FACEBOOK" ? values.pageId : event.channel === "INSTAGRAM" ? values.instagramAccountId : values.whatsappPhoneNumberId;
-        const matches = typeof expected === "string" && expected !== "" && event.receiverId === expected;
+        const matches = metaWebhookReceiverMatches(event.channel, event.receiverId, values);
         if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId }));
         return matches;
       });
@@ -772,14 +799,12 @@ export class CommunicationsService {
       if(pageToken&&facebookEvents.length)void this.enrichMetaProfiles(facebookEvents,pageToken,appSecret);
       if(instagramToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,instagramToken,undefined,"instagram");
       const echoes = normalizeMetaEchoMessages(payload).filter(event => {
-        const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
-        return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+        return metaWebhookReceiverMatches(event.channel, event.receiverId, values);
       });
       const echoResults = await Promise.all(echoes.map(event => this.persistMetaEcho(event)));
       const echoesAccepted = echoResults.filter(Boolean).length;
       const controls = normalizeMetaControlEvents(payload).filter(event => event.eventType !== "message_echo").filter(event => {
-        const expected = event.channel === "FACEBOOK" ? values.pageId : values.instagramAccountId;
-        return typeof expected === "string" && expected !== "" && event.receiverId === expected;
+        return metaWebhookReceiverMatches(event.channel, event.receiverId, values);
       });
       const controlResults = await Promise.all(controls.map(event => this.applyMetaControl(event)));
       const controlsAccepted = controlResults.filter(Boolean).length;
@@ -797,33 +822,64 @@ export class CommunicationsService {
       throw error;
     }
   }
+  private async lookupFacebookProfile(pageId:string,senderId:string,accessToken:string,appSecret?:string){
+    if(!/^\d+$/.test(pageId)||!/^\d+$/.test(senderId))throw new BadRequestException("Некорректная область профиля Facebook");
+    const result=await resolveMetaFacebookProfileWithFallback(
+      fields=>this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,true),
+      ()=>this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{platform:"messenger",user_id:senderId,fields:"id,participants",limit:"5"},"GET",appSecret,true),
+      error=>error instanceof MetaGraphRequestError&&error.failure.code===100&&error.failure.subcode===33,
+      senderId,
+      pageId,
+    );
+    if(result.source==="CONVERSATIONS")this.logger.log(JSON.stringify({event:"META_PROFILE_CONVERSATIONS_FALLBACK",senderRef:metaIdentityLogRef(senderId),outcome:Object.keys(result.profile).length?"RESOLVED":"NOT_FOUND"}));
+    return result;
+  }
+  private async persistResolvedMetaProfile(channel:"FACEBOOK"|"INSTAGRAM",receiverId:string,senderId:string,profile:NormalizedMetaFacebookProfile,actorId?:string){
+    const eventChannel=channel as ContactChannel;
+    return this.p.$transaction(async tx=>{
+      const conversation=await tx.conversation.findUnique({
+        where:{externalId_channel:{externalId:metaConversationExternalId(receiverId,senderId),channel:eventChannel}},
+        select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,email:true,phone:true,language:true,timezone:true,archivedAt:true}}},
+      });
+      const before=conversation?.client;
+      if(!before||before.archivedAt)return false;
+      return persistMetaFacebookProfilePatch(
+        before,
+        profile,
+        async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null,displayName:before.displayName,firstName:before.firstName,lastName:before.lastName,avatarUrl:before.avatarUrl,language:before.language,timezone:before.timezone},data})).count>0,
+        async changedFields=>{
+          const source=channel==="INSTAGRAM"?"INSTAGRAM_PROFILE":actorId?"FACEBOOK_PROFILE_BACKFILL":"FACEBOOK_PROFILE";
+          await tx.activity.create({data:{clientId:before.id,type:"CLIENT_PROFILE_ENRICHED",summary:`Профиль клиента дополнен данными ${channel==="INSTAGRAM"?"Instagram":"Facebook"}`,metadata:{source,changedFields}}});
+          await tx.auditLog.create({data:{actorId,action:"UPDATE",entityType:"Client",entityId:before.id,before:{source,changedFields:[]},after:{source,changedFields}}});
+        },
+      );
+    });
+  }
+  async backfillFacebookProfiles(dryRun:boolean,limit=50,cursor:string|undefined,u:User){
+    const values=await this.sectionValues("integration.meta"),pageId=typeof values.pageId==="string"?values.pageId:"",pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted");
+    if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
+    const boundedLimit=Math.max(1,Math.min(50,limit));
+    const conversations=await this.p.conversation.findMany({
+      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,displayName:{startsWith:"Facebook "}}},
+      orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
+      select:{externalId:true,client:{select:{id:true,displayName:true}}},
+    });
+    return runFacebookProfileBackfillBatch(
+      conversations,pageId,boundedLimit,dryRun,
+      async psid=>{const result=await this.lookupFacebookProfile(pageId,psid,pageToken,appSecret);return{source:result.source,profile:normalizeMetaFacebookProfile(result.profile)}},
+      (psid,profile)=>this.persistResolvedMetaProfile("FACEBOOK",pageId,psid,profile,u.id),
+      (psid,error)=>this.logger.warn(JSON.stringify({event:"META_PROFILE_BACKFILL_FAILED",senderRef:metaIdentityLogRef(psid),errorType:error instanceof Error?error.constructor.name:"UnknownError"})),
+    );
+  }
   private async enrichMetaProfiles(events:MetaInboundMessage[],accessToken:string,appSecret?:string,provider:"facebook"|"instagram"="facebook"){
     const targets=metaProfileTargets(events).slice(0,20);
     for(const {channel,receiverId,senderId} of targets)try{
-      const eventChannel=channel as ContactChannel;
       const rawProfile=provider==="instagram"
         ? await this.instagramGraph<MetaFacebookProfile>(senderId,accessToken,{fields:"name,username,profile_pic"},"GET",false,"PROFILE_LOOKUP")
-        : await resolveMetaFacebookProfile(fields=>this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,false,fields==="locale,timezone"?undefined:"PROFILE_LOOKUP"));
+        : (await this.lookupFacebookProfile(receiverId,senderId,accessToken,appSecret)).profile;
       const profile=normalizeMetaFacebookProfile(rawProfile);
       if(!Object.keys(profile).length)continue;
-      await this.p.$transaction(async tx=>{
-        const conversation=await tx.conversation.findUnique({
-          where:{externalId_channel:{externalId:metaConversationExternalId(receiverId,senderId),channel:eventChannel}},
-          select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,email:true,phone:true,language:true,timezone:true,archivedAt:true}}},
-        });
-        const before=conversation?.client;
-        if(!before||before.archivedAt)return;
-        await persistMetaFacebookProfilePatch(
-          before,
-          profile,
-          async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null},data})).count>0,
-          async changedFields=>{
-            const source=channel==="INSTAGRAM"?"INSTAGRAM_PROFILE":"FACEBOOK_PROFILE";
-            await tx.activity.create({data:{clientId:before.id,type:"CLIENT_PROFILE_ENRICHED",summary:`Профиль клиента дополнен данными ${channel==="INSTAGRAM"?"Instagram":"Facebook"}`,metadata:{source,changedFields}}});
-            await tx.auditLog.create({data:{action:"UPDATE",entityType:"Client",entityId:before.id,before:{source,changedFields:[]},after:{source,changedFields}}});
-          },
-        );
-      });
+      await this.persistResolvedMetaProfile(channel,receiverId,senderId,profile);
     }catch(error){this.logger.warn(JSON.stringify({event:"META_PROFILE_LOOKUP_FAILED",senderRef:metaIdentityLogRef(senderId),errorType:error instanceof Error?error.constructor.name:"UnknownError"}))}
   }
   private async applyMetaControl(event: MetaControlEvent) {

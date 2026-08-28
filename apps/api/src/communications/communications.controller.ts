@@ -5,7 +5,7 @@ import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
@@ -39,6 +39,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Get("meta/oauth/pages")@Roles("OWNER","ADMIN")metaOauthPages(@Req()r:Request&{user:User}){return this.c.metaOauthPages(r.user,this.sessionBinding(r,r.user))}
 @Post("meta/oauth/connect")@Roles("OWNER","ADMIN")metaOauthConnect(@Body()d:MetaOauthConnectDto,@Req()r:Request&{user:User}){return this.c.metaOauthConnect(d.flowId,d.pageId,r.user,this.sessionBinding(r,r.user))}
 @Post("meta/delivery/verify")@Roles("OWNER","ADMIN")verifyMetaDelivery(@Req()r:Request&{user:User}){return this.c.verifyMetaDelivery(r.user)}
+@Post("meta/profiles/backfill")@Roles("OWNER","ADMIN")backfillMetaProfiles(@Body()d:MetaProfileBackfillDto,@Req()r:Request&{user:User}){return this.c.backfillFacebookProfiles(d.dryRun,d.limit,d.cursor,r.user)}
 @Get("meta/data-deletion-requests")@Roles("OWNER","ADMIN")metaDataDeletionRequests(){return this.c.listMetaDataDeletionRequests()}
 @Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
 @Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}

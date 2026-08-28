@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { facebookFallbackProfileTargets, legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -57,6 +57,77 @@ test("Facebook optional profile details are preserved when Meta returns them",as
     ? {locale:"uk_UA",timezone:2}
     : {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
   assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg",locale:"uk_UA",timezone:2});
+});
+
+test("Facebook User Profile API remains the primary identity source",async()=>{
+  const calls=[];
+  const result=await resolveMetaFacebookProfileWithFallback(
+    async fields=>(calls.push(["profile",fields]),fields==="locale,timezone"?{}:{first_name:"Oleg",last_name:"Ogilko",profile_pic:"https://example.com/a.jpg"}),
+    async()=>{calls.push(["conversations"]);return {data:[]}},
+    ()=>false,
+    "psid-1","page-1",
+  );
+  assert.equal(result.source,"USER_PROFILE");
+  assert.equal(calls.some(([kind])=>kind==="conversations"),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.profile)),{first_name:"Oleg",last_name:"Ogilko",profile_pic:"https://example.com/a.jpg"});
+});
+
+test("Facebook code 100 subcode 33 falls back to the exact conversation participant",async()=>{
+  const unavailable=Object.assign(new Error("unavailable"),{failure:{code:100,subcode:33}});
+  const result=await resolveMetaFacebookProfileWithFallback(
+    async()=>{throw unavailable},
+    async()=>({data:[{id:"thread",participants:{data:[{id:"page-1",name:"YOLeotard"},{id:"psid-1",name:"Rachel Smith"}]}}]}),
+    error=>error===unavailable,
+    "psid-1","page-1",
+  );
+  assert.equal(result.source,"CONVERSATIONS");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.profile)),{name:"Rachel Smith"});
+  await assert.rejects(()=>resolveMetaFacebookProfileWithFallback(async()=>{throw new Error("network")},async()=>({data:[]}),()=>false,"psid-1","page-1"),/network/);
+  const ambiguous=await resolveMetaFacebookProfileWithFallback(async()=>{throw unavailable},async()=>({data:[{participants:{data:[{id:"psid-1",name:"Rachel"},{id:"psid-1",name:"Other"}]}}]}),error=>error===unavailable,"psid-1","page-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(ambiguous.profile)),{});
+});
+
+test("Facebook backfill targets only exact fallback clients and deduplicates clients",()=>{
+  const targets=facebookFallbackProfileTargets([
+    {externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}},
+    {externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}},
+    {externalId:"page-1:102",client:{id:"c2",displayName:"Manual name"}},
+    {externalId:"page-2:103",client:{id:"c3",displayName:"Facebook 103"}},
+  ],"page-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{clientId:"c1",psid:"101"}]);
+});
+
+test("Facebook backfill dry-run is write-free and cursor advances across ineligible rows",async()=>{
+  const rows=[
+    {externalId:"page-1:bad",client:{id:"c1",displayName:"Facebook test"}},
+    {externalId:"page-1:102",client:{id:"c2",displayName:"Facebook 102"}},
+  ];
+  let resolves=0,writes=0;
+  const first=await runFacebookProfileBackfillBatch(rows,"page-1",1,true,async()=>{resolves++;return{source:"USER_PROFILE",profile:{displayName:"Ignored"}}},async()=>{writes++;return true});
+  assert.deepEqual(JSON.parse(JSON.stringify(first)),{dryRun:true,fallbackClientsFound:0,resolvedViaUserProfile:0,resolvedViaConversations:0,unresolved:0,updated:0,nextCursor:"c1"});
+  assert.equal(resolves,0);assert.equal(writes,0);
+  const second=await runFacebookProfileBackfillBatch(rows.slice(1),"page-1",1,true,async()=>({source:"CONVERSATIONS",profile:{displayName:"Rachel Smith",firstName:"Rachel Smith"}}),async()=>{writes++;return true});
+  assert.equal(second.fallbackClientsFound,1);assert.equal(second.resolvedViaConversations,1);assert.equal(second.nextCursor,null);assert.equal(writes,0);
+});
+
+test("Facebook backfill apply is idempotent and failed optimistic updates create no success",async()=>{
+  const rows=[{externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}}];
+  let currentName="Facebook 101",writes=0,histories=0;
+  const resolve=async()=>({source:"USER_PROFILE",profile:{displayName:"Anna",firstName:"Anna",avatarUrl:"https://example.com/a.jpg"}});
+  const persist=async(_psid,profile)=>{
+    writes++;
+    if(currentName!=="Facebook 101")return false;
+    currentName=profile.displayName;histories++;return true;
+  };
+  const applied=await runFacebookProfileBackfillBatch(rows,"page-1",50,false,resolve,persist);
+  const retried=await runFacebookProfileBackfillBatch(rows,"page-1",50,false,resolve,persist);
+  assert.equal(applied.updated,1);assert.equal(retried.updated,0);assert.equal(currentName,"Anna");assert.equal(histories,1);assert.equal(writes,2);
+  const protectedRows=[
+    {externalId:"page-1:102",client:{id:"c2",displayName:"Manual name"}},
+    {externalId:"page-1:103",client:{id:"c3",displayName:"Facebook 103"}},
+  ];
+  const protectedResult=await runFacebookProfileBackfillBatch(protectedRows,"page-1",50,false,resolve,async()=>false);
+  assert.equal(protectedResult.fallbackClientsFound,1);assert.equal(protectedResult.updated,0);
 });
 
 test("normalizes available Facebook profile details without inventing contacts",()=>{
@@ -116,7 +187,7 @@ test("profile persistence updates an active client before recording exact histor
 });
 
 test("profile enrichment guards archived clients and logs only pseudonymous Meta identities",()=>{
-  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null\}/);
+  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null,displayName:before\.displayName,firstName:before\.firstName,lastName:before\.lastName,avatarUrl:before\.avatarUrl,language:before\.language,timezone:before\.timezone\}/);
   assert.match(service,/persistMetaFacebookProfilePatch/);
   assert.doesNotMatch(service,/senderId:event\.externalSenderId/);
   assert.equal(metaIdentityLogRef("psid-123"),metaIdentityLogRef("psid-123"));
@@ -135,6 +206,23 @@ test("Meta carries configured receiver ids for scope validation",()=>{
   const [facebook]=normalizeMetaWebhook({object:"page",entry:[{id:"page-1",messaging:[{sender:{id:"s"},message:{mid:"m",text:"x"}}]}]});
   const [whatsapp]=normalizeMetaWebhook({object:"whatsapp_business_account",entry:[{changes:[{value:{metadata:{phone_number_id:"phone-1"},messages:[{id:"w",from:"1",type:"text",text:{body:"x"}}]}}]}]});
   assert.equal(facebook.receiverId,"page-1");assert.equal(whatsapp.receiverId,"phone-1");
+});
+
+test("Meta receiver scope keeps OAuth and verified Instagram namespaces separate",()=>{
+  const settings={pageId:"page-1",instagramAccountId:"28156785147355107",instagramWebhookReceiverId:"17841407931852361",whatsappPhoneNumberId:"phone-1"};
+  assert.equal(metaWebhookReceiverMatches("FACEBOOK","page-1",settings),true);
+  assert.equal(metaWebhookReceiverMatches("FACEBOOK","page-2",settings),false);
+  assert.equal(metaWebhookReceiverMatches("INSTAGRAM","28156785147355107",settings),true);
+  assert.equal(metaWebhookReceiverMatches("INSTAGRAM","17841407931852361",settings),true);
+  assert.equal(metaWebhookReceiverMatches("INSTAGRAM","999",settings),false);
+  assert.equal(metaWebhookReceiverMatches("INSTAGRAM","17841407931852361",{...settings,instagramWebhookReceiverId:"unsafe"}),false);
+  assert.equal(metaWebhookReceiverMatches("WHATSAPP","phone-1",settings),true);
+  assert.equal(metaWebhookReceiverMatches("WHATSAPP","phone-2",settings),false);
+});
+
+test("one receiver scope helper gates messages echoes and controls",()=>{
+  assert.equal((service.match(/metaWebhookReceiverMatches\(/g)||[]).length>=3,true);
+  assert.doesNotMatch(service,/event\.channel === "FACEBOOK" \? values\.pageId : event\.channel === "INSTAGRAM" \? values\.instagramAccountId/);
 });
 
 test("scopes Messenger conversations by Page ID and PSID", () => {

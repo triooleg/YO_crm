@@ -1,5 +1,51 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-28 — Facebook profile fallback и безопасный backfill
+
+- Production dry-run нашёл 11 активных клиентов с техническими именами
+  `Facebook <digits>` в текущей Page scope. User Profile API не разрешил ни
+  один из этих PSID; Page Conversations API вернул точного участника для всех
+  11. До реализации dry-run не изменял БД.
+- User Profile API остаётся первым источником и сохраняет имя/аватар как
+  раньше. Только структурированный Graph отказ `code=100/subcode=33` включает
+  запрос `/{pageId}/conversations` с `platform=messenger`, точным `user_id`,
+  `fields=id,participants` и bounded limit. Имя принимается только от
+  единственного exact participant с `id === PSID`, никогда от Page.
+- Обновление повторно использует существующий technical-name guard и теперь
+  имеет optimistic compare по прежним `displayName` и `firstName`, поэтому
+  конкурентное ручное изменение не перезаписывается. Conversation/externalId,
+  сообщения и клиенты не создаются и не мигрируют.
+- OWNER/ADMIN POST backfill поддерживает обязательный `dryRun`, limit до 50 и
+  cursor; возвращает только агрегаты. Повторный запуск идемпотентен, а audit и
+  activity создаются лишь после реального update.
+- Вместе с этим Instagram receiver alias подтверждается через Page relationship
+  автоматически после OAuth либо отдельной проверки доставки. Ошибка Instagram
+  relationship больше не отменяет успешную Facebook verification; stale alias
+  очищается, а финальная запись защищена общим порядком advisory locks и CAS
+  всех Page/Instagram credential/readiness значений.
+
+## 2026-08-28 — раздельный Instagram OAuth ID и webhook receiver
+
+- Production trace сообщения `Test message 0005` доказал, что Meta доставила
+  подписанный `object=instagram` webhook, но CRM отклонила его как
+  `META_MESSAGE_SCOPE_IGNORED`: webhook receiver был `17841407931852361`, а
+  Instagram Business Login сохранил app-scoped OAuth account ID
+  `28156785147355107`.
+- OAuth account ID остаётся отдельной идентичностью токена, профиля, подписки и
+  отправки. Для входящих добавлен отдельный внутренний
+  `instagramWebhookReceiverId`, который разрешается только через проверенную
+  Meta связь Facebook Page → `instagram_business_account` с точным совпадением
+  username; первый подписанный webhook не может сам назначить alias.
+- Один pure scope helper теперь одинаково проверяет обычные сообщения, echo и
+  read/delivery/control events. Facebook и WhatsApp сохраняют точное прежнее
+  сопоставление; посторонний Instagram receiver отклоняется.
+- Проверка доставки повторно сверяет настройки под advisory locks перед
+  записью alias. Любая смена Page, Page credentials или Instagram identity
+  атомарно удаляет alias и readiness; stale verify не может восстановить его.
+- Failing-first targeted tests затем 57/57 и API typecheck PASS; полный
+  `pnpm quality:check` до финального review/deployment также прошёл (API 165,
+  web 126, database 4, typechecks и builds).
+
 ## 2026-08-26 — раздельная готовность Meta-каналов и безопасный OAuth
 
 - Статус Facebook и Instagram теперь вычисляется и отображается раздельно:
@@ -827,3 +873,12 @@
 - Production выявил два несопоставимых Instagram namespace одного `@yoleotard`: подписанный webhook receiver `17841407931852361`, Business Login app-scoped account ID `28156785147355107`. Поэтому Facebook по-прежнему требует `receiver === pageId`, а Instagram deep link использует только неизменяемый цифровой `receiver:sender` уже сохранённой signature-verified переписки и текущий цифровой Page asset; сравнение с OAuth app-scoped ID запрещено как ложное.
 - TDD и текущий `pnpm quality:check` PASS: API 162/162, web 126/126, database 4/4, typecheck и production builds. После исправления receiver-scope blocker compatibility, regression, business/security и visual reviews — PASS; точный live click Messenger/Instagram Direct в авторизованной Meta Business Suite, mobile overflow и console smoke обязательны после deployment.
 - Deployment завершён revision `3cf5929` (UI base `e176e25`, mobile containment `c588457`). Public `/api/health` HTTP 200, PostgreSQL/Redis/uploads `up`. Production DOM выдаёт точные scoped URL для Facebook Messenger (`asset_id=261203841288993`, sender PSID) и Instagram Direct (`asset_id=261203841288993`, sender IGSID); на 390 px `clientWidth=scrollWidth=275`, selector виден, console warnings/errors 0. Внешний переход в Meta Business Suite не выполнялся автоматически, чтобы не передавать scoped client identifier без отдельного action-time подтверждения; реальный операторский click остаётся финальным provider smoke.
+
+## 2026-08-28 — Facebook Conversations fallback, безопасный backfill и выбор AI-модели
+
+- Messenger User Profile API остаётся основным источником имени/аватара. Только структурированный отказ Meta `code 100 / subcode 33` запускает Page-scoped fallback `/{PAGE_ID}/conversations?platform=messenger&user_id={PSID}&fields=id,participants`; принимается единственный участник с точным PSID, имя Page и неоднозначные ответы отклоняются.
+- Обновление существующего клиента не создаёт новую запись и не меняет external ID. Имя заменяется только для точного технического шаблона `Facebook <digits>`; optimistic CAS защищает имя, avatar, language и timezone от конкурентного ручного редактирования. История/audit создаются только после фактического update.
+- Production dry-run до mutation нашёл 11 Facebook fallback-клиентов: User Profile API — 0, Conversations API — 11, без имени — 0. Пакетный endpoint OWNER/ADMIN ограничен 50 записями, курсор двигается по каждой просмотренной raw-page, dry-run не пишет в БД, повторный apply идемпотентен.
+- Instagram webhook receiver отделён от OAuth account ID и подтверждается через связь выбранной Facebook Page с Instagram username/account. Статус Instagram больше не считается подписанным без проверенного receiver alias; Facebook delivery verification остаётся независимой от необязательной Instagram relationship lookup.
+- В «Настройки → AI-помощник» свободный ввод модели заменён выпадающим allowlist: `gpt-4.1-mini`, `gpt-4.1`, `gpt-5-mini`; сервер принимает тот же набор.
+- Финальный локальный `pnpm quality:check` PASS: API 171/171, web 127/127, database 4/4, все typecheck и production builds. Deployment и production apply/backfill будут отмечены после обязательных финальных reviews и live smoke.
