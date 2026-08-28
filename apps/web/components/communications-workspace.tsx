@@ -174,6 +174,7 @@ export function CommunicationsWorkspace() {
     [replyInstruction,setReplyInstruction]=useState(""),
     [replyMode,setReplyMode]=useState(false),
     [aiReply,setAiReply]=useState<{messageIds:string[];phase:"RUSSIAN"|"TRANSLATED";sourceText?:string;targetLanguage?:string}|null>(null),
+    [aiDraftText,setAiDraftText]=useState(""),
     [translatingId,setTranslatingId]=useState<string|null>(null),
     [aiPreparing,setAiPreparing]=useState(false),
     [search, setSearch] = useState(""),
@@ -203,10 +204,12 @@ export function CommunicationsWorkspace() {
     readOperations = useRef(new Map<string, number>()),
     pendingReads = useRef(new Map<string, Map<string, number>>()),
     pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
+    pendingAiSend = useRef<{textContent?:string;textRequestId?:string}>({}),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
-    previewClose = useRef<HTMLButtonElement | null>(null);
+    previewClose = useRef<HTMLButtonElement | null>(null),
+    aiDraftEditor = useRef<HTMLTextAreaElement | null>(null);
   currentSearch.current=search;
   currentClientCount.current=visibleClientCount;
   const accountLabel = connectedAccountLabel(client, activeChannel);
@@ -335,11 +338,12 @@ export function CommunicationsWorkspace() {
       setAttachment(undefined);
       setAttachmentPreview("");
       pendingSend.current = {};
+      pendingAiSend.current = {};
     }
     selectedClientId.current = c.id;
     composeEpoch.current++;
     aiOperationSequence.current++;
-    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setTranslatingId(null);setAiPreparing(false);setBusy(false);
+    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
@@ -494,6 +498,7 @@ export function CommunicationsWorkspace() {
       previewTrigger.current?.focus();
     };
   }, [preview]);
+  useEffect(()=>{if(aiReply){aiDraftEditor.current?.scrollIntoView({block:"nearest"});aiDraftEditor.current?.focus()}},[aiReply?.phase]);
   const filteredClients = clients;
   const visibleClients=filteredClients;
   useEffect(()=>{
@@ -586,7 +591,7 @@ export function CommunicationsWorkspace() {
       }
       else {
         setText("");
-        if(action==="DRAFT")setAiReply(null);
+        if(action==="DRAFT"){setAiReply(null);setAiDraftText("")}
         setAttachment(undefined);
         pendingSend.current = {};
         if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
@@ -620,7 +625,7 @@ export function CommunicationsWorkspace() {
           clientId: operationClientId,
         }),
       });
-      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply(null)}
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply(null);setAiDraftText("")}
     } catch (e) {
       if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message);
     } finally {
@@ -628,7 +633,7 @@ export function CommunicationsWorkspace() {
     }
   }
   function invalidateAiOperation(){aiOperationSequence.current++;setAiPreparing(false)}
-  function toggleMessage(id:string){invalidateAiOperation();setSelectedMessageIds(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);setAiReply(null)}
+  function toggleMessage(id:string){invalidateAiOperation();setSelectedMessageIds(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);setAiReply(null);setAiDraftText("")}
   async function translateMessage(message:Message){
     if(!client)return;const operationClientId=client.id,operationEpoch=composeEpoch.current;
     setTranslatingId(message.id);setError("");
@@ -639,24 +644,29 @@ export function CommunicationsWorkspace() {
     if(!client||!selectedMessageIds.length)return;
     const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current;
     setAiPreparing(true);setError("");
-    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"REPLY",text:"",instructions:replyInstruction,clientId:operationClientId,messageIds:selectedMessageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply({messageIds:[...selectedMessageIds],phase:"RUSSIAN"})}}
+    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"REPLY",text:"",instructions:replyInstruction,clientId:operationClientId,messageIds:selectedMessageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setAiDraftText(x.text);setAiReply({messageIds:[...selectedMessageIds],phase:"RUSSIAN"})}}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false)}
   }
   async function prepareAiTranslation(){
-    if(!client||!aiReply||!text.trim())return;
-    const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current,sourceText=text.trim();
+    if(!client||!aiReply||!aiDraftText.trim())return;
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current,sourceText=aiDraftText.trim();
     setAiPreparing(true);setError("");
-    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"FINALIZE_REPLY",text:sourceText,clientId:operationClientId,messageIds:aiReply.messageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply({...aiReply,phase:"TRANSLATED",sourceText,targetLanguage:x.targetLanguage})}}
+    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"FINALIZE_REPLY",text:sourceText,clientId:operationClientId,messageIds:aiReply.messageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setAiDraftText(x.text);setAiReply({...aiReply,phase:"TRANSLATED",sourceText,targetLanguage:x.targetLanguage})}}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false)}
   }
   async function sendConfirmedAiReply(){
     if(!aiReply||aiReply.phase!=="TRANSLATED")return;
-    if(await save("SEND")){setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null)}
+    if(!client||!aiDraftText.trim())return;
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,content=aiDraftText.trim(),requestId=pendingAiSend.current.textContent===content&&pendingAiSend.current.textRequestId?pendingAiSend.current.textRequestId:crypto.randomUUID();
+    pendingAiSend.current={textContent:content,textRequestId:requestId};setBusy(true);setError("");
+    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content,channel:activeChannel,action:"SEND",clientRequestId:requestId})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;setMessages(current=>[...current,result]);if(result.status==="FAILED"){pendingAiSend.current={};setError(sendFailureText(result.metadata?.reason,activeChannel));return}pendingAiSend.current={};setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("")}
+    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setBusy(false)}
   }
   function chooseTemplate(template: Template) {
     invalidateAiOperation();
     setText(template.content);
     setAiReply(null);
+    setAiDraftText("");
     setTemplatesOpen(false);
   }
   async function createClient(e: FormEvent<HTMLFormElement>) {
@@ -874,6 +884,15 @@ export function CommunicationsWorkspace() {
                 );
               })
             )}
+            {aiReply&&<article className="out communications-ai-draft-message">
+              <b>{aiReply.phase==="RUSSIAN"?ui.aiRussianDraftTitle:ui.aiTranslatedDraftTitle}</b>
+              <textarea ref={aiDraftEditor} value={aiDraftText} disabled={aiPreparing||busy} onChange={event=>{invalidateAiOperation();setAiDraftText(event.target.value)}} aria-label={aiReply.phase==="RUSSIAN"?ui.aiRussianDraftTitle:ui.aiTranslatedDraftTitle}/>
+              <small>{aiReply.phase==="RUSSIAN"?ui.russianDraftHint:ui.translatedDraftHint}</small>
+              <div>
+                <button type="button" className="secondary" onClick={()=>{invalidateAiOperation();setAiReply(null);setAiDraftText("")}}>{ui.cancelAiDraft}</button>
+                <button type="button" disabled={busy||aiPreparing||!aiDraftText.trim()} onClick={()=>void(aiReply.phase==="RUSSIAN"?prepareAiTranslation():sendConfirmedAiReply())}>{aiPreparing?ui.aiPreparing:aiReply.phase==="RUSSIAN"?ui.prepareTranslation:ui.confirmTranslationAndSend}</button>
+              </div>
+            </article>}
             {!messagesLoading && client && !messages.length && (
               <State text={ui.emptyMessages} />
             )}{" "}
@@ -923,7 +942,6 @@ export function CommunicationsWorkspace() {
               </span>
             </div>
             {replyMode&&selectedMessageIds.length>0&&<div className="communications-reply-task"><label>{ui.replyTask}<textarea value={replyInstruction} onChange={event=>setReplyInstruction(event.target.value)} placeholder={ui.replyTaskPlaceholder}/></label><button type="button" disabled={aiPreparing} onClick={()=>void generateSelectedReply()}>{aiPreparing?ui.aiPreparing:ui.prepareRussianDraft}</button></div>}
-            {aiReply&&<div className="communications-ai-draft-note">{aiReply.phase==="RUSSIAN"?ui.russianDraftHint:ui.translatedDraftHint}</div>}
             {attachment && (
               <div className="communications-selected-attachment">
                 {attachmentPreview && <img src={attachmentPreview} alt={ui.selectedAttachment} />}
@@ -950,10 +968,10 @@ export function CommunicationsWorkspace() {
               </button>
               {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && (
                 <button
-                  disabled={busy || aiPreparing || !client || (!text.trim() && !attachment)}
-                  onClick={() => void (aiReply?.phase==="RUSSIAN"?prepareAiTranslation():aiReply?.phase==="TRANSLATED"?sendConfirmedAiReply():save("SEND"))}
+                  disabled={busy || !client || (!text.trim() && !attachment)}
+                  onClick={() => void save("SEND")}
                 >
-                  {busy ? ui.sending : aiPreparing?ui.aiPreparing:aiReply?.phase==="RUSSIAN"?ui.prepareTranslation:aiReply?.phase==="TRANSLATED"?ui.confirmTranslationAndSend:ui.sendMessage}
+                  {busy ? ui.sending : ui.sendMessage}
                 </button>
               )}
             </div>

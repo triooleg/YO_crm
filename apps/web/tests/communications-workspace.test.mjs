@@ -19,7 +19,7 @@ test("composer offers a real send action separately from saving a draft", () => 
   assert.match(component, /async function save\(action: "DRAFT" \| "SEND",contentOverride\?:string\)/);
   assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: activeChannel, action,/);
   assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
-  assert.match(component, /aiReply\?\.phase==="RUSSIAN"\?prepareAiTranslation\(\):aiReply\?\.phase==="TRANSLATED"\?sendConfirmedAiReply\(\):save\("SEND"\)/);
+  assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
   assert.match(component, /ui\.sendMessage/);
   assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
 });
@@ -41,6 +41,18 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/action:"REPLY"[\s\S]*messageIds:selectedMessageIds/);
   assert.match(component,/action:"FINALIZE_REPLY"[\s\S]*messageIds:aiReply\.messageIds/);
   assert.match(component,/phase:"TRANSLATED"/);
+  assert.match(component,/communications-ai-draft-message/);
+  assert.match(component,/value=\{aiDraftText\}/);
+  assert.match(component,/pendingAiSend/);
+  assert.match(component,/body:JSON\.stringify\(\{content,channel:activeChannel,action:"SEND",clientRequestId:requestId\}\)/);
+  assert.match(component,/pendingAiSend\.current\.textContent===content&&pendingAiSend\.current\.textRequestId/);
+  assert.match(component,/ref=\{aiDraftEditor\}/);
+  assert.match(component,/scrollIntoView\(\{block:"nearest"\}\)/);
+  assert.match(component,/disabled=\{aiPreparing\|\|busy\}/);
+  const aiSend=component.slice(component.indexOf("async function sendConfirmedAiReply"),component.indexOf("function chooseTemplate"));
+  assert.doesNotMatch(aiSend,/attachment|setText|setAttachment|pendingSend/);
+  assert.match(aiSend,/if\(result\.status==="FAILED"\)\{pendingAiSend\.current=\{\}/);
+  assert.match(css,/communications-ai-draft-message/);
   assert.match(component,/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
   for(const name of["generateSelectedReply","prepareAiTranslation"]){const section=component.slice(component.indexOf(`async function ${name}`),component.indexOf("\n  }",component.indexOf(`async function ${name}`))+4);assert.equal((section.match(/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/g)||[]).length,3)}
   assert.match(component,/const isActive=\(\)=>selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
@@ -48,7 +60,7 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/function invalidateAiOperation\(\)\{aiOperationSequence\.current\+\+;setAiPreparing\(false\)\}/);
   assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);setText\(e\.target\.value\)\}\}/);
   assert.match(component,/function chooseTemplate[\s\S]*setAiReply\(null\)/);
-  assert.match(component,/if\(action==="DRAFT"\)setAiReply\(null\)/);
+  assert.match(component,/if\(action==="DRAFT"\)\{setAiReply\(null\);setAiDraftText\(""\)\}/);
   assert.match(component,/ui\.confirmTranslationAndSend/);
   for(const key of["selectDraftForReply","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
 });

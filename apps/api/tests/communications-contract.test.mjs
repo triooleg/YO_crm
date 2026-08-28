@@ -28,6 +28,9 @@ const service = (
     "utf8",
   )
 ).replace(/\s+/g, "");
+const aiResponse = (
+  await readFile(new URL("../src/communications/ai-response.ts", import.meta.url), "utf8")
+).replace(/\s+/g, "");
 
 test("inbox list uses server pagination, full search and complete buyer aggregates", () => {
   assert.match(dto, /classCommunicationsListQueryDto/);
@@ -124,8 +127,8 @@ test("AI requires opt in and separate context consent", () => {
 });
 test("AI is bounded and audited without message content", () => {
   assert.match(service, /ALLOWED_AI_MODELS/);
-  assert.match(service, /max_output_tokens:800/);
-  assert.match(service, /AbortSignal\.timeout\(15000\)/);
+  assert.match(aiResponse, /max_output_tokens:outputTokens/);
+  assert.match(aiResponse, /AbortSignal\.timeout\(30000\)/);
   assert.match(service, /entityType:"AiAssistantGeneration"/);
   assert.doesNotMatch(service, /after:\{[^}]*text:d\.text/s);
 });
@@ -158,6 +161,14 @@ test("AI selected reply is server scoped, Russian first, and translates only aft
   assert.match(service,/InboundMessageTranslation/);
   assert.match(service,/FORUPDATE/);
   assert.doesNotMatch(service,/after:\{[^}]*text:translated\.text/s);
+});
+test("GPT-5 AI requests preserve output budget and log safe incomplete diagnostics",()=>{
+  assert.match(aiResponse,/reasoning:\{effort:"minimal"\}/);
+  assert.match(aiResponse,/AI_RESPONSE_INCOMPLETE/);
+  assert.match(aiResponse,/incompleteReason/);
+  assert.match(aiResponse,/outputTypes/);
+  assert.match(aiResponse,/maxOutputTokens\*2/);
+  assert.doesNotMatch(aiResponse,/diagnostic[^;]*(input|key|token)/i);
 });
 test("conversation and draft are created atomically", () => {
   const x = service.slice(
@@ -256,7 +267,7 @@ test("AI API token is write-only, encrypted and removable", () => {
 test("AI generation resolves the stored token without exposing it", () => {
   assert.match(service, /resolveApiKey/);
   assert.match(service, /process\.env\.OPENAI_API_KEY/);
-  assert.match(service, /Authorization:"Bearer"\+key/);
+  assert.match(aiResponse, /Authorization:"Bearer"\+options\.key/);
   assert.match(controller, /@Patch\("settings"\)@Roles\("OWNER","ADMIN"\)/);
 });
 
