@@ -66,7 +66,7 @@ test("Instagram connection subscribes only to the required messages field", () =
   const callback = service.slice(service.indexOf("async instagramOauthCallback"), service.indexOf("instagramOauthResultHtml"));
   assert.match(callback, /subscribed_fields:\s*"messages"/);
   assert.doesNotMatch(callback, /subscribed_fields:\s*"messages,messaging_postbacks"/);
-  assert.match(callback, /subscribed_fields\?\.includes\("messages"\)/);
+  assert.match(callback, /findInstagramMessagesSubscription\(subscriptions\.data \|\| \[\], instagramAccountId, appId\)/);
 });
 
 test("Instagram OAuth callback logs safe stages and preserves generic browser errors", () => {
@@ -109,6 +109,30 @@ test("Instagram OAuth diagnostics allowlist provider errors and never expose cre
     providerErrorSubcode: 460,
   });
   assert.equal(diagnostics.classifyInstagramOauthError(new TypeError("request contains SECRET")), "network");
+});
+
+test("Instagram subscription verification accepts the Instagram Login account response shape", () => {
+  const diagnostics = loadInstagramDiagnostics();
+  assert.equal(typeof diagnostics.findInstagramMessagesSubscription, "function");
+  const accountId = "17841407931852361", appId = "1053522647652200";
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
+    { id: accountId, subscribed_fields: ["messages"] },
+  ], accountId, appId))), { id: accountId, subscribed_fields: ["messages"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
+    { id: "subscription", application: { id: appId }, subscribed_fields: ["messages"] },
+  ], accountId, appId))), { id: "subscription", application: { id: appId }, subscribed_fields: ["messages"] });
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: "other-account", subscribed_fields: ["messages"] },
+  ], accountId, appId), undefined);
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: accountId, subscribed_fields: ["comments"] },
+  ], accountId, appId), undefined);
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: accountId, application: { id: "other-app" }, subscribed_fields: ["messages"] },
+  ], accountId, appId), undefined);
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: appId, application: { id: "other-app" }, subscribed_fields: ["messages"] },
+  ], accountId, appId), undefined);
 });
 
 test("Meta OAuth requires Page messaging permissions and confirms the subscription before marking it verified", () => {

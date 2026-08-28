@@ -31,3 +31,23 @@ export function classifyInstagramOauthError(error: unknown) {
   if (error && typeof error === "object" && "name" in error && error.name === "TypeError") return "network" as const;
   return "application" as const;
 }
+
+type InstagramSubscription = {
+  id?: string;
+  application?: { id?: string };
+  subscribed_fields?: string[];
+};
+
+export function findInstagramMessagesSubscription(
+  subscriptions: InstagramSubscription[],
+  instagramAccountId: string,
+  instagramAppId: string,
+) {
+  return subscriptions.find(item => {
+    if (!item.subscribed_fields?.includes("messages")) return false;
+    const applicationId = String(item.application?.id || "");
+    if (applicationId) return applicationId === instagramAppId;
+    const id = String(item.id || "");
+    return id === instagramAccountId || id === instagramAppId;
+  });
+}

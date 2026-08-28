@@ -37,7 +37,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus } from "./meta-delivery";
 import { parseMetaDataDeletionRequest } from "./meta-data-deletion";
-import { classifyInstagramOauthError, sanitizeInstagramOauthResponse } from "./instagram-oauth-diagnostics";
+import { classifyInstagramOauthError, findInstagramMessagesSubscription, sanitizeInstagramOauthResponse } from "./instagram-oauth-diagnostics";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
@@ -554,9 +554,9 @@ export class CommunicationsService {
     stage = "SUBSCRIBE";
     await this.instagramGraph(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
     stage = "VERIFY";
-    const subscriptions = await this.instagramGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
-    const subscription = (subscriptions.data || []).find(item => item.id === appId);
-    if (!subscription?.subscribed_fields?.includes("messages")) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
+    const subscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
+    const subscription = findInstagramMessagesSubscription(subscriptions.data || [], instagramAccountId, appId);
+    if (!subscription) throw new BadRequestException("Instagram не подтвердил подписку на входящие сообщения");
     stage = "PERSIST";
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"instagram-oauth-config"},0))`;
