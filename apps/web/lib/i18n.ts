@@ -599,6 +599,7 @@ export const communicationsUi = {
   emptyMessages: "Сообщений пока нет",
   openAttachment: "Открыть вложение",
   imagePreview: "Увеличенный просмотр изображения",
+  videoPreview: "Просмотр видео",
   attachmentTypes: { image: "Фото", video: "Видео", audio: "Аудио", file: "Файл", sticker: "Стикер", fallback: "Вложение" },
   resizeClients: "Изменить ширину списка клиентов",
   resizeOrders: "Изменить ширину заказов",

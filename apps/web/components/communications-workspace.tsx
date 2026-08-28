@@ -200,7 +200,7 @@ export function CommunicationsWorkspace() {
     [attachment, setAttachment] = useState<File>(),
     [attachmentPreview, setAttachmentPreview] = useState(""),
     [creating, setCreating] = useState(false),
-    [preview, setPreview] = useState<string>(),
+    [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
     [right, setRight] = useState(defaults.right);
   const widths = useRef({ ...defaults }),
@@ -223,6 +223,7 @@ export function CommunicationsWorkspace() {
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null),
+    previewVideo = useRef<HTMLVideoElement | null>(null),
     aiDraftEditor = useRef<HTMLTextAreaElement | null>(null);
   currentSearch.current=search;
   currentClientCount.current=visibleClientCount;
@@ -503,8 +504,11 @@ export function CommunicationsWorkspace() {
     const key = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") setPreview(undefined);
       if (event.key === "Tab") {
-        event.preventDefault();
-        previewClose.current?.focus();
+        if(preview.type==="video"&&previewVideo.current){
+          const close=previewClose.current,video=previewVideo.current;
+          if(event.shiftKey&&document.activeElement===close){event.preventDefault();video.focus()}
+          else if(!event.shiftKey&&document.activeElement===video){event.preventDefault();close?.focus()}
+        }else{event.preventDefault();previewClose.current?.focus()}
       }
     };
     document.addEventListener("keydown", key);
@@ -884,17 +888,18 @@ export function CommunicationsWorkspace() {
                                 attachment.type as keyof typeof ui.attachmentTypes
                               ] || ui.attachmentTypes.fallback;
                           return url &&
-                            ["image", "sticker"].includes(attachment.type) ? (
+                            ["image", "sticker", "video"].includes(attachment.type) ? (
                             <button
                               type="button"
                               key={index}
+                              className={attachment.type==="video"?"communications-video-preview":undefined}
                               onClick={(event) => {
                                 previewTrigger.current = event.currentTarget;
-                                setPreview(url);
+                                setPreview({url,type:attachment.type==="video"?"video":"image"});
                               }}
                               aria-label={ui.openAttachment + ": " + label}
                             >
-                              <img src={url} alt={label} />
+                              {attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label} />}
                             </button>
                           ) : url ? (
                             <a
@@ -1123,7 +1128,7 @@ export function CommunicationsWorkspace() {
           className="communications-lightbox"
           role="dialog"
           aria-modal="true"
-          aria-label={ui.imagePreview}
+          aria-label={preview.type==="video"?ui.videoPreview:ui.imagePreview}
           onClick={() => setPreview(undefined)}
         >
           <button
@@ -1134,11 +1139,11 @@ export function CommunicationsWorkspace() {
           >
             ×
           </button>
-          <img
-            src={preview}
-            alt={ui.imagePreview}
-            onClick={(e) => e.stopPropagation()}
-          />
+          {preview.type === "video" ? (
+            <video ref={previewVideo} src={preview.url} controls autoPlay playsInline tabIndex={0} aria-label={ui.videoPreview} onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <img src={preview.url} alt={ui.imagePreview} onClick={(e) => e.stopPropagation()} />
+          )}
         </div>
       )}
     </div>

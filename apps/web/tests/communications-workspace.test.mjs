@@ -271,10 +271,21 @@ test("вложения Meta отображаются в истории пере�
   assert.match(component, /ui\.openAttachment/);
   assert.match(locale, /openAttachment:/);
   assert.match(component, /communications-lightbox/);
-  assert.match(component, /setPreview\(url\)/);
+  assert.match(component, /setPreview\(\{url,type:/);
   assert.match(component, /event\.key\s*===\s*"Escape"/);
   assert.match(component, /previewClose\.current\?\.focus/);
   assert.match(component, /previewTrigger\.current\?\.focus/);
+});
+
+test("видео показывает превью и воспроизводится только в открытом просмотрщике", () => {
+  assert.match(component, /useState<\{url:string;type:"image"\|"video"\}>\(\)/);
+  assert.match(component, /attachment\.type==="video"/);
+  assert.match(component, /<video src=\{url\} preload="metadata" muted playsInline/);
+  assert.match(component, /setPreview\(\{url,type:attachment\.type==="video"\?"video":"image"\}\)/);
+  assert.match(component, /preview\.type\s*===\s*"video"\s*\?[\s\S]*?<video[^>]*src=\{preview\.url\}[^>]*controls autoPlay playsInline/);
+  assert.match(locale, /videoPreview:\s*"Просмотр видео"/);
+  assert.match(css, /communications-attachments img,.communications-attachments video/);
+  assert.match(css, /communications-lightbox>img,.communications-lightbox>video/);
 });
 
 test("ошибка отправки Meta показывает безопасную причину на русском", () => {
