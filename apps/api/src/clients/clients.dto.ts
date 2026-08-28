@@ -1,11 +1,16 @@
 import { ContactChannel, Discipline } from "@prisma/client";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsDateString, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Length, Min, IsIn } from "class-validator";
+import { Transform } from "class-transformer";
+
+function optionalText(value: unknown) {
+  return typeof value === "string" ? value.trim() || undefined : value;
+}
 
 export class CreateClientDto {
-  @ApiProperty() @IsString() @Length(1,100) firstName!:string;
+  @ApiProperty() @Transform(({ value }) => optionalText(value)) @IsString({message:"Введите имя или название профиля клиента"}) @Length(1,100,{message:"Введите имя или название профиля клиента"}) firstName!:string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1,100) lastName?:string;
-  @ApiPropertyOptional() @IsOptional() @IsEmail() email?:string;
+  @ApiPropertyOptional() @Transform(({ value }) => optionalText(value)) @IsOptional() @IsEmail({}, {message:"Введите корректный e-mail"}) email?:string;
   @ApiPropertyOptional() @IsOptional() @IsString() phone?:string;
   @ApiPropertyOptional() @IsOptional() @IsString() country?:string;
   @ApiPropertyOptional() @IsOptional() @IsString() city?:string;

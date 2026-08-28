@@ -139,6 +139,14 @@ test("из активного входящего можно создать кл�
   assert.match(css,/communications-buyer-card/);
 });
 
+test("сохранение покупателя использует имя профиля и не отправляет пустые контакты", () => {
+  assert.match(component, /ui\.profileName/);
+  assert.match(component, /client\.firstName \|\| client\.displayName/);
+  assert.match(component, /optionalFormFields/);
+  assert.match(component, /value\.trim\(\)\?value\.trim\(\):undefined/);
+  assert.match(locale, /profileName:\s*"Название профиля клиента"/);
+});
+
 test("канал Meta, Chatwoot или e-mail показывается возле клиента", () => {
   assert.match(component, /clientBadges\(c\)/);
   assert.match(component, /communications-source-icons/);

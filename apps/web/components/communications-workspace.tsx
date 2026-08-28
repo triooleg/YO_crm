@@ -165,6 +165,12 @@ function formatBytes(size: number) {
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
+function optionalFormFields(data: Record<string, FormDataEntryValue>, names: string[]) {
+  return Object.fromEntries(names.map((name) => {
+    const value = data[name];
+    return [name, typeof value === "string" && value.trim()?value.trim():undefined];
+  }));
+}
 export function CommunicationsWorkspace() {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
@@ -711,7 +717,8 @@ export function CommunicationsWorkspace() {
         {
           method: "POST",
           body: JSON.stringify({
-            ...data,
+            firstName: String(data.firstName||"").trim(),
+            ...optionalFormFields(data,["phone","email","instagram","notes"]),
             source: data.source || channel(client),
           }),
         },
@@ -1060,7 +1067,7 @@ export function CommunicationsWorkspace() {
               </button>
             </div>
             <label>
-              {ui.firstName}
+              {ui.profileName}
               <input
                 name="firstName"
                 required

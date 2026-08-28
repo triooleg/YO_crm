@@ -656,6 +656,7 @@ export const communicationsUi = {
   noDescription: "Описание не указано",
   noOrders: "У клиента пока нет заказов",
   createClientTitle: "Клиент из входящих",
+  profileName: "Название профиля клиента",
   firstName: "Имя",
   phone: "Телефон",
   email: "E-mail",
