@@ -197,10 +197,6 @@ export function metaConversationInboxUrl(channel: string | undefined, externalId
   const pageId = typeof settings.pageId === "string" ? settings.pageId.trim() : "";
   if (!match || !/^\d+$/.test(pageId)) return "";
   if (channel === "FACEBOOK" && match[1] !== pageId) return "";
-  if (channel === "INSTAGRAM") {
-    const instagramAccountId = typeof settings.instagramAccountId === "string" ? settings.instagramAccountId.trim() : "";
-    if (!/^\d+$/.test(instagramAccountId) || match[1] !== instagramAccountId) return "";
-  }
   const section = channel === "FACEBOOK" ? "messenger" : "instagram_direct";
   return `https://business.facebook.com/latest/inbox/${section}?asset_id=${pageId}&selected_item_id=${match[2]}`;
 }

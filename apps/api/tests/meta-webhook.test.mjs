@@ -100,8 +100,7 @@ test("Meta conversation links are scoped and reject unsafe identifiers", () => {
   assert.equal(metaConversationInboxUrl("FACEBOOK", "261203841288993:27352420207764662", { pageId: "261203841288993" }), "https://business.facebook.com/latest/inbox/messenger?asset_id=261203841288993&selected_item_id=27352420207764662");
   assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramAccountId: "17841407931852361" }), "https://business.facebook.com/latest/inbox/instagram_direct?asset_id=261203841288993&selected_item_id=708610235356092");
   assert.equal(metaConversationInboxUrl("FACEBOOK", "999:2", { pageId: "1" }), "");
-  assert.equal(metaConversationInboxUrl("INSTAGRAM", "999:2", { pageId: "1", instagramAccountId: "8" }), "");
-  assert.equal(metaConversationInboxUrl("INSTAGRAM", "8:2", { pageId: "1", instagramAccountId: "unsafe" }), "");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramAccountId: "28156785147355107" }), "https://business.facebook.com/latest/inbox/instagram_direct?asset_id=261203841288993&selected_item_id=708610235356092");
   assert.equal(metaConversationInboxUrl("FACEBOOK", "1:javascript:alert(1)", { pageId: "1" }), "");
   assert.equal(metaConversationInboxUrl("EMAIL", "1:2", { pageId: "1" }), "");
 });
