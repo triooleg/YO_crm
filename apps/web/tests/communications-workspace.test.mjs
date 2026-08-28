@@ -16,12 +16,41 @@ test("входящие используют централизованные р�
 });
 
 test("composer offers a real send action separately from saving a draft", () => {
-  assert.match(component, /async function save\(action: "DRAFT" \| "SEND"\)/);
+  assert.match(component, /async function save\(action: "DRAFT" \| "SEND",contentOverride\?:string\)/);
   assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: activeChannel, action,/);
   assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
-  assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
+  assert.match(component, /aiReply\?\.phase==="RUSSIAN"\?prepareAiTranslation\(\):aiReply\?\.phase==="TRANSLATED"\?sendConfirmedAiReply\(\):save\("SEND"\)/);
   assert.match(component, /ui\.sendMessage/);
   assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
+});
+
+test("каждое входящее переводится внутри сообщения и перевод сохраняется",()=>{
+  assert.match(component,/messages\/\$\{message\.id\}\/translate/);
+  assert.match(component,/message\.metadata\?\.translation\?\.text/);
+  assert.match(component,/communications-message-translation/);
+  assert.match(component,/communications-message-translate/);
+  assert.match(css,/communications-message-translation\{[^}]*border-top:1px solid #aaa[^}]*color:#666/);
+  assert.match(css,/communications-message-translate:focus-visible/);
+  for(const key of["translateAgain","translating","selectMessageForReply"])assert.match(locale,new RegExp(`${key}:`));
+});
+
+test("AI ответ использует выбранные входящие и черновики и требует подтверждения",()=>{
+  assert.match(component,/selectedMessageIds/);
+  assert.match(component,/message\.direction === "INBOUND"\|\|message\.status === "DRAFT"/);
+  assert.match(component,/replyInstruction/);
+  assert.match(component,/action:"REPLY"[\s\S]*messageIds:selectedMessageIds/);
+  assert.match(component,/action:"FINALIZE_REPLY"[\s\S]*messageIds:aiReply\.messageIds/);
+  assert.match(component,/phase:"TRANSLATED"/);
+  assert.match(component,/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
+  for(const name of["generateSelectedReply","prepareAiTranslation"]){const section=component.slice(component.indexOf(`async function ${name}`),component.indexOf("\n  }",component.indexOf(`async function ${name}`))+4);assert.equal((section.match(/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/g)||[]).length,3)}
+  assert.match(component,/const isActive=\(\)=>selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
+  assert.match(component,/aiOperationSequence\.current===operationSequence/);
+  assert.match(component,/function invalidateAiOperation\(\)\{aiOperationSequence\.current\+\+;setAiPreparing\(false\)\}/);
+  assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);setText\(e\.target\.value\)\}\}/);
+  assert.match(component,/function chooseTemplate[\s\S]*setAiReply\(null\)/);
+  assert.match(component,/if\(action==="DRAFT"\)setAiReply\(null\)/);
+  assert.match(component,/ui\.confirmTranslationAndSend/);
+  for(const key of["selectDraftForReply","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
 });
 
 test("composer sends both Facebook and Instagram conversations", () => {
@@ -58,7 +87,17 @@ test("из активного входящего можно создать кл�
   assert.match(component, /preferredChannel/);
   assert.match(component, /communications-create/);
   assert.match(component, /promote-from-inbox/);
-  assert.match(component, /createFromMessage/);
+  assert.match(component, /const exactCreated=/);
+  assert.match(component, /await open\(exactCreated\)/);
+  assert.match(component, /client\.status==="LEAD"\?ui\.unsavedBuyer:ui\.savedBuyer/);
+  assert.match(component, /client\.status==="LEAD"\?<button[^>]*>[\s\S]*ui\.saveBuyer/);
+  assert.match(component, /promote-from-inbox/);
+  assert.match(component, /client\?\.status!=="LEAD"&&activeOrders/);
+  assert.match(component, /buyerSummary\?\.purchaseCount/);
+  assert.match(component, /buyerSummary\?\.paymentTotals/);
+  assert.match(component, /purchaseTotals/);
+  for(const key of["activeOrders","noActiveOrders","unsavedBuyer","savedBuyer","saveBuyer","purchaseHistory"])assert.match(locale,new RegExp(`${key}:`));
+  assert.match(css,/communications-buyer-card/);
 });
 
 test("канал Meta, Chatwoot или e-mail показывается возле клиента", () => {
@@ -74,7 +113,7 @@ test("канал Meta, Chatwoot или e-mail показывается возл�
 test("список клиентов показывает все связанные каналы", () => {
   assert.match(component, /clientBadges/);
   assert.match(component, /communications-source-icons/);
-  assert.match(component, /badges\.map/);
+  assert.match(component, /badges\.filter\(badge=>badge\.key!==primaryBadge\?\.key\)\.map/);
 });
 
 test("аватар Meta отображается в списке и заголовке чата с безопасным fallback", () => {
@@ -109,6 +148,33 @@ test("список входящих показывает последнее со
   assert.match(component, /latestConversation/);
   assert.match(component, /communications-client-preview/);
   assert.match(component, /communications-client-time/);
+  assert.match(component, /communications-client-date/);
+  assert.match(component, /toLocaleDateString\("ru"\)/);
+  assert.match(component, /communications-client-avatar-wrap/);
+  assert.match(component, /communications-avatar-source/);
+  assert.match(component, /badges\.find\(badge=>badge\.key===latest\?\.channel\)\|\|badges\[0\]/);
+  assert.match(css, /communications-avatar-source\{[^}]*position:absolute[^}]*right:-4px[^}]*bottom:-3px/);
+  assert.match(component, /source-\$\{primaryBadge\.key\.toLowerCase\(\)\}/);
+  assert.match(css, /source-facebook[^}]*#1877f2/);
+  assert.match(css, /source-instagram[^}]*linear-gradient/);
+  assert.match(css, /source-whatsapp[^}]*#25d366/);
+});
+
+test("список входящих показывает по 15 чатов и подгружает следующие 15", () => {
+  assert.match(component, /visibleClientCount,setVisibleClientCount\]=useState\(15\)/);
+  assert.match(component, /fetchClientWindow/);
+  assert.match(component, /offset=\$\{offset\}/);
+  assert.match(component, /seenIds/);
+  assert.match(component, /items\.slice\(0,count\)/);
+  assert.match(component, /const selected = id \? data\.find\(\(x\) => x\.id === id\) : data\[0\]/);
+  assert.match(component, /const next=visibleClientCount\+15/);
+  assert.match(component, /setVisibleClientCount\(15\)/);
+  assert.match(component, /listRequestSequence/);
+  assert.match(component, /currentSearch\.current/);
+  assert.match(component, /currentClientCount\.current/);
+  assert.match(component, /const filteredClients = clients/);
+  assert.match(locale, /loadMoreChats:/);
+  assert.match(css, /communications-load-more/);
 });
 
 test("новые входящие автоматически поднимаются наверх и обновляются без перезагрузки", () => {

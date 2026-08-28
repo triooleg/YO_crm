@@ -5,7 +5,7 @@ import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
@@ -23,7 +23,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
  if(!binding)throw new UnauthorizedException("Сессия подключения Meta истекла. Нажмите «Переподключить Facebook» ещё раз");
  return binding;
 }
-@Get()@Roles("OWNER","ADMIN","MANAGER")list(){return this.c.list()}
+@Get()@Roles("OWNER","ADMIN","MANAGER")list(@Query()query:CommunicationsListQueryDto){return this.c.list(query)}
 @Get("templates")@Roles("OWNER","ADMIN","MANAGER")templates(){return this.c.templates()}
 @Post("templates")@Roles("OWNER","ADMIN")createTemplate(@Body()d:MessageTemplateDto,@Req()r:Request&{user:User}){return this.c.createTemplate(d,r.user)}
 @Patch("templates/:id")@Roles("OWNER","ADMIN")updateTemplate(@Param("id")id:string,@Body()d:MessageTemplateDto,@Req()r:Request&{user:User}){return this.c.updateTemplate(id,d,r.user)}
@@ -74,4 +74,4 @@ export class ChatwootWebhookController{constructor(private c:CommunicationsServi
 @Post("webhook")@HttpCode(200)receive(@Headers("x-chatwoot-signature")signature:string|undefined,@Query("token")token:string|undefined,@Req()request:Request&{rawBody?:Buffer},@Body()body:unknown){return this.c.receiveChatwootWebhook(request.rawBody??Buffer.from(JSON.stringify(body)),signature,token,body)}}
 
 @Controller("ai-assistant")@UseGuards(SessionGuard,RolesGuard)
-export class AiAssistantController{constructor(private a:AiAssistantService){}@Get("settings")@Roles("OWNER","ADMIN")settings(){return this.a.settings()}@Patch("settings")@Roles("OWNER","ADMIN")save(@Body()d:AiSettingsDto,@Req()r:Request&{user:User}){return this.a.save(d,r.user)}@Post("generate")@Roles("OWNER","ADMIN","MANAGER")generate(@Body()d:AiRequestDto,@Req()r:Request&{user:User}){return this.a.generateLimited(d,r.user)}}
+export class AiAssistantController{constructor(private a:AiAssistantService){}@Get("settings")@Roles("OWNER","ADMIN")settings(){return this.a.settings()}@Patch("settings")@Roles("OWNER","ADMIN")save(@Body()d:AiSettingsDto,@Req()r:Request&{user:User}){return this.a.save(d,r.user)}@Post("generate")@Roles("OWNER","ADMIN","MANAGER")generate(@Body()d:AiRequestDto,@Req()r:Request&{user:User}){return this.a.generateLimited(d,r.user)}@Post("messages/:id/translate")@Roles("OWNER","ADMIN","MANAGER")translateMessage(@Param("id")id:string,@Req()r:Request&{user:User}){return this.a.translateMessage(id,r.user)}}

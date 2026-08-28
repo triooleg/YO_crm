@@ -1,6 +1,6 @@
 "use client";
 import type { FormEvent, KeyboardEvent, PointerEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
   canRefreshInbox,
@@ -13,9 +13,11 @@ type Order = {
   number: string;
   modelImagePath?: string;
   productionStatus: string;
+  salesStatus?: string;
   notes?: string;
   priceMinor: number;
   currency: string;
+  payments?: { amountMinor: number; currency: string }[];
 };
 type Attachment = { type: string; url?: string; stickerId?: string; name?: string; mimeType?: string };
 type UploadedAttachment = { path: string; name: string; mimeType: string; sizeBytes: number };
@@ -38,10 +40,13 @@ type Client = {
   source: string;
   preferredChannel?: string;
   phone?: string;
+  email?: string;
   instagram?: string;
   orders: Order[];
+  buyerSummary?: { purchaseCount: number; paymentTotals: { currency: string; amountMinor: number }[] };
   conversations: ConversationPreview[];
 };
+type ClientPage = { items: Client[]; total: number; hasMore: boolean };
 type Message = {
   id: string;
   direction: string;
@@ -49,7 +54,7 @@ type Message = {
   createdAt: string;
   channel: string;
   status?: string;
-  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number };
+  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number; translation?: { text?: string; language?: string } };
 };
 type Template = {
   id: string;
@@ -165,7 +170,15 @@ export function CommunicationsWorkspace() {
     [templates, setTemplates] = useState<Template[]>([]),
     [templatesOpen, setTemplatesOpen] = useState(false),
     [text, setText] = useState(""),
+    [selectedMessageIds,setSelectedMessageIds]=useState<string[]>([]),
+    [replyInstruction,setReplyInstruction]=useState(""),
+    [replyMode,setReplyMode]=useState(false),
+    [aiReply,setAiReply]=useState<{messageIds:string[];phase:"RUSSIAN"|"TRANSLATED";sourceText?:string;targetLanguage?:string}|null>(null),
+    [translatingId,setTranslatingId]=useState<string|null>(null),
+    [aiPreparing,setAiPreparing]=useState(false),
     [search, setSearch] = useState(""),
+    [visibleClientCount,setVisibleClientCount]=useState(15),
+    [clientsHasMore,setClientsHasMore]=useState(false),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [messagesLoading, setMessagesLoading] = useState(false),
@@ -178,6 +191,12 @@ export function CommunicationsWorkspace() {
     [right, setRight] = useState(defaults.right);
   const widths = useRef({ ...defaults }),
     selectedClientId = useRef<string | undefined>(undefined),
+    composeEpoch = useRef(0),
+    listRequestSequence = useRef(0),
+    listLoading = useRef(false),
+    currentSearch = useRef(""),
+    currentClientCount = useRef(15),
+    aiOperationSequence = useRef(0),
     detailVersion = useRef(0),
     readVersion = useRef(0),
     readOperationSequence = useRef(0),
@@ -188,6 +207,8 @@ export function CommunicationsWorkspace() {
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null);
+  currentSearch.current=search;
+  currentClientCount.current=visibleClientCount;
   const accountLabel = connectedAccountLabel(client, activeChannel);
   const accountUrl = connectedAccountUrl(client, activeChannel);
   async function api(path: string, init?: RequestInit) {
@@ -201,6 +222,22 @@ export function CommunicationsWorkspace() {
       throw new Error(x.message || ui.requestError);
     }
     return r.json();
+  }
+  async function fetchClientWindow(count: number, query: string) {
+    const items: Client[] = [];
+    const seenIds = new Set<string>();
+    let offset = 0;
+    let hasMore = true;
+    let requests = 0;
+    while (items.length < count && hasMore && requests++ < 100) {
+      const limit = Math.min(60, Math.max(15, count - items.length));
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}`) as ClientPage;
+      offset += page.items.length;
+      for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
+      hasMore = page.hasMore;
+      if (!page.items.length) break;
+    }
+    return { items:items.slice(0,count), hasMore:hasMore||items.length>count };
   }
   function persistWidths() {
     localStorage.setItem(
@@ -300,6 +337,9 @@ export function CommunicationsWorkspace() {
       pendingSend.current = {};
     }
     selectedClientId.current = c.id;
+    composeEpoch.current++;
+    aiOperationSequence.current++;
+    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setTranslatingId(null);setAiPreparing(false);setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
@@ -339,31 +379,40 @@ export function CommunicationsWorkspace() {
       }
     }
   }
-  async function loadClients(id?: string) {
+  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search) {
+    const request=++listRequestSequence.current;
+    listLoading.current=true;
     setLoading(true);
     setError("");
     try {
-      const data = sortClients((await api("/communications")) as Client[]);
+      const page = await fetchClientWindow(requestedCount, requestedSearch);
+      if(request!==listRequestSequence.current)return;
+      const data = sortClients(page.items);
       setClients(data);
-      const selected = data.find((x) => x.id === id) || data[0];
-      if (selected) await open(selected);
-      else {
+      setClientsHasMore(page.hasMore);
+      const selected = id ? data.find((x) => x.id === id) : data[0];
+      if (selected&&selected.id===selectedClientId.current)setClient(selected);
+      else if(id&&selected)await open(selected);
+      else if(!selectedClientId.current&&selected)await open(selected);
+      else if(!selectedClientId.current) {
         selectedClientId.current = undefined;
         setClient(undefined);
         setMessages([]);
       }
     } catch (e) {
-      setError((e as Error).message);
+      if(request===listRequestSequence.current)setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if(request===listRequestSequence.current){setLoading(false);listLoading.current=false}
     }
   }
   async function refreshInbox() {
-    if (!canRefreshInbox(manualLoading.current, refreshing.current)) return;
+    if (listLoading.current||!canRefreshInbox(manualLoading.current, refreshing.current)) return;
     refreshing.current = true;
+    const listRequest=++listRequestSequence.current;
     const observedReadVersion = readVersion.current;
     try {
-      const data = sortClients((await api("/communications")) as Client[]).map(
+      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current);
+      const data = sortClients(page.items).map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
           if (!pending) return candidate;
@@ -380,8 +429,9 @@ export function CommunicationsWorkspace() {
           };
         },
       );
-      if (observedReadVersion !== readVersion.current) return;
+      if (observedReadVersion !== readVersion.current||listRequest!==listRequestSequence.current) return;
       setClients(data);
+      setClientsHasMore(page.hasMore);
       const selected = data.find((x) => x.id === selectedClientId.current);
       if (selected) {
         const request = {
@@ -444,19 +494,12 @@ export function CommunicationsWorkspace() {
       previewTrigger.current?.focus();
     };
   }, [preview]);
-  const filteredClients = useMemo(() => {
-    const q = search.trim().toLocaleLowerCase("ru");
-    return q
-      ? clients.filter((c) =>
-          [
-            c.displayName,
-            c.phone,
-            c.instagram,
-            ...clientBadges(c).map((x) => x.label),
-          ].some((v) => v?.toLocaleLowerCase("ru").includes(q)),
-        )
-      : clients;
-  }, [clients, search]);
+  const filteredClients = clients;
+  const visibleClients=filteredClients;
+  useEffect(()=>{
+    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search)},250);
+    return()=>clearTimeout(timer);
+  },[search]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,
@@ -478,8 +521,12 @@ export function CommunicationsWorkspace() {
     const d = e.key === "ArrowRight" ? 10 : -10;
     setWidth(side, widths.current[side] + d * (side === "left" ? 1 : -1), true);
   }
-  async function save(action: "DRAFT" | "SEND") {
-    if (!client || (!text.trim() && !attachment)) return;
+  async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
+    const messageText=(contentOverride??text).trim();
+    if (!client || (!messageText && !attachment)) return false;
+    if(action==="DRAFT")invalidateAiOperation();
+    const operationClientId=client.id,operationEpoch=composeEpoch.current;
+    const isActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
     setBusy(true);
     setError("");
     try {
@@ -491,6 +538,7 @@ export function CommunicationsWorkspace() {
             method: "POST",
             body: JSON.stringify({ name: attachment.name, mimeType: attachment.type, data: await readFile(attachment) }),
           });
+          if(!isActive())return false;
           pendingSend.current = { file: attachment, uploaded };
         }
       }
@@ -499,28 +547,30 @@ export function CommunicationsWorkspace() {
           method: "POST",
           body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID() } : {}) }),
         });
-        setMessages((current) => [...current, result]);
+        if(isActive())setMessages((current) => [...current, result]);
         return result as Message;
       };
       const sent: Message[] = [];
       if (action === "DRAFT") {
-        sent.push(await sendOne(text.trim() || undefined, uploaded));
+        sent.push(await sendOne(messageText || undefined, uploaded));
       } else {
         if (uploaded && !pendingSend.current.attachmentDelivered) {
           const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
           pendingSend.current = attempt.state;
           const { requestId } = attempt;
           const result = await sendOne(undefined, uploaded, requestId);
+          if(!isActive())return false;
           sent.push(result);
           pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
         }
-        if (!sent.some((message) => message.status === "FAILED") && text.trim()) {
-          const content = text.trim();
+        if (!sent.some((message) => message.status === "FAILED") && messageText) {
+          const content = messageText;
           const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
             ? pendingSend.current.textRequestId
             : crypto.randomUUID();
           pendingSend.current = { ...pendingSend.current, textContent: content, textRequestId };
           const result = await sendOne(content, undefined, textRequestId);
+          if(!isActive())return false;
           sent.push(result);
           if (result.status === "FAILED") {
             const { textContent: _content, textRequestId: _requestId, ...attachmentState } = pendingSend.current;
@@ -529,20 +579,25 @@ export function CommunicationsWorkspace() {
         }
       }
       const failed = sent.find((message) => message.status === "FAILED");
+      if(!isActive())return false;
       if (failed) {
         setError(sendFailureText(failed.metadata?.reason, activeChannel));
+        return false;
       }
       else {
         setText("");
+        if(action==="DRAFT")setAiReply(null);
         setAttachment(undefined);
         pendingSend.current = {};
         if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
         setAttachmentPreview("");
+        return true;
       }
     } catch (e) {
-      setError((e as Error).message);
+      if(isActive())setError((e as Error).message);
+      return false;
     } finally {
-      setBusy(false);
+      if(isActive())setBusy(false);
     }
   }
   function chooseAttachment(file?: File) {
@@ -553,7 +608,8 @@ export function CommunicationsWorkspace() {
   }
   async function ai(action: string) {
     if (!client) return;
-    setBusy(true);
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current;
+    setAiPreparing(true);
     setError("");
     try {
       const x = await api("/ai-assistant/generate", {
@@ -561,18 +617,46 @@ export function CommunicationsWorkspace() {
         body: JSON.stringify({
           action,
           text: text || messages.at(-1)?.content || "",
-          clientId: client.id,
+          clientId: operationClientId,
         }),
       });
-      setText(x.text);
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply(null)}
     } catch (e) {
-      setError((e as Error).message);
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false);
     }
   }
+  function invalidateAiOperation(){aiOperationSequence.current++;setAiPreparing(false)}
+  function toggleMessage(id:string){invalidateAiOperation();setSelectedMessageIds(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);setAiReply(null)}
+  async function translateMessage(message:Message){
+    if(!client)return;const operationClientId=client.id,operationEpoch=composeEpoch.current;
+    setTranslatingId(message.id);setError("");
+    try{const result=await api(`/ai-assistant/messages/${message.id}/translate`,{method:"POST",body:"{}"});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setMessages(current=>current.map(item=>item.id===message.id?{...item,metadata:result.metadata}:item))}
+    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setTranslatingId(null)}
+  }
+  async function generateSelectedReply(){
+    if(!client||!selectedMessageIds.length)return;
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current;
+    setAiPreparing(true);setError("");
+    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"REPLY",text:"",instructions:replyInstruction,clientId:operationClientId,messageIds:selectedMessageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply({messageIds:[...selectedMessageIds],phase:"RUSSIAN"})}}
+    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false)}
+  }
+  async function prepareAiTranslation(){
+    if(!client||!aiReply||!text.trim())return;
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current,sourceText=text.trim();
+    setAiPreparing(true);setError("");
+    try{const x=await api("/ai-assistant/generate",{method:"POST",body:JSON.stringify({action:"FINALIZE_REPLY",text:sourceText,clientId:operationClientId,messageIds:aiReply.messageIds})});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setAiReply({...aiReply,phase:"TRANSLATED",sourceText,targetLanguage:x.targetLanguage})}}
+    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false)}
+  }
+  async function sendConfirmedAiReply(){
+    if(!aiReply||aiReply.phase!=="TRANSLATED")return;
+    if(await save("SEND")){setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null)}
+  }
   function chooseTemplate(template: Template) {
+    invalidateAiOperation();
     setText(template.content);
+    setAiReply(null);
     setTemplatesOpen(false);
   }
   async function createClient(e: FormEvent<HTMLFormElement>) {
@@ -595,7 +679,11 @@ export function CommunicationsWorkspace() {
         },
       );
       setCreating(false);
-      await loadClients(created.id);
+      setSearch("");
+      const existingClient=client?.id===created.id?client:undefined;
+      const exactCreated={...created,orders:existingClient?.orders||[],conversations:existingClient?.conversations||[]} as Client;
+      await open(exactCreated);
+      await loadClients(created.id,15,"");
     } catch (x) {
       setError((x as Error).message);
     } finally {
@@ -604,6 +692,8 @@ export function CommunicationsWorkspace() {
   }
   const active = sourceBadge({source:activeChannel} as Client),
     availableChannels = client ? clientBadges(client) : [],
+    activeOrders=client?.orders||[],
+    purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     grid = left + "px 6px minmax(380px,1fr) 6px " + right + "px";
   return (
     <div className="communications-page">
@@ -615,7 +705,7 @@ export function CommunicationsWorkspace() {
         </div>
         <div className="communications-header-actions">
           <button onClick={() => setCreating(true)}>
-            {client?.status === "LEAD" ? ui.createFromMessage : ui.createClient}
+            {ui.createClient}
           </button>
           <button
             onClick={() => {
@@ -650,36 +740,29 @@ export function CommunicationsWorkspace() {
           {loading ? (
             <State text={ui.loading} />
           ) : (
-            filteredClients.map((c) => {
+            visibleClients.map((c) => {
               const badges = clientBadges(c),
                 unread = c.conversations.reduce(
                   (sum, x) => sum + (x.unreadCount || 0),
                   0,
                 ),
                 latest = latestConversation(c),
-                last = latest?.messages?.[0];
+                last = latest?.messages?.[0],
+                primaryBadge=badges.find(badge=>badge.key===latest?.channel)||badges[0];
               return (
                 <button
                   key={c.id}
                   className={client?.id === c.id ? "active" : ""}
                   onClick={() => void open(c)}
                 >
-                  <ClientAvatar className="communications-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
+                  <span className="communications-client-avatar-wrap">
+                    <ClientAvatar className="communications-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
+                    {primaryBadge&&<span className={`communications-avatar-source source-${primaryBadge.key.toLowerCase()}`} title={primaryBadge.label} aria-label={primaryBadge.label}>{primaryBadge.icon}</span>}
+                  </span>
                   <div>
                     <span className="communications-client-name">
                       <b>{c.displayName}</b>
-                      <span className="communications-source-icons">
-                        {badges.map((b) => (
-                          <span
-                            key={b.key}
-                            className="communications-source-icon"
-                            title={b.label}
-                            aria-label={b.label}
-                          >
-                            {b.icon}
-                          </span>
-                        ))}
-                      </span>
+                      {badges.length>1&&<span className="communications-source-icons">{badges.filter(badge=>badge.key!==primaryBadge?.key).map(badge=><span key={badge.key} className={`communications-source-icon source-${badge.key.toLowerCase()}`} title={badge.label} aria-label={badge.label}>{badge.icon}</span>)}</span>}
                     </span>
                     <small className="communications-client-preview">
                       {last?.content || badges.map((b) => b.label).join(" · ")}
@@ -697,12 +780,14 @@ export function CommunicationsWorkspace() {
                         })}
                       </time>
                     )}
+                    {last&&<time className="communications-client-date" dateTime={last.createdAt}>{new Date(last.createdAt).toLocaleDateString("ru")}</time>}
                     {unread > 0 && <em>{unread}</em>}
                   </span>
                 </button>
               );
             })
           )}
+          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
           {!loading && !filteredClients.length && (
             <State text={search ? ui.noSearchResults : ui.noClients} />
           )}
@@ -741,6 +826,7 @@ export function CommunicationsWorkspace() {
                     key={message.id}
                     className={message.direction === "OUTBOUND" ? "out" : "in"}
                   >
+                    {(message.direction === "INBOUND"||message.status === "DRAFT") && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     <span>{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">
@@ -778,10 +864,12 @@ export function CommunicationsWorkspace() {
                         })}
                       </div>
                     )}
+                    {message.metadata?.translation?.text && <div className="communications-message-translation"><span>{message.metadata.translation.text}</span></div>}
                     <small>
                       {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {new Date(message.createdAt).toLocaleString("ru")}
                     </small>
+                    {message.direction === "INBOUND" && <button type="button" className="communications-message-translate" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate}</button>}
                   </article>
                 );
               })
@@ -794,16 +882,15 @@ export function CommunicationsWorkspace() {
           <footer>
             <div className="communications-ai">
               <b>{ui.ai}</b>
+              <button type="button" disabled={busy||!client||!selectedMessageIds.length} onClick={()=>setReplyMode(true)}>{ui.reply}{selectedMessageIds.length?` (${selectedMessageIds.length})`:""}</button>
               {(
                 [
-                  ["REPLY", ui.reply],
-                  ["TRANSLATE", ui.translate],
                   ["IMPROVE", ui.improve],
                 ] as const
               ).map(([a, l]) => (
                 <button
                   key={a}
-                  disabled={busy || !client}
+                  disabled={busy || aiPreparing || !client}
                   onClick={() => void ai(a)}
                 >
                   {l}
@@ -835,6 +922,8 @@ export function CommunicationsWorkspace() {
                 )}
               </span>
             </div>
+            {replyMode&&selectedMessageIds.length>0&&<div className="communications-reply-task"><label>{ui.replyTask}<textarea value={replyInstruction} onChange={event=>setReplyInstruction(event.target.value)} placeholder={ui.replyTaskPlaceholder}/></label><button type="button" disabled={aiPreparing} onClick={()=>void generateSelectedReply()}>{aiPreparing?ui.aiPreparing:ui.prepareRussianDraft}</button></div>}
+            {aiReply&&<div className="communications-ai-draft-note">{aiReply.phase==="RUSSIAN"?ui.russianDraftHint:ui.translatedDraftHint}</div>}
             {attachment && (
               <div className="communications-selected-attachment">
                 {attachmentPreview && <img src={attachmentPreview} alt={ui.selectedAttachment} />}
@@ -849,7 +938,7 @@ export function CommunicationsWorkspace() {
               </label>
               <textarea
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {invalidateAiOperation();setText(e.target.value)}}
                 placeholder={ui.messagePlaceholder}
                 disabled={!client}
               />
@@ -861,10 +950,10 @@ export function CommunicationsWorkspace() {
               </button>
               {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && (
                 <button
-                  disabled={busy || !client || (!text.trim() && !attachment)}
-                  onClick={() => void save("SEND")}
+                  disabled={busy || aiPreparing || !client || (!text.trim() && !attachment)}
+                  onClick={() => void (aiReply?.phase==="RUSSIAN"?prepareAiTranslation():aiReply?.phase==="TRANSLATED"?sendConfirmedAiReply():save("SEND"))}
                 >
-                  {busy ? ui.sending : ui.sendMessage}
+                  {busy ? ui.sending : aiPreparing?ui.aiPreparing:aiReply?.phase==="RUSSIAN"?ui.prepareTranslation:aiReply?.phase==="TRANSLATED"?ui.confirmTranslationAndSend:ui.sendMessage}
                 </button>
               )}
             </div>
@@ -877,11 +966,12 @@ export function CommunicationsWorkspace() {
           onKey={resizeByKeyboard}
         />
         <aside className="communications-orders">
-          <header>
-            <b>{ui.clientOrders}</b>
-            <small>{client?.orders?.length || 0}</small>
-          </header>
-          {client?.orders?.map((o) => (
+          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagram&&<p><span>{ui.instagram}</span><b>{client.instagram}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
+          {client?.status!=="LEAD"&&<header>
+            <b>{ui.activeOrders}</b>
+            <small>{activeOrders.length}</small>
+          </header>}
+          {client?.status!=="LEAD"&&activeOrders.map((o) => (
             <article key={o.id}>
               {o.modelImagePath ? (
                 <img
@@ -907,7 +997,7 @@ export function CommunicationsWorkspace() {
               </div>
             </article>
           ))}
-          {client && !client.orders?.length && <State text={ui.noOrders} />}
+          {client?.status!=="LEAD"&&!activeOrders.length && <State text={ui.noActiveOrders} />}
         </aside>
       </section>
       {creating && (
@@ -941,11 +1031,15 @@ export function CommunicationsWorkspace() {
             </label>
             <label>
               {ui.phone}
-              <input name="phone" />
+              <input name="phone" defaultValue={client?.status==="LEAD"?client.phone||"":""}/>
+            </label>
+            <label>
+              {ui.email}
+              <input name="email" type="email" defaultValue={client?.status==="LEAD"?client.email||"":""}/>
             </label>
             <label>
               {ui.instagram}
-              <input name="instagram" />
+              <input name="instagram" defaultValue={client?.status==="LEAD"?client.instagram||"":""}/>
             </label>
             <label>
               {ui.source}

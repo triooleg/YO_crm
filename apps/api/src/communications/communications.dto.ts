@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
@@ -26,6 +27,11 @@ export const ALLOWED_AI_MODELS = [
 ] as const;
 export class ConversationQueryDto {
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
+}
+export class CommunicationsListQueryDto {
+  @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset = 0;
+  @IsOptional() @IsInt() @Min(1) @Max(60) @Type(() => Number) limit = 15;
+  @IsOptional() @IsString() @MaxLength(120) search?: string;
 }
 export class ReadConversationDto {
   @IsString() @Length(1, 80) id!: string;
@@ -109,8 +115,9 @@ export class MetaDataDeletionCompleteDto {
   @IsOptional() @IsString() @MaxLength(500) retentionNote?: string;
 }
 export class AiRequestDto {
-  @IsIn(["REPLY", "TRANSLATE", "IMPROVE", "TEMPLATE"] as const) action!:
+  @IsIn(["REPLY", "FINALIZE_REPLY", "TRANSLATE", "IMPROVE", "TEMPLATE"] as const) action!:
     | "REPLY"
+    | "FINALIZE_REPLY"
     | "TRANSLATE"
     | "IMPROVE"
     | "TEMPLATE";
@@ -118,6 +125,7 @@ export class AiRequestDto {
   @IsOptional() @IsString() @MaxLength(50) targetLanguage?: string;
   @IsOptional() @IsString() @MaxLength(2000) instructions?: string;
   @IsOptional() @IsString() clientId?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(80, { each: true }) messageIds?: string[];
 }
 export class AiSettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
