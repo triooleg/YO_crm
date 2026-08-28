@@ -61,6 +61,9 @@ function validCommunicationFile(bytes: Buffer, mimeType: string) {
   if (mimeType === "application/pdf") return bytes.subarray(0, 5).toString() === "%PDF-";
   return mimeType === "text/plain" && !bytes.includes(0);
 }
+function isDeduplicatedDraft(metadata: Prisma.JsonValue | null) {
+  return !!metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.deduplicatedIntoMessageId === "string";
+}
 type MetaOauthAttempt = { nonce: string; configRevision: number };
 function parseMetaOauthAttempt(value: unknown): MetaOauthAttempt | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -1091,7 +1094,7 @@ export class CommunicationsService {
     if (!client) throw new NotFoundException("Клиент не найден");
     if (!channel) {
       const conversations = await this.p.conversation.findMany({ where: { clientId, archivedAt: null }, include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } } });
-      const messages = conversations.flatMap(conversation => conversation.messages.map(message => ({ ...message, channel: conversation.channel }))).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-300);
+      const messages = conversations.flatMap(conversation => conversation.messages.filter(message => !isDeduplicatedDraft(message.metadata)).map(message => ({ ...message, channel: conversation.channel }))).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-300);
       return { id: null, clientId, channel: null, unreadCount: conversations.reduce((sum,x) => sum + x.unreadCount, 0), lastMessageAt: messages.at(-1)?.createdAt ?? null, messages };
     }
     const selected = channel;
@@ -1099,7 +1102,7 @@ export class CommunicationsService {
       where: { clientId_channel: { clientId, channel: selected } },
       include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } },
     });
-    return c ? { ...c, messages: c.messages.map(message => ({ ...message, channel: c.channel })) } : (
+    return c ? { ...c, messages: c.messages.filter(message => !isDeduplicatedDraft(message.metadata)).map(message => ({ ...message, channel: c.channel })) } : (
       {
         id: null,
         clientId,
@@ -1164,7 +1167,35 @@ export class CommunicationsService {
       selected.preferredChannel ||
       selected.source ||
       ContactChannel.MANUAL;
-    const content = d.content?.trim() || "";
+    if (d.draftMessageId && d.action !== "SEND")
+      throw new BadRequestException("Сохранённый черновик можно только отправить");
+    if (d.draftMessageId && d.clientRequestId) {
+      const [attempt, scopedConversation] = await Promise.all([
+        this.p.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId } }),
+        this.p.conversation.findFirst({ where: { clientId, channel, archivedAt: null }, select: { id: true } }),
+      ]);
+      if (attempt) {
+        if (!scopedConversation || attempt.clientId !== clientId || attempt.conversationId !== scopedConversation.id)
+          throw new ConflictException("Идентификатор отправки уже использован");
+        if (attempt.messageId) {
+          const [result, requestedDraft] = await Promise.all([
+            this.p.message.findUnique({ where: { id: attempt.messageId } }),
+            this.p.message.findUnique({ where: { id: d.draftMessageId }, select: { id: true, metadata: true } }),
+          ]);
+          const mergedInto = requestedDraft?.metadata && typeof requestedDraft.metadata === "object" && !Array.isArray(requestedDraft.metadata)
+            ? requestedDraft.metadata.deduplicatedIntoMessageId
+            : undefined;
+          if (!result || (result.id !== d.draftMessageId && mergedInto !== result.id))
+            throw new ConflictException("Результат отправки не относится к выбранному черновику");
+          return { ...result, status: attempt.status === "FAILED" ? MessageStatus.FAILED : result.status, channel };
+        }
+      }
+    }
+    const draft=d.draftMessageId?await this.p.message.findFirst({where:{id:d.draftMessageId,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversation:{clientId,channel,archivedAt:null}},select:{id:true,content:true,metadata:true}}):null;
+    if(d.draftMessageId&&!draft)throw new NotFoundException("Черновик не найден");
+    if(draft&&d.attachment)throw new BadRequestException("Вложение сохранённого черновика отправляется отдельно");
+    const content = draft?.content.trim() || d.content?.trim() || "";
+    const draftMetadata=draft?.metadata&&typeof draft.metadata==="object"&&!Array.isArray(draft.metadata)?draft.metadata as Prisma.JsonObject:{};
     const attachment = d.attachment ? await this.outboundAttachment(d.attachment, u, d.clientRequestId) : undefined;
     if (!content && !attachment)
       throw new BadRequestException("Сообщение не может быть пустым");
@@ -1199,6 +1230,10 @@ export class CommunicationsService {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
             if (existing) return existing;
+            if (draft) {
+              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
+              if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
+            }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
             if (pending) return pending;
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
@@ -1213,7 +1248,7 @@ export class CommunicationsService {
             throw new ConflictException("Идентификатор отправки уже использован");
           if (!prior.messageId) return { kind: "PENDING" as const };
           const existing = await this.p.message.findUnique({ where: { id: prior.messageId } });
-          if (existing) return { kind: "DONE" as const, result: { ...existing, channel } };
+          if (existing) return { kind: "DONE" as const, result: { ...existing, status:prior.status==="FAILED"?MessageStatus.FAILED:existing.status, channel } };
           throw new ConflictException("Результат отправки временно недоступен");
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
@@ -1238,21 +1273,32 @@ export class CommunicationsService {
         persistFailure: async (error) => this.p.$transaction(async (tx) => {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
           const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-          const m = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: { provider: "META", ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}), failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...failure } } });
+          const failureMetadata={...draftMetadata,provider:"META",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
+          const m=draft?await tx.message.update({where:{id:draft.id},data:{metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata:failureMetadata } });
           if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
           await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
           await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: `${channelName} не принял исходящее сообщение`, metadata: { messageId: m.id, channel } } });
-          await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: m.id, after: { id: m.id, channel, status: m.status } } });
-          return { ...m, channel };
+          await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: m.id, after: { id: m.id, channel, status: MessageStatus.FAILED } } });
+          return { ...m, status: MessageStatus.FAILED, channel };
         }),
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
         const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-        const m = await tx.message.upsert({
+        const successMetadata={...draftMetadata,provider:"META",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + result.message_id}, 0))`;
+        const existingEcho = draft ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } } }) : null;
+        const m = draft && existingEcho ? await tx.message.update({
+          where: { id: existingEcho.id },
+          data: { status: MessageStatus.SENT, content, authorId: u.id, metadata: successMetadata },
+        }) : draft ? await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content,externalId:result.message_id,authorId:u.id,metadata:successMetadata}}) : await tx.message.upsert({
           where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } },
-          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", externalId: result.message_id, authorId: u.id, metadata: { provider: "META", recipientId, receiverId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } },
-          update: { status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: { provider: "META", recipientId, receiverId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } },
+          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", externalId: result.message_id, authorId: u.id, metadata:successMetadata },
+          update: { status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata:successMetadata },
         });
+        if (draft && existingEcho) {
+          await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, metadata: { ...draftMetadata, deduplicatedIntoMessageId: m.id } } });
+          await tx.auditLog.create({ data: { actorId: u.id, action: "MERGE", entityType: "Message", entityId: draft.id, after: { deduplicatedIntoMessageId: m.id, externalId: result.message_id } } });
+        }
         if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
         await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
         await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "SENT", messageId: m.id } });

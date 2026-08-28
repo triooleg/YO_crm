@@ -621,6 +621,7 @@ export const communicationsUi = {
   removeAttachment: "Удалить вложение",
   fileReadError: "Не удалось прочитать выбранный файл",
   saveDraft: "Сохранить черновик",
+  sendSavedDraft: "Отправить черновик",
   saving: "Сохранение…",
   sendMessage: "Отправить",
   sending: "Отправка…",

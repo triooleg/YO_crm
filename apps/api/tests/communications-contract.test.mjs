@@ -205,6 +205,19 @@ test("outbound Facebook and Instagram messages distinguish drafts from real Meta
   assert.match(x, /GREATEST\(COALESCE\("lastMessageAt",\$\{m\.createdAt\}\),\$\{m\.createdAt\}\)/);
   assert.match(x, /conversationId:conversation\.id,status:"PENDING"/);
 });
+test("a saved draft is sent in place without creating a duplicate message",()=>{
+  assert.match(dto,/@IsUUID\("4"\)draftMessageId/);
+  assert.match(service,/draftMessageId&&d\.action!=="SEND"/);
+  assert.ok(service.indexOf("messageDeliveryAttempt.findUnique")<service.indexOf("constdraft=d.draftMessageId"),"a completed retry must resolve before the draft status check");
+  assert.match(service,/result\.id!==d\.draftMessageId&&mergedInto!==result\.id/);
+  assert.match(service,/draftMessageId.*status:MessageStatus\.DRAFT.*conversation:\{clientId,channel,archivedAt:null\}/s);
+  assert.match(service,/currentDraft.*status:MessageStatus\.DRAFT.*conversationId:conversation\.id/s);
+  assert.match(service,/draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT/s);
+  assert.match(service,/draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{metadata:/s);
+  assert.match(service,/"meta-echo:"\+conversation\.id\+":"\+result\.message_id/);
+  assert.match(service,/deduplicatedIntoMessageId:m\.id/);
+  assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,metadata:/);
+});
 
 test("Messenger thread-control mutations have separate durable history without customer data", () => {
   assert.match(service, /THREAD_CONTROL_TAKEN/);

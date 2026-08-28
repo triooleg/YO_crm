@@ -64,6 +64,14 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/ui\.confirmTranslationAndSend/);
   for(const key of["selectDraftForReply","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
 });
+test("сохранённый черновик имеет собственную идемпотентную отправку из ленты",()=>{
+  assert.match(component,/async function sendSavedDraft/);
+  assert.match(component,/draftMessageId:message\.id/);
+  assert.match(component,/message\.status === "DRAFT" && <button[^>]*communications-send-saved-draft/s);
+  assert.match(component,/pendingDraftSends\.current/);
+  assert.match(css,/communications-send-saved-draft/);
+  assert.match(locale,/sendSavedDraft:/);
+});
 
 test("composer sends both Facebook and Instagram conversations", () => {
   assert.match(component, /\["FACEBOOK", "INSTAGRAM"\]\.includes\(activeChannel\)/);

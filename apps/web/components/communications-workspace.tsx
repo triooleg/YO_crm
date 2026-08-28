@@ -177,6 +177,7 @@ export function CommunicationsWorkspace() {
     [aiDraftText,setAiDraftText]=useState(""),
     [translatingId,setTranslatingId]=useState<string|null>(null),
     [aiPreparing,setAiPreparing]=useState(false),
+    [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
     [search, setSearch] = useState(""),
     [visibleClientCount,setVisibleClientCount]=useState(15),
     [clientsHasMore,setClientsHasMore]=useState(false),
@@ -205,6 +206,7 @@ export function CommunicationsWorkspace() {
     pendingReads = useRef(new Map<string, Map<string, number>>()),
     pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
     pendingAiSend = useRef<{textContent?:string;textRequestId?:string}>({}),
+    pendingDraftSends = useRef(new Map<string,string>()),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
@@ -339,6 +341,7 @@ export function CommunicationsWorkspace() {
       setAttachmentPreview("");
       pendingSend.current = {};
       pendingAiSend.current = {};
+      pendingDraftSends.current.clear();
     }
     selectedClientId.current = c.id;
     composeEpoch.current++;
@@ -640,6 +643,13 @@ export function CommunicationsWorkspace() {
     try{const result=await api(`/ai-assistant/messages/${message.id}/translate`,{method:"POST",body:"{}"});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setMessages(current=>current.map(item=>item.id===message.id?{...item,metadata:result.metadata}:item))}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setTranslatingId(null)}
   }
+  async function sendSavedDraft(message:Message){
+    if(!client||message.status!=="DRAFT")return;
+    const operationClientId=client.id,operationEpoch=composeEpoch.current,requestId=pendingDraftSends.current.get(message.id)||crypto.randomUUID();
+    pendingDraftSends.current.set(message.id,requestId);setBusyDraftIds(current=>new Set(current).add(message.id));setError("");
+    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;if(result.status==="FAILED"){pendingDraftSends.current.delete(message.id);setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item))}
+    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{setBusyDraftIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
+  }
   async function generateSelectedReply(){
     if(!client||!selectedMessageIds.length)return;
     const operationClientId=client.id,operationEpoch=composeEpoch.current,operationSequence=++aiOperationSequence.current;
@@ -880,6 +890,7 @@ export function CommunicationsWorkspace() {
                       {new Date(message.createdAt).toLocaleString("ru")}
                     </small>
                     {message.direction === "INBOUND" && <button type="button" className="communications-message-translate" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate}</button>}
+                    {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>
                 );
               })
