@@ -44,3 +44,9 @@
 .communications-chat-account:is(a){display:flex;min-width:0;flex-direction:column;align-items:flex-start;text-decoration:none}
 .communications-chat-account:is(a)>span,.communications-chat-account:is(a)>small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .communications-chat-account:is(a)>small{color:var(--muted);font-size:11px}
+.communications-message-meta{display:flex!important;align-items:center;justify-content:flex-end;gap:5px}.communications-message-read{display:inline-flex;align-items:center;color:#c9ffdc;font-size:12px;font-weight:800;letter-spacing:-3px;padding-right:3px}
+
+/* Pointer actions stay quiet until the message is inspected. Keyboard focus and touch remain fully usable. */
+.communications-message-translate,.communications-save-template,.communications-media-save{opacity:0;pointer-events:none;transition:opacity .15s ease}
+.communications-messages article:hover .communications-message-translate,.communications-messages article:focus-within .communications-message-translate,.communications-messages article:hover .communications-save-template,.communications-messages article:focus-within .communications-save-template,.communications-media-attachment:hover .communications-media-save,.communications-media-attachment:focus-within .communications-media-save{opacity:1;pointer-events:auto}
+@media(hover:none),(pointer:coarse){.communications-message-translate,.communications-save-template,.communications-media-save{opacity:1;pointer-events:auto}}

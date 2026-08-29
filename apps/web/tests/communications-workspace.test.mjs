@@ -126,6 +126,22 @@ test("ответы отправленные вне CRM имеют подпись
   assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram"\s*\}/);
   assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
 });
+test("прочтение клиентом показано возле времени с доступной русской подсказкой",()=>{
+  assert.match(component,/message\.direction === "OUTBOUND" && message\.metadata\?\.metaReadAt && <span className="communications-message-read"[^>]*title=\{ui\.messageRead\}[^>]*aria-label=\{ui\.messageRead\}/);
+  assert.match(locale,/messageRead:\s*"Прочитано клиентом"/);
+  assert.match(css,/\.communications-message-read\{[^}]*display:inline-flex[^}]*color:/);
+});
+test("иконки действий появляются при наведении или фокусе и видимы на touch",()=>{
+  assert.match(css,/\.communications-message-translate,\.communications-save-template,\.communications-media-save\{[^}]*opacity:0[^}]*pointer-events:none/);
+  assert.match(css,/article:hover \.communications-message-translate/);
+  assert.match(css,/article:focus-within \.communications-save-template/);
+  assert.match(css,/\.communications-media-attachment:hover \.communications-media-save/);
+  assert.match(css,/@media\(hover:none\),\(pointer:coarse\)\{[^}]*\.communications-message-translate/);
+});
+test("ссылка на соцсеть содержит видимое действие и аккаунт второй строкой",()=>{
+  assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
+  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram"/);
+});
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
 

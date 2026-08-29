@@ -1,5 +1,13 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-29 — Meta bidirectional messaging hardening (local only)
+
+- Facebook Page subscription дополнена обязательным `message_echoes`; Instagram продолжает получать echo через официальный `messages` webhook.
+- Dedupe входящих ограничен конкретным scoped conversation (`channel + receiver/account + customer`), поэтому одинаковый Meta `mid` другого аккаунта не подавляется.
+- Meta echo теперь согласует CRM outbound без дубля, сохраняет Meta timestamp, `source=CRM|META` и нормализованные `MessageAttachment`; ручной исходящий echo никогда не создаёт клиента.
+- Добавлены тесты Facebook/Instagram echo, attachment-only Instagram echo, retry-idempotent metadata reconciliation, account-scoped dedupe и проверка полноты Messenger subscription.
+- Реальный внешний outbound smoke не выполнялся: production не изменялся. Обязательная процедура зафиксирована в `docs/META_BIDIRECTIONAL_MESSAGING.md`.
+
 ## 2026-08-29 — AI Intelligence P1A control center (local only)
 
 - Добавлен безопасный Control Center в `Настройки → AI-помощник`: эффективная политика ENV → global → channel → client → conversation, только режимы OFF/SHADOW, аудит изменений и лимиты worker. Auto-reply, CRM writes, auto-promote/confirm и автономные режимы остаются жёстко выключенными.

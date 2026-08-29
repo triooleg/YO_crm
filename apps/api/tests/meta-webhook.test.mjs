@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { facebookFallbackProfileTargets, legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, summarizeMetaWebhook, verifyMetaSignature } = module.exports;
+const { facebookFallbackProfileTargets, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -214,7 +214,7 @@ test("profile enrichment guards archived clients and logs only pseudonymous Meta
 });
 
 test("Meta subscription and persistence include outbound message echoes", () => {
-  assert.match(service, /subscribed_fields:\s*"messages,standby,messaging_postbacks,message_reads,messaging_optins"/);
+  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins"/);
   assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
   assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
   assert.match(service, /status:\s*MessageStatus\.SENT/);
@@ -321,6 +321,79 @@ test("normalizes Facebook message echoes as outbound messages with text and atta
   });
 });
 
+test("normalizes a read watermark without a message id and keeps exact account identity", () => {
+  const [event] = normalizeMetaControlEvents({ object:"page", entry:[{ id:"page-1", messaging:[{ sender:{id:"psid-1"}, recipient:{id:"page-1"}, timestamp:1700000005000, read:{watermark:1700000000000} }] }] });
+  assert.equal(event.eventType,"read");
+  assert.equal(event.receiverId,"page-1");
+  assert.equal(event.externalPartyId,"psid-1");
+  assert.equal(event.externalMessageId,undefined);
+  assert.equal(event.readWatermarkAt.toISOString(),"2023-11-14T22:13:20.000Z");
+});
+
+test("read metadata is monotonic and idempotent",()=>{
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReadMetadata({source:"CRM"},new Date("2026-08-30T10:00:00Z")))),{source:"CRM",metaReadAt:"2026-08-30T10:00:00.000Z"});
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReadMetadata({source:"CRM",metaReadAt:"2026-08-30T11:00:00.000Z"},new Date("2026-08-30T10:00:00Z")))),{source:"CRM",metaReadAt:"2026-08-30T11:00:00.000Z"});
+});
+
+test("malformed read watermarks are ignored instead of becoming now",()=>{
+  for(const watermark of [undefined,null,"bad",0,-1,1.5,"1.5",8640000000000001]){
+    const [event]=normalizeMetaControlEvents({object:"page",entry:[{id:"page-1",messaging:[{sender:{id:"psid-1"},recipient:{id:"page-1"},timestamp:1700000005000,read:{watermark}}]}]});
+    assert.equal(event.readWatermarkAt,undefined);
+  }
+});
+
+test("read watermark uses sentAt so an old draft sent later stays unread",()=>{
+  const watermark=new Date("2026-08-30T10:00:00Z");
+  assert.equal(isMetaMessageReadAt(new Date("2026-08-30T09:59:59Z"),watermark),true);
+  assert.equal(isMetaMessageReadAt(new Date("2026-08-30T10:00:01Z"),watermark),false);
+  assert.equal(isMetaMessageReadAt(null,watermark),false);
+});
+
+test("normalizes Facebook message echoes delivered through standby", () => {
+  const [echo] = normalizeMetaEchoMessages({ object: "page", entry: [{ id: "page-1", standby: [{ sender: { id: "page-1" }, recipient: { id: "psid-1" }, timestamp: 85, message: { mid: "standby-echo-mid", is_echo: true, text: "Ответ из Business Suite" } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(echo)), {
+    channel: "FACEBOOK",
+    externalRecipientId: "psid-1",
+    externalMessageId: "standby-echo-mid",
+    content: "Ответ из Business Suite",
+    receiverId: "page-1",
+    receivedAt: "1970-01-01T00:00:00.085Z",
+    metadata: { messageType: "text" },
+  });
+});
+
+test("safe webhook log summaries pseudonymize both sender and recipient identifiers", () => {
+  const safe = safeMetaWebhookLogSummary({ object: "page", entryId: "page-1", eventType: "message_echo", senderId: "page-1", recipientId: "customer-igsid", mid: "mid-1", hasText: true, attachmentCount: 0, attachmentTypes: [], isEcho: true, isTest: false });
+  const serialized = JSON.stringify(safe);
+  assert.equal(serialized.includes("customer-igsid"), false);
+  assert.equal(serialized.includes('"senderId"'), false);
+  assert.equal(serialized.includes('"recipientId"'), false);
+  assert.match(safe.senderRef, /^[a-f0-9]{12}$/);
+  assert.match(safe.recipientRef, /^[a-f0-9]{12}$/);
+});
+
+test("normalizes Instagram message echoes from the shared messages subscription", () => {
+  const [echo] = normalizeMetaEchoMessages({ object: "instagram", entry: [{ id: "ig-business-1", messaging: [{ sender: { id: "ig-business-1" }, recipient: { id: "igsid-1" }, timestamp: 84, message: { mid: "ig-echo-mid", is_echo: true, attachments: [{ type: "video", payload: { url: "https://cdn.example/reply.mp4" } }] } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(echo)), {
+    channel: "INSTAGRAM",
+    externalRecipientId: "igsid-1",
+    externalMessageId: "ig-echo-mid",
+    content: "[Видео]",
+    receiverId: "ig-business-1",
+    receivedAt: "1970-01-01T00:00:00.084Z",
+    metadata: { messageType: "video", attachmentTypes: ["video"], attachments: [{ type: "video", url: "https://cdn.example/reply.mp4" }] },
+  });
+});
+
+test("echo reconciliation preserves CRM provenance, records Meta chronology and is retry-idempotent", () => {
+  const at = new Date("2026-08-29T10:20:30.000Z");
+  const crm = mergeMetaEchoMetadata({ source: "CRM", requestId: "request-1" }, { messageType: "text" }, "page-1", at);
+  assert.deepEqual(JSON.parse(JSON.stringify(crm)), { source: "CRM", requestId: "request-1", messageType: "text", receiverId: "page-1", provider: "META", metaEchoReceivedAt: at.toISOString() });
+  assert.equal(metaEchoAlreadyProcessed(crm), true);
+  assert.equal(mergeMetaEchoMetadata({}, { messageType: "image" }, "ig-1", at).source, "META");
+  assert.equal(metaEchoAlreadyProcessed({}), false);
+});
+
 test("normalizes control events without creating inbound messages", () => {
   const payload = { object: "page", entry: [{ id: "page-1", messaging: [
     { recipient: { id: "page-1" }, timestamp: 10, delivery: { mids: ["m-1", "m-2"] } },
@@ -331,6 +404,17 @@ test("normalizes control events without creating inbound messages", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaControlEvents(payload).map(x => [x.eventType, x.externalMessageId, x.editedText]))), [
     ["delivery", "m-1", null], ["delivery", "m-2", null], ["message_edit", "m-3", "Исправленный текст"], ["reaction", "m-4", null],
   ]);
+});
+
+test("control events retain account and counterparty scope and fail closed when a mid is ambiguous", () => {
+  const [event] = normalizeMetaControlEvents({ object: "page", entry: [{ id: "page-1", messaging: [{ sender: { id: "psid-1" }, recipient: { id: "page-1" }, timestamp: 10, reaction: { mid: "same-mid", reaction: "love" } }] }] });
+  assert.equal(event.receiverId, "page-1");
+  assert.equal(event.externalPartyId, "psid-1");
+  const page1 = { id: "m1", conversationExternalId: "page-1:psid-1" };
+  const page2 = { id: "m2", conversationExternalId: "page-2:psid-1" };
+  assert.equal(uniqueMetaControlTarget([page1, page2], "page-1"), page1);
+  assert.equal(uniqueMetaControlTarget([page1, { id: "m3", conversationExternalId: "page-1:psid-2" }], "page-1"), undefined);
+  assert.equal(uniqueMetaControlTarget([page1], undefined), undefined);
 });
 
 test("verifies the exact raw body with X-Hub-Signature-256", () => {

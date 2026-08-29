@@ -596,6 +596,7 @@ export const communicationsUi = {
     openConversationByChannel: { FACEBOOK: "Открыть переписку в Facebook", INSTAGRAM: "Открыть переписку в Instagram" },
     externalReplyByChannel: { FACEBOOK: "Ответ отправлен через Facebook", INSTAGRAM: "Ответ отправлен через Instagram" },
     externalReplyOutsideCrm: "Ответ отправлен вне CRM",
+    messageRead: "Прочитано клиентом",
   templatesList: "Сохранённые шаблоны",
   saveAsTemplate: "Сохранить как шаблон",
   templateNamePrompt: "Введите название шаблона",

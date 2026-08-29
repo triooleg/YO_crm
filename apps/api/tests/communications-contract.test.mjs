@@ -223,10 +223,10 @@ test("a saved draft is sent in place without creating a duplicate message",()=>{
   assert.match(service,/draftMessageId.*status:MessageStatus\.DRAFT.*conversation:\{clientId,channel,archivedAt:null\}/s);
   assert.match(service,/currentDraft.*status:MessageStatus\.DRAFT.*conversationId:conversation\.id/s);
   assert.match(service,/draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT/s);
-  assert.match(service,/draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{metadata:/s);
+  assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,sentAt,metadata:/s);
   assert.match(service,/"meta-echo:"\+conversation\.id\+":"\+result\.message_id/);
   assert.match(service,/deduplicatedIntoMessageId:m\.id/);
-  assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,metadata:/);
+  assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,sentAt,metadata:/);
 });
 
 test("Messenger thread-control mutations have separate durable history without customer data", () => {
@@ -316,13 +316,22 @@ test("Meta inbound webhook is public but signed, idempotent and audited", () => 
   assert.match(service, /verifyMetaSignature/);
   assert.match(service, /normalizeMetaWebhook/);
   assert.match(service, /externalId_channel/);
-  assert.match(service, /externalId:event\.externalMessageId,conversation:\{channel\}/);
+  assert.match(service, /conversationId_externalId:\{conversationId:conversation\.id,externalId:event\.externalMessageId\}/);
   assert.match(service, /MessageDirection\.INBOUND/);
   assert.match(service, /unreadCount:\{increment:1\}/);
   assert.match(service, /INBOUND_MESSAGE_RECEIVED/);
   for (const event of ["META_WEBHOOK_RECEIVED", "META_MESSAGE_PARSED", "META_CLIENT_CREATED", "META_CONVERSATION_CREATED", "META_MESSAGE_CREATED", "META_MESSAGE_DUPLICATE_SKIPPED", "META_MESSAGE_ERROR", "META_WEBHOOK_RESPONDED"])
     assert.match(service, new RegExp(event));
   assert.match(service, /summarizeMetaWebhook/);
+});
+
+test("Meta synchronization scopes dedupe to the connected account and persists echo provenance and attachments", () => {
+  assert.match(service, /conversationId_externalId:\{conversationId:conversation\.id,externalId:event\.externalMessageId/);
+  assert.match(service, /source:provider==="META"\?"META":"CHATWOOT"/);
+  assert.match(service, /source:"CRM"/);
+  assert.match(service, /tx\.messageAttachment\.create/);
+  assert.match(service, /mergeMetaEchoMetadata/);
+  assert.match(service, /message_echoes/);
 });
 
 test("Meta secrets are encrypted and settings return only safe connection status", () => {
@@ -346,6 +355,15 @@ test("Meta delivery is verified by a real Page subscription before it is reporte
   assert.match(service, /lastWebhookAt/);
   assert.match(service, /metaDeliveryStatus/);
   assert.match(service, /isMetaAccessToken\(saved\)/);
+});
+
+test("Meta read watermark marks only sent outbound messages in the exact account conversation",()=>{
+  assert.match(service,/event\.eventType==="read"&&event\.readWatermarkAt&&event\.receiverId&&event\.externalPartyId/);
+  assert.match(service,/metaConversationExternalId\(receiverId,externalPartyId\)/);
+  assert.match(service,/direction:MessageDirection\.OUTBOUND,status:MessageStatus\.SENT,sentAt:\{lte:readWatermarkAt\}/);
+  assert.match(service,/mergeMetaReadMetadata\(message\.metadata,readWatermarkAt\)/);
+  assert.match(service,/constsentAt=newDate\(\)/);
+  assert.match(service,/status:MessageStatus\.SENT[^}]*sentAt/);
 });
 
 test("changing Meta delivery identity invalidates both Facebook and Instagram readiness", () => {

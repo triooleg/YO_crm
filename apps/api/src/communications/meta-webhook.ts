@@ -22,6 +22,26 @@ export type MetaEchoMessage = Omit<MetaInboundMessage, "externalSenderId" | "dis
   externalRecipientId: string;
 };
 
+export function metaEchoAlreadyProcessed(metadata: unknown) {
+  return Boolean(metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof (metadata as AnyRecord).metaEchoReceivedAt === "string");
+}
+
+export function mergeMetaEchoMetadata(existing: unknown, eventMetadata: MetaEchoMessage["metadata"], receiverId: string | undefined, sentAt: Date) {
+  const prior = existing && typeof existing === "object" && !Array.isArray(existing) ? existing as AnyRecord : {};
+  return { ...prior, ...eventMetadata, receiverId, provider: "META", source: prior.source === "CRM" ? "CRM" : "META", metaEchoReceivedAt: sentAt.toISOString() };
+}
+
+export function mergeMetaReadMetadata(existing: unknown, readAt: Date) {
+  const prior = existing && typeof existing === "object" && !Array.isArray(existing) ? existing as AnyRecord : {};
+  const previous = typeof prior.metaReadAt === "string" ? new Date(prior.metaReadAt) : undefined;
+  if (previous && Number.isFinite(previous.getTime()) && previous.getTime() >= readAt.getTime()) return { ...prior };
+  return { ...prior, metaReadAt: readAt.toISOString() };
+}
+
+export function isMetaMessageReadAt(sentAt: Date | null | undefined, watermarkAt: Date) {
+  return Boolean(sentAt && Number.isFinite(sentAt.getTime()) && sentAt.getTime() <= watermarkAt.getTime());
+}
+
 export type MetaWebhookEventSummary = {
   object: string;
   entryId?: string;
@@ -39,9 +59,11 @@ export type MetaWebhookEventSummary = {
 export type MetaControlEvent = {
   channel: "FACEBOOK" | "INSTAGRAM";
   receiverId?: string;
+  externalPartyId?: string;
   externalMessageId?: string;
   eventType: "message_echo" | "read" | "delivery" | "reaction" | "message_edit" | "postback";
   receivedAt: Date;
+  readWatermarkAt?: Date;
   editedText?: string;
 };
 
@@ -50,6 +72,12 @@ const records = (value: unknown): AnyRecord[] => Array.isArray(value) ? value.fi
 const asDate = (value: unknown, seconds = false) => {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? new Date(n * (seconds ? 1000 : 1)) : new Date();
+};
+const strictMetaTimestamp = (value: unknown) => {
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0 || n > 8_640_000_000_000_000) return undefined;
+  const parsed = new Date(n);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 };
 
 export function metaConversationExternalId(receiverId: string | undefined, senderId: string) {
@@ -272,6 +300,17 @@ export function metaIdentityLogRef(value: string | undefined) {
   return value ? createHash("sha256").update(value).digest("hex").slice(0, 12) : undefined;
 }
 
+export function safeMetaWebhookLogSummary(summary: MetaWebhookEventSummary) {
+  const { senderId, recipientId, ...safe } = summary;
+  return { ...safe, senderRef: metaIdentityLogRef(senderId), recipientRef: metaIdentityLogRef(recipientId) };
+}
+
+export function uniqueMetaControlTarget<T extends { conversationExternalId: string }>(candidates: T[], receiverId: string | undefined) {
+  if (!receiverId) return undefined;
+  const scoped = candidates.filter(candidate => candidate.conversationExternalId.startsWith(receiverId + ":"));
+  return scoped.length === 1 ? scoped[0] : undefined;
+}
+
 export function metaWebhookReceiverMatches(
   channel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP",
   receiverId: string | undefined,
@@ -359,7 +398,7 @@ export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
   const value = payload as AnyRecord;
   if (value.object !== "page" && value.object !== "instagram") return [];
   const channel: MetaEchoMessage["channel"] = value.object === "page" ? "FACEBOOK" : "INSTAGRAM", output: MetaEchoMessage[] = [];
-  for (const entry of records(value.entry)) for (const event of records(entry.messaging)) {
+  for (const entry of records(value.entry)) for (const event of [...records(entry.messaging), ...records(entry.standby)]) {
     const message = event.message;
     if (!message?.mid || message.is_echo !== true || !event.recipient?.id) continue;
     const attachments = records(message.attachments).map(x => ({
@@ -426,7 +465,10 @@ export function normalizeMetaControlEvents(payload: unknown): MetaControlEvent[]
     if (!(["message_echo", "read", "delivery", "reaction", "message_edit", "postback"] as string[]).includes(eventType)) continue;
     const source = event.message_edit || event.reaction || event.message_reaction || event.postback || event.delivery || event.read || event.message || {};
     const mids = Array.isArray(source.mids) ? source.mids : [source.mid || event.message?.mid].filter(Boolean);
-    const base = { channel, receiverId: String(entry.id || event.recipient?.id || "") || undefined, eventType: eventType as MetaControlEvent["eventType"], receivedAt: asDate(event.timestamp) };
+    const receiverId = String(entry.id || event.recipient?.id || "") || undefined;
+    const externalPartyId = [event.sender?.id, event.recipient?.id].map(value => value === undefined ? "" : String(value)).find(value => value && value !== receiverId);
+    const readWatermarkAt = eventType === "read" ? strictMetaTimestamp(source.watermark) : undefined;
+    const base = { channel, receiverId, ...(externalPartyId ? { externalPartyId } : {}), eventType: eventType as MetaControlEvent["eventType"], receivedAt: asDate(event.timestamp), ...(readWatermarkAt ? { readWatermarkAt } : {}) };
     if (!mids.length) output.push(base);
     else for (const mid of mids) output.push({ ...base, externalMessageId: String(mid), ...(eventType === "message_edit" && typeof source.text === "string" ? { editedText: source.text.trim().slice(0, 5000) } : {}) });
   }

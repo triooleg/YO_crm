@@ -31,7 +31,7 @@ import {
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { legacyConversationMatchesReceiver, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeTokenEqual, summarizeMetaWebhook, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
+import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -569,7 +569,7 @@ export class CommunicationsService {
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret, false, "FACEBOOK_VERIFY");
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
@@ -741,7 +741,7 @@ export class CommunicationsService {
     try {
       const page = await this.metaGraph<MetaPageIdentity>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
-      const fields = "messages,standby,messaging_postbacks,message_reads,messaging_optins";
+      const fields = "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
@@ -867,8 +867,7 @@ export class CommunicationsService {
   async receiveMetaWebhook(rawBody: Buffer, signature: string | undefined, payload: unknown) {
     const timestamp = new Date().toISOString(), summaries = summarizeMetaWebhook(payload);
     for (const summary of summaries.length ? summaries : [{ object: "unknown", eventType: "unknown", hasText: false, attachmentCount: 0, attachmentTypes: [], isEcho: false, isTest: false }]) {
-      const { senderId, ...safeSummary } = summary;
-      this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RECEIVED", timestamp, ...safeSummary, senderRef: metaIdentityLogRef(senderId) }));
+      this.logger.log(JSON.stringify({ event: "META_WEBHOOK_RECEIVED", timestamp, ...safeMetaWebhookLogSummary(summary) }));
     }
     try {
       const values = await this.sectionValues("integration.meta");
@@ -1004,10 +1003,35 @@ export class CommunicationsService {
     }catch(error){this.logger.warn(JSON.stringify({event:"META_PROFILE_LOOKUP_FAILED",senderRef:metaIdentityLogRef(senderId),errorType:error instanceof Error?error.constructor.name:"UnknownError"}))}
   }
   private async applyMetaControl(event: MetaControlEvent) {
+    if (event.eventType === "read" && event.readWatermarkAt && event.receiverId && event.externalPartyId) {
+      const receiverId = event.receiverId, externalPartyId = event.externalPartyId, readWatermarkAt = event.readWatermarkAt;
+      return this.p.$transaction(async tx => {
+        const externalId = metaConversationExternalId(receiverId, externalPartyId);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-read:" + event.channel + ":" + externalId}, 0))`;
+        const conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId, channel: event.channel as ContactChannel } }, select: { id: true } });
+        if (!conversation) return false;
+        const messages = await tx.message.findMany({ where: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, sentAt: { lte: readWatermarkAt } }, select: { id: true, sentAt: true, metadata: true } });
+        let updatedCount = 0;
+        for (const message of messages) {
+          if (!isMetaMessageReadAt(message.sentAt, readWatermarkAt)) continue;
+          const metadata = mergeMetaReadMetadata(message.metadata, readWatermarkAt);
+          const previousReadAt = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? (message.metadata as Prisma.JsonObject).metaReadAt : undefined;
+          if (previousReadAt === metadata.metaReadAt) continue;
+          await tx.message.update({ where: { id: message.id }, data: { metadata: metadata as Prisma.InputJsonValue } });
+          updatedCount++;
+        }
+        if (updatedCount) await tx.auditLog.create({ data: { action: "UPDATE", entityType: "ConversationReadReceipt", entityId: conversation.id, after: { channel: event.channel, watermarkAt: readWatermarkAt.toISOString(), updatedCount } } });
+        this.logger.log(JSON.stringify({ event: "META_READ_WATERMARK_APPLIED", channel: event.channel, conversationId: conversation.id, updatedCount }));
+        return updatedCount > 0;
+      });
+    }
     if (!event.externalMessageId) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, recipientId: event.receiverId, reason: "noMessageId" })); return false; }
     return this.p.$transaction(async tx => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-control:" + event.channel + ":" + event.externalMessageId}, 0))`;
-      const message = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel: event.channel as ContactChannel } }, select: { id: true, content: true, metadata: true } });
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-control:" + event.channel + ":" + event.receiverId + ":" + event.externalMessageId}, 0))`;
+      const exactConversationId = event.externalPartyId ? metaConversationExternalId(event.receiverId, event.externalPartyId) : undefined;
+      const candidates = await tx.message.findMany({ where: { externalId: event.externalMessageId, conversation: { channel: event.channel as ContactChannel, ...(exactConversationId ? { externalId: exactConversationId } : event.receiverId ? { externalId: { startsWith: event.receiverId + ":" } } : { externalId: "" }) } }, take: 2, select: { id: true, content: true, metadata: true, conversation: { select: { externalId: true } } } });
+      const target = uniqueMetaControlTarget(candidates.map(candidate => ({ ...candidate, conversationExternalId: candidate.conversation.externalId || "" })), event.receiverId);
+      const message = target;
       if (!message) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, mid: event.externalMessageId, recipientId: event.receiverId, reason: "messageNotFound" })); return false; }
       const oldMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Prisma.JsonObject : {};
       const updated = await tx.message.update({ where: { id: message.id }, data: { ...(event.editedText ? { content: event.editedText } : {}), metadata: { ...oldMetadata, lastMetaControl: { type: event.eventType, receivedAt: event.receivedAt.toISOString() } } } });
@@ -1028,17 +1052,26 @@ export class CommunicationsService {
           await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel: event.channel, identityScope: "receiverId+recipientId", source: "META_ECHO" } } });
         }
       }
-      if (!conversation || conversation.archivedAt) { this.logger.warn(JSON.stringify({ event: "META_ECHO_IGNORED", channel: event.channel, recipientId: event.externalRecipientId, mid: event.externalMessageId, reason: "conversationNotFound" })); return false; }
+      if (!conversation || conversation.archivedAt) { this.logger.warn(JSON.stringify({ event: "META_ECHO_IGNORED", channel: event.channel, recipientRef: metaIdentityLogRef(event.externalRecipientId), mid: event.externalMessageId, reason: "conversationNotFound" })); return false; }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + event.externalMessageId}, 0))`;
-      const duplicate = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true } });
-      if (duplicate) return false;
       const sentAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
-      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, metadata: { ...event.metadata, receiverId: event.receiverId, source: "META_ECHO" } as Prisma.InputJsonValue } });
+      const duplicate = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true, metadata: true } });
+      const oldMetadata = duplicate?.metadata && typeof duplicate.metadata === "object" && !Array.isArray(duplicate.metadata) ? duplicate.metadata as Prisma.JsonObject : {};
+      if (duplicate && metaEchoAlreadyProcessed(oldMetadata)) return false;
+      const mergedMetadata = mergeMetaEchoMetadata(oldMetadata, event.metadata, event.receiverId, sentAt);
+      const source = mergedMetadata.source === "CRM" ? "CRM" : "META";
+      const metadata = mergedMetadata as Prisma.InputJsonValue;
+      const message = duplicate
+        ? await tx.message.update({ where: { id: duplicate.id }, data: { direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, createdAt: sentAt, sentAt, metadata } })
+        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, sentAt, metadata } });
+      const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
+      const existingAttachmentCount = duplicate ? await tx.messageAttachment.count({ where: { messageId: message.id } }) : 0;
+      if (!existingAttachmentCount) for (const attachment of normalizedAttachments) await tx.messageAttachment.create({ data: { messageId: message.id, type: attachment.type || "attachment", externalUrl: attachment.url, metadata: attachment as Prisma.InputJsonValue } });
       const lastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > sentAt.getTime() ? conversation.lastMessageAt : sentAt;
       await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt } });
-      await tx.activity.create({ data: { clientId: conversation.clientId, type: "OUTBOUND_MESSAGE_SYNCED", summary: "Исходящее сообщение синхронизировано из " + event.channel, metadata: { messageId: message.id, channel: event.channel } } });
-      await tx.auditLog.create({ data: { action: "CREATE", entityType: "OutboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId, source: "META_ECHO" } } });
-      this.logger.log(JSON.stringify({ event: "META_ECHO_CREATED", channel: event.channel, recipientId: event.externalRecipientId, mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id }));
+      await tx.activity.create({ data: { clientId: conversation.clientId, type: "OUTBOUND_MESSAGE_SYNCED", summary: "Исходящее сообщение синхронизировано из " + event.channel, metadata: { messageId: message.id, channel: event.channel, source } } });
+      await tx.auditLog.create({ data: { action: duplicate ? "SYNC" : "CREATE", entityType: "OutboundMessage", entityId: message.id, after: { channel: event.channel, externalMessageId: event.externalMessageId, source } } });
+      this.logger.log(JSON.stringify({ event: "META_ECHO_CREATED", channel: event.channel, recipientRef: metaIdentityLogRef(event.externalRecipientId), mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id }));
       return true;
     });
   }
@@ -1059,8 +1092,8 @@ export class CommunicationsService {
   private async persistInbound(event: MetaInboundMessage | ChatwootInboundMessage, provider: "META" | "CHATWOOT", rawPayload: Prisma.InputJsonValue) {
     return this.p.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + event.externalMessageId}, 0))`;
       const channel = event.channel as ContactChannel, externalConversationId = provider === "META" ? metaConversationExternalId(event.receiverId, event.externalSenderId) : event.externalSenderId;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + externalConversationId + ":" + event.externalMessageId}, 0))`;
       let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: externalConversationId, channel } } });
       if (!conversation && provider === "META" && externalConversationId !== event.externalSenderId) {
         const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
@@ -1069,7 +1102,7 @@ export class CommunicationsService {
           await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel, identityScope: "receiverId+senderId" } } });
         }
       }
-      const duplicate = await tx.message.findFirst({ where: { externalId: event.externalMessageId, conversation: { channel } }, select: { id: true } });
+      const duplicate = conversation ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true } }) : null;
       if (duplicate) { if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_DUPLICATE_SKIPPED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), mid: event.externalMessageId })); return false; }
       let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } }) : null;
       let ambiguousMatches = 0;
@@ -1121,7 +1154,7 @@ export class CommunicationsService {
       const receivedAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
       const messageType = typeof event.metadata.messageType === "string" ? event.metadata.messageType : "text";
       const envelope=await tx.webhookEnvelope.create({data:{provider,payload:rawPayload,payloadHash:createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex"),receivedAt}});
-      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType, externalId: event.externalMessageId, createdAt: receivedAt, receivedAt, rawPayload, webhookEnvelopeId:envelope.id, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined } as Prisma.InputJsonValue } });
+      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType, externalId: event.externalMessageId, createdAt: receivedAt, receivedAt, rawPayload, webhookEnvelopeId:envelope.id, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined, source: provider === "META" ? "META" : "CHATWOOT" } as Prisma.InputJsonValue } });
       const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
       for (const attachment of normalizedAttachments) if (attachment && typeof attachment === "object" && !Array.isArray(attachment)) {
         const item = attachment as Record<string, unknown>;
@@ -1423,7 +1456,7 @@ export class CommunicationsService {
         persistFailure: async (error) => this.p.$transaction(async (tx) => {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
           const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-          const failureMetadata={...draftMetadata,provider:"META",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
+          const failureMetadata={...draftMetadata,provider:"META",source:"CRM",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
           const m=draft?await tx.message.update({where:{id:draft.id},data:{metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata:failureMetadata } });
           if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
@@ -1434,20 +1467,23 @@ export class CommunicationsService {
           return { ...m, status: MessageStatus.FAILED, channel };
         }),
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
+        const sentAt=new Date();
         const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-        const successMetadata={...draftMetadata,provider:"META",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+        const successMetadata={...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + result.message_id}, 0))`;
-        const existingEcho = draft ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } } }) : null;
+        const existingEcho = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } } });
+        const existingEchoMetadata=existingEcho?.metadata&&typeof existingEcho.metadata==="object"&&!Array.isArray(existingEcho.metadata)?existingEcho.metadata as Prisma.JsonObject:{};
+        const mergedSuccessMetadata={...existingEchoMetadata,...successMetadata};
         const m = draft && existingEcho ? await tx.message.update({
           where: { id: existingEcho.id },
-          data: { status: MessageStatus.SENT, content, authorId: u.id, metadata: successMetadata },
-        }) : draft ? await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content,externalId:result.message_id,authorId:u.id,metadata:successMetadata}}) : await tx.message.upsert({
+          data: { status: MessageStatus.SENT, content, authorId: u.id, sentAt, metadata: mergedSuccessMetadata },
+        }) : draft ? await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content,externalId:result.message_id,authorId:u.id,sentAt,metadata:successMetadata}}) : await tx.message.upsert({
           where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } },
-          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", externalId: result.message_id, authorId: u.id, metadata:successMetadata },
-          update: { status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata:successMetadata },
+          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", externalId: result.message_id, authorId: u.id, sentAt, metadata:successMetadata },
+          update: { status: MessageStatus.SENT, content: content || attachment?.name || "[Вложение]", authorId: u.id, sentAt, metadata:mergedSuccessMetadata },
         });
         if (draft && existingEcho) {
-          await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, metadata: { ...draftMetadata, deduplicatedIntoMessageId: m.id } } });
+          await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, sentAt, metadata: { ...draftMetadata, deduplicatedIntoMessageId: m.id } } });
           await tx.auditLog.create({ data: { actorId: u.id, action: "MERGE", entityType: "Message", entityId: draft.id, after: { deduplicatedIntoMessageId: m.id, externalId: result.message_id } } });
         }
         if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
