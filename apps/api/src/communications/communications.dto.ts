@@ -53,6 +53,7 @@ export class SendMessageDto {
   @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
   @IsOptional() @IsUUID("4") clientRequestId?: string;
   @IsOptional() @IsUUID("4") draftMessageId?: string;
+  @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
 }
 export class UploadCommunicationAttachmentDto {
@@ -127,6 +128,7 @@ export class AiRequestDto {
   @IsOptional() @IsString() @MaxLength(2000) instructions?: string;
   @IsOptional() @IsString() clientId?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(80, { each: true }) messageIds?: string[];
+  @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
 }
 export class AiSettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;

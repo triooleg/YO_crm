@@ -15,3 +15,7 @@ backups/
 *.tar
 *.tgz
 *.tsbuildinfo
+.playwright-cli/
+apps/web/.next-*/
+output/
+tmp/

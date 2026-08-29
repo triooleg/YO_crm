@@ -45,7 +45,8 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/communications-ai-draft-message/);
   assert.match(component,/value=\{aiDraftText\}/);
   assert.match(component,/pendingAiSend/);
-  assert.match(component,/body:JSON\.stringify\(\{content,channel:activeChannel,action:"SEND",clientRequestId:requestId\}\)/);
+  assert.match(component,/body:JSON\.stringify\(\{content,channel:activeChannel,action:"SEND",clientRequestId:requestId,aiRunId:aiReply\.aiRunId\}\)/);
+  assert.match(component,/setAiReply\(\{messageIds:\[\.\.\.selectedMessageIds\],phase:"RUSSIAN",aiRunId:x\.aiRunId\}\)/);
   assert.match(component,/pendingAiSend\.current\.textContent===content&&pendingAiSend\.current\.textRequestId/);
   assert.match(component,/ref=\{aiDraftEditor\}/);
   assert.match(component,/scrollIntoView\(\{block:"nearest"\}\)/);

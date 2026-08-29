@@ -31,6 +31,9 @@ const service = (
 const aiResponse = (
   await readFile(new URL("../src/communications/ai-response.ts", import.meta.url), "utf8")
 ).replace(/\s+/g, "");
+const contextBuilder = (
+  await readFile(new URL("../src/intelligence/context-builder.service.ts", import.meta.url), "utf8")
+).replace(/\s+/g, "");
 
 test("inbox list uses server pagination, full search and complete buyer aggregates", () => {
   assert.match(dto, /classCommunicationsListQueryDto/);
@@ -145,13 +148,9 @@ test("AI is bounded and audited without message content", () => {
 test("AI context is action specific and data minimal", () => {
   const x = service.slice(service.indexOf("asyncgenerate"));
   assert.match(x, /d\.action===\"REPLY\"\|\|d\.action===\"TEMPLATE\"/);
-  assert.match(
-    x,
-    /select:\{displayName:true,language:true,country:true,orders:/,
-  );
-  assert.doesNotMatch(x, /client:\{[^}]*notes:/);
-  assert.doesNotMatch(x, /orders\.map\(o=>\(\{[^}]*notes:/);
-  assert.doesNotMatch(x, /payments:true/);
+  assert.match(x, /this\.contextBuilder\.build\(\{clientId:d\.clientId,messageIds:selectedIds\}\)/);
+  for(const field of ["displayName:true","language:true","country:true","paymentStatus:true","productionStatus:true","shippingStatus:true"])assert.match(contextBuilder,new RegExp(field));
+  assert.doesNotMatch(contextBuilder, /notes:true|appSetting|apiKey|accessToken|rawPayload|passwordHash/);
 });
 test("AI selected reply is server scoped, Russian first, and translates only after confirmation",()=>{
   assert.match(dto,/"FINALIZE_REPLY"/);

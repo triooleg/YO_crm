@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { HealthController } from "./health.controller";
-import { PrismaService } from "./prisma.service";
+import { PrismaModule } from "./prisma.module";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { SessionGuard } from "./auth/session.guard";
@@ -19,10 +19,11 @@ import { AiAssistantService, CommunicationsService } from "./communications/comm
 import { TasksController } from "./tasks/tasks.controller";
 import { TasksService } from "./tasks/tasks.service";
 import { BackupsModule } from "./backups/backups.module";
+import { IntelligenceModule } from "./intelligence/intelligence.module";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), BackupsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
   controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController],
-  providers: [PrismaService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, CommunicationsService, AiAssistantService, TasksService],
+  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, CommunicationsService, AiAssistantService, TasksService],
 })
 export class AppModule {}
