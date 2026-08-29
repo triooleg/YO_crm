@@ -106,3 +106,15 @@ P0 uses `AiRun` and existing audit logs. P1 may export traces to self-hosted Ari
 - [x] Evaluation dimensions and reference dataset specified
 - [x] Online guardrails defined
 - [x] Monitoring and later tracing direction defined
+
+## P1A — AI Control Center contract
+
+P1A keeps the native NestJS/Prisma architecture. It adds control-plane configuration, not a new agent framework. The authoritative resolution order is `ENV server safety policy → GLOBAL database setting → CHANNEL → CLIENT → CONVERSATION`. A lower scope may disable an inherited capability but cannot grant anything denied by a higher scope.
+
+Only `OFF` and `SHADOW` are activatable. `ASSIST`, `AUTO_SAFE`, `AGENT` and `AUTONOMOUS` remain visible architectural states but are rejected by the API. Automatic replies, memory auto-promotion, agreement auto-confirmation and CRM writes have no writable runtime path. Provider/model values are effective read-only server values; keys and arbitrary endpoints are never returned or accepted.
+
+`AiRuntimeSetting` stores typed, scoped values with the updating actor and timestamps. Every mutation is validated against a server registry, bounded, performed transactionally and appended to `AuditLog` with old/new values. Effective configuration and 24-hour operational statistics are exposed through an OWNER/ADMIN read endpoint; only OWNER may mutate settings.
+
+Shadow rollout is deterministic by conversation/client identity (`FNV-1a % 100 < percentage`) at 0/10/25/50/100 percent. The same identity remains consistently selected. The job worker consumes effective configuration and never calls message delivery.
+
+P1A tests lock: ENV OFF dominance, master OFF dominance, lower-scope non-escalation, channel disable, deterministic rollout, bounded limits, forbidden modes/capabilities, audit creation, real effective status, and absence of automatic send.

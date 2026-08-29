@@ -1,5 +1,13 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-29 — AI Intelligence P1A control center (local only)
+
+- Добавлен безопасный Control Center в `Настройки → AI-помощник`: эффективная политика ENV → global → channel → client → conversation, только режимы OFF/SHADOW, аудит изменений и лимиты worker. Auto-reply, CRM writes, auto-promote/confirm и автономные режимы остаются жёстко выключенными.
+- Worker учитывает каждую допущенную попытку через additive `AiJobAttempt`, включая failures/retries; scoped OFF и rate limit откладывают job без ложного `COMPLETED`, invalid/orphan jobs завершаются fail-closed.
+- Во Входящих добавлены channel-specific ссылки Facebook/Instagram, фиксированный поиск над независимо прокручиваемым списком, адаптивная шапка и скрытие перевода только для сообщений с сохранённым языком `ru`/`uk`.
+- Локально PASS: `pnpm db:generate`, Prisma validate, `pnpm quality:check` (API 215, web 154, database 7, typecheck, builds), Playwright UI на 1920/1366/390 и все пять review gates. Docker CLI локально недоступен, поэтому compose config и временный PostgreSQL migration smoke остаются обязательным pre-deploy шагом.
+- Production deployment, production migration, изменение production `.env`, restart containers и включение AI не выполнялись.
+
 ## 2026-08-29 — deployment, backup and restore foundation
 
 - Persistence audit confirmed that PostgreSQL lives in `crm_postgres`, Redis in `crm_redis`, and all durable application files use `/app/uploads` backed by `crm_uploads`; generated Next/Nest images and caches are rebuildable. A separate access-controlled host directory is mounted at `/backups` for backup artifacts.

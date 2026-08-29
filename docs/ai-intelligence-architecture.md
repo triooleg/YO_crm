@@ -114,3 +114,14 @@ Migration: `20260830120000_ai_intelligence_foundation`. It adds nullable/default
 - P1: knowledge/memory/history UI, embedding records and pgvector deployment decision, summary producer, robust retry/dead-letter scheduling, prompt CRUD and reference-dataset eval runner.
 - P2: approved tool execution and stateful workflows only after evaluation evidence.
 - Not enabled: automatic replies, autonomous price/payment/deadline changes, refunds, deletion, multi-agent framework or fine-tuning.
+
+## P1A runtime control plane
+
+`AiRuntimeSetting` extends the existing Prisma/settings/audit infrastructure with typed scopes. It is intentionally not a single JSON blob. The resolver applies server ENV gates first and then `GLOBAL → CHANNEL → CLIENT → CONVERSATION`; specific scopes can only restrict inherited permissions. `AiModeOverride` remains readable for backward-compatible OFF restrictions but cannot elevate the effective mode.
+
+API:
+
+- `GET /api/ai-control/status` — effective server/runtime state, safe model labels, worker/outbox status, settings metadata and last-24-hour aggregates; OWNER/ADMIN.
+- `PATCH /api/ai-control/settings` — one validated, audited setting mutation; OWNER only.
+
+Current policy permits only OFF and SHADOW message analysis. Automatic replies and all autonomous/write capabilities are hard-disabled in policy and have no execution path. Production activation remains a separate controlled action after commit, CI, release and smoke evidence.

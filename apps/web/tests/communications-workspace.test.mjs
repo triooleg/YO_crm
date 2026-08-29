@@ -28,7 +28,7 @@ test("каждое входящее переводится внутри сооб
   assert.match(component,/messages\/\$\{message\.id\}\/translate/);
   assert.match(component,/message\.metadata\?\.translation\?\.text/);
   assert.match(component,/communications-message-translation/);
-  assert.match(component,/message\.direction === "INBOUND" && !hasVisualAttachment && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
+  assert.match(component,/message\.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation\(message\.language\) && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
   assert.match(css,/communications-message-translation\{[^}]*border-top:1px solid #aaa[^}]*color:#666/);
   assert.match(css,/\.communications-message-translate\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
   assert.match(css,/communications-message-translate:focus-visible/);
@@ -224,10 +224,23 @@ test("заголовок чата показывает привязанный б
   assert.match(component, /rel="noopener noreferrer"/);
   assert.match(component, /ui\.openInSocialNetwork/);
   assert.match(component, /ui\.connectedAccount/);
+  assert.match(component, /<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
   assert.match(css, /\.communications-chat-account\{/);
   assert.match(css, /\.communications-chat-client-copy\{[^}]*min-width:0;flex:1 1 0/);
   assert.match(css, /\.communications-chat-client-copy\{[^}]*overflow:hidden/);
   assert.match(css, /\.communications-chat-account\{[^}]*width:100%/);
+});
+
+test("ссылка на социальную переписку названа по активному каналу и шапка вмещает данные",()=>{
+  assert.match(component,/ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\]/);
+  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram"/);
+  assert.match(css,/\.communications-chat\{[^}]*grid-template-rows:minmax\(64px,auto\) minmax\(0,1fr\) auto/);
+  assert.match(css,/\.communications-chat>header[^}]*box-sizing:border-box/);
+});
+
+test("перевод не предлагается только для подтверждённого русского или украинского языка",()=>{
+  assert.match(component,/shouldOfferInboundTranslation/);
+  assert.match(component,/shouldOfferInboundTranslation\(message\.language\)/);
 });
 
 test("список входящих показывает последнее сообщение и время", () => {

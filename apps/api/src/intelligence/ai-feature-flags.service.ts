@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AiMode, ContactChannel } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
+import {AiControlService} from "./ai-control.service";
 
 function enabled(name: string, fallback = false) {
   const value = process.env[name];
@@ -9,7 +10,7 @@ function enabled(name: string, fallback = false) {
 
 @Injectable()
 export class AiFeatureFlagsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,private readonly control:AiControlService) {}
 
   snapshot() {
     return {
@@ -22,9 +23,11 @@ export class AiFeatureFlagsService {
     };
   }
 
+  effective(input:{channel?:ContactChannel;clientId?:string;conversationId?:string}={}){return this.control.effective(input)}
+
   async resolveMode(input: { channel?: ContactChannel; clientId?: string; conversationId?: string }) {
-    const flags = this.snapshot();
-    if (!flags.aiEnabled) return AiMode.OFF;
+    const effective=await this.effective(input);
+    if (!effective.masterEnabled) return AiMode.OFF;
     const overrides = await this.prisma.aiModeOverride.findMany({
       where: { OR: [
         ...(input.conversationId ? [{ conversationId: input.conversationId }] : []),
@@ -35,11 +38,10 @@ export class AiFeatureFlagsService {
     const requested = overrides.find(x => x.conversationId)?.mode
       ?? overrides.find(x => x.clientId && !x.conversationId)?.mode
       ?? overrides.find(x => x.channel && !x.clientId)?.mode
-      ?? AiMode.ASSIST;
-    if (requested === AiMode.AUTO_SAFE || requested === AiMode.AGENT || requested === AiMode.AUTONOMOUS) {
-      // P0 is assist-only. The flag is an additional safety gate, not an implementation switch.
-      return AiMode.ASSIST;
-    }
-    return requested;
+      ?? effective.mode as AiMode;
+    // Legacy overrides may restrict a scope to OFF, but cannot elevate the
+    // effective server/database policy to ASSIST or an autonomous mode.
+    if(requested===AiMode.OFF)return AiMode.OFF;
+    return effective.mode as AiMode;
   }
 }

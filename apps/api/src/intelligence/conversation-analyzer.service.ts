@@ -14,10 +14,10 @@ export function deterministicAnalysis(text: string) {
 @Injectable()
 export class ConversationAnalyzerService {
   constructor(private readonly prisma: PrismaService) {}
-  async analyze(messageId: string, version = "rules-v1") {
+  async analyze(messageId: string, version = "rules-v1",maxInputCharacters=12000) {
     const message = await this.prisma.message.findUnique({ where: { id: messageId }, select: { id: true, content: true } });
     if (!message) return null;
-    const result = deterministicAnalysis(message.content);
+    const result = deterministicAnalysis(message.content.slice(0,maxInputCharacters));
     await this.prisma.$transaction([
       this.prisma.messageAnalysis.upsert({ where: { messageId_analysisVersion: { messageId, analysisVersion: version } }, create: { messageId, ...result, extractor: "deterministic-rules", analysisVersion: version }, update: { ...result, extractor: "deterministic-rules" } }),
       this.prisma.message.update({ where: { id: messageId }, data: { normalizedText: message.content.normalize("NFKC"), language: result.language, aiProcessedAt: new Date(), aiAnalysisVersion: version } }),

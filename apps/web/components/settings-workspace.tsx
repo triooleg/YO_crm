@@ -13,6 +13,7 @@ type AiData = {
   connected: boolean;
   apiKeySource: "settings" | "environment" | "none";
 };
+type AiControlData={serverPolicy:{aiEnabled:boolean;provider:string;analysisModel:string;replyModel:string;embeddingModel:string};effective:Record<string,unknown>&{masterEnabled:boolean;mode:string;autoReplies:boolean;serverBlocked:boolean};settings:Array<{key:string;value:unknown;scope:string;scopeId:string}>;worker:{running:boolean};outbox:{status:string;queued:number};lastSuccessfulRun:string|null;statistics24h:{messagesQueued:number;analysesCompleted:number;failed:number;retryCount:number;averageLatencyMs:number;inputTokens:number;outputTokens:number;estimatedCostMinor:number;automaticRepliesSent:number}};
 type IntegrationData = {
   deliveryAvailable: boolean;
   meta: {
@@ -549,6 +550,31 @@ function FinanceSettings() {
     </div>
   );
 }
+const AI_CONTROL_GROUPS=[
+  ["conversation",["analyzeIncoming","detectLanguage","detectIntent","detectUrgency","detectReplyRequired","extractEntities","extractCandidateFacts","extractCustomerRequests","extractDesignRequirements","detectPaymentClaims","detectShippingQuestions","detectProductionQuestions"]],
+  ["memory",["extractMemoryCandidates","storeMemoryCandidates","autoPromoteMemories","useCustomerMemory","showMemoryInCustomerCard"]],
+  ["facts",["extractConversationFacts","detectAgreements","storeAgreementCandidates","autoConfirmAgreements","useConfirmedAgreements"]],
+  ["knowledge",["knowledgeRetrieval","semanticSearch","generalKnowledge","pricingKnowledge","deliveryKnowledge","productionKnowledge","sportsKnowledge"]],
+  ["replies",["draftReplies","showDrafts","employeeEditing","saveDraftFeedback","autoReplies"]],
+] as const;
+function AiControlCenter(){
+  const [data,setData]=useState<AiControlData>(),[error,setError]=useState(""),[saved,setSaved]=useState(""),[channel,setChannel]=useState("");
+  async function load(){const suffix=channel?`?channel=${encodeURIComponent(channel)}`:"",response=await fetch(`/api/ai-control/status${suffix}`,{credentials:"include"});if(!response.ok)throw new Error(settingsUi.aiControl.saveError);setData(await response.json())}
+  useEffect(()=>{load().catch(e=>setError((e as Error).message))},[channel]);
+  async function update(key:string,value:unknown){setError("");setSaved("");const response=await fetch("/api/ai-control/settings",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,value,scope:channel?"CHANNEL":"GLOBAL",...(channel?{scopeId:channel}:{})})});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||settingsUi.aiControl.saveError)}await load();setSaved(settingsUi.aiControl.saved)}
+  if(!data)return <section className="settings-card" aria-busy={!error}><h2>{settingsUi.aiControl.title}</h2>{error?<div className="phase2-error" role="alert">{error}</div>:<p>{settingsUi.aiLoading}</p>}</section>;
+  const labels=settingsUi.aiControl.labels as Record<string,string>,effective=data.effective,disabled=data.effective.serverBlocked;
+  const toggle=(key:string,forcedDisabled=false)=><label key={key} className="settings-check"><input type="checkbox" checked={Boolean(effective[key])} disabled={disabled||forcedDisabled} onChange={event=>update(key,event.target.checked).catch(e=>setError((e as Error).message))}/><span><strong>{labels[key]}</strong>{(forcedDisabled||disabled)&&<small>{disabled?settingsUi.aiControl.disabledByServer:settingsUi.aiControl.policyDisabled}</small>}</span></label>;
+  return <div className="settings-ai-control">
+    <section className="settings-card"><h2>{settingsUi.aiControl.title}</h2><p>{settingsUi.aiControl.hint}</p><div className={disabled?"phase2-warning":"settings-success"}>{disabled?settingsUi.aiControl.disabledByServer:settingsUi.aiControl.serverPolicy}</div><div className="settings-grid"><strong>{settingsUi.aiControl.global}: {effective.masterEnabled?settingsUi.aiControl.stateLabels.on:settingsUi.aiControl.stateLabels.off}</strong><strong>{settingsUi.aiControl.mode}: {settingsUi.aiControl.modeLabels[effective.mode as keyof typeof settingsUi.aiControl.modeLabels]||effective.mode}</strong><span>{settingsUi.aiControl.provider}: {data.serverPolicy.provider}</span><span>{settingsUi.aiControl.model}: {data.serverPolicy.analysisModel}</span><span>{settingsUi.aiControl.worker}: {data.worker.running?settingsUi.aiControl.running:settingsUi.aiControl.stopped}</span><span>{settingsUi.aiControl.outbox}: {data.outbox.status==="healthy"?settingsUi.aiControl.healthy:settingsUi.aiControl.warning}</span><span>{settingsUi.aiControl.autoReplies}: {settingsUi.aiControl.stateLabels.off}</span><span>{settingsUi.aiControl.lastRun}: {data.lastSuccessfulRun?new Date(data.lastSuccessfulRun).toLocaleString("ru-RU"):settingsUi.aiControl.never}</span></div></section>
+    <section className="settings-card"><label>{settingsUi.aiControl.channel}<select value={channel} onChange={event=>setChannel(event.target.value)}><option value="">{settingsUi.aiControl.globalScope}</option>{(["INSTAGRAM","FACEBOOK","WHATSAPP","EMAIL"] as const).map(value=><option key={value} value={value}>{settingsUi.aiControl.channelLabels[value]}</option>)}</select></label>{toggle("masterEnabled")}<label>{settingsUi.aiControl.operatingMode}<select value={String(effective.mode)} disabled={disabled} onChange={event=>update("mode",event.target.value).catch(e=>setError((e as Error).message))}><option value="OFF">{settingsUi.aiControl.modeLabels.OFF}</option><option value="SHADOW">{settingsUi.aiControl.modeLabels.SHADOW}</option>{(["ASSIST","AUTO_SAFE","AGENT","AUTONOMOUS"] as const).map(value=><option key={value} value={value} disabled>{settingsUi.aiControl.modeLabels[value]} — {settingsUi.aiControl.policyDisabled}</option>)}</select></label><label>{settingsUi.aiControl.rollout}<select value={Number(effective.rolloutPercentage||0)} disabled={disabled} onChange={event=>update("rolloutPercentage",Number(event.target.value)).catch(e=>setError((e as Error).message))}>{[0,10,25,50,100].map(value=><option key={value} value={value}>{value}%</option>)}</select></label></section>
+    {AI_CONTROL_GROUPS.map(([title,keys])=><section className="settings-card" key={title}><h3>{settingsUi.aiControl[title]}</h3><div className="settings-ai-switches">{keys.map(key=>toggle(key,["autoPromoteMemories","autoConfirmAgreements","autoReplies"].includes(key)))}</div></section>)}
+    <section className="settings-card"><h3>{settingsUi.aiControl.actions}</h3><div className="settings-grid">{settingsUi.aiControl.actionNames.map((name,index)=><div key={name}><strong>{name}</strong><small>{index<5?settingsUi.aiControl.readOnly:index<8?settingsUi.aiControl.approvalRequired:settingsUi.aiControl.disabled}</small></div>)}</div><p>{settingsUi.aiControl.policyDisabled}</p></section>
+    <section className="settings-card"><h3>{settingsUi.aiControl.limits}</h3><div className="settings-grid">{Object.entries(settingsUi.aiControl.limitNames).map(([key,name])=>{const definition=(data as AiControlData&{definitions?:Record<string,{min:number;max:number;writable?:boolean}>}).definitions?.[key];return <label key={key}>{name}<input type="number" min={definition?.min} max={definition?.max} defaultValue={Number(effective[key]||definition?.min||1)} disabled={disabled||definition?.writable===false} onBlur={event=>update(key,Number(event.target.value)).catch(e=>setError((e as Error).message))}/>{definition?.writable===false&&<small>{settingsUi.aiControl.policyDisabled}</small>}</label>})}</div></section>
+    <section className="settings-card"><h3>{settingsUi.aiControl.statistics}</h3><div className="settings-grid"><span>{settingsUi.aiControl.messagesQueued}: {data.statistics24h.messagesQueued}</span><span>{settingsUi.aiControl.completed}: {data.statistics24h.analysesCompleted}</span><span>{settingsUi.aiControl.failed}: {data.statistics24h.failed}</span><span>{settingsUi.aiControl.retries}: {data.statistics24h.retryCount}</span><span>{settingsUi.aiControl.latency}: {data.statistics24h.averageLatencyMs} ms</span><span>{settingsUi.aiControl.tokens}: {data.statistics24h.inputTokens}/{data.statistics24h.outputTokens}</span><span>{settingsUi.aiControl.cost}: {data.statistics24h.estimatedCostMinor}</span><span>{settingsUi.aiControl.automaticSent}: 0</span></div></section>
+    {saved&&<div className="settings-success" role="status">{saved}</div>}{error&&<div className="phase2-error" role="alert">{error}</div>}
+  </div>
+}
 function AiSettings() {
   const [data, setData] = useState<AiData>(),
     [error, setError] = useState(""),
@@ -651,13 +677,9 @@ function AiSettings() {
       </section>
     );
   return (
-    <form
-      id="settings-ai-panel"
-      role="tabpanel"
-      className="settings-card settings-ai-card"
-      onSubmit={submit}
-      aria-busy={saving}
-    >
+    <div id="settings-ai-panel" role="tabpanel" className="settings-ai-panel">
+      <AiControlCenter />
+      <form className="settings-card settings-ai-card" onSubmit={submit} aria-busy={saving}>
       <header className="settings-ai-header">
         <div>
           <h2>{settingsUi.aiTitle}</h2>
@@ -753,6 +775,7 @@ function AiSettings() {
         </button>
         {data.connected && <button type="button" className="phase2-secondary" disabled={saving} onClick={removeToken}>{settingsUi.aiDeleteToken}</button>}
       </div>
-    </form>
+      </form>
+    </div>
   );
 }

@@ -15,6 +15,47 @@ const [schema, communications, memory, context, tools, runs, flags, worker, prov
   read("apps/api/src/intelligence/ai-provider.ts"),
 ]);
 
+test("P1A exposes audited hierarchical runtime settings with fail-closed policy", async () => {
+  const [policy, service, controller, dto] = await Promise.all([
+    read("apps/api/src/intelligence/ai-control.policy.ts"),
+    read("apps/api/src/intelligence/ai-control.service.ts"),
+    read("apps/api/src/intelligence/ai-control.controller.ts"),
+    read("apps/api/src/intelligence/ai-control.dto.ts"),
+  ]);
+  assert.match(schema, /SHADOW/);
+  assert.match(schema, /model AiRuntimeSetting/);
+  assert.match(schema, /enum AiSettingScope/);
+  assert.match(policy, /SERVER_SAFETY_POLICY/);
+  assert.match(policy, /GLOBAL[\s\S]*CHANNEL[\s\S]*CLIENT[\s\S]*CONVERSATION/);
+  assert.match(policy, /deterministicRollout/);
+  assert.match(service, /auditLog\.create/);
+  assert.match(service, /AiRuntimeSetting/);
+  assert.match(controller, /Controller\("ai-control"\)/);
+  assert.match(controller, /Roles\("OWNER"\)/);
+  assert.match(dto, /Max\(100\)/);
+});
+
+test("P1A effective policy keeps ENV and dangerous capabilities authoritative", async () => {
+  const source = await read("apps/api/src/intelligence/ai-control.policy.ts");
+  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(javascript, { module, exports: module.exports, require: createRequire(import.meta.url) });
+  const base={global:{masterEnabled:true,mode:"SHADOW",analyzeIncoming:true,draftReplies:false,autoReplies:false,rolloutPercentage:100},channel:{}};
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:false},...base}).masterEnabled,false);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,masterEnabled:false},channel:{analyzeIncoming:true}}).analyzeIncoming,false);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,analyzeIncoming:false},channel:{analyzeIncoming:true}}).analyzeIncoming,false);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},...base,channel:{analyzeIncoming:false}}).analyzeIncoming,false);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},...base}).mode,"SHADOW");
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},...base,channel:{mode:"OFF"},client:{mode:"SHADOW"},conversation:{mode:"SHADOW"}}).mode,"OFF");
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,mode:"AGENT"},channel:{}}).mode,"OFF");
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true,autoReplyEnabled:true},global:{...base.global,autoReplies:true},channel:{}}).autoReplies,false);
+  assert.equal(module.exports.deterministicRollout("conversation-1",25),module.exports.deterministicRollout("conversation-1",25));
+  assert.equal(module.exports.deterministicRollout("conversation-1",0),false);
+  assert.equal(module.exports.deterministicRollout("conversation-1",100),true);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,rolloutPercentage:0,maxConcurrency:1},conversation:{rolloutPercentage:100,maxConcurrency:10}}).rolloutPercentage,0);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,rolloutPercentage:100,maxConcurrency:5},conversation:{rolloutPercentage:25,maxConcurrency:2}}).maxConcurrency,2);
+});
+
 test("message storage preserves replayable source and normalized attachments", () => {
   for (const field of ["rawPayload", "normalizedText", "messageType", "receivedAt", "replyToMessageId", "aiProcessedAt"]) assert.match(schema, new RegExp(field));
   assert.match(schema, /model MessageAttachment/);
@@ -67,7 +108,7 @@ test("provider is model-neutral and tool permissions fail closed", () => {
 });
 
 test("disabled mode and automatic messaging fail closed", () => {
-  assert.match(flags, /if \(!flags\.aiEnabled\) return AiMode\.OFF/);
+  assert.match(flags, /if \(!effective\.masterEnabled\) return AiMode\.OFF/);
   assert.match(flags, /AI_AUTO_REPLY_ENABLED", false/);
   assert.doesNotMatch(worker, /sendMessage|communications.*send/);
 });
@@ -86,7 +127,7 @@ test("AI draft feedback is scoped to the current client and conversation", () =>
 
 test("AI outbox recovers stale locks and retries before dead letter", () => {
   assert.match(worker, /status:AiJobStatus\.RUNNING,lockedAt:\{lt:staleBefore\}/);
-  assert.match(worker, /retry=job\.attempts<3/);
+  assert.match(worker, /retry=shouldRetryAiJob\(job\.attempts,scoped\.maxRetries\)/);
   assert.match(worker, /retry\?AiJobStatus\.PENDING:AiJobStatus\.FAILED/);
   assert.match(worker, /setInterval\(\(\) => void this\.tick\(\), 5_000\)/);
 });
@@ -99,6 +140,36 @@ test("AI outbox obeys both the master switch and the analysis switch", () => {
   assert.equal(module.exports.shouldProcessAiJobs({ aiEnabled: false, messageAnalysisEnabled: true }), false);
   assert.equal(module.exports.shouldProcessAiJobs({ aiEnabled: true, messageAnalysisEnabled: false }), false);
   assert.equal(module.exports.shouldProcessAiJobs({ aiEnabled: true, messageAnalysisEnabled: true }), true);
+  assert.equal(module.exports.shouldRetryAiJob(1, 0), false);
+  assert.equal(module.exports.shouldRetryAiJob(1, 1), true);
+  assert.equal(module.exports.shouldRetryAiJob(3, 2), false);
+  assert.equal(module.exports.withinAiJobLimits({running:1,recentMinute:0,recentHour:0},{maxConcurrency:1,maxAnalysesPerMinute:10,maxAnalysesPerHour:100}),false);
+  assert.equal(module.exports.withinAiJobLimits({running:0,recentMinute:2,recentHour:2},{maxConcurrency:2,maxAnalysesPerMinute:2,maxAnalysesPerHour:100}),false);
+  assert.equal(module.exports.withinAiJobLimits({running:0,recentMinute:1,recentHour:2},{maxConcurrency:2,maxAnalysesPerMinute:2,maxAnalysesPerHour:100}),true);
+  assert.equal(module.exports.aiJobAdmissionDecision({masterEnabled:false,analyzeIncoming:true}),"DEFER");
+  assert.equal(module.exports.aiJobAdmissionDecision({masterEnabled:true,analyzeIncoming:false}),"DEFER");
+  assert.equal(module.exports.aiJobAdmissionDecision({masterEnabled:true,analyzeIncoming:true}),"ADMIT");
+  assert.equal(module.exports.aiJobLimitDeferralMs({recentMinute:2,recentHour:2},{maxAnalysesPerMinute:2,maxAnalysesPerHour:100}),15000);
+  assert.equal(module.exports.aiJobLimitDeferralMs({recentMinute:2,recentHour:100},{maxAnalysesPerMinute:2,maxAnalysesPerHour:100}),60000);
+});
+
+test("AI outbox serializes claims before applying concurrency and rate limits",()=>{
+  assert.match(worker,/pg_advisory_xact_lock/);
+  assert.match(worker,/withinAiJobLimits\(\{running,recentMinute,recentHour\},scoped\)/);
+});
+
+test("AI outbox resolves channel and conversation policy before analysis",()=>{
+  assert.match(worker,/conversation:\{select:\{id:true,clientId:true,channel:true\}\}/);
+  assert.match(worker,/flags\.effective\(\{channel:identity\.channel,clientId:identity\.clientId,conversationId:identity\.id\}\)/);
+  assert.match(worker,/aiJobAdmissionDecision\(scoped\)==="DEFER"/);
+  assert.match(worker,/lastError:"AI_SCOPE_DISABLED"/);
+  assert.match(worker,/lastError:"AI_RATE_LIMITED"/);
+  assert.match(worker,/availableAt:new Date\(Date\.now\(\)\+delay\)/);
+  assert.match(worker,/lastError:"AI_JOB_INVALID"/);
+  assert.match(worker,/tx\.aiJobAttempt\.count/);
+  assert.match(worker,/tx\.aiJobAttempt\.create/);
+  assert.match(worker,/shouldRetryAiJob\(job\.attempts,scoped\.maxRetries\)/);
+  assert.match(worker,/withinAiJobLimits\(\{running,recentMinute,recentHour\},scoped\)/);
 });
 
 test("concurrent AI feedback reservations allow exactly one sender", async () => {

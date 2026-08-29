@@ -53,10 +53,18 @@ enum MessageStatus {
 
 enum AiMode {
   OFF
+  SHADOW
   ASSIST
   AUTO_SAFE
   AGENT
   AUTONOMOUS
+}
+
+enum AiSettingScope {
+  GLOBAL
+  CHANNEL
+  CLIENT
+  CONVERSATION
 }
 
 enum AiRecordStatus {
@@ -236,6 +244,7 @@ model User {
   createdBackups           Backup[]                  @relation("BackupCreator")
   createdKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeCreatedBy")
   updatedKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeUpdatedBy")
+  updatedAiRuntimeSettings AiRuntimeSetting[]         @relation("AiRuntimeSettingUpdatedBy")
 }
 
 model Session {
@@ -291,6 +300,7 @@ model Client {
   agreements              Agreement[]
   aiRuns                  AiRun[]
   aiModeOverrides         AiModeOverride[]
+  aiRuntimeSettings       AiRuntimeSetting[]        @relation("AiRuntimeSettingClient")
 
   @@index([displayName])
   @@index([email])
@@ -462,6 +472,7 @@ model Conversation {
   summaries        ConversationSummary[]
   aiRuns           AiRun[]
   aiModeOverrides  AiModeOverride[]
+  aiRuntimeSettings AiRuntimeSetting[] @relation("AiRuntimeSettingConversation")
 
   @@unique([clientId, channel])
   @@unique([externalId, channel])
@@ -781,6 +792,30 @@ model AiModeOverride {
   @@index([conversationId])
 }
 
+model AiRuntimeSetting {
+  id          String         @id @default(cuid())
+  key         String
+  value       Json
+  valueType   String
+  scope       AiSettingScope @default(GLOBAL)
+  scopeId     String         @default("")
+  channel     ContactChannel?
+  clientId    String?
+  conversationId String?
+  updatedById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  updatedBy   User?          @relation("AiRuntimeSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  client      Client?        @relation("AiRuntimeSettingClient", fields: [clientId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation("AiRuntimeSettingConversation", fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([scope, scopeId, key])
+  @@index([scope, scopeId])
+  @@index([key])
+  @@index([clientId])
+  @@index([conversationId])
+}
+
 model AiJob {
   id          String      @id @default(cuid())
   type        String
@@ -794,8 +829,19 @@ model AiJob {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   message     Message?    @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  attemptLog  AiJobAttempt[]
 
   @@index([status, availableAt])
+}
+
+model AiJobAttempt {
+  id        String   @id @default(cuid())
+  jobId     String
+  createdAt DateTime @default(now())
+  job       AiJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([jobId, createdAt])
 }
 
 model CommunicationAttachment {
