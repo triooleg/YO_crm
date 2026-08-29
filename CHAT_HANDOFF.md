@@ -1,5 +1,12 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-30 — Meta replies/read receipts production rollout
+
+- В production развёрнуты commits `042de99` и `8d5d83b` из изолированной ветки `codex/meta-bidirectional-sync`: внешние ответы Facebook/Instagram получают явную подпись, Meta read watermark отмечает исходящие сообщения как прочитанные, действия сообщения показываются по hover/focus, а ссылка на переписку имеет видимый channel-specific текст.
+- Перед заменой runtime-файлы сохранены в `/home/trio/releases/runtime-ui-meta-backup-20260829T220942Z`; локальные и загруженные SHA-256 совпали. Дополнительно доставлен уже проверенный helper `apps/web/lib/message-language.ts`, отсутствовавший в server checkout; первая сборка остановилась до recreate и не прервала работающие контейнеры.
+- Пересобраны и пересозданы только `api` и `web`. PostgreSQL, Redis, volumes, migrations и production `.env` не менялись. Оба контейнера healthy, restart count 0; внутренний и внешний `/api/health` возвращают 200 с `postgres/redis/uploads=up`, внешний корень возвращает 200, свежие логи без error/exception/fatal/failed.
+- Реальный UI/Meta smoke остаётся операторским: открыть конкретный Facebook и Instagram диалог, проверить видимый текст ссылки, hover-действия, подпись внешнего ответа и `✓✓` после фактического прочтения клиентом. Автоматические сообщения клиентам во время deployment не отправлялись.
+
 ## 2026-08-29 — Meta bidirectional messaging hardening (local only)
 
 - Facebook Page subscription дополнена обязательным `message_echoes`; Instagram продолжает получать echo через официальный `messages` webhook.
