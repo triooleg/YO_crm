@@ -1,0 +1,14 @@
+import { HttpException, HttpStatus, ServiceUnavailableException } from "@nestjs/common";
+import { createConnection, type Socket } from "node:net";
+import { connect as connectTls, type TLSSocket } from "node:tls";
+import { createHash } from "node:crypto";
+
+const encode=(parts:string[])=>`*${parts.length}\r\n`+parts.map(x=>`$${Buffer.byteLength(x)}\r\n${x}\r\n`).join("");
+function parse(buffer:string,offset=0):{value:unknown;next:number}|null{const end=buffer.indexOf("\r\n",offset);if(end<0)return null;const type=buffer[offset],head=buffer.slice(offset+1,end);if(type==="+"||type===":")return{value:type===":"?Number(head):head,next:end+2};if(type==="-")throw new Error(head);if(type==="$" ){const n=Number(head);if(n<0)return{value:null,next:end+2};const start=end+2,next=start+n+2;if(buffer.length<next)return null;return{value:buffer.slice(start,start+n),next}}throw new Error("Unsupported Redis response")}
+async function redisIncrement(key:string,windowSeconds:number){
+  const value=process.env.REDIS_URL;if(!value)throw new ServiceUnavailableException("Защита входа временно недоступна");
+  const url=new URL(value);if(!["redis:","rediss:"].includes(url.protocol))throw new ServiceUnavailableException("Защита входа временно недоступна");
+  const commands:string[][]=[];if(url.password)commands.push(url.username?["AUTH",decodeURIComponent(url.username),decodeURIComponent(url.password)]:["AUTH",decodeURIComponent(url.password)]);const db=url.pathname.slice(1);if(db&&db!=="0")commands.push(["SELECT",db]);commands.push(["EVAL","local n=redis.call('INCR',KEYS[1]);if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end;return n","1",key,String(windowSeconds)]);
+  return new Promise<number>((resolve,reject)=>{let socket:Socket|TLSSocket,buffer="",offset=0,responses=0,settled=false;const fail=()=>{if(!settled){settled=true;reject(new ServiceUnavailableException("Защита входа временно недоступна"))}};const onData=(chunk:Buffer)=>{buffer+=chunk.toString("utf8");try{for(;;){const parsed=parse(buffer,offset);if(!parsed)return;offset=parsed.next;responses++;if(responses===commands.length){settled=true;socket.end();resolve(Number(parsed.value));return}}}catch{socket.destroy();fail()}};const options={host:url.hostname,port:Number(url.port||(url.protocol==="rediss:"?6380:6379))};socket=url.protocol==="rediss:"?connectTls(options):createConnection(options);socket.setTimeout(3000,()=>{socket.destroy();fail()});socket.once("error",fail);socket.on("data",onData);socket.once(url.protocol==="rediss:"?"secureConnect":"connect",()=>socket.write(commands.map(encode).join("")))});
+}
+export async function enforceAuthRateLimit(scope:string,identity:string,limit:number,windowSeconds=900){const digest=createHash("sha256").update(identity).digest("hex");const count=await redisIncrement(`auth:${scope}:${digest}`,windowSeconds);if(count>limit)throw new HttpException("Слишком много попыток. Повторите позже",HttpStatus.TOO_MANY_REQUESTS)}

@@ -324,6 +324,20 @@ export const clientAthleteUi = {
 } as const;
 
 export const settingsUi = {
+  accountTab: "Учётная запись",
+  accountTitle: "Логин и пароль",
+  accountHint: "Для изменения логина или пароля подтвердите текущий пароль. После сохранения остальные сеансы будут завершены.",
+  currentLogin: "Текущий логин",
+  newLogin: "Новый логин (e-mail)",
+  currentPassword: "Текущий пароль",
+  newPassword: "Новый пароль",
+  confirmPassword: "Повторите новый пароль",
+  accountPasswordHint: "Не менее 12 символов. Оставьте оба поля нового пароля пустыми, если меняете только логин.",
+  accountMismatch: "Новые пароли не совпадают",
+  accountSave: "Изменить учётные данные",
+  accountSaving: "Сохранение…",
+  accountSaved: "Логин и пароль обновлены. Остальные сеансы завершены.",
+  accountLoadError: "Не удалось загрузить учётную запись",
   communications: "Каналы связи",
   channelsTitle: "Meta, Chatwoot и e-mail",
   channelsHint:
@@ -451,6 +465,8 @@ export const settingsUi = {
     "Для включения AI-помощника подтвердите согласие на передачу контекста.",
   defaultCountry: "Украина",
 } as const;
+
+export const authUi={loading:"Проверяем вход…",logout:"Выйти",logoutError:"Не удалось завершить сеанс. Повторите выход.",checkError:"Не удалось проверить сеанс",networkError:"Не удалось подключиться к CRM. Проверьте соединение и повторите вход.",retry:"Повторить",title:"Вход в Yoleotard CRM",subtitle:"Внутренняя рабочая система",login:"Логин (e-mail)",password:"Пароль",invalid:"Неверный логин или пароль",submit:"Войти",submitting:"Входим…"} as const;
 export const shippingUi = {
   actionError: "Не удалось выполнить действие",
   eyebrow: "КОНТРОЛЬ ОТПРАВЛЕНИЙ",

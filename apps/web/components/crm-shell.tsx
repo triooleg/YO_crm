@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ClientWorkspace } from "./client-workspace";
 import { OrdersWorkspace } from "./orders-workspace";
 import { ProductionWorkspace } from "./production-workspace";
 import { FinanceWorkspace } from "./finance-workspace";
 import { SettingsWorkspace } from "./settings-workspace";
-import { navigationUi } from "../lib/i18n";
+import { authUi, navigationUi } from "../lib/i18n";
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
@@ -17,17 +17,29 @@ const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbo
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 
 export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSectionId}){
-  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId);
+  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState("");
+  const authSequence=useRef(0);
+  const verifyAuth=()=>{const sequence=++authSequence.current;return fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(sequence!==authSequence.current)return;if(r.status===401||r.status===403){setAuth(false);setAuthError("");return}if(!r.ok)throw new Error();const x=await r.json();if(sequence!==authSequence.current)return;setAuth(x.user);setAuthError("")}).catch(()=>{if(sequence===authSequence.current)setAuthError(authUi.checkError)})};
+  useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
   const navigate=(next:CrmSectionId)=>{if (next === sectionId) return;setSectionId(next);window.history.pushState(null,"",crmSectionHref(next,window.location.search))};
   useEffect(()=>{const sync=()=>setSectionId(parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined));window.addEventListener("popstate",sync);return()=>window.removeEventListener("popstate",sync)},[]);
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
+  if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:authUi.loading}</main>;
+  if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
   return <main className="crm-shell nav-collapsed">
     <aside className="crm-nav">
       <div className="crm-brand"><span>Y</span></div>
       <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{icon}</i></button>)}</nav>
+      <button className="crm-logout" type="button" title={authUi.logout} aria-label={authUi.logout} onClick={async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}}}>⇥</button>
     </aside>
-    <section className="crm-content">{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace/>:sectionId==="orders"?<OrdersWorkspace onClients={()=>navigate("clients")}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace/>:sectionId==="orders"?<OrdersWorkspace onClients={()=>navigate("clients")}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
   </main>
+}
+
+function CrmLogin({onSuccess}:{onSuccess:(user:{email:string;displayName:string;role:string})=>void}){
+  const[error,setError]=useState(""),[submitting,setSubmitting]=useState(false);
+  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setError("");setSubmitting(true);try{const f=new FormData(e.currentTarget),r=await fetch("/api/auth/login",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:f.get("email"),password:f.get("password")})});if(!r.ok){setError(authUi.invalid);return}const x=await r.json();onSuccess(x.user)}catch{setError(authUi.networkError)}finally{setSubmitting(false)}}
+  return <main className="phase2-login"><form onSubmit={submit}><div className="phase2-logo">Y</div><h1>{authUi.title}</h1><p>{authUi.subtitle}</p><label>{authUi.login}<input name="email" type="email" autoComplete="username" required/></label><label>{authUi.password}<input name="password" type="password" autoComplete="current-password" minLength={8} required/></label>{error&&<div className="phase2-error" role="alert">{error}</div>}<button className="phase2-primary" disabled={submitting}>{submitting?authUi.submitting:authUi.submit}</button></form></main>
 }
 
 function Inbox({onOpenClients}:{onOpenClients:()=>void}){

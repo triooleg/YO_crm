@@ -8,6 +8,7 @@ import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.use(json({ limit: "8mb", verify: (request: Request & { rawBody?: Buffer }, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
   app.use(urlencoded({ extended: true, limit: "8mb" }));
   app.setGlobalPrefix("api");

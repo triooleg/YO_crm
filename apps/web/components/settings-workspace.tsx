@@ -328,9 +328,9 @@ function CommunicationsSettings() {
     </section>
   );
 }
-export function SettingsWorkspace() {
-  const [section, setSection] = useState<"finance" | "communications" | "ai">(
-    "finance",
+export function SettingsWorkspace({role}:{role:string}) {
+  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai">(
+    role==="OWNER"?"account":"finance",
   );
   return (
     <div className="settings-page">
@@ -346,6 +346,7 @@ export function SettingsWorkspace() {
         aria-label={settingsUi.title}
         role="tablist"
       >
+        {role==="OWNER"&&<button type="button" role="tab" aria-selected={section === "account"} aria-controls="settings-account-panel" className={section === "account" ? "active" : ""} onClick={() => setSection("account")}>{settingsUi.accountTab}</button>}
         <button
           type="button"
           role="tab"
@@ -389,7 +390,9 @@ export function SettingsWorkspace() {
           ),
         )}
       </nav>
-      {section === "finance" ? (
+      {section === "account"&&role==="OWNER" ? (
+        <AccountSettings />
+      ) : section === "finance" ? (
         <FinanceSettings />
       ) : section === "communications" ? (
         <CommunicationsSettings />
@@ -398,6 +401,24 @@ export function SettingsWorkspace() {
       )}
     </div>
   );
+}
+
+function AccountSettings(){
+  const[currentEmail,setCurrentEmail]=useState(""),[newEmail,setNewEmail]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState(""),[saving,setSaving]=useState(false);
+  useEffect(()=>{fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(!r.ok)throw new Error();const x=await r.json();setCurrentEmail(x.user.email);setNewEmail(x.user.email)}).catch(()=>setError(settingsUi.accountLoadError))},[]);
+  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setError("");setMessage("");const form=e.currentTarget,f=new FormData(form),newPassword=String(f.get("newPassword")||""),confirmPassword=String(f.get("confirmPassword")||"");if(newPassword!==confirmPassword){setError(settingsUi.accountMismatch);return}setSaving(true);try{const body:{currentPassword:string;email:string;newPassword?:string}={currentPassword:String(f.get("currentPassword")||""),email:String(f.get("email")||"")};if(newPassword)body.newPassword=newPassword;const r=await fetch("/api/auth/account",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(Array.isArray(x.message)?x.message.join(", "):x.message||settingsUi.saveError);setCurrentEmail(x.user.email);setNewEmail(x.user.email);form.reset();setMessage(settingsUi.accountSaved);window.dispatchEvent(new Event("yoleotard-auth-changed"))}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
+  return <section id="settings-account-panel" role="tabpanel" className="settings-card">
+    <h2>{settingsUi.accountTitle}</h2><p>{settingsUi.accountHint}</p>
+    <form className="settings-grid" onSubmit={submit}>
+      <label>{settingsUi.currentLogin}<input value={currentEmail} readOnly/></label>
+      <label>{settingsUi.newLogin}<input name="email" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} autoComplete="username" required/></label>
+      <label>{settingsUi.currentPassword}<input name="currentPassword" type="password" autoComplete="current-password" minLength={8} required/></label>
+      <label>{settingsUi.newPassword}<input name="newPassword" type="password" autoComplete="new-password" minLength={12}/></label>
+      <label>{settingsUi.confirmPassword}<input name="confirmPassword" type="password" autoComplete="new-password" minLength={12}/><small>{settingsUi.accountPasswordHint}</small></label>
+      {error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}
+      <button className="phase2-primary" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.accountSave}</button>
+    </form>
+  </section>
 }
 function FinanceSettings() {
   const [settings, setSettings] = useState<Setting[]>([]),
