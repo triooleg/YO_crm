@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { facebookFallbackProfileTargets, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
+const { facebookFallbackProfileTargets, isMetaManagedAvatarUrl, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -91,10 +91,14 @@ test("Facebook backfill targets only exact fallback clients and deduplicates cli
   const targets=facebookFallbackProfileTargets([
     {externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}},
     {externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}},
-    {externalId:"page-1:102",client:{id:"c2",displayName:"Manual name"}},
+    {externalId:"page-1:102",client:{id:"c2",displayName:"Manual name",avatarUrl:"https://assets.yoleotard.com/manual.jpg"}},
     {externalId:"page-2:103",client:{id:"c3",displayName:"Facebook 103"}},
+    {externalId:"page-1:104",client:{id:"c4",displayName:"Meta name",avatarUrl:"https://scontent.xx.fbcdn.net/expired.jpg?token=old"}},
   ],"page-1");
-  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[{clientId:"c1",psid:"101",needsName:true,needsAvatar:false}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[
+    {clientId:"c1",psid:"101",needsName:true,needsAvatar:false},
+    {clientId:"c4",psid:"104",needsName:false,needsAvatar:true},
+  ]);
 });
 
 test("Facebook backfill retries a missing avatar without changing a real name", async()=>{
@@ -169,6 +173,26 @@ test("profile patch contains only real missing-field changes and preserves maint
   assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(empty,{displayName:"Anna",firstName:"Anna"}))),{displayName:"Anna",firstName:"Anna"});
   const maintained={...empty,firstName:"Manual",displayName:"Manual",avatarUrl:"https://example.com/a.jpg",language:"ru",timezone:"UTC+02:00"};
   assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(maintained,{displayName:"Meta",firstName:"Meta",avatarUrl:"https://example.com/b.jpg",language:"uk",timezone:"UTC+03:00"}))),{});
+});
+
+test("profile patch refreshes expired Meta CDN avatars but preserves manual avatars",()=>{
+  assert.equal(isMetaManagedAvatarUrl("https://scontent.xx.fbcdn.net/old.jpg?token=old"),true);
+  assert.equal(isMetaManagedAvatarUrl("https://scontent.cdninstagram.com/old.jpg?token=old"),true);
+  assert.equal(isMetaManagedAvatarUrl("https://example.com/fbcdn.net/avatar.jpg"),false);
+  assert.equal(isMetaManagedAvatarUrl("http://scontent.xx.fbcdn.net/avatar.jpg"),false);
+  const base={firstName:"Anna",lastName:null,displayName:"Anna",country:null,email:null,phone:null,language:null,timezone:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(
+    {...base,avatarUrl:"https://scontent.xx.fbcdn.net/old.jpg?token=old"},
+    {avatarUrl:"https://scontent.xx.fbcdn.net/new.jpg?token=new"},
+  ))),{avatarUrl:"https://scontent.xx.fbcdn.net/new.jpg?token=new"});
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(
+    {...base,avatarUrl:"https://scontent.cdninstagram.com/old.jpg?token=old"},
+    {avatarUrl:"https://scontent.cdninstagram.com/new.jpg?token=new"},
+  ))),{avatarUrl:"https://scontent.cdninstagram.com/new.jpg?token=new"});
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(
+    {...base,avatarUrl:"https://assets.yoleotard.com/manual.jpg"},
+    {avatarUrl:"https://scontent.xx.fbcdn.net/new.jpg?token=new"},
+  ))),{});
 });
 
 test("connected account labels expose no credentials", () => {

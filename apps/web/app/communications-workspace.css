@@ -41,9 +41,8 @@
 /* The chat identity row grows with its content and keeps the avatar and link inside. */
 .communications-chat{display:grid;grid-template-rows:minmax(64px,auto) minmax(0,1fr) auto}
 .communications-chat>header{box-sizing:border-box;padding:8px 14px}
-.communications-chat-account:is(a){display:flex;min-width:0;flex-direction:column;align-items:flex-start;text-decoration:none}
-.communications-chat-account:is(a)>span,.communications-chat-account:is(a)>small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.communications-chat-account:is(a)>small{color:var(--muted);font-size:11px}
+.communications-chat-account:is(a){display:block;min-width:0;text-decoration:none}
+.communications-chat-account:is(a)>span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .communications-message-meta{display:flex!important;align-items:center;justify-content:flex-end;gap:5px;opacity:1!important}.communications-message-read{display:inline-block;flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:#2fb56f;box-shadow:0 0 0 1px rgba(255,255,255,.8)}
 
 /* Pointer actions stay quiet until the message is inspected. Keyboard focus and touch remain fully usable. */

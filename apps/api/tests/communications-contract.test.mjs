@@ -131,6 +131,17 @@ test("opening a conversation explicitly marks its unread messages as read", () =
   assert.match(service, /unreadVersion:\{increment:1\}/);
   assert.match(controller, /markRead\(id,d,r\.user\)/);
 });
+test("conversation detail returns the latest messages in chronological order", () => {
+  const x = service.slice(service.indexOf("asyncdetail"), service.indexOf("asyncuploadAttachment"));
+  const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));
+  assert.match(window, /orderBy:\[\{createdAt:"desc"\},\{id:"desc"\}\]/);
+  assert.match(window, /while\(visible\.length<300\)/);
+  assert.match(window, /cursor:\{id:cursor\},skip:1/);
+  assert.match(window, /batch\.filter\(message=>!isDeduplicatedDraft\(message\.metadata\)\)/);
+  assert.match(window, /visible\.slice\(0,300\)\.reverse\(\)/);
+  assert.match(x, /this\.latestVisibleMessages\(\{conversation:/);
+  assert.match(x, /this\.latestVisibleMessages\(\{conversationId:c\.id\}\)/);
+});
 test("AI requires opt in and separate context consent", () => {
   assert.match(service, /enabled:v\.enabled===true/);
   assert.match(service, /allowClientContext:v\.allowClientContext===true/);
@@ -378,6 +389,12 @@ test("Facebook fallback backfill is role protected dry-run capable and idempoten
   assert.match(service, /runFacebookProfileBackfillBatch/);
   assert.match(service, /persistMetaFacebookProfilePatch/);
   assert.match(service, /dryRun/);
+});
+
+test("Facebook profile backfill revisits expiring Meta-hosted avatars",()=>{
+  assert.match(service,/avatarUrl:\{contains:"fbcdn\.net"\}/);
+  assert.match(service,/avatarUrl:\{contains:"cdninstagram\.com"\}/);
+  assert.match(service,/avatarUrl:\{contains:"fbsbx\.com"\}/);
 });
 test("a failed OAuth attempt cannot erase or resurrect a newer Meta connection", () => {
   const oauthConnect = service.slice(service.indexOf("asyncmetaOauthConnect"), service.indexOf("asyncmetaSettings"));

@@ -115,12 +115,6 @@ function latestConversation(c: Client) {
       new Date(a.lastMessageAt || a.messages?.[0]?.createdAt || 0).getTime(),
   )[0];
 }
-function connectedAccountLabel(c: Client | undefined, activeChannel: string) {
-  if (!c) return "";
-  return [...c.conversations]
-    .filter((conversation) => conversation.channel === activeChannel && conversation.connectedAccountLabel)
-    .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0]?.connectedAccountLabel || "";
-}
 function connectedAccountUrl(c: Client | undefined, activeChannel: string) {
   if (!c) return "";
   return [...c.conversations]
@@ -229,11 +223,15 @@ export function CommunicationsWorkspace() {
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null),
     previewVideo = useRef<HTMLVideoElement | null>(null),
+    messagesViewport = useRef<HTMLDivElement | null>(null),
+    autoScrollPending = useRef(true),
+    stickToBottom = useRef(true),
     aiDraftEditor = useRef<HTMLTextAreaElement | null>(null);
   currentSearch.current=search;
   currentClientCount.current=visibleClientCount;
-  const accountLabel = connectedAccountLabel(client, activeChannel);
   const accountUrl = connectedAccountUrl(client, activeChannel);
+  function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
+  function scrollMessagesToLatest(){if(!messagesViewport.current)return;if(!autoScrollPending.current&&!stickToBottom.current)return;requestAnimationFrame(()=>{if(!messagesViewport.current)return;messagesViewport.current.scrollTop=messagesViewport.current.scrollHeight;stickToBottom.current=true;autoScrollPending.current=false})}
   async function api(path: string, init?: RequestInit) {
     const r = await fetch("/api" + path, {
       credentials: "include",
@@ -369,6 +367,8 @@ export function CommunicationsWorkspace() {
     manualLoading.current = true;
     setClient(c);
     setActiveChannel(latestConversation(c)?.channel||channel(c));
+    autoScrollPending.current = true;
+    stickToBottom.current = true;
     setMessagesLoading(true);
     setError("");
     try {
@@ -523,6 +523,7 @@ export function CommunicationsWorkspace() {
     };
   }, [preview]);
   useEffect(()=>{if(aiReply){aiDraftEditor.current?.scrollIntoView({block:"nearest"});aiDraftEditor.current?.focus()}},[aiReply?.phase]);
+  useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
   const filteredClients = clients;
   const visibleClients=filteredClients;
   useEffect(()=>{
@@ -862,9 +863,7 @@ export function CommunicationsWorkspace() {
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {accountLabel && (accountUrl
-                  ? <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={`${ui.openInSocialNetwork}: ${accountLabel}`}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span><small>{ui.connectedAccount}: {accountLabel}</small></a>
-                  : <small className="communications-chat-account">{ui.connectedAccount}: {accountLabel}</small>)}
+                {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (
@@ -873,7 +872,7 @@ export function CommunicationsWorkspace() {
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
           </header>
-          <div className="communications-messages">
+          <div className="communications-messages" ref={messagesViewport} onScroll={updateMessagesScrollIntent}>
             {messagesLoading ? (
               <State text={ui.loadingMessages} />
             ) : (
@@ -910,7 +909,7 @@ export function CommunicationsWorkspace() {
                               }}
                               aria-label={ui.openAttachment + ": " + label}
                             >
-                              {attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label} />}
+                              {attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label} onLoadedMetadata={scrollMessagesToLatest}/>:<img src={url} alt={label} onLoad={scrollMessagesToLatest}/>}
                             </button>
                               <a className="communications-media-save" aria-label={ui.saveAttachment} title={ui.saveAttachment} href={`/api/communications/messages/${encodeURIComponent(message.id)}/attachments/${index}/download`} download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg></a>
                             </span>

@@ -153,6 +153,18 @@ export async function resolveMetaFacebookProfileWithFallback(
   return { profile: {}, source: "CONVERSATIONS" as const };
 }
 
+const META_AVATAR_HOST = /(^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com)$/i;
+
+export function isMetaManagedAvatarUrl(value: string | null | undefined) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && META_AVATAR_HOST.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function facebookFallbackProfileTargets(
   conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null } }>,
   pageId: string,
@@ -161,7 +173,7 @@ export function facebookFallbackProfileTargets(
   const prefix = pageId + ":";
   for (const conversation of conversations) {
     const needsName = /^Facebook \d+$/.test(conversation.client.displayName);
-    const needsAvatar = conversation.client.avatarUrl === null;
+    const needsAvatar = conversation.client.avatarUrl === null || isMetaManagedAvatarUrl(conversation.client.avatarUrl);
     if ((!needsName && !needsAvatar) || targets.has(conversation.client.id)) continue;
     const externalId = conversation.externalId || "";
     const psid = externalId.startsWith(prefix) ? externalId.slice(prefix.length) : "";
@@ -276,7 +288,12 @@ export function metaFacebookProfilePatch(before: ExistingMetaClientProfile, prof
     if (firstName && firstName !== before.firstName) patch.firstName = firstName;
     if (profile.lastName && profile.lastName !== before.lastName) patch.lastName = profile.lastName;
   }
-  for (const key of ["avatarUrl", "language", "timezone"] as const) {
+  if (
+    profile.avatarUrl &&
+    profile.avatarUrl !== before.avatarUrl &&
+    (!before.avatarUrl || (isMetaManagedAvatarUrl(before.avatarUrl) && isMetaManagedAvatarUrl(profile.avatarUrl)))
+  ) patch.avatarUrl = profile.avatarUrl;
+  for (const key of ["language", "timezone"] as const) {
     if (!before[key] && profile[key]) patch[key] = profile[key];
   }
   if (profile.instagramUsername && profile.instagramUsername !== before.instagramUsername) patch.instagramUsername = profile.instagramUsername;

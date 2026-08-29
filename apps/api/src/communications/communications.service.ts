@@ -102,6 +102,7 @@ function validCommunicationFile(bytes: Buffer, mimeType: string) {
 function isDeduplicatedDraft(metadata: Prisma.JsonValue | null) {
   return !!metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.deduplicatedIntoMessageId === "string";
 }
+type MessageWithChannel = Prisma.MessageGetPayload<{ include: { conversation: { select: { channel: true } } } }>;
 type MetaOauthAttempt = { nonce: string; configRevision: number };
 function parseMetaOauthAttempt(value: unknown): MetaOauthAttempt | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -955,7 +956,7 @@ export class CommunicationsService {
     if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
     const boundedLimit=Math.max(1,Math.min(50,limit));
     const conversations=await this.p.conversation.findMany({
-      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null}]}},
+      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}}]}},
       orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
       select:{externalId:true,client:{select:{id:true,displayName:true,avatarUrl:true}}},
     });
@@ -1221,6 +1222,24 @@ export class CommunicationsService {
       return { marked };
     });
   }
+  private async latestVisibleMessages(where: Prisma.MessageWhereInput) {
+    const visible: MessageWithChannel[] = [];
+    let cursor: string | undefined;
+    while (visible.length < 300) {
+      const batch = await this.p.message.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 300,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: { conversation: { select: { channel: true } } },
+      });
+      visible.push(...batch.filter(message => !isDeduplicatedDraft(message.metadata)));
+      if (batch.length < 300) break;
+      cursor = batch.at(-1)?.id;
+      if (!cursor) break;
+    }
+    return visible.slice(0, 300).reverse().map(({ conversation, ...message }) => ({ ...message, channel: conversation.channel }));
+  }
   async detail(clientId: string, channel?: ContactChannel) {
     const client = await this.p.client.findFirst({
       where: { id: clientId, archivedAt: null },
@@ -1228,16 +1247,15 @@ export class CommunicationsService {
     });
     if (!client) throw new NotFoundException("Клиент не найден");
     if (!channel) {
-      const conversations = await this.p.conversation.findMany({ where: { clientId, archivedAt: null }, include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } } });
-      const messages = conversations.flatMap(conversation => conversation.messages.filter(message => !isDeduplicatedDraft(message.metadata)).map(message => ({ ...message, channel: conversation.channel }))).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime()).slice(-300);
+      const conversations = await this.p.conversation.findMany({ where: { clientId, archivedAt: null } });
+      const messages = await this.latestVisibleMessages({ conversation: { clientId, archivedAt: null } });
       return { id: null, clientId, channel: null, unreadCount: conversations.reduce((sum,x) => sum + x.unreadCount, 0), lastMessageAt: messages.at(-1)?.createdAt ?? null, messages };
     }
     const selected = channel;
     const c = await this.p.conversation.findUnique({
       where: { clientId_channel: { clientId, channel: selected } },
-      include: { messages: { orderBy: { createdAt: "asc" }, take: 300 } },
     });
-    return c ? { ...c, messages: c.messages.filter(message => !isDeduplicatedDraft(message.metadata)).map(message => ({ ...message, channel: c.channel })) } : (
+    return c ? { ...c, messages: await this.latestVisibleMessages({ conversationId: c.id }) } : (
       {
         id: null,
         clientId,

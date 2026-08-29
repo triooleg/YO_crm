@@ -140,8 +140,10 @@ test("иконки действий появляются при наведени
   assert.match(css,/\.communications-media-attachment:hover \.communications-media-save/);
   assert.match(css,/@media\(hover:none\),\(pointer:coarse\)\{[^}]*\.communications-message-translate/);
 });
-test("ссылка на соцсеть содержит видимое действие и аккаунт второй строкой",()=>{
-  assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
+test("ссылка на соцсеть содержит только видимое действие без строки аккаунта",()=>{
+  assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><\/a>/);
+  assert.doesNotMatch(component,/<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
+  assert.doesNotMatch(component,/function connectedAccountLabel/);
   assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram"/);
 });
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
@@ -240,16 +242,14 @@ test("заголовок чата удерживает источник при �
   assert.match(css, /\.communications-chat-header>span:last-child\{flex-shrink:0\}/);
 });
 
-test("заголовок чата показывает привязанный бизнес-аккаунт Meta", () => {
-  assert.match(component, /connectedAccountLabel/);
+test("заголовок чата показывает только ссылку на социальную переписку", () => {
   assert.match(component, /communications-chat-account/);
   assert.match(component, /communications-chat-client-copy/);
   assert.match(component, /connectedAccountUrl/);
   assert.match(component, /target="_blank"/);
   assert.match(component, /rel="noopener noreferrer"/);
   assert.match(component, /ui\.openInSocialNetwork/);
-  assert.match(component, /ui\.connectedAccount/);
-  assert.match(component, /<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
+  assert.doesNotMatch(component, /ui\.connectedAccount/);
   assert.match(css, /\.communications-chat-account\{/);
   assert.match(css, /\.communications-chat-client-copy\{[^}]*min-width:0;flex:1 1 0/);
   assert.match(css, /\.communications-chat-client-copy\{[^}]*overflow:hidden/);
@@ -369,6 +369,21 @@ test("ошибка отправки Meta показывает безопасну
 test("переключатель канала не ломает заголовок на мобильном экране", () => {
   assert.match(css, /communications-chat-header>label select/);
   assert.match(css, /@media\(max-width:650px\)\{\.communications-chat-header>label/);
+});
+
+test("при открытии переписки лента показывает последние сообщения", () => {
+  assert.match(component, /messagesViewport\s*=\s*useRef<HTMLDivElement\s*\|\s*null>/);
+  assert.match(component, /ref=\{messagesViewport\}/);
+  assert.match(component, /function scrollMessagesToLatest/);
+  assert.match(component, /requestAnimationFrame/);
+  assert.match(component, /autoScrollPending\.current\s*=\s*true/);
+  assert.match(component, /stickToBottom\s*=\s*useRef\(true\)/);
+  assert.match(component, /onScroll=\{updateMessagesScrollIntent\}/);
+  assert.match(component, /if\(!autoScrollPending\.current&&!stickToBottom\.current\)return/);
+  assert.match(component, /messagesViewport\.current\.scrollTop\s*=\s*messagesViewport\.current\.scrollHeight/);
+  assert.match(component, /\[messagesLoading,client\?\.id,messages\.length\]/);
+  assert.match(component, /<img[^>]*onLoad=\{scrollMessagesToLatest\}/);
+  assert.match(component, /<video[^>]*onLoadedMetadata=\{scrollMessagesToLatest\}/);
 });
 
 test("к сообщению можно прикрепить изображение или файл и сохранить его как черновик", () => {
