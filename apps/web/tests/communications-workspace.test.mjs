@@ -28,8 +28,9 @@ test("каждое входящее переводится внутри сооб
   assert.match(component,/messages\/\$\{message\.id\}\/translate/);
   assert.match(component,/message\.metadata\?\.translation\?\.text/);
   assert.match(component,/communications-message-translation/);
-  assert.match(component,/communications-message-translate/);
+  assert.match(component,/message\.direction === "INBOUND" && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
   assert.match(css,/communications-message-translation\{[^}]*border-top:1px solid #aaa[^}]*color:#666/);
+  assert.match(css,/\.communications-message-translate\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
   assert.match(css,/communications-message-translate:focus-visible/);
   for(const key of["translateAgain","translating","selectMessageForReply"])assert.match(locale,new RegExp(`${key}:`));
 });
@@ -99,13 +100,15 @@ test("template action loads a saved template into the composer instead of invoki
 test("исходящий ответ можно сохранить как шаблон, выбрать и архивировать из меню",()=>{
   assert.match(component,/async function saveAsTemplate\(content:string,channel:string,language="ru"\)/);
   assert.match(component,/method:"POST",body:JSON\.stringify\(\{name,content:content\.trim\(\),channel,language\}\)/);
-  assert.match(component,/message\.direction === "OUTBOUND" && <button[^>]*communications-save-template/s);
+  assert.match(component,/message\.direction === "OUTBOUND" && <button[^>]*communications-save-template[^>]*aria-label=\{ui\.saveAsTemplate\}[^>]*title=\{ui\.saveAsTemplate\}[\s\S]*?<svg/);
   assert.match(component,/async function archiveTemplate\(template:Template\)/);
   assert.match(component,/\/communications\/templates\/"\+template\.id\+"\/archive/);
   assert.match(component,/setTemplates\(current=>current\.filter\(item=>item\.id!==template\.id\)\)/);
   assert.match(component,/communications-template-delete/);
   assert.match(component,/className="communications-template-row" role="none"/);
-  assert.match(menuCss,/\.communications-save-template\{[^}]*min-height:32px/);
+  assert.match(menuCss,/\.communications-save-template\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
+  assert.match(menuCss,/\.communications-messages article\.out\{[^}]*padding-right:44px/);
+  assert.match(css,/\.communications-messages article\.selectable\.out\{padding-right:72px\}/);
   for(const key of["saveAsTemplate","templateNamePrompt","templateSaved","deleteTemplate","deleteTemplateConfirm"])assert.match(locale,new RegExp(`${key}:`));
 });
 test("сообщения показывают время без секунд и сохраняют абзацы",()=>{
