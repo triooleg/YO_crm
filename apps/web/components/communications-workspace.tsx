@@ -58,7 +58,7 @@ type Message = {
   channel: string;
   status?: string;
   language?: string;
-  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number; translation?: { text?: string; language?: string } };
+  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number; source?: string; translation?: { text?: string; language?: string } };
 };
 type Template = {
   id: string;
@@ -881,12 +881,14 @@ export function CommunicationsWorkspace() {
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
+                const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO"].includes(message.metadata?.source || "");
                 return (
                   <article
                     key={message.id}
                     className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}`}
                   >
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
+                    {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
                     <span className="communications-message-content">{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">

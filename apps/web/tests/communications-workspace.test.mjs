@@ -119,6 +119,13 @@ test("сообщения показывают время без секунд и 
   assert.match(component,/className="communications-message-content"/);
   assert.match(css,/\.communications-message-content,\.communications-message-translation span\{[^}]*white-space:pre-wrap/);
 });
+test("ответы отправленные вне CRM имеют подпись социальной сети",()=>{
+  assert.match(component,/\["META","META_ECHO"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
+  assert.match(component,/communications-external-message-source/);
+  assert.match(component,/ui\.externalReplyByChannel\[message\.channel as keyof typeof ui\.externalReplyByChannel\]/);
+  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram"\s*\}/);
+  assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
+});
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
 
