@@ -1002,3 +1002,11 @@
 - Production auth smoke: health 200; анонимные `/auth/me` и `/admin/backups` 401; неверный пароль 401; OWNER login 201; safe `/auth/me` подтверждён; logout 201 и прежняя сессия после logout 401.
 - Instagram profile backfill выполнен dry-run и apply: найдено 4, разрешено 4, обновлено 4, unresolved 0. Authenticated read smoke подтвердил 4/4 Instagram conversation links вида `https://ig.me/m/{username}` и отсутствие Facebook URL у Instagram; Facebook сохранил 15/15 собственных ссылок.
 - Live browser visual smoke не завершён: подключение Edge extension истекло по timeout до ввода credentials. API/browser-independent production E2E подтверждён; desktop/mobile/keyboard визуальная проверка остаётся операторской.
+
+## 2026-08-29 — пароль от 8 символов и компактные действия сообщений
+
+- По явному запросу владельца минимальная длина нового пароля снижена с 12 до 8 символов. API DTO, оба web-поля, русская подсказка и контрактные тесты согласованы; Argon2id, проверка текущего пароля, OWNER RBAC, Redis rate limit, ротация сессий и аудит не менялись.
+- В исходящих сообщениях текстовая кнопка «Сохранить как шаблон» заменена на bookmark-plus SVG-иконку в правом верхнем углу; во входящих «Перевести/Перевести заново» заменена на translate SVG-иконку в том же месте. Обработчики и direction gates сохранены, SVG декоративные, а локализованные `title` и `aria-label` дают tooltip и доступное имя.
+- Для обычных bubbles зарезервировано 44px справа. Исходящий DRAFT в режиме выбора ответа резервирует 72px для отдельного checkbox и template action; source review подтвердил отсутствие overlap на desktop/mobile.
+- Финальный `pnpm quality:check` PASS: API 195/195, web 141/141, database 5/5, typechecks и production builds. Regression, business/security, visual и release reviews — PASS.
+- Commits `ba6f3b0` и `1682e75` pushed и развёрнуты в `/home/trio/yoleotard-crm`; API/web/PostgreSQL/Redis running, public health 200, anonymous `/auth/me` 401, deployed source contracts подтверждены.
