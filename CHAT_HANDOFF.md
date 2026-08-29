@@ -1010,3 +1010,10 @@
 - Для обычных bubbles зарезервировано 44px справа. Исходящий DRAFT в режиме выбора ответа резервирует 72px для отдельного checkbox и template action; source review подтвердил отсутствие overlap на desktop/mobile.
 - Финальный `pnpm quality:check` PASS: API 195/195, web 141/141, database 5/5, typechecks и production builds. Regression, business/security, visual и release reviews — PASS.
 - Commits `ba6f3b0` и `1682e75` pushed и развёрнуты в `/home/trio/yoleotard-crm`; API/web/PostgreSQL/Redis running, public health 200, anonymous `/auth/me` 401, deployed source contracts подтверждены.
+
+## 2026-08-29 — действия для входящих фото и видео
+
+- Для входящих сообщений с `image`, `sticker` или `video` иконка перевода больше не отображается; у текстовых, audio и file сообщений перевод сохранён.
+- Каждое визуальное вложение имеет собственную top-right download-иконку с локализованными `title`/`aria-label`. Она использует существующий authenticated same-origin endpoint message ID + attachment index и не открывает lightbox при сохранении.
+- Финальный `pnpm quality:check` PASS: API 195/195, web 141/141, database 5/5, typechecks и builds. Regression, business/security, visual и release reviews — PASS.
+- Commit `7ee0974` pushed и развёрнут; API/web/PostgreSQL/Redis running, public health 200, deployed source contracts подтверждены.
