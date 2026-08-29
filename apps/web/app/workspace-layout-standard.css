@@ -1,0 +1,60 @@
+/* Final CRM page geometry contract. Keep this import after section styles. */
+.phase2-main,
+.communications-page,
+.orders-page,
+.production-page,
+.finance-page,
+.shipping-page,
+.tasks-page,
+.settings-page,
+.coming-soon-page,
+.inbox-page {
+  width: 100%;
+  min-width: 0;
+  padding: 18px 20px!important;
+}
+
+.phase2-header {
+  width: 100%;
+  max-width: none;
+  margin: 0 0 22px;
+}
+
+.phase2-workspace {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.inbox-board {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.phase2-error,
+.communications-template-notice {
+  width: 100%;
+  max-width: none;
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.coming-soon-page .coming-soon {
+  margin: 0;
+}
+
+@media(max-width:720px) {
+  .phase2-main,
+  .communications-page,
+  .orders-page,
+  .production-page,
+  .finance-page,
+  .shipping-page,
+  .tasks-page,
+  .settings-page,
+  .coming-soon-page,
+  .inbox-page {
+    padding: 10px!important;
+  }
+}

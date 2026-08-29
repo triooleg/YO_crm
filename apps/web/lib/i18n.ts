@@ -523,6 +523,10 @@ export const navigationUi = {
   shipping: "Доставка",
   tasks: "Задачи",
   settings: "Настройки",
+  workspaceEyebrow: "РАБОЧАЯ ОБЛАСТЬ",
+  workspaceSubtitle: "Единое пространство управления CRM",
+  section: "Раздел",
+  comingSoon: "Этот рабочий экран будет реализован на следующем этапе.",
   expand: "Развернуть меню",
   collapse: "Свернуть меню",
 } as const;
