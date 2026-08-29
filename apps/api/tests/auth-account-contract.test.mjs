@@ -13,7 +13,8 @@ test("учётные данные меняются только в автори�
   assert.match(service, /pg_advisory_xact_lock/);
   assert.match(service, /argon2\.verify\(user\.passwordHash,input\.currentPassword\)/);
   assert.match(dto, /currentPassword/);
-  assert.match(dto, /@MinLength\(12/);
+  assert.match(dto, /newPassword\?: string/);
+  assert.match(dto, /@MinLength\(8, \{ message: "Новый пароль должен содержать не менее 8 символов" \}\) newPassword/);
 });
 
 test("смена учётных данных ротирует сессии и журналируется без пароля", () => {

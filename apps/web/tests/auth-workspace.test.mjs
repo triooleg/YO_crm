@@ -29,6 +29,9 @@ test("в настройках можно безопасно изменить л�
   assert.match(settings, /\/api\/auth\/account/);
   assert.match(settings, /name="currentPassword"/);
   assert.match(settings, /name="newPassword"/);
+  assert.match(settings, /name="newPassword"[^>]+minLength=\{8\}/);
+  assert.match(settings, /name="confirmPassword"[^>]+minLength=\{8\}/);
+  assert.match(locale, /accountPasswordHint: "Не менее 8 символов\./);
   assert.match(settings, /name="confirmPassword"/);
   assert.match(locale, /accountTab:\s*"Учётная запись"/);
   assert.match(locale,/export const authUi/);

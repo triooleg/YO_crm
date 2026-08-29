@@ -413,8 +413,8 @@ function AccountSettings(){
       <label>{settingsUi.currentLogin}<input value={currentEmail} readOnly/></label>
       <label>{settingsUi.newLogin}<input name="email" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} autoComplete="username" required/></label>
       <label>{settingsUi.currentPassword}<input name="currentPassword" type="password" autoComplete="current-password" minLength={8} required/></label>
-      <label>{settingsUi.newPassword}<input name="newPassword" type="password" autoComplete="new-password" minLength={12}/></label>
-      <label>{settingsUi.confirmPassword}<input name="confirmPassword" type="password" autoComplete="new-password" minLength={12}/><small>{settingsUi.accountPasswordHint}</small></label>
+      <label>{settingsUi.newPassword}<input name="newPassword" type="password" autoComplete="new-password" minLength={8}/></label>
+      <label>{settingsUi.confirmPassword}<input name="confirmPassword" type="password" autoComplete="new-password" minLength={8}/><small>{settingsUi.accountPasswordHint}</small></label>
       {error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}
       <button className="phase2-primary" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.accountSave}</button>
     </form>

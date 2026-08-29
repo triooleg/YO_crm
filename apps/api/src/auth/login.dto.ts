@@ -14,5 +14,5 @@ export class LoginDto {
 export class UpdateAccountDto {
   @IsString() @MinLength(8) currentPassword!: string;
   @IsOptional() @IsEmail({}, { message: "Введите корректный e-mail" }) email?: string;
-  @IsOptional() @IsString() @MinLength(12, { message: "Новый пароль должен содержать не менее 12 символов" }) newPassword?: string;
+  @IsOptional() @IsString() @MinLength(8, { message: "Новый пароль должен содержать не менее 8 символов" }) newPassword?: string;
 }

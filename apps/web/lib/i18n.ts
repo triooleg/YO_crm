@@ -332,7 +332,7 @@ export const settingsUi = {
   currentPassword: "Текущий пароль",
   newPassword: "Новый пароль",
   confirmPassword: "Повторите новый пароль",
-  accountPasswordHint: "Не менее 12 символов. Оставьте оба поля нового пароля пустыми, если меняете только логин.",
+  accountPasswordHint: "Не менее 8 символов. Оставьте оба поля нового пароля пустыми, если меняете только логин.",
   accountMismatch: "Новые пароли не совпадают",
   accountSave: "Изменить учётные данные",
   accountSaving: "Сохранение…",
