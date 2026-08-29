@@ -127,9 +127,11 @@ test("ответы отправленные вне CRM имеют подпись
   assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
 });
 test("прочтение клиентом показано возле времени с доступной русской подсказкой",()=>{
-  assert.match(component,/message\.direction === "OUTBOUND" && message\.metadata\?\.metaReadAt && <span className="communications-message-read"[^>]*title=\{ui\.messageRead\}[^>]*aria-label=\{ui\.messageRead\}/);
+  assert.match(component,/message\.direction === "OUTBOUND" && message\.metadata\?\.metaReadAt && <span className="communications-message-read"[^>]*title=\{ui\.messageRead\}[^>]*aria-label=\{ui\.messageRead\}[^>]*><\/span>/);
+  assert.doesNotMatch(component,/communications-message-read[^>]*>✓✓<\/span>/);
   assert.match(locale,/messageRead:\s*"Прочитано клиентом"/);
-  assert.match(css,/\.communications-message-read\{[^}]*display:inline-flex[^}]*color:/);
+  assert.match(css,/\.communications-message-meta\{[^}]*opacity:\s*1!important/);
+  assert.match(css,/\.communications-message-read\{[^}]*width:\s*7px[^}]*height:\s*7px[^}]*border-radius:\s*50%[^}]*background:\s*#2fb56f/);
 });
 test("иконки действий появляются при наведении или фокусе и видимы на touch",()=>{
   assert.match(css,/\.communications-message-translate,\.communications-save-template,\.communications-media-save\{[^}]*opacity:0[^}]*pointer-events:none/);

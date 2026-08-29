@@ -330,6 +330,16 @@ test("normalizes a read watermark without a message id and keeps exact account i
   assert.equal(event.readWatermarkAt.toISOString(),"2023-11-14T22:13:20.000Z");
 });
 
+test("normalizes an Instagram read receipt by exact message id", () => {
+  const [event] = normalizeMetaControlEvents({ object:"instagram", entry:[{ id:"ig-account-1", messaging:[{ sender:{id:"igsid-1"}, recipient:{id:"ig-account-1"}, timestamp:1700000005000, read:{mid:"ig-mid-1"} }] }] });
+  assert.equal(event.channel,"INSTAGRAM");
+  assert.equal(event.eventType,"read");
+  assert.equal(event.receiverId,"ig-account-1");
+  assert.equal(event.externalPartyId,"igsid-1");
+  assert.equal(event.externalMessageId,"ig-mid-1");
+  assert.equal(event.readWatermarkAt,undefined);
+});
+
 test("read metadata is monotonic and idempotent",()=>{
   assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReadMetadata({source:"CRM"},new Date("2026-08-30T10:00:00Z")))),{source:"CRM",metaReadAt:"2026-08-30T10:00:00.000Z"});
   assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReadMetadata({source:"CRM",metaReadAt:"2026-08-30T11:00:00.000Z"},new Date("2026-08-30T10:00:00Z")))),{source:"CRM",metaReadAt:"2026-08-30T11:00:00.000Z"});

@@ -358,10 +358,12 @@ test("Meta delivery is verified by a real Page subscription before it is reporte
 });
 
 test("Meta read watermark marks only sent outbound messages in the exact account conversation",()=>{
-  assert.match(service,/event\.eventType==="read"&&event\.readWatermarkAt&&event\.receiverId&&event\.externalPartyId/);
+  assert.match(service,/event\.eventType==="read"&&\(event\.readWatermarkAt\|\|event\.externalMessageId\)&&event\.receiverId&&event\.externalPartyId/);
   assert.match(service,/metaConversationExternalId\(receiverId,externalPartyId\)/);
   assert.match(service,/direction:MessageDirection\.OUTBOUND,status:MessageStatus\.SENT,sentAt:\{lte:readWatermarkAt\}/);
+  assert.match(service,/externalId:event\.externalMessageId,direction:MessageDirection\.OUTBOUND,status:MessageStatus\.SENT/);
   assert.match(service,/mergeMetaReadMetadata\(message\.metadata,readWatermarkAt\)/);
+  assert.match(service,/mergeMetaReadMetadata\(message\.metadata,event\.receivedAt\)/);
   assert.match(service,/constsentAt=newDate\(\)/);
   assert.match(service,/status:MessageStatus\.SENT[^}]*sentAt/);
 });

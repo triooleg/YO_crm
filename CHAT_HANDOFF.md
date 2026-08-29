@@ -1,5 +1,13 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-30 — Instagram read receipt by message ID (local only)
+
+- Production trace подтвердил различие провайдеров: Facebook присылает `read.watermark`, а Instagram — `read.mid`. Старый путь сохранял Instagram event как generic control metadata и не выставлял `metaReadAt`.
+- Instagram `read.mid` теперь обрабатывается только внутри точного `channel + receiver/account + external party` диалога и обновляет ровно одно сообщение с совпадающим provider `externalId`, `direction=OUTBOUND`, `status=SENT`. Facebook watermark path, строгая проверка timestamp и монотонное/idempotent metadata merge сохранены.
+- Текстовый `✓✓` заменён на постоянный зелёный круг 7×7 px возле времени с `title`/`aria-label` «Прочитано клиентом». Общая opacity времени больше не приглушает индикатор; белая окантовка сохраняет различимость на фиолетовом bubble.
+- Failing-first тесты затем PASS: API 224, web 155, database 7, typecheck и builds. Compatibility, regression, business/security, visual (Chromium 1920×1080, 1366×768, 390×844) и final release gate — PASS.
+- Production на этом шаге не изменён. После отдельного разрешения нужны deploy API/web и реальный smoke Instagram `read.mid` плюс Facebook watermark.
+
 ## 2026-08-30 — Meta replies/read receipts production rollout
 
 - В production развёрнуты commits `042de99` и `8d5d83b` из изолированной ветки `codex/meta-bidirectional-sync`: внешние ответы Facebook/Instagram получают явную подпись, Meta read watermark отмечает исходящие сообщения как прочитанные, действия сообщения показываются по hover/focus, а ссылка на переписку имеет видимый channel-specific текст.

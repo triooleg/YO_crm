@@ -1003,25 +1003,29 @@ export class CommunicationsService {
     }catch(error){this.logger.warn(JSON.stringify({event:"META_PROFILE_LOOKUP_FAILED",senderRef:metaIdentityLogRef(senderId),errorType:error instanceof Error?error.constructor.name:"UnknownError"}))}
   }
   private async applyMetaControl(event: MetaControlEvent) {
-    if (event.eventType === "read" && event.readWatermarkAt && event.receiverId && event.externalPartyId) {
+    if (event.eventType === "read" && (event.readWatermarkAt || event.externalMessageId) && event.receiverId && event.externalPartyId) {
       const receiverId = event.receiverId, externalPartyId = event.externalPartyId, readWatermarkAt = event.readWatermarkAt;
       return this.p.$transaction(async tx => {
         const externalId = metaConversationExternalId(receiverId, externalPartyId);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-read:" + event.channel + ":" + externalId}, 0))`;
         const conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId, channel: event.channel as ContactChannel } }, select: { id: true } });
         if (!conversation) return false;
-        const messages = await tx.message.findMany({ where: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, sentAt: { lte: readWatermarkAt } }, select: { id: true, sentAt: true, metadata: true } });
+        const messages = readWatermarkAt
+          ? await tx.message.findMany({ where: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, sentAt: { lte: readWatermarkAt } }, select: { id: true, sentAt: true, metadata: true } })
+          : await tx.message.findMany({ where: { conversationId: conversation.id, externalId: event.externalMessageId, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT }, take: 1, select: { id: true, sentAt: true, metadata: true } });
         let updatedCount = 0;
         for (const message of messages) {
-          if (!isMetaMessageReadAt(message.sentAt, readWatermarkAt)) continue;
-          const metadata = mergeMetaReadMetadata(message.metadata, readWatermarkAt);
+          if (readWatermarkAt && !isMetaMessageReadAt(message.sentAt, readWatermarkAt)) continue;
+          const metadata = readWatermarkAt
+            ? mergeMetaReadMetadata(message.metadata, readWatermarkAt)
+            : mergeMetaReadMetadata(message.metadata, event.receivedAt);
           const previousReadAt = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? (message.metadata as Prisma.JsonObject).metaReadAt : undefined;
           if (previousReadAt === metadata.metaReadAt) continue;
           await tx.message.update({ where: { id: message.id }, data: { metadata: metadata as Prisma.InputJsonValue } });
           updatedCount++;
         }
-        if (updatedCount) await tx.auditLog.create({ data: { action: "UPDATE", entityType: "ConversationReadReceipt", entityId: conversation.id, after: { channel: event.channel, watermarkAt: readWatermarkAt.toISOString(), updatedCount } } });
-        this.logger.log(JSON.stringify({ event: "META_READ_WATERMARK_APPLIED", channel: event.channel, conversationId: conversation.id, updatedCount }));
+        if (updatedCount) await tx.auditLog.create({ data: { action: "UPDATE", entityType: "ConversationReadReceipt", entityId: conversation.id, after: { channel: event.channel, readAt: (readWatermarkAt || event.receivedAt).toISOString(), method: readWatermarkAt ? "watermark" : "messageId", updatedCount } } });
+        this.logger.log(JSON.stringify({ event: "META_READ_RECEIPT_APPLIED", channel: event.channel, conversationId: conversation.id, method: readWatermarkAt ? "watermark" : "messageId", updatedCount }));
         return updatedCount > 0;
       });
     }
