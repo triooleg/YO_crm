@@ -37,6 +37,9 @@ test("backup platform module exposes storage, repository, job and restore bounda
   assert.match(controller, /@Controller\("admin\/backups"\)/);
   assert.match(controller, /@Roles\("OWNER","ADMIN"\)/);
   assert.match(module, /class BackupsModule/);
+  assert.match(module, /AuthService/);
+  assert.match(module, /SessionGuard/);
+  assert.match(module, /RolesGuard/);
   assert.match(scheduler, /interface CreateBackupJob/);
   assert.match(scheduler, /class BackupScheduler/);
 });
