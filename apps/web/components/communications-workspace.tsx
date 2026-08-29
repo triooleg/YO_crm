@@ -906,7 +906,7 @@ export function CommunicationsWorkspace() {
                             >
                               {attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label} />}
                             </button>
-                              <a className="communications-media-save" href={`/api/communications/messages/${encodeURIComponent(message.id)}/attachments/${index}/download`} download>{ui.saveAttachment}</a>
+                              <a className="communications-media-save" aria-label={ui.saveAttachment} title={ui.saveAttachment} href={`/api/communications/messages/${encodeURIComponent(message.id)}/attachments/${index}/download`} download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg></a>
                             </span>
                           ) : url ? (
                             <a
@@ -928,7 +928,7 @@ export function CommunicationsWorkspace() {
                       {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {formatMessageDateTime(message.createdAt)}
                     </small>
-                    {message.direction === "INBOUND" && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}
+                    {message.direction === "INBOUND" && !hasVisualAttachment && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}
                     {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" aria-label={ui.saveAsTemplate} title={ui.saveAsTemplate} disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z"/><path d="M12 7v6M9 10h6"/></svg></button>}
                     {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>

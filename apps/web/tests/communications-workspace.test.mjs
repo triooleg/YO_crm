@@ -28,7 +28,7 @@ test("каждое входящее переводится внутри сооб
   assert.match(component,/messages\/\$\{message\.id\}\/translate/);
   assert.match(component,/message\.metadata\?\.translation\?\.text/);
   assert.match(component,/communications-message-translation/);
-  assert.match(component,/message\.direction === "INBOUND" && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
+  assert.match(component,/message\.direction === "INBOUND" && !hasVisualAttachment && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
   assert.match(css,/communications-message-translation\{[^}]*border-top:1px solid #aaa[^}]*color:#666/);
   assert.match(css,/\.communications-message-translate\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
   assert.match(css,/communications-message-translate:focus-visible/);
@@ -299,7 +299,9 @@ test("вложения Meta отображаются в истории пере�
   assert.match(locale, /openAttachment:/);
   assert.match(component, /communications-lightbox/);
   assert.match(component, /setPreview\(\{url,type:/);
-  assert.match(component, /className="communications-media-save"[^>]*\/api\/communications\/messages\/\$\{encodeURIComponent\(message\.id\)\}\/attachments\/\$\{index\}\/download[^>]*download/);
+  assert.match(component, /className="communications-media-save"[^>]*aria-label=\{ui\.saveAttachment\}[^>]*title=\{ui\.saveAttachment\}[^>]*\/api\/communications\/messages\/\$\{encodeURIComponent\(message\.id\)\}\/attachments\/\$\{index\}\/download[^>]*download[^>]*><svg/);
+  assert.match(css,/\.communications-attachments \.communications-media-attachment\{[^}]*position:relative/);
+  assert.match(css,/\.communications-attachments \.communications-media-save\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
   assert.match(locale, /saveAttachment:\s*"Сохранить"/);
   assert.match(component, /event\.key\s*===\s*"Escape"/);
   assert.match(component, /previewClose\.current\?\.focus/);
