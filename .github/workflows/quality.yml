@@ -13,7 +13,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.16.0
       - uses: actions/setup-node@v5
@@ -23,6 +23,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm --filter @yoleotard-crm/database exec prisma validate --schema prisma/schema.prisma
+      - run: cp .env.example .env
       - run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
       - run: docker compose --env-file .env.example -f docker-compose.backup-test.yml config --quiet
       - run: pnpm quality:check
