@@ -35,7 +35,7 @@ export class TasksService {
           : { archivedAt: null },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         include: { tasks: { where: { archivedAt: archived ? { not: null } : null }, orderBy: [{ position: "asc" }, { createdAt: "desc" }], include: {
-          client: { select: { id: true, displayName: true } },
+          client: { select: { id: true, displayName: true, source: true, preferredChannel: true } },
           assignee: { select: { id: true, displayName: true, role: true } },
           attachments: { orderBy: { createdAt: "asc" } },
           sourceMessage: { select: { id: true, content: true, conversation: { select: { channel: true } } } },

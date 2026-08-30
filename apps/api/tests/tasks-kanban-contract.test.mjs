@@ -87,3 +87,7 @@ test("board can explicitly return archived tasks without mixing them into active
   assert.match(service,/archivedAt: archived \? \{ not: null \} : null/);
   assert.match(service,/archived\s*\? \{ tasks: \{ some: \{ archivedAt: \{ not: null \} \} \} \}\s*: \{ archivedAt: null \}/);
 });
+
+test("task board exposes the linked client channel for a social badge",()=>{
+  assert.match(service,/client:\s*\{\s*select:\s*\{\s*id:\s*true,\s*displayName:\s*true,\s*source:\s*true,\s*preferredChannel:\s*true\s*\}\s*\}/);
+});

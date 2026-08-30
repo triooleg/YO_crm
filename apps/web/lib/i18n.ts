@@ -578,7 +578,9 @@ export const tasksUi = {
   labelsHint: "Срочно, закупки, клиент",
   photos: "Фотографии",
   selectedPhotos: "Выбрано фотографий",
+  photoPreviews: "Превью фотографий задачи",
   client: "Клиент",
+  clientChannel: "Канал клиента",
   archive: "Архивировать задачу",
   cancel: "Отмена",
   save: "Сохранить",
@@ -595,6 +597,7 @@ export const tasksUi = {
   completesTasks: "Задачи в этой колонке считаются завершёнными",
   archiveColumn: "Архивировать колонку",
   types: { CLIENT: "Клиентская", ADMINISTRATIVE: "Администратору", PRODUCTION: "Производственная" },
+  sources: { FACEBOOK: "Facebook", INSTAGRAM: "Instagram", WHATSAPP: "WhatsApp", CHATWOOT: "Chatwoot", EMAIL: "Gmail" },
 } as const;
 
 export const communicationsUi = {

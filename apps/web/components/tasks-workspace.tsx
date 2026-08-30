@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { tasksUi } from "../lib/i18n";
+import { taskChannel, taskChannelIcons } from "../lib/task-channel";
 
 type User = { id: string; displayName: string; role: string };
 type Attachment = { id: string; path: string };
@@ -15,7 +16,7 @@ type Task = {
   labels: string[];
   dueAt?: string;
   archivedAt?: string;
-  client?: { id: string; displayName: string };
+  client?: { id: string; displayName: string; source?: string; preferredChannel?: string };
   assignee?: User;
   attachments: Attachment[];
   sourceMessage?: { content: string; conversation: { channel: string } };
@@ -29,6 +30,21 @@ type Column = {
   tasks: Task[];
 };
 type Board = { columns: Column[]; users: User[] };
+function taskAccessibleLabel(task: Task) {
+  const client = task.client
+    ? `, ${tasksUi.client}: ${task.client.displayName}`
+    : "";
+  const channel = taskChannel(task);
+  const source = channel
+    ? `, ${tasksUi.clientChannel}: ${tasksUi.sources[channel]}`
+    : "";
+  return `${tasksUi.openTask}: ${task.title}${client}${source}`;
+}
+function TaskClientBadge({ task }: { task: Task }) {
+  if (!task.client) return null;
+  const channel = taskChannel(task);
+  return <div className="task-client">{channel && <span className={`task-client-channel source-${channel.toLowerCase()}`} title={tasksUi.sources[channel]} aria-label={`${tasksUi.clientChannel}: ${tasksUi.sources[channel]}`}>{taskChannelIcons[channel]}</span>}<b>{task.client.displayName}</b></div>;
+}
 type Incoming = {
   id: string;
   content: string;
@@ -307,7 +323,7 @@ export function TasksWorkspace() {
                     key={task.id}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${tasksUi.openTask}: ${task.title}`}
+                    aria-label={taskAccessibleLabel(task)}
                     draggable={!showArchived}
                     onDragStart={() => {
                       if (!showArchived) dragged.current = task.id;
@@ -371,6 +387,7 @@ export function TasksWorkspace() {
                         {tasksUi.types[task.type]}
                       </span>
                       <h3>{task.title}</h3>
+                      <TaskClientBadge task={task}/>
                       {task.description && <p>{task.description}</p>}
                       <div className="task-labels">
                         {task.labels.map((x) => (
@@ -568,6 +585,7 @@ export function TaskDialog({
   archive?: () => Promise<void>;
 }) {
   const [files, setFiles] = useState<string[]>([]);
+  const previewPaths=[...(task.attachments?.map((attachment) => attachment.path)||[]),...files];
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -695,6 +713,11 @@ export function TaskDialog({
             </small>
           )}
         </label>
+        {previewPaths.length > 0 && (
+          <div className="task-form-previews" aria-label={tasksUi.photoPreviews}>
+            {previewPaths.map((path) => <img key={path} src={`/api/tasks/images/${path}`} alt={tasksUi.photoPreviews}/>) }
+          </div>
+        )}
         {task.client && (
           <p className="task-context">
             {tasksUi.client}: <b>{task.client.displayName}</b>
