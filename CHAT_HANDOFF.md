@@ -1153,3 +1153,11 @@
 - Локальный Next.js поднят на `http://localhost:3513`, однако production-cookie не переносится на localhost, поэтому реальный заказ через локальный домен не изменялся. Финальный read-only UI smoke запланирован на production только после всех quality/review/release gates; сохранение замеров реальному клиенту во время smoke запрещено.
 - Compatibility review обнаружил поддерживаемый исторический вариант, где спортсмен записан только в единственной позиции заказа. Исправление выбирает однозначного спортсмена из заказа или позиции, нормализует обе связи в одной транзакции и fail-closed отклоняет конфликт двух разных спортсменов.
 - Visual review потребовал полноценное управление клавиатурным фокусом. Модальное окно теперь переводит фокус внутрь, удерживает Tab/Shift+Tab, закрывается по Escape и возвращает фокус на исходную кнопку.
+
+## 2026-08-30 — deployment добавления замеров из заказа
+
+- Runtime commit `7cd4565418478add54e50fd88b4bade60eb29050` fast-forward pushed в `origin/main`; GitHub Actions `Quality gates` run `33321157545` завершён `SUCCESS` за 2 мин 30 с.
+- Перед deployment создан и отдельно проверен FULL backup `20260830T160200Z-7cd4565-predeploy`: SHA-256 для `postgres.dump`, `uploads.tar.gz` и `manifest.json` совпали; PostgreSQL custom dump читается `pg_restore --list`, uploads archive и JSON manifest структурно валидны.
+- Release archive SHA-256 `31f708fd3d35fff43e871e77578faf9720c6684fe07b21a78f3591ebd18b02e6` совпал локально и на сервере. В `/home/trio/yoleotard-crm` развёрнут точный release `7cd4565`; Compose config проверен, пересобраны и пересозданы только `api` и `web`. Production `.env`, PostgreSQL, Redis и persistent volumes не заменялись.
+- Post-deploy: API/web/PostgreSQL/Redis healthy с restart count 0, все 19 Prisma migrations актуальны, internal/public `/api/health` и public root возвращают HTTP 200, PostgreSQL/Redis/uploads — `up`, свежий server error scan пустой.
+- Авторизованный Edge smoke на реальном заказе `YO-26-0003` подтвердил кнопку «+ Добавить замеры», dialog «Замеры для заказа», 17 ростовых стандартов, выбранного спортсмена `dother` и 17 редактируемых полей. Стандарт 120 заполнил №1=62, №2=53, №3=65 и №15=113; поле №1 изменилось на 62,5 без отправки. Escape закрыл dialog и вернул фокус на исходную кнопку. «Сохранить замеры» не нажималась, production-данные клиента не изменялись.
