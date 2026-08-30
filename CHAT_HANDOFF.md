@@ -1108,3 +1108,11 @@
 - Sketch 013 и manifest отмечены выбранным вариантом A. Изменения остаются только локальными; deployment и push не выполнялись.
 - Финальный `pnpm quality:check` PASS: API 240/240, database 7/7, полный web suite, typechecks и production builds. Browser review при 1366×768 подтвердил четыре видимых действия, четыре секции без horizontal overflow, доступный dialog заметки и отсутствие console errors.
 - На ширине до 1000 px карточка доступна через кнопку в шапке чата и открывается drawer с затемнением и явным закрытием. Проверка при 639×703: панель 390 px полностью видима, horizontal overflow отсутствует, console errors отсутствуют.
+
+## 2026-08-30 — deployment фильтров каналов и варианта A
+
+- Runtime commit `40535d81ac3c79fe381a00061637019fad6c23c0` fast-forward pushed в `origin/main`; GitHub Actions `Quality gates` run `33314870036` завершён `SUCCESS`.
+- Перед deployment создан и проверен FULL backup `20260830T134509Z-40535d8-predeploy`: `postgres.dump`, `uploads.tar.gz` и `manifest.json` прошли SHA-256 verification. Release archive SHA-256 `95e9f09fb9317fb0635fb3dab69ef414f77e6ebba61c2748a9e46ea58f8d2663` совпал локально и на сервере.
+- В `/home/trio/yoleotard-crm` развёрнут точный release `40535d8`; Compose config проверен, пересобраны и пересозданы только `api` и `web`. Production `.env`, PostgreSQL, Redis и persistent volumes не заменялись.
+- Post-deploy: API/web/PostgreSQL/Redis healthy с restart count 0, все 19 Prisma migrations актуальны, internal/public `/api/health` и public root возвращают HTTP 200, PostgreSQL/Redis/uploads — `up`, свежий error scan пустой.
+- Авторизованный Edge smoke подтвердил пять фильтров без «Все» и Telegram: Facebook, Instagram, WhatsApp, Chatwoot, Gmail. Facebook + Gmail выбираются одновременно, повторный клик отключает Facebook. Вариант A показывает четыре быстрых действия и секции «Быстрые действия», «Заметка чата», «Активные заказы», «Следующее действие»; horizontal overflow и console errors равны 0. Во время smoke сообщения клиентам и другие записи не создавались.
