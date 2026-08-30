@@ -330,7 +330,7 @@ function CommunicationsSettings() {
   );
 }
 export function SettingsWorkspace({role}:{role:string}) {
-  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai">(
+  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai" | "production">(
     role==="OWNER"?"account":"finance",
   );
   return (
@@ -378,7 +378,8 @@ export function SettingsWorkspace({role}:{role:string}) {
         >
           {settingsUi.aiTab}
         </button>
-        {(["orders", "production", "shipping", "interface"] as const).map(
+        {(role==="OWNER"||role==="ADMIN")&&<button type="button" role="tab" aria-selected={section === "production"} aria-controls="settings-production-panel" className={section === "production" ? "active" : ""} onClick={() => setSection("production")}>{settingsUi.production}</button>}
+        {(["orders", "shipping", "interface"] as const).map(
           (key) => (
             <button
               type="button"
@@ -397,11 +398,22 @@ export function SettingsWorkspace({role}:{role:string}) {
         <FinanceSettings />
       ) : section === "communications" ? (
         <CommunicationsSettings />
+      ) : section === "production" ? (
+        <ProductionSettings />
       ) : (
         <AiSettings />
       )}
     </div>
   );
+}
+
+function ProductionSettings() {
+  const [settings,setSettings]=useState<Setting[]>([]),[loaded,setLoaded]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState(""),[saving,setSaving]=useState(false);
+  async function request(init?:RequestInit,path="/api/finance/settings"){const r=await fetch(path,{credentials:"include",...init,headers:{"Content-Type":"application/json"}});const body=await r.json().catch(()=>({}));if(!r.ok)throw new Error(Array.isArray(body.message)?body.message.join(", "):body.message||settingsUi.saveError);return body}
+  useEffect(()=>{request().then(x=>{setSettings(x);setLoaded(true)}).catch(e=>setError((e as Error).message))},[]);
+  const value=(key:string,fallback:number)=>{const current=settings.find(item=>item.section==="production"&&item.key===key)?.value;return typeof current==="number"?current:fallback};
+  async function save(e:FormEvent<HTMLFormElement>){e.preventDefault();setSaving(true);setError("");setMessage("");try{const form=new FormData(e.currentTarget),updated=await request({method:"PATCH",body:JSON.stringify({defaultDurationDays:Number(form.get("defaultDurationDays")),shippingLeadDays:Number(form.get("shippingLeadDays"))})},"/api/finance/settings/production");setSettings(updated);setMessage(settingsUi.saved)}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
+  return <section id="settings-production-panel" role="tabpanel" className="settings-card"><h2>{settingsUi.productionSettingsTitle}</h2><p>{settingsUi.productionSettingsHint}</p><form key={JSON.stringify(settings)} className="settings-grid" onSubmit={save}><label>{settingsUi.productionDuration}<input name="defaultDurationDays" type="number" min="1" max="90" defaultValue={value("defaultDurationDays",7)} disabled={!loaded} required/><small>{settingsUi.productionDurationHint}</small></label><label>{settingsUi.shippingLeadDays}<input name="shippingLeadDays" type="number" min="0" max="30" defaultValue={value("shippingLeadDays",2)} disabled={!loaded} required/><small>{settingsUi.shippingLeadDaysHint}</small></label>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<button className="phase2-primary" disabled={saving||!loaded}>{saving?settingsUi.accountSaving:settingsUi.save}</button></form></section>
 }
 
 function AccountSettings(){

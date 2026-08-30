@@ -13,7 +13,7 @@ import { OrdersService } from "./orders.service";
 @UseGuards(SessionGuard, RolesGuard)
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
-  @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER") defaults() { return this.orders.defaults(); }
+  @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") defaults() { return this.orders.defaults(); }
   @Get("production") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) productionList() { return this.orders.productionList(); }
   @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string) { return this.orders.list(search); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }

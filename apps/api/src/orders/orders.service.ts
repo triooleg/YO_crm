@@ -7,10 +7,10 @@ import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderDeadlineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
-
 function calculateDepositMinor(priceMinor: number, percent: number) {
   const scaled = BigInt(priceMinor) * BigInt(percent);
   return Number((scaled + 50n) / 100n);
@@ -34,9 +34,17 @@ export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async defaults() {
-    const setting = await this.prisma.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } });
+    const [setting, duration, lead] = await Promise.all([
+      this.prisma.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } }),
+      this.prisma.appSetting.findUnique({ where: { section_key: { section: "production", key: "defaultDurationDays" } } }),
+      this.prisma.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } }),
+    ]);
     const depositPercent = typeof setting?.value === "number" && Number.isInteger(setting.value) && setting.value >= 0 && setting.value <= 100 ? setting.value : 50;
-    return { depositPercent };
+    return {
+      depositPercent,
+      defaultDurationDays: productionSetting(duration?.value, DEFAULT_PRODUCTION_DURATION_DAYS, 1, 90),
+      shippingLeadDays: productionSetting(lead?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30),
+    };
   }
 
   async list(search?: string) {
@@ -111,10 +119,17 @@ export class OrdersService {
     });
   }
   async updateDeadline(orderId: string, dto: UpdateOrderDeadlineDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null } });
-    if (!order) throw new NotFoundException("Заказ не найден");
     const requiredDeliveryAt = new Date(dto.requiredDeliveryAt);
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-production-settings'))");
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { productionSlot: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
+      const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
+      if (order.productionSlot && violatesShippingLead(order.productionSlot.endsAt, requiredDeliveryAt, shippingLeadDays)) {
+        throw new BadRequestException(`Дата отправки должна быть минимум на ${shippingLeadDays} дн. позже окончания производства`);
+      }
       const updated = await tx.order.update({ where: { id: orderId }, data: { requiredDeliveryAt } });
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DEADLINE_UPDATED", summary: "Изменён срок отправки заказа", metadata: { requiredDeliveryAt } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
@@ -125,11 +140,17 @@ export class OrdersService {
     const startsAt = new Date(dto.startsAt), endsAt = new Date(dto.endsAt);
     if (endsAt < startsAt) throw new BadRequestException("Дата окончания не может быть раньше даты начала");
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-production-settings'))");
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
+      const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
+      const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
+      if (order.requiredDeliveryAt && violatesShippingLead(endsAt, order.requiredDeliveryAt, shippingLeadDays)) {
+        throw new BadRequestException(`Производство должно завершиться минимум за ${shippingLeadDays} дн. до отправки`);
+      }
       const paid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
-      const tentative = paid >= order.depositRequiredMinor ? false : dto.tentative ?? true;
+      const tentative = resolveProductionSlotTentative(paid, order.depositRequiredMinor, dto.tentative);
       if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
       const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false} });
       await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_UPDATED",summary:"Обновлён производственный слот",metadata:{startsAt,endsAt,tentative,locked:dto.locked??false}}});
@@ -186,7 +207,12 @@ export class OrdersService {
       ...items.flatMap((item) => item.measurementId ? [{ measurementId: item.measurementId, athleteId: item.athleteId }] : []),
     ];
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-production-settings'))");
       const depositSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } });
+      const [durationSetting, leadSetting] = await Promise.all([
+        tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "defaultDurationDays" } } }),
+        tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } }),
+      ]);
       const depositPercent = typeof depositSetting?.value === "number" && Number.isInteger(depositSetting.value) && depositSetting.value >= 0 && depositSetting.value <= 100 ? depositSetting.value : 50;
       const depositRequiredMinor = dto.depositRequiredMinor ?? calculateDepositMinor(dto.priceMinor, depositPercent);
       if (depositRequiredMinor > dto.priceMinor) throw new BadRequestException("Предоплата не может превышать цену");
@@ -203,6 +229,13 @@ export class OrdersService {
       }
       const number = await nextOrderNumber(tx);
       const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
+      if (order.requiredDeliveryAt) {
+        const defaultDurationDays = productionSetting(durationSetting?.value, DEFAULT_PRODUCTION_DURATION_DAYS, 1, 90);
+        const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
+        const { startsAt, endsAt } = productionWindow(order.requiredDeliveryAt, defaultDurationDays, shippingLeadDays);
+        const slot = await tx.productionSlot.create({ data: { orderId: order.id, startsAt, endsAt, capacity: 1, tentative: true, locked: false } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "ProductionSlot", entityId: slot.id, after: slot } });
+      }
       await tx.activity.create({ data: { clientId: dto.clientId, orderId: order.id, type: "ORDER_CREATED", summary: `Создан заказ ${number}` } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Order", entityId: order.id, after: order } });
       return order;

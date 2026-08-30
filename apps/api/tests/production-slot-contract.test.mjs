@@ -12,7 +12,7 @@ test("изменение слота сериализуется с платежо
   assert.ok(updateSlot.indexOf("pg_advisory_xact_lock")<updateSlot.indexOf("order.findFirst"));
   assert.match(updateSlot,/tx\.order\.findFirst/);
   assert.match(updateSlot,/payment\.currency === order\.currency/);
-  assert.match(updateSlot,/paid >= order\.depositRequiredMinor \? false/);
+  assert.match(updateSlot,/resolveProductionSlotTentative\(paid, order\.depositRequiredMinor, dto\.tentative\)/);
   assert.ok(updateSlot.indexOf("productionSlot.upsert")<updateSlot.indexOf("activity.create"));
   assert.ok(updateSlot.indexOf("activity.create")<updateSlot.indexOf("auditLog.create"));
 });

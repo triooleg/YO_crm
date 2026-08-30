@@ -1,5 +1,15 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-30 — production scheduling rules and defaults (local only)
+
+- В `Настройки → Производство` OWNER/ADMIN могут задать стандартную длительность производства (1–90 дней) и резерв до отправки (0–30 дней). Пара значений сохраняется одним атомарным API-запросом под общим advisory lock и с отдельным audit event для каждого значения.
+- Новый заказ со сроком отправки автоматически получает незаблокированный предварительный слот: окончание за настроенное число дней до отправки, начало рассчитано по включительной длительности. Предоплата по-прежнему является единственным существующим путём подтверждения предварительного слота.
+- Изменение срока, слота и увеличение резерва сериализованы одним lock. Любой итоговый слот, нарушающий резерв, отклоняется; отменённые заказы не блокируют изменение настройки. Календарь не планирует и не двигает слоты, если серверные defaults не загрузились.
+- Добавлены исполняемые тесты границы срока, расчёта включительного окна, поведения предоплаты и атомарного сохранения/rollback-before-write, а также контрактные API/UI проверки. Targeted 30/30 PASS; полный `pnpm quality:check` PASS: API 237, web 159, database 7, все typecheck и production builds.
+- Browser review реальных компонентов PASS на 1920×1080, 1366×768 и 390×844: document overflow и console errors отсутствуют. Временные visual-review routes/fixtures полностью удалены.
+- Обязательные compatibility, regression, business-rule, visual и release reviews после устранения замечаний — PASS без блокирующих findings.
+- Prisma schema, migrations, Meta/AI, deployment/runtime и production не менялись. Push и deployment не выполнялись; после отдельного разрешения потребуются обычные backup/release gates и live smoke создания заказа, изменения настроек и drag/resize календаря.
+
 ## 2026-08-30 — Instagram read receipt by message ID (local only)
 
 - Production trace подтвердил различие провайдеров: Facebook присылает `read.watermark`, а Instagram — `read.mid`. Старый путь сохранял Instagram event как generic control metadata и не выставлял `metaReadAt`.
