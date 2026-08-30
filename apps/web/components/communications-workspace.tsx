@@ -45,10 +45,14 @@ type Client = {
   instagram?: string;
   instagramUsername?: string;
   facebook?: string;
+  notes?: string;
+  nextActionAt?: string;
   orders: Order[];
   buyerSummary?: { purchaseCount: number; paymentTotals: { currency: string; amountMinor: number }[] };
   conversations: ConversationPreview[];
 };
+type ContextTarget = "clients" | "tasks" | "finance";
+type CommunicationsWorkspaceProps = { onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
 type ClientPage = { items: Client[]; total: number; hasMore: boolean };
 type Message = {
   id: string;
@@ -68,6 +72,7 @@ type Template = {
   language: string;
 };
 type Side = "left" | "right";
+type SocialChannel = "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "CHATWOOT" | "EMAIL";
 const limits = { left: [200, 430], right: [260, 560] } as const,
   defaults = { left: 280, right: 360 },
   icons: Record<string, string> = {
@@ -80,6 +85,7 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
     WEBSITE: "⌂",
     MANUAL: "✎",
   };
+const socialChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
 const isInstagramScopedId = (value?: string) => /^\d+$/.test(value || "");
 const instagramHandle = (value?: string) => value ? `@${value.replace(/^@/, "")}` : "";
@@ -171,7 +177,7 @@ function optionalFormFields(data: Record<string, FormDataEntryValue>, names: str
     return [name, typeof value === "string" && value.trim()?value.trim():undefined];
   }));
 }
-export function CommunicationsWorkspace() {
+export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProps={}) {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
     [activeChannel,setActiveChannel]=useState("MANUAL"),
@@ -190,6 +196,7 @@ export function CommunicationsWorkspace() {
     [aiPreparing,setAiPreparing]=useState(false),
     [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
     [search, setSearch] = useState(""),
+    [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [visibleClientCount,setVisibleClientCount]=useState(15),
     [clientsHasMore,setClientsHasMore]=useState(false),
     [busy, setBusy] = useState(false),
@@ -199,6 +206,9 @@ export function CommunicationsWorkspace() {
     [attachment, setAttachment] = useState<File>(),
     [attachmentPreview, setAttachmentPreview] = useState(""),
     [creating, setCreating] = useState(false),
+    [noteOpen,setNoteOpen]=useState(false),
+    [noteText,setNoteText]=useState(""),
+    [contextOpen,setContextOpen]=useState(false),
     [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
     [right, setRight] = useState(defaults.right);
@@ -208,6 +218,7 @@ export function CommunicationsWorkspace() {
     listRequestSequence = useRef(0),
     listLoading = useRef(false),
     currentSearch = useRef(""),
+    currentSocialFilters = useRef<SocialChannel[]>([]),
     currentClientCount = useRef(15),
     aiOperationSequence = useRef(0),
     detailVersion = useRef(0),
@@ -228,6 +239,7 @@ export function CommunicationsWorkspace() {
     stickToBottom = useRef(true),
     aiDraftEditor = useRef<HTMLTextAreaElement | null>(null);
   currentSearch.current=search;
+  currentSocialFilters.current=socialFilters;
   currentClientCount.current=visibleClientCount;
   const accountUrl = connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
@@ -244,7 +256,7 @@ export function CommunicationsWorkspace() {
     }
     return r.json();
   }
-  async function fetchClientWindow(count: number, query: string) {
+  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = []) {
     const items: Client[] = [];
     const seenIds = new Set<string>();
     let offset = 0;
@@ -252,13 +264,27 @@ export function CommunicationsWorkspace() {
     let requests = 0;
     while (items.length < count && hasMore && requests++ < 100) {
       const limit = Math.min(60, Math.max(15, count - items.length));
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}`) as ClientPage;
+      const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}`) as ClientPage;
       offset += page.items.length;
       for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
       hasMore = page.hasMore;
       if (!page.items.length) break;
     }
     return { items:items.slice(0,count), hasMore:hasMore||items.length>count };
+  }
+  async function saveClientNote(event:FormEvent<HTMLFormElement>){
+    event.preventDefault();
+    if(!client||busy)return;
+    setBusy(true);setError("");
+    try{const updated=await api("/clients/"+client.id+"/notes",{method:"PATCH",body:JSON.stringify({notes:noteText})});setClient({...client,notes:updated.notes});setClients(items=>items.map(item=>item.id===client.id?{...item,notes:updated.notes}:item));setNoteOpen(false)}
+    catch(reason){setError((reason as Error).message)}finally{setBusy(false)}
+  }
+  function conversationDetailPath(clientId: string, selectedChannel?: string) {
+    return `/communications/${clientId}${selectedChannel?`?channel=${encodeURIComponent(selectedChannel)}`:""}`;
+  }
+  function toggleSocialFilter(item: SocialChannel) {
+    setSocialFilters(current=>current.includes(item)?current.filter(channel=>channel!==item):[...current,item]);
   }
   function persistWidths() {
     localStorage.setItem(
@@ -373,7 +399,7 @@ export function CommunicationsWorkspace() {
     setError("");
     try {
       void markClientRead(c);
-      const x = await api("/communications/" + c.id);
+      const x = await api(conversationDetailPath(c.id, socialFilters.length ? latestConversation(c)?.channel : undefined));
       if (
         isCurrentInboxDetailRequest(
           request,
@@ -404,13 +430,13 @@ export function CommunicationsWorkspace() {
       }
     }
   }
-  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search) {
+  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters) {
     const request=++listRequestSequence.current;
     listLoading.current=true;
     setLoading(true);
     setError("");
     try {
-      const page = await fetchClientWindow(requestedCount, requestedSearch);
+      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels);
       if(request!==listRequestSequence.current)return;
       const data = sortClients(page.items);
       setClients(data);
@@ -436,7 +462,7 @@ export function CommunicationsWorkspace() {
     const listRequest=++listRequestSequence.current;
     const observedReadVersion = readVersion.current;
     try {
-      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current);
+      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current);
       const data = sortClients(page.items).map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
@@ -463,7 +489,7 @@ export function CommunicationsWorkspace() {
           clientId: selected.id,
           version: ++detailVersion.current,
         };
-        const detail = await api("/communications/" + selected.id);
+        const detail = await api(conversationDetailPath(selected.id, currentSocialFilters.current.length ? latestConversation(selected)?.channel : undefined));
         if (
           isCurrentInboxDetailRequest(
             request,
@@ -527,9 +553,12 @@ export function CommunicationsWorkspace() {
   const filteredClients = clients;
   const visibleClients=filteredClients;
   useEffect(()=>{
-    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search)},250);
+    selectedClientId.current=undefined;
+    setClient(undefined);
+    setMessages([]);
+    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search,socialFilters)},250);
     return()=>clearTimeout(timer);
-  },[search]);
+  },[search,socialFilters]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,
@@ -794,6 +823,9 @@ export function CommunicationsWorkspace() {
             placeholder={ui.search}
             aria-label={ui.search}
           />
+          <div className="communications-social-filters" role="group" aria-label={ui.socialNetworkFilter}>
+            {socialChannels.map(item=><button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={item==="EMAIL"?ui.gmail:ui.sources[item]} title={item==="EMAIL"?ui.gmail:ui.sources[item]} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}>{icons[item]}</button>)}
+          </div>
           <div className="communications-client-list">
           {loading ? (
             <State text={ui.loading} />
@@ -845,9 +877,9 @@ export function CommunicationsWorkspace() {
               );
             })
           )}
-          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
+          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
           {!loading && !filteredClients.length && (
-            <State text={search ? ui.noSearchResults : ui.noClients} />
+            <State text={socialFilters.length ? ui.noSocialNetworkResults : search ? ui.noSearchResults : ui.noClients} />
           )}
           </div>
         </aside>
@@ -871,6 +903,7 @@ export function CommunicationsWorkspace() {
             ) : (
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
+            {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
           </header>
           <div className="communications-messages" ref={messagesViewport} onScroll={updateMessagesScrollIntent}>
             {messagesLoading ? (
@@ -1034,13 +1067,15 @@ export function CommunicationsWorkspace() {
           onPointer={resize}
           onKey={resizeByKeyboard}
         />
-        <aside className="communications-orders">
-          {client&&<section className="communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>}
-          {client?.status!=="LEAD"&&<header>
-            <b>{ui.activeOrders}</b>
-            <small>{activeOrders.length}</small>
-          </header>}
-          {client?.status!=="LEAD"&&activeOrders.map((o) => (
+        {contextOpen&&<button type="button" className="communications-context-backdrop" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}/>}
+        <aside className={`communications-orders communications-context-panel${contextOpen?" open":""}`} aria-label={ui.clientCard}>
+          <button type="button" className="communications-context-close" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}>×</button>
+          {client&&<>
+          <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>onNavigate?.("tasks",{action:"new",clientId:client.id,clientName:client.displayName})}>✓ <span>{ui.createTask}</span></button><button type="button" onClick={()=>onNavigate?.("clients",{action:"new-order",clientId:client.id})}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>onNavigate?.("clients",{action:"new-order",clientId:client.id})}>＋</button></header>
+          {activeOrders.map((o) => (
             <article key={o.id}>
               {o.modelImagePath ? (
                 <img
@@ -1066,7 +1101,9 @@ export function CommunicationsWorkspace() {
               </div>
             </article>
           ))}
-          {client?.status!=="LEAD"&&!activeOrders.length && <State text={ui.noActiveOrders} />}
+          {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b></header>{client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>onNavigate?.("tasks",{action:"new",clientId:client.id,clientName:client.displayName})}>{ui.createTask}</button></p>}</section>}
+          </>}
         </aside>
       </section>
       {creating && (
@@ -1137,6 +1174,7 @@ export function CommunicationsWorkspace() {
           </form>
         </div>
       )}
+      {noteOpen&&client&&<div className="phase2-overlay"><form className="phase2-modal communications-note-modal" role="dialog" aria-modal="true" aria-labelledby="communications-note-title" onSubmit={saveClientNote}><div><h2 id="communications-note-title">{ui.chatNote}</h2><button type="button" aria-label={ui.close} onClick={()=>setNoteOpen(false)}>×</button></div><label>{ui.note}<textarea autoFocus maxLength={2000} rows={6} value={noteText} onChange={event=>setNoteText(event.target.value)}/></label><footer><button type="button" onClick={()=>setNoteOpen(false)}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy?ui.saving:ui.save}</button></footer></form></div>}
       {preview && (
         <div
           className="communications-lightbox"

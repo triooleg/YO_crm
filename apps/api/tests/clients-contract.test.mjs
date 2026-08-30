@@ -21,9 +21,9 @@ test("client routes require session and role guards", () => {
   assert.match(controller, /@Roles\(UserRole\.OWNER, UserRole\.ADMIN, UserRole\.MANAGER\)/);
 });
 
-test("client, athlete and measurement creation append audit history", () => {
-  assert.equal((service.match(/auditLog\.create/g) ?? []).length, 4);
-  assert.equal((service.match(/activity\.create/g) ?? []).length, 4);
+test("client mutations append audit and activity history", () => {
+  assert.equal((service.match(/auditLog\.create/g) ?? []).length, 5);
+  assert.equal((service.match(/activity\.create/g) ?? []).length, 5);
 });
 
 test("временный контакт из входящих оформляется без дублирования переписки",()=>{

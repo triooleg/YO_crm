@@ -62,6 +62,17 @@ export class ClientsService {
     return this.prisma.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-promote:"+id},0))`;const before=await tx.client.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Клиент не найден");if(before.status!=="LEAD")throw new BadRequestException("Карточка клиента уже оформлена");const preserveInstagramSid=before.source==="INSTAGRAM"&&/^\d+$/.test(before.instagram||"");const client=await tx.client.update({where:{id},data:{...editable,source:before.source,...(preserveInstagramSid?{instagram:before.instagram}:{}),firstName,lastName,displayName,status:"ACTIVE",responsibleManagerId:actor.id}});await tx.activity.create({data:{clientId:id,type:"CLIENT_PROMOTED_FROM_INBOX",summary:"Входящий контакт оформлен как клиент"}});await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before,after:client}});return client});
   }
 
+  async updateNotes(id:string,notes:string,actor:User){
+    return this.prisma.$transaction(async tx=>{
+      const before=await tx.client.findFirst({where:{id,archivedAt:null}});
+      if(!before)throw new NotFoundException("Клиент не найден");
+      const client=await tx.client.update({where:{id},data:{notes:notes.trim()||null}});
+      await tx.activity.create({data:{clientId:id,type:"CLIENT_NOTE_UPDATED",summary:notes.trim()?"Обновлена заметка клиента":"Заметка клиента очищена"}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{notes:before.notes},after:{notes:client.notes}}});
+      return client;
+    });
+  }
+
   async addAthlete(clientId: string, dto: CreateAthleteDto, actor: User) {
     await this.ensureClient(clientId);
     return this.prisma.$transaction(async tx => {

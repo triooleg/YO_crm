@@ -1,6 +1,6 @@
 import { ContactChannel, Discipline } from "@prisma/client";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsDateString, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Length, Min, IsIn } from "class-validator";
+import { IsDateString, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Length, MaxLength, Min, IsIn } from "class-validator";
 import { Transform } from "class-transformer";
 
 function optionalText(value: unknown) {
@@ -23,6 +23,9 @@ export class CreateClientDto {
   @ApiPropertyOptional() @IsOptional() @IsString() notes?:string;
 }
 export class PromoteInboxClientDto extends CreateClientDto {}
+export class UpdateClientNotesDto {
+  @ApiProperty() @IsString() @MaxLength(2000) notes!: string;
+}
 export class CreateAthleteDto {
   @ApiProperty() @IsString() @Length(1,100) firstName!:string;
   @ApiPropertyOptional() @IsOptional() @IsString() lastName?:string;

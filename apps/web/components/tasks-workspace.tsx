@@ -70,7 +70,8 @@ export function TasksWorkspace() {
     [incoming, setIncoming] = useState<Incoming[] | null>(null),
     [columnEditor, setColumnEditor] = useState<Partial<Column>>(),
     [saving, setSaving] = useState(false),
-    dragged = useRef<string | undefined>(undefined);
+    dragged = useRef<string | undefined>(undefined),
+    contextActionHandled=useRef(false);
   async function load(archived = showArchived) {
     try {
       setData(await api(`/tasks/board?archived=${archived}`));
@@ -82,6 +83,7 @@ export function TasksWorkspace() {
   useEffect(() => {
     load(false);
   }, []);
+  useEffect(()=>{if(contextActionHandled.current||!data.columns.length)return;const params=new URLSearchParams(window.location.search);if(params.get("action")!=="new")return;const clientId=params.get("clientId"),clientName=params.get("clientName");if(!clientId)return;contextActionHandled.current=true;setEditing({columnId:data.columns[0]?.id,type:"CLIENT",markerColor:"#7047eb",labels:[],client:{id:clientId,displayName:clientName||tasksUi.client}});clearContextAction()},[data.columns]);
   const labels = useMemo(
     () =>
       [
@@ -545,6 +547,8 @@ export function TasksWorkspace() {
     </section>
   );
 }
+
+function clearContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}
 
 function TaskDialog({
   task,

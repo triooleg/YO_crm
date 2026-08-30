@@ -18,7 +18,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from "class-validator";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { ContactChannel } from "@prisma/client";
 export const ALLOWED_AI_MODELS = [
   "gpt-4.1-mini",
@@ -32,6 +32,9 @@ export class CommunicationsListQueryDto {
   @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset = 0;
   @IsOptional() @IsInt() @Min(1) @Max(60) @Type(() => Number) limit = 15;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
+  @IsOptional()
+  @Transform(({ value }) => Array.isArray(value) ? value : String(value).split(",").filter(Boolean))
+  @IsArray() @ArrayMaxSize(5) @IsEnum(ContactChannel, { each: true }) channels?: ContactChannel[];
 }
 export class ReadConversationDto {
   @IsString() @Length(1, 80) id!: string;

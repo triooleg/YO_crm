@@ -25,3 +25,4 @@
 | 010 | communications-inbox | Как объединить список клиентов, переписку и заказы в одном экране? | A — Баланс | communications, inbox, chat, clients, orders |
 | 011 | tasks-kanban | Как организовать полностью настраиваемую доску задач, создаваемых из входящих сообщений? | C — компактный контроль, B — переключаемый визуальный вид | tasks, kanban, inbox, attachments, deadlines, labels |
 | 012 | production-settings-review | Как наглядно показать локальные изменения правил производства перед деплоем? | A — CRM как будет | production, settings, review, comparison, annotations |
+| 013 | chat-context-sidebar | Как из чата видеть данные клиента и быстро создавать связанные сущности, не перегружая переписку? | A — постоянный обзор | communications, inbox, sidebar, customer, orders, actions |

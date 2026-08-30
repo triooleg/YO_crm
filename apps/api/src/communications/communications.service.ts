@@ -123,6 +123,7 @@ export class CommunicationsService {
   constructor(private p: PrismaService) {}
   async list(query: CommunicationsListQueryDto = new CommunicationsListQueryDto()) {
     const search = query.search?.trim();
+    const selectedChannels=query.channels?.length?query.channels:undefined;
     const channelQuery=search?.toLocaleLowerCase("ru")||"";
     const channelSearch = ([
       ["facebook фейсбук", "FACEBOOK"], ["instagram инстаграм", "INSTAGRAM"],
@@ -132,6 +133,7 @@ export class CommunicationsService {
     ] as const).find(([aliases])=>channelQuery.length>=2&&aliases.split(" ").some(alias=>alias.includes(channelQuery)))?.[1] as ContactChannel|undefined;
     const where: Prisma.ClientWhereInput = {
       archivedAt: null,
+      ...(selectedChannels ? { conversations: { some: { channel: { in: selectedChannels }, archivedAt: null } } } : {}),
       ...(search ? { OR: [
         { displayName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
@@ -148,7 +150,7 @@ export class CommunicationsService {
       orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }, { id: "asc" }],
       include: {
         conversations: {
-          where: { archivedAt: null },
+          where: { archivedAt: null, ...(selectedChannels ? { channel: { in: selectedChannels } } : {}) },
           orderBy: { lastMessageAt: "desc" },
           include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
         },

@@ -50,6 +50,13 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
   assert.match(service, /paymentTotals:/);
 });
 
+test("inbox list can be narrowed to several validated social channels", () => {
+  assert.match(dto, /classCommunicationsListQueryDto.*@IsArray\(\).*@ArrayMaxSize\(5\).*@IsEnum\(ContactChannel,\{each:true\}\)channels\?:ContactChannel\[\]/s);
+  assert.match(service, /query\.channels\?\.length/);
+  assert.match(service, /conversations:\{some:\{channel:\{in:selectedChannels\},archivedAt:null\}\}/);
+  assert.match(service, /conversations:\{where:\{archivedAt:null,\.\.\.\(selectedChannels\?\{channel:\{in:selectedChannels\}\}:\{\}\)\}/);
+});
+
 test("Instagram profile identity keeps scoped ID immutable and persists username separately", () => {
   assert.match(schema, /instagramUsername\s+String\?/);
   assert.match(service, /instagramUsername:before\.instagramUsername/);

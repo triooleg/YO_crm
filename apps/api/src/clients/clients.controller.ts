@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { UserRole, type User } from "@prisma/client";
 import type { Request } from "express";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto } from "./clients.dto";
+import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto, UpdateClientNotesDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
 
 type AuthRequest = Request & { user: User };
@@ -35,6 +35,10 @@ export class ClientsController {
   @Post(":id/promote-from-inbox")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   promoteFromInbox(@Param("id") id:string,@Body()dto:PromoteInboxClientDto,@Req()request:AuthRequest){return this.clients.promoteFromInbox(id,dto,request.user)}
+
+  @Patch(":id/notes")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateNotes(@Param("id") id:string,@Body()dto:UpdateClientNotesDto,@Req()request:AuthRequest){return this.clients.updateNotes(id,dto.notes,request.user)}
 
   @Post(":id/athletes")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

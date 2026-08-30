@@ -43,6 +43,7 @@ type Activity = { id: string; summary: string; createdAt: string };
 
 export function ClientWorkspace() {
   const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
   const [auth, setAuth] = useState<boolean | null>(null),
     [clients, setClients] = useState<Client[]>([]),
     [selected, setSelected] = useState<string>(),
@@ -77,7 +78,7 @@ export function ClientWorkspace() {
     );
     setClients(data);
     setAuth(true);
-    if (!selected && data[0]) setSelected(data[0].id);
+    if (!selected && data[0]) setSelected(pendingOrderClientId.current||data[0].id);
   }
   useEffect(() => {
     request("/auth/me")
@@ -98,7 +99,7 @@ export function ClientWorkspace() {
       return;
     }
     request(`/clients/${selected}`)
-      .then(setDetail)
+      .then(value=>{setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
       .catch((e) => setError(e.message));
   }, [selected, auth]);
   if (auth === null) return <div className="phase2-loading">Загрузка CRM…</div>;
@@ -253,6 +254,8 @@ export function ClientWorkspace() {
     </main>
   );
 }
+
+function clearClientContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}
 function Login({ onSuccess }: { onSuccess: () => void }) {
   const [error, setError] = useState("");
   async function submit(e: FormEvent<HTMLFormElement>) {

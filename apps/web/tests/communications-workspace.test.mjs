@@ -175,7 +175,7 @@ test("из активного входящего можно создать кл�
   assert.match(component, /client\.status==="LEAD"\?ui\.unsavedBuyer:ui\.savedBuyer/);
   assert.match(component, /client\.status==="LEAD"\?<button[^>]*>[\s\S]*ui\.saveBuyer/);
   assert.match(component, /promote-from-inbox/);
-  assert.match(component, /client\?\.status!=="LEAD"&&activeOrders/);
+  assert.match(component, /client\.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"/);
   assert.match(component, /buyerSummary\?\.purchaseCount/);
   assert.match(component, /buyerSummary\?\.paymentTotals/);
   assert.match(component, /purchaseTotals/);
@@ -299,6 +299,35 @@ test("список входящих показывает по 15 чатов и �
   assert.match(component, /const filteredClients = clients/);
   assert.match(locale, /loadMoreChats:/);
   assert.match(css, /communications-load-more/);
+});
+
+test("под поиском можно отфильтровать входящие по социальной сети", () => {
+  assert.match(component, /socialChannels/);
+  assert.match(component, /socialFilters,setSocialFilters/);
+  assert.match(component, /channels=\$\{encodeURIComponent\(selectedChannels\.join\(","\)\)\}/);
+  assert.match(component, /conversationDetailPath/);
+  assert.match(component, /\?channel=\$\{encodeURIComponent\(selectedChannel\)\}/);
+  assert.match(component, /className="communications-social-filters"/);
+  assert.match(component, /aria-label=\{ui\.socialNetworkFilter\}/);
+  assert.match(component, /aria-pressed=\{socialFilters\.includes\(item\)\}/);
+  assert.match(component, /toggleSocialFilter/);
+  assert.match(component, /current\.includes\(item\)\?current\.filter/);
+  assert.match(component, /"FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"/);
+  assert.doesNotMatch(component, /socialChannels[^;]*TELEGRAM/);
+  assert.doesNotMatch(component, /allSocialNetworks/);
+  assert.match(component, /setVisibleClientCount\(15\)/);
+  assert.match(component, /selectedClientId\.current=undefined/);
+  assert.match(locale, /socialNetworkFilter:\s*"Фильтр по социальным сетям"/);
+  assert.match(component, /item==="EMAIL"\?ui\.gmail:ui\.sources\[item\]/);
+  assert.match(locale, /gmail:\s*"Gmail"/);
+  assert.match(locale, /noSocialNetworkResults:\s*"В выбранных каналах диалогов нет"/);
+  assert.match(css, /\.communications-social-filters\{/);
+  assert.match(css, /\.communications-social-filter\[aria-pressed="true"\]/);
+  assert.match(css, /\.communications-social-filter\.source-facebook/);
+  assert.match(css, /\.communications-social-filter\.source-instagram/);
+  assert.match(css, /\.communications-social-filter\.source-whatsapp/);
+  assert.match(css, /\.communications-social-filter\.source-chatwoot/);
+  assert.match(css, /\.communications-social-filter\.source-email/);
 });
 
 test("новые входящие автоматически поднимаются наверх и обновляются без перезагрузки", () => {

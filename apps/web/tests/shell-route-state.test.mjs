@@ -31,5 +31,6 @@ test("CRM shell restores section from the URL and synchronizes browser history",
   assert.match(shell, /window\.history\.pushState/);
   assert.match(shell, /popstate/);
   assert.match(shell, /parseCrmSection/);
-  assert.match(shell, /if \(next === sectionId\) return/);
+  assert.match(shell, /if\(next===sectionId&&!context\)return/);
+  assert.match(shell, /Object\.entries\(context\|\|\{\}\)/);
 });
