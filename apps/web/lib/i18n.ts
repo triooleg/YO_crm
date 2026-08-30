@@ -301,6 +301,8 @@ export const financeUi = {
 export const orderFormUi = {
   deposit: "Предоплата",
   depositHint: "Рассчитано автоматически: {percent}% от общей цены",
+  selectAthlete: "Выберите спортсмена",
+  noAthletes: "Спортсмены ещё не добавлены",
 } as const;
 
 export const clientAthleteUi = {
@@ -621,6 +623,8 @@ export const communicationsUi = {
   createClient: "+ Новый клиент",
   createFromMessage: "+ Создать клиента из сообщения",
   resetWidths: "Сбросить ширину",
+  collapseClientCard: "Свернуть карточку клиента",
+  expandClientCard: "Развернуть карточку клиента",
   close: "Закрыть",
   requestError: "Ошибка запроса",
   loading: "Загрузка клиентов…",
@@ -695,11 +699,17 @@ export const communicationsUi = {
   createOrder: "Создать заказ",
   createInvoice: "Создать инвойс",
   addNote: "Добавить заметку",
+  athletes: "Спортсмены",
+  noAthletes: "Спортсмены ещё не добавлены",
+  selectAthlete: "Выберите спортсмена",
+  loadingAthletes: "Загрузка спортсменов…",
+  addAthlete: "Добавить спортсмена",
   chatNote: "Заметка чата",
   noChatNote: "Заметок по этому клиенту пока нет",
   nextAction: "Следующее действие",
   contactClient: "Связаться с клиентом",
   noNextAction: "Следующее действие не назначено",
+  noTaskColumns: "Сначала добавьте колонку для задач",
   add: "Добавить",
   edit: "Изменить",
   save: "Сохранить",

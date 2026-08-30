@@ -7,6 +7,9 @@ import {
   isCurrentInboxDetailRequest,
 } from "../lib/inbox-request-guard";
 import { ClientAvatar } from "./client-avatar";
+import { AddAthlete } from "./client-workspace";
+import { OrderPanel } from "./order-panel";
+import { TaskDialog } from "./tasks-workspace";
 import { prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
 type Order = {
@@ -50,6 +53,22 @@ type Client = {
   orders: Order[];
   buyerSummary?: { purchaseCount: number; paymentTotals: { currency: string; amountMinor: number }[] };
   conversations: ConversationPreview[];
+};
+type ClientAthlete = {
+  id: string;
+  firstName: string;
+  lastName?: string;
+  discipline?: string;
+  measurements: { id: string; measuredAt: string }[];
+};
+type ClientDetail = {
+  id: string;
+  displayName: string;
+  athletes: ClientAthlete[];
+};
+type TaskBoard = {
+  columns: { id: string; name: string; color: string; isDone: boolean; sortOrder: number; tasks: never[] }[];
+  users: { id: string; displayName: string; role: string }[];
 };
 type ContextTarget = "clients" | "tasks" | "finance";
 type CommunicationsWorkspaceProps = { onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
@@ -208,7 +227,16 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [creating, setCreating] = useState(false),
     [noteOpen,setNoteOpen]=useState(false),
     [noteText,setNoteText]=useState(""),
+    [clientDetail,setClientDetail]=useState<ClientDetail>(),
+    [selectedAthleteId,setSelectedAthleteId]=useState<string>(),
+    [contextLoading,setContextLoading]=useState(false),
+    [addingAthlete,setAddingAthlete]=useState(false),
+    [ordering,setOrdering]=useState(false),
+    [taskBoard,setTaskBoard]=useState<TaskBoard>(),
+    [tasking,setTasking]=useState(false),
+    [taskSaving,setTaskSaving]=useState(false),
     [contextOpen,setContextOpen]=useState(false),
+    [contextCollapsed,setContextCollapsed]=useState(false),
     [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
     [right, setRight] = useState(defaults.right);
@@ -217,6 +245,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
     listLoading = useRef(false),
+    clientDetailRequest = useRef(0),
+    orderRequestVersion = useRef(0),
+    taskRequestVersion = useRef(0),
     currentSearch = useRef(""),
     currentSocialFilters = useRef<SocialChannel[]>([]),
     currentClientCount = useRef(15),
@@ -231,6 +262,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     pendingDraftSends = useRef(new Map<string,string>()),
     manualLoading = useRef(false),
     refreshing = useRef(false),
+    addAthleteTriggerRef = useRef<HTMLButtonElement | null>(null),
+    orderTriggerRef = useRef<HTMLButtonElement | null>(null),
     previewTrigger = useRef<HTMLButtonElement | null>(null),
     previewClose = useRef<HTMLButtonElement | null>(null),
     previewVideo = useRef<HTMLVideoElement | null>(null),
@@ -376,6 +409,53 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
     }
   }
+  async function loadClientDetail(clientId: string) {
+    const request = ++clientDetailRequest.current;
+    setContextLoading(true);
+    try {
+      const detail = await api("/clients/" + clientId) as ClientDetail;
+      if (request !== clientDetailRequest.current || selectedClientId.current !== clientId) return detail;
+      setClientDetail(detail);
+      setSelectedAthleteId(current => detail.athletes.some(athlete => athlete.id === current) ? current : detail.athletes[0]?.id);
+      return detail;
+    } finally {
+      if (request === clientDetailRequest.current && selectedClientId.current === clientId) setContextLoading(false);
+    }
+  }
+  async function openOrderFromChat() {
+    if (!client || client.status === "LEAD") return;
+    const request = { clientId: client.id, version: ++orderRequestVersion.current };
+    setError("");
+    try {
+      const detail = clientDetail?.id === client.id ? clientDetail : await loadClientDetail(client.id);
+      if (!isCurrentInboxDetailRequest(request, selectedClientId.current, orderRequestVersion.current)) return;
+      if (!detail.athletes.length) {
+        setAddingAthlete(true);
+        return;
+      }
+      setClientDetail(detail);
+      setSelectedAthleteId(current => detail.athletes.some(athlete => athlete.id === current) ? current : detail.athletes[0]?.id);
+      setOrdering(true);
+    } catch (e) {
+      if (!isCurrentInboxDetailRequest(request, selectedClientId.current, orderRequestVersion.current)) return;
+      setError((e as Error).message);
+    }
+  }
+  async function openTaskFromChat() {
+    if (!client || client.status === "LEAD") return;
+    const request = { clientId: client.id, version: ++taskRequestVersion.current };
+    setError("");
+    try {
+      const board = taskBoard || await api("/tasks/board?archived=false") as TaskBoard;
+      if (!isCurrentInboxDetailRequest(request, selectedClientId.current, taskRequestVersion.current)) return;
+      if (!board.columns.length) throw new Error(ui.noTaskColumns);
+      setTaskBoard(board);
+      setTasking(true);
+    } catch (e) {
+      if (!isCurrentInboxDetailRequest(request, selectedClientId.current, taskRequestVersion.current)) return;
+      setError((e as Error).message);
+    }
+  }
   async function open(c: Client) {
     if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
       if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
@@ -386,6 +466,15 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       pendingDraftSends.current.clear();
     }
     selectedClientId.current = c.id;
+    clientDetailRequest.current++;
+    orderRequestVersion.current++;
+    taskRequestVersion.current++;
+    setClientDetail(undefined);
+    setSelectedAthleteId(undefined);
+    setContextLoading(c.status !== "LEAD");
+    setAddingAthlete(false);
+    setOrdering(false);
+    setTasking(false);
     composeEpoch.current++;
     aiOperationSequence.current++;
     setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setBusy(false);
@@ -397,6 +486,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     stickToBottom.current = true;
     setMessagesLoading(true);
     setError("");
+    if (c.status !== "LEAD") void loadClientDetail(c.id).catch(e => {
+      if (selectedClientId.current === c.id) setError((e as Error).message);
+    });
     try {
       void markClientRead(c);
       const x = await api(conversationDetailPath(c.id, socialFilters.length ? latestConversation(c)?.channel : undefined));
@@ -519,6 +611,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         setWidth("left", saved.left);
         setWidth("right", saved.right);
       }
+      setContextCollapsed(localStorage.getItem("communications-context-collapsed")==="true");
     } catch {
       localStorage.removeItem("communications-widths");
     }
@@ -779,7 +872,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     availableChannels = client ? clientBadges(client) : [],
     activeOrders=client?.orders||[],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
-    grid = left + "px 6px minmax(380px,1fr) 6px " + right + "px";
+    grid = left + "px 6px minmax(380px,1fr) " + (contextCollapsed?"0px 46px":"6px "+right+"px");
   return (
     <div className="communications-page">
       <header className="phase2-header">
@@ -797,7 +890,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               widths.current = { ...defaults };
               setLeft(defaults.left);
               setRight(defaults.right);
+              setContextCollapsed(false);
               localStorage.removeItem("communications-widths");
+              localStorage.removeItem("communications-context-collapsed");
             }}
           >
             {ui.resetWidths}
@@ -1061,20 +1156,22 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             </div>
           </footer>
         </main>
-        <Resizer
+        {contextCollapsed?<span className="communications-context-collapsed-spacer" aria-hidden="true"/>:<Resizer
           side="right"
           value={right}
           onPointer={resize}
           onKey={resizeByKeyboard}
-        />
+        />}
         {contextOpen&&<button type="button" className="communications-context-backdrop" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}/>}
-        <aside className={`communications-orders communications-context-panel${contextOpen?" open":""}`} aria-label={ui.clientCard}>
+        <aside className={`communications-orders communications-context-panel${contextOpen?" open":""}${contextCollapsed?" collapsed":""}`} aria-label={ui.clientCard}>
+          <button type="button" className="communications-context-collapse" aria-label={contextCollapsed?ui.expandClientCard:ui.collapseClientCard} aria-expanded={!contextCollapsed} onClick={()=>{const next=!contextCollapsed;setContextCollapsed(next);localStorage.setItem("communications-context-collapsed",String(next))}}>{contextCollapsed?"‹":"›"}</button>
           <button type="button" className="communications-context-close" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}>×</button>
           {client&&<>
           <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>onNavigate?.("tasks",{action:"new",clientId:client.id,clientName:client.displayName})}>✓ <span>{ui.createTask}</span></button><button type="button" onClick={()=>onNavigate?.("clients",{action:"new-order",clientId:client.id})}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>onNavigate?.("clients",{action:"new-order",clientId:client.id})}>＋</button></header>
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
           {activeOrders.map((o) => (
             <article key={o.id}>
               {o.modelImagePath ? (
@@ -1102,7 +1199,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             </article>
           ))}
           {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b></header>{client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>onNavigate?.("tasks",{action:"new",clientId:client.id,clientName:client.displayName})}>{ui.createTask}</button></p>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b></header>{client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
           </>}
         </aside>
       </section>
@@ -1175,6 +1272,23 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         </div>
       )}
       {noteOpen&&client&&<div className="phase2-overlay"><form className="phase2-modal communications-note-modal" role="dialog" aria-modal="true" aria-labelledby="communications-note-title" onSubmit={saveClientNote}><div><h2 id="communications-note-title">{ui.chatNote}</h2><button type="button" aria-label={ui.close} onClick={()=>setNoteOpen(false)}>×</button></div><label>{ui.note}<textarea autoFocus maxLength={2000} rows={6} value={noteText} onChange={event=>setNoteText(event.target.value)}/></label><footer><button type="button" onClick={()=>setNoteOpen(false)}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy?ui.saving:ui.save}</button></footer></form></div>}
+      {ordering&&client&&clientDetail&&<OrderPanel client={clientDetail} request={api} initialAthleteId={selectedAthleteId} onClose={()=>{setOrdering(false);orderTriggerRef.current?.focus()}} onSaved={async()=>{setOrdering(false);await Promise.all([loadClientDetail(client.id),loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current)])}}/>}
+      {tasking&&client&&taskBoard&&<TaskDialog
+        task={{columnId:taskBoard.columns[0]?.id,type:"CLIENT",markerColor:"#7047eb",labels:[],client:{id:client.id,displayName:client.displayName}}}
+        columns={taskBoard.columns}
+        users={taskBoard.users}
+        saving={taskSaving}
+        close={()=>!taskSaving&&setTasking(false)}
+        save={async payload=>{
+          setTaskSaving(true);setError("");
+          try{
+            await api("/tasks",{method:"POST",body:JSON.stringify(payload)});
+            setTasking(false);
+            await loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current);
+          }catch(e){setError((e as Error).message)}finally{setTaskSaving(false)}
+        }}
+      />}
+      {addingAthlete&&client&&<AddAthlete clientId={client.id} request={api} returnFocusRef={addAthleteTriggerRef} close={()=>setAddingAthlete(false)} done={()=>{setAddingAthlete(false);void loadClientDetail(client.id).catch(e=>setError((e as Error).message))}}/>}
       {preview && (
         <div
           className="communications-lightbox"

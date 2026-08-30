@@ -550,7 +550,7 @@ export function TasksWorkspace() {
 
 function clearContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}
 
-function TaskDialog({
+export function TaskDialog({
   task,
   columns,
   users,

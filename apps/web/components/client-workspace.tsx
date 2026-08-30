@@ -508,7 +508,7 @@ function Create({
     </div>
   );
 }
-function AddAthlete({
+export function AddAthlete({
   clientId,
   close,
   done,
