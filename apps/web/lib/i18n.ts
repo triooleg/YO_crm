@@ -175,6 +175,9 @@ export const ordersUi = {
   measurementWaist: "Талия",
   measurementHips: "Бёдра",
   measurementsMissing: "Замеры не заполнены",
+  addMeasurements: "+ Добавить замеры",
+  measurementDialogTitle: "Замеры для заказа",
+  measurementAthleteMissing: "Сначала укажите спортсмена в заказе",
   enlargedModel: "Увеличенный просмотр модели",
 } as const;
 export const productionUi = {

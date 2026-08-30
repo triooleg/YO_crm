@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
+import type { CreateMeasurementDto } from "../clients/clients.dto";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderDeadlineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
@@ -179,6 +180,51 @@ export class OrdersService {
         if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
       }
       return payment;
+    });
+  }
+
+  async addMeasurement(orderId: string, dto: CreateMeasurementDto, actor: User) {
+    const { measuredAt, standardHeight, notes, ...numbered } = dto;
+    if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
+      throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { items: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (order.type === "GROUP_ORDER" || order.type === "PAIR" || order.items.length > 1) {
+        throw new BadRequestException("Добавляйте замеры отдельно для каждого спортсмена состава");
+      }
+      if (order.measurementId || order.items.some(item => item.measurementId)) {
+        throw new BadRequestException("Замеры для этого заказа уже сохранены");
+      }
+      const item = order.items[0];
+      if (order.athleteId && item?.athleteId && order.athleteId !== item.athleteId) {
+        throw new BadRequestException("Спортсмены заказа не совпадают");
+      }
+      const athleteId = order.athleteId ?? order.items[0]?.athleteId;
+      if (!athleteId) throw new BadRequestException("Сначала укажите спортсмена в заказе");
+      const athlete = await tx.athlete.findFirst({ where: { id: athleteId, clientId: order.clientId, archivedAt: null } });
+      if (!athlete) throw new NotFoundException("Спортсмен заказа не найден");
+      const measurement = await tx.measurement.create({
+        data: {
+          athleteId: athlete.id,
+          measuredAt: new Date(measuredAt),
+          chest: dto.m1,
+          waist: dto.m2,
+          hips: dto.m3,
+          torso: dto.m15,
+          values: { standardHeight, ...numbered },
+          notes,
+          source: standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из заказа",
+        },
+      });
+      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { athleteId: athlete.id, measurementId: measurement.id } });
+      if (item) await tx.orderItem.update({ where: { id: item.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "MEASUREMENT_CREATED", summary: `Добавлены замеры для заказа ${order.number}`, metadata: { measurementId: measurement.id, athleteId: athlete.id, standardHeight } } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { athleteId: order.athleteId, measurementId: order.measurementId }, after: { athleteId: updatedOrder.athleteId, measurementId: updatedOrder.measurementId } } });
+      return measurement;
     });
   }
 

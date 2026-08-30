@@ -3,6 +3,7 @@ import { CSSProperties, FormEvent, Fragment, MouseEvent as ReactMouseEvent, useE
 import { orderLabel } from "../lib/orders-i18n";
 import { ordersUi } from "../lib/i18n";
 import { repairMojibake } from "../lib/text-encoding.mjs";
+import { MeasurementPanel } from "./measurement-panel";
 
 type Payment={id:string;amountMinor:number;currency:string;method:string;receivedAt:string;reference?:string;notes?:string};
 type Activity={id:string;type:string;summary:string;createdAt:string};
@@ -19,7 +20,7 @@ const COLUMN_SETTINGS_KEY="orders-column-settings-v1",PREVIEW_WIDTH_KEY="orders-
 
 export function OrdersWorkspace({onClients}:Props){
   async function request(path:string,init?:RequestInit){const response=await fetch(`/api${path}`,{credentials:"include",...init,headers:{"Content-Type":"application/json"}});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(Array.isArray(body.message)?body.message.join(", "):body.message??"Не удалось выполнить действие")}return response.json()}
-  const[orders,setOrders]=useState<Order[]>([]),[search,setSearch]=useState(""),[filter,setFilter]=useState("all"),[sort,setSort]=useState("deadline"),[selectedId,setSelectedId]=useState<string>(),[editingDeadlineId,setEditingDeadlineId]=useState<string>(),[workspaceId,setWorkspaceId]=useState<string>(),[expandedId,setExpandedId]=useState<string>(),[selectedIds,setSelectedIds]=useState<Set<string>>(new Set()),[error,setError]=useState("");
+  const[orders,setOrders]=useState<Order[]>([]),[search,setSearch]=useState(""),[filter,setFilter]=useState("all"),[sort,setSort]=useState("deadline"),[selectedId,setSelectedId]=useState<string>(),[editingDeadlineId,setEditingDeadlineId]=useState<string>(),[workspaceId,setWorkspaceId]=useState<string>(),[expandedId,setExpandedId]=useState<string>(),[measurementOrder,setMeasurementOrder]=useState<Order>(),[selectedIds,setSelectedIds]=useState<Set<string>>(new Set()),[error,setError]=useState("");
   const[columnsOpen,setColumnsOpen]=useState(false),[columnOrder,setColumnOrder]=useState<ColumnId[]>(DEFAULT_COLUMNS),[hiddenColumns,setHiddenColumns]=useState<Set<ColumnId>>(new Set()),[draggedColumn,setDraggedColumn]=useState<ColumnId>(),[previewWidth,setPreviewWidth]=useState(600),[preview,setPreview]=useState<Preview>();
   async function load(){try{setOrders(await request(`/orders${search?`?search=${encodeURIComponent(search)}`:""}`));setError("")}catch(e){setError((e as Error).message)}}
   useEffect(()=>{const timer=setTimeout(load,220);return()=>clearTimeout(timer)},[search]);
@@ -71,7 +72,7 @@ export function OrdersWorkspace({onClients}:Props){
             <td className="orders-controls" style={{order:0}} onClick={e=>e.stopPropagation()}><button className="orders-expand" aria-label="Развернуть заказ" onClick={()=>setExpandedId(expandedId===o.id?undefined:o.id)}>{expandedId===o.id?"⌄":"›"}</button><input aria-label="Выбрать заказ" type="checkbox" checked={selectedIds.has(o.id)} onChange={e=>setSelectedIds(current=>{const next=new Set(current);e.target.checked?next.add(o.id):next.delete(o.id);return next})}/></td>
             {visibleColumns.map(id=>renderOrderCell(o,id))}
           </tr>
-          {expandedId===o.id&&<tr className="orders-expanded-row"><td colSpan={visibleColumns.length+1}><div className="orders-row-details"><section className="orders-preview-model">{o.modelImagePath&&<img src={`/api/orders/images/${o.modelImagePath}`} alt="Модель заказа" onMouseEnter={showPreview} onMouseMove={showPreview} onMouseLeave={()=>setPreview(undefined)}/>}<div><small>ИЗДЕЛИЕ</small><strong>{o.notes||"Описание не указано"}</strong><span>{sizes(o)}</span></div></section><section><small>ЗАКАЗ</small><Detail l="Номер" v={o.number}/><Detail l="Создан" v={new Intl.DateTimeFormat("ru-RU",{dateStyle:"medium"}).format(new Date(o.createdAt))}/><Detail l="Статус" v={orderLabel("sales",o.salesStatus)}/></section><section><small>КЛИЕНТ И ДОСТАВКА</small><Detail l="Клиент" v={o.client.displayName}/><Detail l="Источник" v={`${sourceIcon(o.client.source)} ${orderLabel("source",o.client.source)}`}/><Detail l="Адрес" v={deliveryPlace(o)}/><Detail l="Получить до" v={deliveryDate(o)}/></section><section><small>ОПЛАТА</small><Detail l="Стоимость" v={money(o.priceMinor,o.currency)}/><Detail l="Оплачено" v={money(paid(o),o.currency)}/><Detail l="Остаток" v={money(Math.max(0,o.priceMinor-paid(o)),o.currency)}/><button onClick={()=>setSelectedId(o.id)}>+ Добавить оплату</button></section></div>{isMulti(o)&&<GroupOrderItems o={o}/>}</td></tr>}
+          {expandedId===o.id&&<tr className="orders-expanded-row"><td colSpan={visibleColumns.length+1}><div className="orders-row-details"><section className="orders-preview-model">{o.modelImagePath&&<img src={`/api/orders/images/${o.modelImagePath}`} alt="Модель заказа" onMouseEnter={showPreview} onMouseMove={showPreview} onMouseLeave={()=>setPreview(undefined)}/>}<div><small>ИЗДЕЛИЕ</small><strong>{o.notes||"Описание не указано"}</strong><span>{sizes(o)}</span>{!primaryMeasurement(o)&&!isMulti(o)&&<button type="button" className="orders-add-measurements" disabled={!measurementAthlete(o)} title={!measurementAthlete(o)?ordersUi.measurementAthleteMissing:undefined} onClick={()=>measurementAthlete(o)&&setMeasurementOrder(o)}>{ordersUi.addMeasurements}</button>}</div></section><section><small>ЗАКАЗ</small><Detail l="Номер" v={o.number}/><Detail l="Создан" v={new Intl.DateTimeFormat("ru-RU",{dateStyle:"medium"}).format(new Date(o.createdAt))}/><Detail l="Статус" v={orderLabel("sales",o.salesStatus)}/></section><section><small>КЛИЕНТ И ДОСТАВКА</small><Detail l="Клиент" v={o.client.displayName}/><Detail l="Источник" v={`${sourceIcon(o.client.source)} ${orderLabel("source",o.client.source)}`}/><Detail l="Адрес" v={deliveryPlace(o)}/><Detail l="Получить до" v={deliveryDate(o)}/></section><section><small>ОПЛАТА</small><Detail l="Стоимость" v={money(o.priceMinor,o.currency)}/><Detail l="Оплачено" v={money(paid(o),o.currency)}/><Detail l="Остаток" v={money(Math.max(0,o.priceMinor-paid(o)),o.currency)}/><button onClick={()=>setSelectedId(o.id)}>+ Добавить оплату</button></section></div>{isMulti(o)&&<GroupOrderItems o={o}/>}</td></tr>}
         </Fragment>)}{!shown.length&&<tr><td colSpan={visibleColumns.length+1} className="orders-empty">Заказы не найдены</td></tr>}</tbody>
       </table></div>
     </section>
@@ -84,6 +85,7 @@ export function OrdersWorkspace({onClients}:Props){
     </aside></div>}
     {preview&&<img className="orders-image-preview" src={preview.src} alt={ordersUi.enlargedModel} style={{left:preview.left,top:preview.top,width:preview.width}}/>}
     {selected&&<OrderDrawer order={selected} close={()=>setSelectedId(undefined)} request={request} refresh={load}/>}
+    {measurementOrder&&measurementAthlete(measurementOrder)&&<MeasurementPanel client={{id:measurementOrder.client.id,displayName:measurementOrder.client.displayName,athletes:[measurementAthlete(measurementOrder)!]}} request={request} orderId={measurementOrder.id} title={ordersUi.measurementDialogTitle} onClose={()=>setMeasurementOrder(undefined)} onSaved={async()=>{setMeasurementOrder(undefined);await load()}}/>}
   </>;
 }
 
@@ -162,6 +164,8 @@ function days(o:Order){return o.requiredDeliveryAt?Math.ceil((new Date(o.require
 function deliveryDate(o:Order){return o.requiredDeliveryAt?new Intl.DateTimeFormat("ru-RU",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(o.requiredDeliveryAt)):"Не указан"}
 function dayText(o:Order){const d=days(o);return d===9999?"Нет срока":d<0?`Просрочен на ${Math.abs(d)} дн.`:d===0?"Сегодня":`Через ${d} дн.`}
 function deliveryPlace(o:Order){return[o.client.country,o.client.city,o.client.address].filter(Boolean).join(", ")||"Адрес не указан"}
-function sizes(o:Order){const v=o.measurement?.values;if(!v)return"Нет замеров";const height=v.standardHeight?`Рост ${v.standardHeight} · `:"";return height+[v.m1,v.m2,v.m3,v.m15].map(x=>x??"—").join(" / ")+" см"}
+function primaryMeasurement(o:Order){return o.measurement??(!isMulti(o)?o.items[0]?.measurement:undefined)}
+function measurementAthlete(o:Order){return o.athlete??o.items[0]?.athlete}
+function sizes(o:Order){const v=primaryMeasurement(o)?.values;if(!v)return"Нет замеров";const height=v.standardHeight?`Рост ${v.standardHeight} · `:"";return height+[v.m1,v.m2,v.m3,v.m15].map(x=>x??"—").join(" / ")+" см"}
 function formatCm(value:number){return new Intl.NumberFormat("ru-RU",{maximumFractionDigits:1}).format(value)}
 function paymentMethod(method:string){return({BANK_TRANSFER:"Банковский перевод",CARD:"Карта",PAYPAL:"PayPal",CASH:"Наличные",OTHER:"Другое"}as Record<string,string>)[method]??method}
