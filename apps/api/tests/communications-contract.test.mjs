@@ -352,6 +352,31 @@ test("Meta synchronization scopes dedupe to the connected account and persists e
   assert.match(service, /message_echoes/);
 });
 
+test("Meta reply context links quoted messages and keeps story media", () => {
+  assert.match(service, /event\.metadata\.replyTo\?\.externalMessageId/);
+  assert.match(service, /replyToMessageId/);
+  assert.match(service, /replyToMessage:\s*\{\s*select:/);
+});
+
+test("Meta reactions are subscribed, persisted on the target message and Instagram reactions can be sent from CRM", () => {
+  assert.match(service, /message_reactions/);
+  assert.match(service, /mergeMetaReactionMetadata/);
+  assert.match(controller, /messages\/:messageId\/reaction/);
+  assert.match(dto, /classMessageReactionDto/);
+  assert.match(service, /asyncreactToMessage/);
+  assert.match(service, /sender_action:d\.action/);
+  assert.match(service, /reaction:"love"/);
+  assert.match(service, /channel!==ContactChannel\.INSTAGRAM/);
+  assert.match(service, /instagramSubscribedFields.*message_reactions/);
+  assert.match(service, /REACTION_REQUESTED/);
+  assert.match(service, /REACTION_FAILED/);
+  assert.match(service, /operation\.status==="SUCCEEDED"/);
+  assert.match(service, /\["PENDING","FAILED"\]\.includes/);
+  assert.match(service, /REACTION_STALE_RECOVERED/);
+  assert.match(service, /instagramSubscriptionOutcome==="UNAVAILABLE"&&savedInstagramWebhookReceiverId/);
+  assert.match(service, /message-reaction:/);
+});
+
 test("Meta secrets are encrypted and settings return only safe connection status", () => {
   assert.match(controller, /@Get\("meta\/settings"\)@Roles\("OWNER","ADMIN"\)/);
   assert.match(controller, /@Patch\("meta\/settings"\)@Roles\("OWNER","ADMIN"\)/);

@@ -1,13 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
-import type { CreateMeasurementDto } from "../clients/clients.dto";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, UpdateOrderDeadlineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
@@ -183,8 +182,8 @@ export class OrdersService {
     });
   }
 
-  async addMeasurement(orderId: string, dto: CreateMeasurementDto, actor: User) {
-    const { measuredAt, standardHeight, notes, ...numbered } = dto;
+  async addMeasurement(orderId: string, dto: OrderMeasurementDto, actor: User) {
+    const { measuredAt, standardHeight, notes, expectedMeasurementId, ...numbered } = dto;
     if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
       throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
     }
@@ -195,10 +194,14 @@ export class OrdersService {
       if (order.type === "GROUP_ORDER" || order.type === "PAIR" || order.items.length > 1) {
         throw new BadRequestException("Добавляйте замеры отдельно для каждого спортсмена состава");
       }
-      if (order.measurementId || order.items.some(item => item.measurementId)) {
-        throw new BadRequestException("Замеры для этого заказа уже сохранены");
-      }
       const item = order.items[0];
+      if (order.measurementId && item?.measurementId && order.measurementId !== item.measurementId) {
+        throw new BadRequestException("Снимки замеров заказа не совпадают");
+      }
+      const previousMeasurementId = order.measurementId ?? item?.measurementId ?? null;
+      if ((expectedMeasurementId ?? null) !== previousMeasurementId) {
+        throw new ConflictException("Замеры уже изменены другим пользователем. Обновите заказ и повторите");
+      }
       if (order.athleteId && item?.athleteId && order.athleteId !== item.athleteId) {
         throw new BadRequestException("Спортсмены заказа не совпадают");
       }
@@ -216,12 +219,12 @@ export class OrdersService {
           torso: dto.m15,
           values: { standardHeight, ...numbered },
           notes,
-          source: standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из заказа",
+          source: previousMeasurementId ? `Редактирование замеров заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из заказа",
         },
       });
       const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { athleteId: athlete.id, measurementId: measurement.id } });
       if (item) await tx.orderItem.update({ where: { id: item.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
-      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "MEASUREMENT_CREATED", summary: `Добавлены замеры для заказа ${order.number}`, metadata: { measurementId: measurement.id, athleteId: athlete.id, standardHeight } } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: previousMeasurementId ? "MEASUREMENT_REPLACED" : "MEASUREMENT_CREATED", summary: previousMeasurementId ? `Обновлены замеры для заказа ${order.number}` : `Добавлены замеры для заказа ${order.number}`, metadata: { measurementId: measurement.id, previousMeasurementId, athleteId: athlete.id, standardHeight } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { athleteId: order.athleteId, measurementId: order.measurementId }, after: { athleteId: updatedOrder.athleteId, measurementId: updatedOrder.measurementId } } });
       return measurement;

@@ -44,7 +44,7 @@ export function findInstagramMessagesSubscription(
   instagramAppId: string,
 ) {
   const candidates = subscriptions.filter(item => {
-    if (!item.subscribed_fields?.includes("messages")) return false;
+    if (!item.subscribed_fields?.includes("messages") || !item.subscribed_fields.includes("message_reactions")) return false;
     const applicationId = String(item.application?.id || "");
     return !applicationId || applicationId === instagramAppId;
   });

@@ -1,5 +1,5 @@
 "use client";
-import type { FormEvent, KeyboardEvent, PointerEvent } from "react";
+import type { FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
@@ -75,13 +75,15 @@ type CommunicationsWorkspaceProps = { onNavigate?: (section: ContextTarget, cont
 type ClientPage = { items: Client[]; total: number; hasMore: boolean };
 type Message = {
   id: string;
+  externalId?: string;
   direction: string;
   content: string;
   createdAt: string;
   channel: string;
   status?: string;
   language?: string;
-  metadata?: { attachments?: Attachment[]; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string } };
+  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string } };
+  replyToMessage?: { id: string; content: string; metadata?: { attachments?: Attachment[] } } | null;
 };
 type Template = {
   id: string;
@@ -105,6 +107,7 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
     MANUAL: "✎",
   };
 const socialChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
+const standardEmojis = ["😀","😂","🥰","😍","😊","😉","😅","😢","😭","😮","🙏","👍","👎","👏","🙌","❤️","💜","🔥","✨","🎉","✅","💯"];
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
 const isInstagramScopedId = (value?: string) => /^\d+$/.test(value || "");
 const instagramHandle = (value?: string) => value ? `@${value.replace(/^@/, "")}` : "";
@@ -206,6 +209,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [templateBusy,setTemplateBusy]=useState(false),
     [templateNotice,setTemplateNotice]=useState(""),
     [text, setText] = useState(""),
+    [emojiOpen,setEmojiOpen]=useState(false),
     [selectedMessageIds,setSelectedMessageIds]=useState<string[]>([]),
     [replyInstruction,setReplyInstruction]=useState(""),
     [replyMode,setReplyMode]=useState(false),
@@ -214,6 +218,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [translatingId,setTranslatingId]=useState<string|null>(null),
     [aiPreparing,setAiPreparing]=useState(false),
     [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
+    [reactionBusyIds,setReactionBusyIds]=useState<Set<string>>(()=>new Set()),
     [search, setSearch] = useState(""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [visibleClientCount,setVisibleClientCount]=useState(15),
@@ -270,12 +275,26 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     messagesViewport = useRef<HTMLDivElement | null>(null),
     autoScrollPending = useRef(true),
     stickToBottom = useRef(true),
-    aiDraftEditor = useRef<HTMLTextAreaElement | null>(null);
+    aiDraftEditor = useRef<HTMLTextAreaElement | null>(null),
+    composerTextarea=useRef<HTMLTextAreaElement|null>(null),
+    emojiTrigger=useRef<HTMLButtonElement|null>(null),
+    emojiPicker=useRef<HTMLDivElement|null>(null);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentClientCount.current=visibleClientCount;
   const accountUrl = connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
+  function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
+  async function toggleReaction(message:Message){
+    if(message.channel!=="INSTAGRAM"||message.direction!=="INBOUND"||!message.externalId||reactionBusyIds.has(message.id))return;
+    const businessReaction=message.metadata?.reactions?.business,operationClientId=selectedClientId.current,operationEpoch=composeEpoch.current;
+    const isActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
+    setReactionBusyIds(current=>new Set(current).add(message.id));setError("");
+    try{
+      const updated=await api(`/communications/messages/${encodeURIComponent(message.id)}/reaction`,{method:"POST",body:JSON.stringify({action:businessReaction?"unreact":"react"})}) as Message;
+      if(isActive())setMessages(current=>current.map(item=>item.id===message.id?{...item,...updated,replyToMessage:item.replyToMessage}:item));
+    }catch(reason){if(isActive())setError((reason as Error).message)}finally{if(isActive())setReactionBusyIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
+  }
   function scrollMessagesToLatest(){if(!messagesViewport.current)return;if(!autoScrollPending.current&&!stickToBottom.current)return;requestAnimationFrame(()=>{if(!messagesViewport.current)return;messagesViewport.current.scrollTop=messagesViewport.current.scrollHeight;stickToBottom.current=true;autoScrollPending.current=false})}
   async function api(path: string, init?: RequestInit) {
     const r = await fetch("/api" + path, {
@@ -477,7 +496,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     setTasking(false);
     composeEpoch.current++;
     aiOperationSequence.current++;
-    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setBusy(false);
+    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
@@ -642,6 +661,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     };
   }, [preview]);
   useEffect(()=>{if(aiReply){aiDraftEditor.current?.scrollIntoView({block:"nearest"});aiDraftEditor.current?.focus()}},[aiReply?.phase]);
+  useEffect(()=>{if(emojiOpen)requestAnimationFrame(()=>emojiPicker.current?.querySelector<HTMLButtonElement>("button")?.focus())},[emojiOpen]);
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
   const filteredClients = clients;
   const visibleClients=filteredClients;
@@ -738,6 +758,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
       else {
         setText("");
+        setEmojiOpen(false);
         if(action==="DRAFT"){setAiReply(null);setAiDraftText("")}
         setAttachment(undefined);
         pendingSend.current = {};
@@ -994,7 +1015,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>setActiveChannel(event.target.value)}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{setActiveChannel(event.target.value);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
             ) : (
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
@@ -1009,6 +1030,10 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
                 const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO"].includes(message.metadata?.source || "");
+                const replyContext=message.metadata?.replyTo;
+                const customerReaction=message.metadata?.reactions?.customer,businessReaction=message.metadata?.reactions?.business;
+                const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
+                const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url);
                 return (
                   <article
                     key={message.id}
@@ -1016,6 +1041,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                   >
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
+                    {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
                     <span className="communications-message-content">{message.content}</span>
                     {attachments.length > 0 && (
                       <div className="communications-attachments">
@@ -1057,6 +1083,11 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                       </div>
                     )}
                     {message.metadata?.translation?.text && <div className="communications-message-translation"><span>{message.metadata.translation.text}</span></div>}
+                    {(customerReaction||businessReaction||(message.channel==="INSTAGRAM"&&message.direction==="INBOUND"&&message.externalId))&&<div className="communications-message-reactions">
+                      {customerReaction&&<span title={ui.customerReaction}>{customerReaction.emoji||"❤️"}</span>}
+                      {businessReaction&&<span className="business" title={ui.crmReaction}>{businessReaction.emoji||"❤️"}</span>}
+                      {message.channel==="INSTAGRAM"&&message.direction==="INBOUND"&&message.externalId&&<button type="button" disabled={reactionBusyIds.has(message.id)} aria-label={businessReaction?ui.removeReaction:ui.reactToMessage} title={businessReaction?ui.removeReaction:ui.reactToMessage} onClick={()=>void toggleReaction(message)}>{businessReaction?"−❤️":"♡"}</button>}
+                    </div>}
                     <small className="communications-message-meta">
                       {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
                       {formatMessageDateTime(message.createdAt)}
@@ -1133,7 +1164,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <span aria-hidden>＋</span>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
               </label>
+              {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
+                ref={composerTextarea}
                 value={text}
                 onChange={(e) => {invalidateAiOperation();setText(e.target.value)}}
                 placeholder={ui.messagePlaceholder}
@@ -1317,6 +1350,10 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
 }
 function State({ text }: { text: string }) {
   return <div className="communications-state">{text}</div>;
+}
+function ReplyMedia({url,type,label,onOpen,onLoad}:{url:string;type?:"image"|"video";label:string;onOpen:(event:MouseEvent<HTMLButtonElement>,type:"image"|"video")=>void;onLoad:()=>void}){
+  const[video,setVideo]=useState(type==="video");
+  return <button type="button" className={video?"communications-video-preview":undefined} aria-label={ui.openAttachment+": "+label} onClick={event=>onOpen(event,video?"video":"image")}>{video?<video src={url} preload="metadata" muted playsInline aria-label={label} onLoadedMetadata={onLoad}/>:<img src={url} alt={label} onLoad={onLoad} onError={()=>setVideo(true)}/>}</button>
 }
 function Resizer({
   side,

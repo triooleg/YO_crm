@@ -5,7 +5,7 @@ import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageReactionDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
@@ -45,6 +45,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
 @Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}
 @Get("messages/:messageId/attachments/:index/download")@Roles("OWNER","ADMIN","MANAGER")async downloadAttachment(@Param("messageId")messageId:string,@Param("index")indexRaw:string,@Res()res:Response){const download=await this.c.downloadMessageAttachment(messageId,Number(indexRaw));res.setHeader("Content-Type",download.contentType);res.setHeader("Content-Disposition",`attachment; filename="${download.filename}"`);res.setHeader("Content-Length",String(download.contentLength));return res.send(download.body)}
+@Post("messages/:messageId/reaction")@Roles("OWNER","ADMIN","MANAGER")react(@Param("messageId")messageId:string,@Body()d:MessageReactionDto,@Req()r:Request&{user:User}){return this.c.reactToMessage(messageId,d,r.user)}
 @Patch(":clientId/read")@Roles("OWNER","ADMIN","MANAGER")markRead(@Param("clientId")id:string,@Body()d:MarkConversationsReadDto,@Req()r:Request&{user:User}){return this.c.markRead(id,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
 @Post(":clientId/messages")@Roles("OWNER","ADMIN","MANAGER")send(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}}

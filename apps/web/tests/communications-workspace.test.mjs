@@ -376,6 +376,44 @@ test("вложения Meta отображаются в истории пере�
   assert.match(component, /previewTrigger\.current\?\.focus/);
 });
 
+test("ответы на историю и сообщения показывают исходный контекст", () => {
+  assert.match(component, /message\.metadata\?\.replyTo/);
+  assert.match(component, /message\.replyToMessage/);
+  assert.match(component, /communications-reply-context/);
+  assert.match(component, /ReplyMedia/);
+  assert.match(component, /replyToMessage\?\.metadata\?\.attachments/);
+  assert.match(locale, /storyReply:/);
+  assert.match(locale, /messageReply:/);
+});
+
+test("редактор Facebook и Instagram предлагает стандартные emoji и вставляет их в позицию курсора", () => {
+  assert.match(component, /const standardEmojis\s*=/);
+  assert.match(component, /editor\?\.selectionStart/);
+  assert.match(component, /setSelectionRange/);
+  assert.match(component, /emojiPicker\.current\?\.querySelector/);
+  assert.match(component, /setEmojiOpen\(false\)/);
+  assert.match(component, /event\.currentTarget\.contains\(event\.relatedTarget\)/);
+  assert.match(component, /communications-emoji-picker/);
+  assert.match(component, /\["FACEBOOK",\s*"INSTAGRAM"\]\.includes\(activeChannel\)/);
+  assert.match(locale, /chooseEmoji:/);
+  assert.match(locale, /emojiPanel:/);
+  assert.match(css, /\.communications-emoji-picker/);
+});
+
+test("реакции клиента отображаются на сообщении, а Instagram позволяет поставить или снять реакцию из CRM", () => {
+  assert.match(component, /message\.metadata\?\.reactions/);
+  assert.match(component, /communications-message-reactions/);
+  assert.match(component, /\/communications\/messages\/.*\/reaction/);
+  assert.match(component, /message\.channel==="INSTAGRAM"/);
+  assert.match(component, /action:businessReaction\?"unreact":"react"/);
+  assert.match(component, /replyToMessage:item\.replyToMessage/);
+  assert.match(component, /operationEpoch=composeEpoch\.current/);
+  assert.match(component, /if\(isActive\(\)\)setError/);
+  assert.match(locale, /reactToMessage:/);
+  assert.match(locale, /removeReaction:/);
+  assert.match(css, /\.communications-message-reactions/);
+});
+
 test("видео показывает превью и воспроизводится только в открытом просмотрщике", () => {
   assert.match(component, /useState<\{url:string;type:"image"\|"video"\}>\(\)/);
   assert.match(component, /attachment\.type==="video"/);

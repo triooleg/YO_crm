@@ -7,17 +7,21 @@ const service = await readFile(new URL("../src/orders/orders.service.ts", import
 
 test("заказ принимает новый неизменяемый snapshot замеров через защищённый endpoint", () => {
   assert.match(controller, /@Post\(":id\/measurement"\)/);
-  assert.match(controller, /CreateMeasurementDto/);
+  assert.match(controller, /OrderMeasurementDto/);
   assert.match(controller, /addMeasurement\(id, dto, req\.user\)/);
   assert.match(controller, /UserRole\.PRODUCTION/);
 });
 
-test("snapshot создаётся и связывается с заказом атомарно", () => {
+test("snapshot создаётся или заменяется новым и связывается с заказом атомарно", () => {
   const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload"));
   assert.match(method, /\$transaction\(async \(tx\)/);
   assert.match(method, /pg_advisory_xact_lock/);
   assert.match(method, /measurementId/);
-  assert.match(method, /Замеры для этого заказа уже сохранены/);
+  assert.doesNotMatch(method, /Замеры для этого заказа уже сохранены/);
+  assert.match(method, /previousMeasurementId/);
+  assert.match(method, /\(expectedMeasurementId \?\? null\) !== previousMeasurementId/);
+  assert.match(method, /ConflictException/);
+  assert.match(method, /MEASUREMENT_(?:CREATED|REPLACED)/);
   assert.match(method, /Добавляйте замеры отдельно для каждого спортсмена состава/);
   assert.match(method, /athlete\.findFirst/);
   assert.match(method, /measurement\.create/);
@@ -34,4 +38,5 @@ test("сервер сохраняет точность шага 0,5 см и не
   const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload"));
   assert.match(method, /Number\.isInteger\(value \* 2\)/);
   assert.doesNotMatch(method, /measurement\.update/);
+  assert.match(method, /measurement\.create/);
 });

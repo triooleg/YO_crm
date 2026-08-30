@@ -15,6 +15,7 @@ export type MetaInboundMessage = {
     messageType: string;
     attachmentTypes?: string[];
     attachments?: Array<{ type: string; url?: string; stickerId?: string }>;
+    replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string };
   };
 };
 
@@ -65,6 +66,10 @@ export type MetaControlEvent = {
   receivedAt: Date;
   readWatermarkAt?: Date;
   editedText?: string;
+  reactionAction?: "react" | "unreact";
+  reactionName?: string;
+  reactionEmoji?: string;
+  reactionActor?: "CUSTOMER" | "BUSINESS";
 };
 
 type AnyRecord = Record<string, any>;
@@ -79,6 +84,33 @@ const strictMetaTimestamp = (value: unknown) => {
   const parsed = new Date(n);
   return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 };
+
+const reactionEmojiByName: Record<string, string> = {
+  love: "❤️",
+  like: "👍",
+  haha: "😂",
+  wow: "😮",
+  sad: "😢",
+  angry: "😡",
+};
+
+export function mergeMetaReactionMetadata(existing: unknown, event: MetaControlEvent) {
+  const prior = existing && typeof existing === "object" && !Array.isArray(existing) ? existing as AnyRecord : {};
+  const priorReactions = prior.reactions && typeof prior.reactions === "object" && !Array.isArray(prior.reactions) ? prior.reactions as AnyRecord : {};
+  const priorVersions = prior.reactionVersions && typeof prior.reactionVersions === "object" && !Array.isArray(prior.reactionVersions) ? prior.reactionVersions as AnyRecord : {};
+  const reactions = { ...priorReactions };
+  const key = event.reactionActor === "BUSINESS" ? "business" : "customer";
+  const eventTime = event.receivedAt.toISOString();
+  const previousTime = typeof priorVersions[key] === "string" ? Date.parse(priorVersions[key]) : NaN;
+  if (Number.isFinite(previousTime) && previousTime > event.receivedAt.getTime()) return { ...prior };
+  if (event.reactionAction === "unreact") delete reactions[key];
+  else reactions[key] = {
+    name: event.reactionName || "love",
+    emoji: event.reactionEmoji || reactionEmojiByName[event.reactionName || "love"] || "❤️",
+    reactedAt: eventTime,
+  };
+  return { ...prior, reactions, reactionVersions: { ...priorVersions, [key]: eventTime } };
+}
 
 export function metaConversationExternalId(receiverId: string | undefined, senderId: string) {
   return receiverId ? `${receiverId}:${senderId}` : senderId;
@@ -402,10 +434,14 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
       };
     });
     const attachmentTypes = attachments.map(x => x.type);
+    const reply = message.reply_to;
+    const replyTo = reply?.story && (typeof reply.story.url === "string" || typeof reply.story.id === "string")
+      ? { kind: "story" as const, ...(typeof reply.story.id === "string" ? { storyId: reply.story.id } : {}), ...(typeof reply.story.url === "string" ? { storyUrl: reply.story.url } : {}) }
+      : typeof reply?.mid === "string" ? { kind: "message" as const, externalMessageId: reply.mid } : undefined;
     const attachmentLabel: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
     const content = String(message.text || attachments.map(x => attachmentLabel[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
-    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
+    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}), ...(replyTo ? { replyTo } : {}) } });
   }
   return output;
 }
@@ -485,7 +521,13 @@ export function normalizeMetaControlEvents(payload: unknown): MetaControlEvent[]
     const receiverId = String(entry.id || event.recipient?.id || "") || undefined;
     const externalPartyId = [event.sender?.id, event.recipient?.id].map(value => value === undefined ? "" : String(value)).find(value => value && value !== receiverId);
     const readWatermarkAt = eventType === "read" ? strictMetaTimestamp(source.watermark) : undefined;
-    const base = { channel, receiverId, ...(externalPartyId ? { externalPartyId } : {}), eventType: eventType as MetaControlEvent["eventType"], receivedAt: asDate(event.timestamp), ...(readWatermarkAt ? { readWatermarkAt } : {}) };
+    const reaction = eventType === "reaction" ? {
+      reactionAction: source.action === "unreact" ? "unreact" as const : "react" as const,
+      ...(typeof source.reaction === "string" && source.reaction ? { reactionName: source.reaction } : {}),
+      ...(typeof source.emoji === "string" && source.emoji ? { reactionEmoji: source.emoji } : {}),
+      reactionActor: String(event.sender?.id || "") === receiverId ? "BUSINESS" as const : "CUSTOMER" as const,
+    } : {};
+    const base = { channel, receiverId, ...(externalPartyId ? { externalPartyId } : {}), eventType: eventType as MetaControlEvent["eventType"], receivedAt: asDate(event.timestamp), ...(readWatermarkAt ? { readWatermarkAt } : {}), ...reaction };
     if (!mids.length) output.push(base);
     else for (const mid of mids) output.push({ ...base, externalMessageId: String(mid), ...(eventType === "message_edit" && typeof source.text === "string" ? { editedText: source.text.trim().slice(0, 5000) } : {}) });
   }

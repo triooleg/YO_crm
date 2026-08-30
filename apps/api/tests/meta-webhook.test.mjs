@@ -10,7 +10,7 @@ const service = await readFile(new URL("../src/communications/communications.ser
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
-const { facebookFallbackProfileTargets, isMetaManagedAvatarUrl, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
+const { facebookFallbackProfileTargets, isMetaManagedAvatarUrl, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -238,7 +238,7 @@ test("profile enrichment guards archived clients and logs only pseudonymous Meta
 });
 
 test("Meta subscription and persistence include outbound message echoes", () => {
-  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins"/);
+  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions"/);
   assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
   assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
   assert.match(service, /status:\s*MessageStatus\.SENT/);
@@ -310,6 +310,15 @@ test("preserves Messenger attachment URLs and sticker metadata", () => {
     { type: "sticker", url: "https://cdn.example/image.jpg", stickerId: "369239263222822" },
     { type: "file", url: "https://cdn.example/file.pdf" },
   ]);
+});
+
+test("preserves Instagram story media and quoted-message context", () => {
+  const [storyReply] = normalizeMetaWebhook({ object: "instagram", entry: [{ id: "ig-1", messaging: [{ sender: { id: "igsid-1" }, recipient: { id: "ig-1" }, timestamp: 42, message: { mid: "story-reply", text: "😍 Где купить?", reply_to: { story: { id: "story-1", url: "https://lookaside.fbsbx.com/story-media" } } } }] }] });
+  assert.equal(storyReply.content, "😍 Где купить?");
+  assert.deepEqual(JSON.parse(JSON.stringify(storyReply.metadata.replyTo)), { kind: "story", storyId: "story-1", storyUrl: "https://lookaside.fbsbx.com/story-media" });
+
+  const [messageReply] = normalizeMetaWebhook({ object: "page", entry: [{ id: "page-1", messaging: [{ sender: { id: "psid-1" }, recipient: { id: "page-1" }, timestamp: 43, message: { mid: "message-reply", text: "Да 👍", reply_to: { mid: "original-mid" } } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(messageReply.metadata.replyTo)), { kind: "message", externalMessageId: "original-mid" });
 });
 
 test("summarizes every Messenger event before filtering without message text or attachment URLs", () => {
@@ -438,6 +447,17 @@ test("normalizes control events without creating inbound messages", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaControlEvents(payload).map(x => [x.eventType, x.externalMessageId, x.editedText]))), [
     ["delivery", "m-1", null], ["delivery", "m-2", null], ["message_edit", "m-3", "Исправленный текст"], ["reaction", "m-4", null],
   ]);
+});
+
+test("normalizes and merges customer and CRM reactions without losing message metadata", () => {
+  const [customer] = normalizeMetaControlEvents({ object: "instagram", entry: [{ id: "ig-business", messaging: [{ sender: { id: "igsid" }, recipient: { id: "ig-business" }, timestamp: 12, reaction: { mid: "m-4", action: "react", reaction: "love", emoji: "❤️" } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(customer)), { channel: "INSTAGRAM", receiverId: "ig-business", externalPartyId: "igsid", eventType: "reaction", receivedAt: "1970-01-01T00:00:00.012Z", externalMessageId: "m-4", reactionAction: "react", reactionName: "love", reactionEmoji: "❤️", reactionActor: "CUSTOMER" });
+  const reacted = mergeMetaReactionMetadata({ source: "META" }, customer);
+  assert.deepEqual(JSON.parse(JSON.stringify(reacted)), { source: "META", reactions: { customer: { name: "love", emoji: "❤️", reactedAt: "1970-01-01T00:00:00.012Z" } }, reactionVersions: { customer: "1970-01-01T00:00:00.012Z" } });
+  const removed = mergeMetaReactionMetadata(reacted, { ...customer, reactionAction: "unreact" });
+  assert.deepEqual(JSON.parse(JSON.stringify(removed)), { source: "META", reactions: {}, reactionVersions: { customer: "1970-01-01T00:00:00.012Z" } });
+  const newer = mergeMetaReactionMetadata(reacted, { ...customer, receivedAt: new Date(20), reactionAction: "unreact" });
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReactionMetadata(newer, customer))), JSON.parse(JSON.stringify(newer)));
 });
 
 test("control events retain account and counterparty scope and fail closed when a mid is ambiguous", () => {

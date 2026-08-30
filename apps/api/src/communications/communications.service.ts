@@ -26,12 +26,13 @@ import {
   ChatwootIntegrationDto,
   EmailIntegrationDto,
   MarkConversationsReadDto,
+  MessageReactionDto,
   MessageTemplateDto,
   MetaIntegrationDto,
   SendMessageDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
-import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
+import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -102,7 +103,7 @@ function validCommunicationFile(bytes: Buffer, mimeType: string) {
 function isDeduplicatedDraft(metadata: Prisma.JsonValue | null) {
   return !!metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.deduplicatedIntoMessageId === "string";
 }
-type MessageWithChannel = Prisma.MessageGetPayload<{ include: { conversation: { select: { channel: true } } } }>;
+type MessageWithChannel = Prisma.MessageGetPayload<{ include: { conversation: { select: { channel: true } }; replyToMessage: { select: { id: true; content: true; metadata: true } } } }>;
 type MetaOauthAttempt = { nonce: string; configRevision: number };
 function parseMetaOauthAttempt(value: unknown): MetaOauthAttempt | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -572,7 +573,7 @@ export class CommunicationsService {
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret, false, "FACEBOOK_VERIFY");
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
@@ -643,11 +644,10 @@ export class CommunicationsService {
     const profile = await this.instagramGraph<{ id?: string; username?: string; account_type?: string }>("me", token.accessToken, { fields: "id,username,account_type" });
     const instagramAccountId = profile.id || token.accountId;
     if (!instagramAccountId) throw new BadGatewayException("Instagram не вернул идентификатор профессионального аккаунта");
-    // `messages` is the only field required for Direct delivery. Asking for an
-    // optional field in the same call makes Meta reject the entire subscription
-    // for applications where that capability is not enabled (Graph code 3).
+    // Direct messages and reactions are separate webhook fields. Verify both so
+    // the CRM never reports reaction support while only text delivery is active.
     stage = "SUBSCRIBE";
-    const subscribeResult = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    const subscribeResult = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages,message_reactions" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
     if (subscribeResult.success !== true) throw new BadGatewayException("Instagram не подтвердил запрос подписки на входящие сообщения");
     stage = "VERIFY";
     const subscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
@@ -739,19 +739,36 @@ export class CommunicationsService {
     return this.metaSettings();
   }
   async verifyMetaDelivery(u: User) {
-    const section = "integration.meta", values = await this.sectionValues(section), pageId = typeof values.pageId === "string" ? values.pageId : "", appId = typeof values.appId === "string" ? values.appId : "", appSecret = this.secretValue(values, "appSecretEncrypted"), pageToken = this.secretValue(values, "pageAccessTokenEncrypted"), instagramAccountId = typeof values.instagramAccountId === "string" ? values.instagramAccountId : "", instagramUsername = typeof values.instagramUsername === "string" ? values.instagramUsername : "";
+    const section = "integration.meta", values = await this.sectionValues(section), pageId = typeof values.pageId === "string" ? values.pageId : "", appId = typeof values.appId === "string" ? values.appId : "", appSecret = this.secretValue(values, "appSecretEncrypted"), pageToken = this.secretValue(values, "pageAccessTokenEncrypted"), instagramAccountId = typeof values.instagramAccountId === "string" ? values.instagramAccountId : "", instagramUsername = typeof values.instagramUsername === "string" ? values.instagramUsername : "", instagramAppId = typeof values.instagramAppId === "string" ? values.instagramAppId : "", instagramToken = this.secretValue(values, "instagramAccessTokenEncrypted");
     if (values.enabled !== true || !pageId || !appId || !appSecret || !pageToken) throw new BadRequestException("Сначала заполните и сохраните настройки страницы Facebook");
     try {
       const page = await this.metaGraph<MetaPageIdentity>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
-      const fields = "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins";
+      const fields = "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
       const confirmed = confirmMetaPageSubscription({ pageId, appId, page, subscriptions: subscriptions.data || [], verifiedAt });
-      let instagramWebhookReceiverId="",instagramReceiverOutcome:"VERIFIED"|"NOT_CONFIGURED"|"RELATIONSHIP_UNAVAILABLE"="NOT_CONFIGURED";
-      const completeInstagramIdentity=/^\d+$/.test(instagramAccountId)&&Boolean(instagramUsername)&&typeof values.instagramAccessTokenEncrypted==="string"&&typeof values.instagramSubscriptionVerifiedAt==="string"&&Array.isArray(values.instagramSubscribedFields)&&values.instagramSubscribedFields.includes("messages");
-      if(completeInstagramIdentity)try{
+      let instagramSubscription: { id?: string; application?: { id?: string }; subscribed_fields?: string[] } | undefined;
+      let instagramSubscriptionOutcome: "VERIFIED" | "NOT_CONFIGURED" | "UNAVAILABLE" = "NOT_CONFIGURED";
+      if (instagramAccountId && instagramAppId && instagramToken) {
+        try {
+          const result = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", instagramToken, { subscribed_fields: "messages,message_reactions" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+          if (result.success !== true) throw new Error("Instagram subscription was not confirmed");
+          const instagramSubscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", instagramToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
+          instagramSubscription = findInstagramMessagesSubscription(instagramSubscriptions.data || [], instagramAccountId, instagramAppId);
+          if (!instagramSubscription) throw new Error("Instagram subscription fields were not confirmed");
+          instagramSubscriptionOutcome = "VERIFIED";
+        } catch (error) {
+          instagramSubscriptionOutcome = "UNAVAILABLE";
+          this.logger.warn(JSON.stringify({ event: "INSTAGRAM_REACTION_SUBSCRIPTION_UNAVAILABLE", errorType: error instanceof Error ? error.constructor.name : "UnknownError" }));
+        }
+      }
+      let instagramWebhookReceiverId="",instagramReceiverOutcome:"VERIFIED"|"PRESERVED"|"NOT_CONFIGURED"|"RELATIONSHIP_UNAVAILABLE"="NOT_CONFIGURED";
+      const savedInstagramWebhookReceiverId = typeof values.instagramWebhookReceiverId === "string" && /^\d+$/.test(values.instagramWebhookReceiverId) ? values.instagramWebhookReceiverId : "";
+      const completeInstagramIdentity=/^\d+$/.test(instagramAccountId)&&Boolean(instagramUsername)&&Boolean(instagramToken)&&Boolean(instagramSubscription);
+      if(instagramSubscriptionOutcome==="UNAVAILABLE"&&savedInstagramWebhookReceiverId){instagramWebhookReceiverId=savedInstagramWebhookReceiverId;instagramReceiverOutcome="PRESERVED"}
+      else if(completeInstagramIdentity)try{
         const linkedPage=await this.metaGraph<MetaPageIdentity>(pageId,pageToken,{fields:"id,instagram_business_account{id,username}"},"GET",appSecret);
         instagramWebhookReceiverId=resolveInstagramWebhookReceiver(linkedPage,pageId,instagramUsername);
         instagramReceiverOutcome="VERIFIED";
@@ -765,9 +782,16 @@ export class CommunicationsService {
           if (JSON.stringify(current[key]) !== JSON.stringify(values[key])) throw new ConflictException("Настройки Meta изменились во время проверки; повторите проверку доставки");
         }
         for (const [key, value] of Object.entries(confirmed.settings)) await tx.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } });
+        if (instagramSubscription) {
+          await tx.appSetting.upsert({ where: { section_key: { section, key: "instagramSubscriptionVerifiedAt" } }, create: { section, key: "instagramSubscriptionVerifiedAt", value: verifiedAt }, update: { value: verifiedAt } });
+          await tx.appSetting.upsert({ where: { section_key: { section, key: "instagramSubscribedFields" } }, create: { section, key: "instagramSubscribedFields", value: instagramSubscription.subscribed_fields || [] }, update: { value: instagramSubscription.subscribed_fields || [] } });
+        } else if (instagramSubscriptionOutcome === "UNAVAILABLE") {
+          const safeExistingFields = Array.isArray(values.instagramSubscribedFields) ? values.instagramSubscribedFields.filter(field => field !== "message_reactions") : [];
+          await tx.appSetting.upsert({ where: { section_key: { section, key: "instagramSubscribedFields" } }, create: { section, key: "instagramSubscribedFields", value: safeExistingFields }, update: { value: safeExistingFields } });
+        }
         if (instagramWebhookReceiverId) await tx.appSetting.upsert({ where: { section_key: { section, key: "instagramWebhookReceiverId" } }, create: { section, key: "instagramWebhookReceiverId", value: instagramWebhookReceiverId }, update: { value: instagramWebhookReceiverId } });
         else await tx.appSetting.deleteMany({where:{section,key:"instagramWebhookReceiverId"}});
-        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { ...confirmed.auditAfter, instagramWebhookReceiverVerified: Boolean(instagramWebhookReceiverId),instagramReceiverOutcome } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "MetaIntegrationSetting", entityId: "meta", after: { ...confirmed.auditAfter, instagramWebhookReceiverVerified: Boolean(instagramWebhookReceiverId),instagramReceiverOutcome, instagramSubscriptionOutcome, instagramSubscribedFields: instagramSubscription?.subscribed_fields || [] } } });
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -1038,10 +1062,22 @@ export class CommunicationsService {
       const exactConversationId = event.externalPartyId ? metaConversationExternalId(event.receiverId, event.externalPartyId) : undefined;
       const candidates = await tx.message.findMany({ where: { externalId: event.externalMessageId, conversation: { channel: event.channel as ContactChannel, ...(exactConversationId ? { externalId: exactConversationId } : event.receiverId ? { externalId: { startsWith: event.receiverId + ":" } } : { externalId: "" }) } }, take: 2, select: { id: true, content: true, metadata: true, conversation: { select: { externalId: true } } } });
       const target = uniqueMetaControlTarget(candidates.map(candidate => ({ ...candidate, conversationExternalId: candidate.conversation.externalId || "" })), event.receiverId);
-      const message = target;
+      let message = target;
       if (!message) { this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_IGNORED", eventType: event.eventType, mid: event.externalMessageId, recipientId: event.receiverId, reason: "messageNotFound" })); return false; }
+      if (event.eventType === "reaction") {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
+        const latest = await tx.message.findUnique({ where: { id: message.id }, select: { id: true, content: true, metadata: true } });
+        if (!latest) return false;
+        message = { ...message, ...latest };
+      }
       const oldMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Prisma.JsonObject : {};
-      const updated = await tx.message.update({ where: { id: message.id }, data: { ...(event.editedText ? { content: event.editedText } : {}), metadata: { ...oldMetadata, lastMetaControl: { type: event.eventType, receivedAt: event.receivedAt.toISOString() } } } });
+      const reactionMetadata = (event.eventType === "reaction" ? mergeMetaReactionMetadata(oldMetadata, event) : oldMetadata) as Record<string, any>;
+      const pendingOperation = reactionMetadata.reactionOperation && typeof reactionMetadata.reactionOperation === "object" && !Array.isArray(reactionMetadata.reactionOperation) ? reactionMetadata.reactionOperation as Prisma.JsonObject : undefined;
+      const pendingRequestedAt = typeof pendingOperation?.requestedAt === "string" ? Date.parse(pendingOperation.requestedAt) : NaN;
+      const reconciledOperation = event.eventType === "reaction" && event.reactionActor === "BUSINESS" && ["PENDING", "FAILED"].includes(String(pendingOperation?.status || "")) && pendingOperation?.action === event.reactionAction && Number.isFinite(pendingRequestedAt) && event.receivedAt.getTime() >= pendingRequestedAt
+        ? { ...pendingOperation, status: "SUCCEEDED", confirmedAt: event.receivedAt.toISOString(), confirmedBy: "WEBHOOK" }
+        : pendingOperation;
+      const updated = await tx.message.update({ where: { id: message.id }, data: { ...(event.editedText ? { content: event.editedText } : {}), metadata: { ...reactionMetadata, ...(reconciledOperation ? { reactionOperation: reconciledOperation } : {}), lastMetaControl: { type: event.eventType, receivedAt: event.receivedAt.toISOString() } } } });
       await tx.auditLog.create({ data: { action: "UPDATE", entityType: "InboundMessage", entityId: message.id, before: { contentChanged: false }, after: { metaControl: event.eventType, contentChanged: Boolean(event.editedText) } } });
       this.logger.log(JSON.stringify({ event: "META_CONTROL_EVENT_APPLIED", eventType: event.eventType, mid: event.externalMessageId, messageId: updated.id, recipientId: event.receiverId }));
       return true;
@@ -1160,8 +1196,10 @@ export class CommunicationsService {
       } else if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CONVERSATION_FOUND", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), conversationId: conversation.id }));
       const receivedAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
       const messageType = typeof event.metadata.messageType === "string" ? event.metadata.messageType : "text";
+      const replyExternalId = event.metadata.replyTo?.externalMessageId;
+      const replyToMessage = replyExternalId ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: replyExternalId } }, select: { id: true } }) : null;
       const envelope=await tx.webhookEnvelope.create({data:{provider,payload:rawPayload,payloadHash:createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex"),receivedAt}});
-      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType, externalId: event.externalMessageId, createdAt: receivedAt, receivedAt, rawPayload, webhookEnvelopeId:envelope.id, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined, source: provider === "META" ? "META" : "CHATWOOT" } as Prisma.InputJsonValue } });
+      const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType, externalId: event.externalMessageId, replyToMessageId: replyToMessage?.id, createdAt: receivedAt, receivedAt, rawPayload, webhookEnvelopeId:envelope.id, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined, source: provider === "META" ? "META" : "CHATWOOT" } as Prisma.InputJsonValue } });
       const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
       for (const attachment of normalizedAttachments) if (attachment && typeof attachment === "object" && !Array.isArray(attachment)) {
         const item = attachment as Record<string, unknown>;
@@ -1233,7 +1271,7 @@ export class CommunicationsService {
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 300,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        include: { conversation: { select: { channel: true } } },
+        include: { conversation: { select: { channel: true } }, replyToMessage: { select: { id: true, content: true, metadata: true } } },
       });
       visible.push(...batch.filter(message => !isDeduplicatedDraft(message.metadata)));
       if (batch.length < 300) break;
@@ -1342,6 +1380,81 @@ export class CommunicationsService {
     const extension = type === "video" || contentType.startsWith("video/") ? "mp4" : contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : contentType === "image/gif" ? "gif" : "jpg";
     const body = await boundedRemoteMedia(response.body);
     return { body, contentType, contentLength: body.length, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
+  }
+  async reactToMessage(messageId: string, d: MessageReactionDto, u: User) {
+    const [message, values] = await Promise.all([
+      this.p.message.findFirst({
+        where: { id: messageId, direction: MessageDirection.INBOUND, conversation: { archivedAt: null, client: { archivedAt: null } } },
+        select: { id: true, externalId: true, metadata: true, conversation: { select: { id: true, externalId: true, channel: true } } },
+      }),
+      this.sectionValues("integration.meta"),
+    ]);
+    if (!message) throw new NotFoundException("Сообщение не найдено");
+    const channel = message.conversation.channel;
+    if (channel !== ContactChannel.INSTAGRAM) throw new BadRequestException("Реакции из CRM поддерживаются только для Instagram");
+    if (!message.externalId) throw new BadRequestException("У сообщения нет идентификатора Instagram");
+    const externalMessageId = message.externalId;
+    const receiverId = typeof values.instagramAccountId === "string" ? values.instagramAccountId : "";
+    const webhookReceiverId = typeof values.instagramWebhookReceiverId === "string" && /^\d+$/.test(values.instagramWebhookReceiverId) ? values.instagramWebhookReceiverId : "";
+    const token = this.secretValue(values, "instagramAccessTokenEncrypted");
+    const recipientId = metaRecipientIdForReceivers([receiverId, webhookReceiverId], message.conversation.externalId);
+    if (values.enabled !== true || !receiverId || !token) throw new BadRequestException("Канал Instagram не подключён");
+    if (!Array.isArray(values.instagramSubscribedFields) || !values.instagramSubscribedFields.includes("message_reactions")) throw new BadRequestException("Подписка на реакции Instagram не подтверждена. Повторите проверку доставки в настройках");
+    if (!recipientId) throw new BadRequestException("Для этого клиента нет активного диалога Instagram");
+    const operationId = randomUUID(), requestedAt = new Date();
+    await this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
+      const current = await tx.message.findFirst({ where: { id: message.id, direction: MessageDirection.INBOUND, conversation: { archivedAt: null, client: { archivedAt: null } } }, select: { id: true, metadata: true } });
+      if (!current) throw new NotFoundException("Сообщение не найдено");
+      const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata as Prisma.JsonObject : {};
+      const pending = metadata.reactionOperation && typeof metadata.reactionOperation === "object" && !Array.isArray(metadata.reactionOperation) ? metadata.reactionOperation as Prisma.JsonObject : undefined;
+      const pendingAt = typeof pending?.requestedAt === "string" ? Date.parse(pending.requestedAt) : NaN;
+      if (pending?.status === "PENDING" && (!Number.isFinite(pendingAt) || Date.now() - pendingAt < 5 * 60 * 1000)) throw new ConflictException("Предыдущая операция с реакцией ещё выполняется. Обновите диалог перед повтором");
+      if (pending?.status === "PENDING") await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_STALE_RECOVERED", entityType: "Message", entityId: current.id, after: { previousOperationId: pending.id, ageSeconds: Math.floor((Date.now() - pendingAt) / 1000) } } });
+      await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { id: operationId, action: d.action, status: "PENDING", requestedAt: requestedAt.toISOString() } } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_REQUESTED", entityType: "Message", entityId: current.id, after: { channel, action: d.action, operationId } } });
+    });
+    try {
+      await this.instagramGraph(receiverId + "/messages", token, {
+        recipient: JSON.stringify({ id: recipientId }),
+        sender_action:d.action,
+        payload: JSON.stringify({ message_id: externalMessageId, reaction:"love" }),
+      }, "POST", true);
+    } catch {
+      const webhookConfirmed = await this.p.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
+        const current = await tx.message.findUnique({ where: { id: message.id } });
+        if (!current) return null;
+        const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata as Prisma.JsonObject : {};
+        const operation = metadata.reactionOperation && typeof metadata.reactionOperation === "object" && !Array.isArray(metadata.reactionOperation) ? metadata.reactionOperation as Prisma.JsonObject : undefined;
+        if (operation?.id === operationId && operation.status === "SUCCEEDED") return current;
+        if (operation?.id !== operationId || operation.status !== "PENDING") return null;
+        await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { ...operation, status: "FAILED", failedAt: new Date().toISOString() } } } });
+        await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_FAILED", entityType: "Message", entityId: current.id, after: { channel, action: d.action, operationId } } });
+        return null;
+      });
+      if (webhookConfirmed) return { ...webhookConfirmed, channel };
+      throw new BadGatewayException(d.action === "unreact" ? "Instagram не снял реакцию" : "Instagram не принял реакцию");
+    }
+    return this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
+      const current = await tx.message.findUnique({ where: { id: message.id }, select: { id: true, metadata: true } });
+      if (!current) throw new NotFoundException("Сообщение не найдено");
+      const receivedAt = new Date();
+      const metadata = mergeMetaReactionMetadata(current.metadata, {
+        channel: "INSTAGRAM",
+        eventType: "reaction",
+        receivedAt,
+        externalMessageId,
+        reactionAction: d.action,
+        reactionName: "love",
+        reactionEmoji: "❤️",
+        reactionActor: "BUSINESS",
+      });
+      const updated = await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { id: operationId, action: d.action, status: "SUCCEEDED", requestedAt: requestedAt.toISOString(), completedAt: receivedAt.toISOString() } } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: d.action === "unreact" ? "UNREACT" : "REACT", entityType: "Message", entityId: current.id, after: { channel, reaction: "love", operationId } } });
+      return { ...updated, channel };
+    });
   }
   private async outboundAttachment(input: { path: string; name: string; mimeType: string }, u: User, clientRequestId?: string) {
     if (!COMMUNICATION_FILE.test(input.path)) throw new BadRequestException("Некорректное имя вложения");

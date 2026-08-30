@@ -9,12 +9,24 @@ const css = await readFile(new URL("../app/orders-workspace.css", import.meta.ur
 
 test("раскрытый индивидуальный заказ без замеров предлагает добавить снимок", () => {
   assert.match(workspace, /import \{ MeasurementPanel \}/);
-  assert.match(workspace, /!primaryMeasurement\(o\)/);
   assert.match(workspace, /ordersUi\.addMeasurements/);
   assert.match(workspace, /setMeasurementOrder\(o\)/);
   assert.match(workspace, /function measurementAthlete\(o:Order\)/);
   assert.match(workspace, /o\.athlete\?\?o\.items\[0\]\?\.athlete/);
   assert.match(css, /\.orders-add-measurements/);
+});
+
+test("там же существующие замеры открываются для редактирования", () => {
+  assert.match(workspace, /primaryMeasurement\(o\)\?ordersUi\.editMeasurements:ordersUi\.addMeasurements/);
+  assert.match(workspace, /initialValues=\{primaryMeasurement\(measurementOrder\)\?\.values\}/);
+  assert.match(workspace, /expectedMeasurementId=\{primaryMeasurement\(measurementOrder\)\?\.id\}/);
+  assert.match(i18n, /editMeasurements:\s*"Редактировать замеры"/);
+  assert.match(i18n, /editMeasurementDialogTitle:\s*"Редактировать замеры заказа"/);
+  assert.match(panel, /initialValues\?:Record<string,number>/);
+  assert.match(panel, /initialMeasurementValues\(initialValues\)/);
+  assert.match(panel, /expectedMeasurementId\?:string/);
+  assert.match(panel, /expectedMeasurementId/);
+  assert.match(panel, /const standardHeight=initialValues\?chosen:nearest/);
 });
 
 test("замеры из заказа открываются модально и обновляют список после сохранения", () => {

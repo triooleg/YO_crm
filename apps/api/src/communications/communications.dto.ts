@@ -59,6 +59,9 @@ export class SendMessageDto {
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
 }
+export class MessageReactionDto {
+  @IsIn(["react", "unreact"] as const) action!: "react" | "unreact";
+}
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;
   @IsString() @MaxLength(120) mimeType!: string;
