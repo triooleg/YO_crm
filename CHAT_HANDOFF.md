@@ -1135,3 +1135,11 @@
 - В окне редактирования задачи показана адаптивная сетка превью всех уже сохранённых фотографий и новых загруженных файлов. Существующая append-only логика вложений не менялась.
 - Failing-first контракты прошли: web 10/10, API 11/11; финальный `pnpm quality:check` PASS — API 241/241, database 7/7, полный web suite, typechecks и production builds.
 - Browser-smoke при 1366×768 подтвердил `Facebook + Christabel Lim Meiling` на карточке и одно превью 96 px в форме; при 390×844 превью адаптируется до 132 px, body/dialog horizontal overflow равен 0. Push и production deployment не выполнялись.
+
+## 2026-08-30 — deployment имени клиента, канала и превью задач
+
+- Runtime commit `05de094f1b228431d2e761c2e5e0785c725c49c3` fast-forward pushed в `origin/main`; GitHub Actions `Quality gates` run `33319919014` завершён `SUCCESS` за 2 мин 23 с.
+- Перед deployment создан и повторно проверен FULL backup `20260830T153626Z-05de094-predeploy`: `postgres.dump`, `uploads.tar.gz` и `manifest.json` прошли SHA-256 verification. Release archive SHA-256 `53735f7b4d3e6b017f7e4e8540d7164953fe163e5c2cb969cc9277be274e6be2` совпал локально и на сервере.
+- В `/home/trio/yoleotard-crm` развёрнут точный release `05de094`; Compose config проверен, пересобраны и пересозданы только `api` и `web`. Production `.env`, PostgreSQL, Redis и persistent volumes не заменялись.
+- Post-deploy: API/web/PostgreSQL/Redis healthy с restart count 0, все 19 Prisma migrations актуальны, internal/public `/api/health` и public root возвращают HTTP 200, PostgreSQL/Redis/uploads — `up`, свежий error scan пустой.
+- Авторизованный Edge smoke подтвердил `Facebook + Christabel Lim Meiling` на карточке «Дизайн спинки», полный accessible label задачи и одно реально загруженное превью 104×96 px (natural width 1040). Body/dialog overflow и console errors равны 0; записи и сообщения клиентам во время smoke не создавались.
