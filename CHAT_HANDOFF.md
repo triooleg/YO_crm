@@ -1200,3 +1200,11 @@
 - Composer Chatwoot использует существующие обычные текстовые emoji, вложения и кнопку «Отправить». Подпись внешнего ответа: «Ответ отправлен через Chatwoot». На mobile исправлен унаследованный конфликт grid-column emoji picker; сетка остаётся компактной (5 колонок).
 - Failing-first подтверждён. Targeted: Chatwoot/API 48/48, communications web 45/45. Финальный `pnpm quality:check` PASS: API 255/255, database 7/7, полный web suite, typechecks и production builds; `git diff --check` PASS.
 - Browser-smoke локальной изолированной сборки с детерминированными Chatwoot-данными прошёл на 1920×1080, 1366×768 и 390×844: входящее фото, длинный исходящий текст, подпись Chatwoot, composer и emoji; console errors отсутствуют. Compatibility, regression, business/API и visual reviews дали PASS после исправлений. Production backup, deployment и live provider smoke ещё не выполнены.
+
+## 2026-08-31 — бейдж количества заказов во входящих (готово к deployment)
+
+- В списке клиентов «Входящих» реализован утверждённый вариант B: белый контурный бейдж с фиолетовой рамкой в верхнем правом углу аватара. Нижний значок канала и правый счётчик непрочитанных не изменялись.
+- Бейдж использует существующий серверный `buyerSummary.purchaseCount`, скрывается при нуле и показывает `99+` для больших значений; tooltip и accessible name сохраняют точное количество.
+- Новая подпись «Заказов» добавлена в централизованный русский словарь. API, Prisma, данные заказов и бизнес-правила не менялись.
+- Failing-first targeted test подтверждён; финальный `pnpm quality:check` PASS: API 255/255, web 181/181, database 7/7, все typechecks и production builds. `git diff --check` PASS.
+- Browser-smoke реальной локальной production-сборки с детерминированными данными прошёл на 1920×1080, 1366×768 и 390×844: значения 1, 12, 120→99+, нулевой счётчик, Facebook, Instagram, Chatwoot и Gmail. Геометрическая проверка подтвердила отсутствие пересечения и обрезания; итоговая консоль — 0 ошибок и предупреждений.

@@ -624,6 +624,7 @@ export const communicationsUi = {
   subtitle: "Клиенты, переписка и заказы",
   workspace: "Рабочее пространство входящих",
   clientsList: "Список клиентов",
+  orderCount: "Заказов",
   search: "Имя, телефон, Instagram…",
   socialNetworkFilter: "Фильтр по социальным сетям",
   gmail: "Gmail",

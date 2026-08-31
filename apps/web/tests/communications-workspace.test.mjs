@@ -229,6 +229,15 @@ test("список клиентов показывает все связанны
   assert.match(component, /badges\.filter\(badge=>badge\.key!==primaryBadge\?\.key\)\.map/);
 });
 
+test("список клиентов показывает контурный бейдж количества заказов возле аватара", () => {
+  assert.match(component, /purchaseCount=c\.buyerSummary\?\.purchaseCount\|\|0/);
+  assert.match(component, /purchaseCount>0&&<span className="communications-client-order-count"/);
+  assert.match(component, /purchaseCount>99\?"99\+":purchaseCount/);
+  assert.match(component, /aria-label=\{`\$\{ui\.orderCount\}: \$\{purchaseCount\}`\}/);
+  assert.match(locale, /orderCount:\s*"Заказов"/);
+  assert.match(css, /\.communications-client-order-count\{[^}]*border:2px solid var\(--violet\);[^}]*background:#fff;[^}]*color:var\(--violet\)/);
+});
+
 test("аватар Meta отображается в списке и заголовке чата с безопасным fallback", () => {
   assert.match(component, /avatarUrl\?: string/);
   assert.match(component, /<ClientAvatar[\s\S]*avatarUrl=\{c\.avatarUrl\}/);
