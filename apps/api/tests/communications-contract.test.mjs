@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { IsOptional, IsString, Length, validate } from "class-validator";
 const schema = await readFile(
   new URL("../../../packages/database/prisma/schema.prisma", import.meta.url),
   "utf8",
@@ -243,7 +244,8 @@ test("outbound Facebook, Instagram and WhatsApp messages distinguish drafts from
   assert.match(x, /conversationId:conversation\.id,status:"PENDING"/);
 });
 test("a saved draft is sent in place without creating a duplicate message",()=>{
-  assert.match(dto,/@IsUUID\("4"\)draftMessageId/);
+  assert.match(dto,/@IsString\(\)@Length\(20,80\)draftMessageId/);
+  assert.doesNotMatch(dto,/@IsUUID\("4"\)draftMessageId/);
   assert.match(service,/draftMessageId&&d\.action!=="SEND"/);
   assert.ok(service.indexOf("messageDeliveryAttempt.findUnique")<service.indexOf("constdraft=d.draftMessageId"),"a completed retry must resolve before the draft status check");
   assert.match(service,/result\.id!==d\.draftMessageId&&mergedInto!==result\.id/);
@@ -254,6 +256,18 @@ test("a saved draft is sent in place without creating a duplicate message",()=>{
   assert.match(service,/"meta-echo:"\+conversation\.id\+":"\+result\.message_id/);
   assert.match(service,/deduplicatedIntoMessageId:m\.id/);
   assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,sentAt,metadata:/);
+});
+
+test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundaries",async()=>{
+  class DraftMessageIdProbe { draftMessageId; }
+  IsOptional()(DraftMessageIdProbe.prototype,"draftMessageId");
+  IsString()(DraftMessageIdProbe.prototype,"draftMessageId");
+  Length(20,80)(DraftMessageIdProbe.prototype,"draftMessageId");
+  const errors=async draftMessageId=>validate(Object.assign(new DraftMessageIdProbe(),{draftMessageId}));
+  assert.equal((await errors("cm12345678901234567890123")).length,0);
+  assert.ok((await errors(12345)).length>0);
+  assert.ok((await errors("c".repeat(19))).length>0);
+  assert.ok((await errors("c".repeat(81))).length>0);
 });
 
 test("Messenger thread-control mutations have separate durable history without customer data", () => {

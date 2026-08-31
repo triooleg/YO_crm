@@ -55,7 +55,7 @@ export class SendMessageDto {
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
   @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
   @IsOptional() @IsUUID("4") clientRequestId?: string;
-  @IsOptional() @IsUUID("4") draftMessageId?: string;
+  @IsOptional() @IsString() @Length(20, 80) draftMessageId?: string;
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @IsString() @Length(20, 80) replyToMessageId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
