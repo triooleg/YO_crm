@@ -1209,3 +1209,11 @@
 - Новые подписи добавлены в централизованный русский словарь. Prisma, данные заказов и бизнес-правила не менялись.
 - Финальный `pnpm quality:check` PASS после regression fix: API 257/257, web 181/181, database 7/7, все typecheck и production builds; `git diff --check` PASS.
 - Browser-smoke финального варианта C реальной локальной production-сборки прошёл на 1920×1080, 1366×768 и 390×844: значения `3`, `12`, `99+`, оба статуса, левое положение, значки каналов и Chatwoot-ссылка проверены; clipping/overlap и console errors отсутствуют.
+
+## 2026-08-31 — deployment варианта C и ссылки Chatwoot
+
+- Runtime commit `c3edebd7d15320d0bc1074e59aac80d7349489f0` fast-forward pushed в `origin/main` и развёрнут в `/home/trio/yoleotard-crm`. Release archive SHA-256 `9cb05ae7a34eddd42c81f0c48a256c2c565ef75a55dd40bcb15512132e2dcd60` совпал локально и на сервере.
+- До deployment создан и полностью проверен FULL backup `20260831T120353Z-c3edebd-predeploy`: checksums `postgres.dump`, `uploads.tar.gz`, `manifest.json` совпали; PostgreSQL custom dump читается, uploads archive и JSON manifest валидны.
+- Пересобраны и пересозданы только `api` и `web`; PostgreSQL, Redis, `.env` и persistent volumes не заменялись. API/web/PostgreSQL/Redis healthy, restart count 0; все 19 миграций актуальны.
+- Internal/public root и `/api/health` возвращают HTTP 200; PostgreSQL, Redis и uploads — `up`. Свежие production-логи содержат штатный запуск без ошибок.
+- Авторизованный read-only browser-smoke реальных данных подтвердил оранжевый бейдж активного заказа слева сверху, отдельный значок канала справа снизу и ссылку «Открыть переписку в Chatwoot» на точный диалог `accounts/2/conversations/83`. Фото и сквозные входящие/исходящие Chatwoot отображаются; horizontal overflow и console errors/warnings равны 0. Сообщения не отправлялись и данные клиентов не изменялись.
