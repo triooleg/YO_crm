@@ -120,10 +120,10 @@ test("сообщения показывают время без секунд и 
   assert.match(css,/\.communications-message-content,\.communications-message-translation span\{[^}]*white-space:pre-wrap/);
 });
 test("ответы отправленные вне CRM имеют подпись социальной сети или Chatwoot",()=>{
-  assert.match(component,/\["META","META_ECHO","CHATWOOT"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
+  assert.match(component,/\["META","META_ECHO","CHATWOOT","GMAIL"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
   assert.match(component,/communications-external-message-source/);
   assert.match(component,/ui\.externalReplyByChannel\[message\.channel as keyof typeof ui\.externalReplyByChannel\]/);
-  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram",\s*CHATWOOT:\s*"Ответ отправлен через Chatwoot"\s*\}/);
+  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram",\s*CHATWOOT:\s*"Ответ отправлен через Chatwoot",\s*EMAIL:\s*"Ответ отправлен через Gmail"\s*\}/);
   assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
 });
 test("прочтение клиентом показано возле времени с доступной русской подсказкой",()=>{
@@ -417,7 +417,7 @@ test("редактор Facebook, Instagram и Chatwoot предлагает ст
 });
 
 test("Chatwoot может отправлять сообщения и отмечает синхронизированные внешние ответы", () => {
-  assert.match(component, /\["META","META_ECHO","CHATWOOT"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
+  assert.match(component, /\["META","META_ECHO","CHATWOOT","GMAIL"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
   assert.match(locale, /CHATWOOT:\s*"Ответ отправлен через Chatwoot"/);
 });
 
@@ -449,7 +449,7 @@ test("видео показывает превью и воспроизводит
 test("ошибка отправки провайдера показывает безопасную причину на русском", () => {
   assert.match(component, /sendFailureReasons/);
   assert.match(component, /sendFailureText\(message\.metadata\?\.reason, message\.channel\)/);
-  assert.match(component, /messageChannel === "CHATWOOT" \? "Chatwoot" : "Facebook"/);
+  assert.match(component, /messageChannel === "EMAIL" \? "Gmail" : "Facebook"/);
   assert.match(locale, /TOKEN_EXPIRED/);
   assert.match(locale, /PERMISSION_REQUIRED/);
   assert.match(locale, /REPLY_WINDOW_CLOSED/);

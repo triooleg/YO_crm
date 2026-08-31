@@ -57,6 +57,7 @@ export class SendMessageDto {
   @IsOptional() @IsUUID("4") clientRequestId?: string;
   @IsOptional() @IsUUID("4") draftMessageId?: string;
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
+  @IsOptional() @IsString() @Length(20, 80) replyToMessageId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
 }
 export class MessageReactionDto {
@@ -86,10 +87,11 @@ export class IntegrationSettingsDto {
   @IsOptional() @IsIn([465, 587] as const) smtpPort?: number;
   @IsOptional() @IsIn(["imap.gmail.com"] as const) imapHost?: string;
   @IsOptional() @IsIn([993] as const) imapPort?: number;
-  @IsOptional() @IsString() @MaxLength(255) username?: string;
+  @IsOptional() @IsEmail() username?: string;
   @IsOptional() @IsString() @MaxLength(500) password?: string;
   @IsOptional() @IsBoolean() removePassword?: boolean;
   @IsOptional() @IsEmail() fromAddress?: string;
+  @IsOptional() @IsString() @MaxLength(5000) signature?: string;
 }
 export class ChatwootIntegrationDto extends IntegrationSettingsDto {}
 export class EmailIntegrationDto extends IntegrationSettingsDto {}

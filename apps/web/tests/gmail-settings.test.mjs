@@ -9,6 +9,8 @@ test("Gmail settings expose accessible save and verification actions", async () 
   assert.match(source, /settings-actions/);
   assert.match(source, /emailSaveBeforeVerify/);
   assert.match(source, /disabled=\{saving\|\|!data\.email\.passwordConfigured\}/);
+  assert.match(source, /name="signature"/);
+  assert.match(source, /settingsUi\.emailSignature/);
 });
 
 test("e-mail conversations use the same real send action as connected chats", async () => {
@@ -16,4 +18,13 @@ test("e-mail conversations use the same real send action as connected chats", as
   assert.match(source, /"CHATWOOT",\s*"EMAIL"[\s\S]{0,80}includes\(activeChannel\)/);
   assert.match(source, /safeAttachmentUrl/);
   assert.match(source, /\/api\\\/communications\\\/files/);
+  assert.match(source, /emailHtml/);
+  assert.match(source, /email-rich-content/);
+  assert.match(source, /emailReplyTarget/);
+  assert.match(source, /replyToMessageId/);
+  assert.match(source, /ui\.replyToEmail/);
+  assert.match(source, /gmailConversationUrl/);
+  assert.match(source, /https:\/\/mail\.google\.com\/mail\/u\/0\/#search\//);
+  assert.match(source, /rfc822msgid:/);
+  assert.match(source, /\[\\r\\n\]/);
 });

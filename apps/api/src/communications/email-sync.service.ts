@@ -1,35 +1,101 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
+import { simpleParser, type ParsedMail } from "mailparser";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
 import { CommunicationsService } from "./communications.service";
-import { EmailTransportService } from "./email-transport.service";
-import { emailCursorUid, emailDisplayContent, emailRetryCursor, emailStandaloneAttachments, emailUidRange } from "./email-sync-rules";
+import { emailPlainTextFromHtml, emailSafeHtml } from "./email-html";
+import { EmailTransportService, type EmailConnection } from "./email-transport.service";
+import { emailCursorUid, emailDisplayContent, emailLatestContent, emailRetryCursor, emailSentImageAllowed, emailStandaloneAttachments, emailUidRange } from "./email-sync-rules";
 
-const inboundExtensions:Record<string,string>={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","application/pdf":"pdf","text/plain":"txt"};
-type SyncCursor={account:string;mailbox:"INBOX";uidValidity:string;uid:number};
+const emailExtensions:Record<string,string>={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","application/pdf":"pdf","text/plain":"txt"};
+type SyncDirection="INBOUND"|"OUTBOUND";
+type SyncMailbox={path:string;cursorKey:"inboxCursor"|"sentCursor";direction:SyncDirection};
+type SyncCursor={account:string;mailbox:string;uidValidity:string;uid:number};
+type StoredAttachment={name:string;mimeType:string;sizeBytes:number;url:string};
 
 @Injectable()
 export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
- private readonly logger=new Logger(EmailSyncService.name);private timer?:NodeJS.Timeout;private running=false;
- constructor(private readonly prisma:PrismaService,private readonly transport:EmailTransportService,private readonly communications:CommunicationsService){}
- onModuleInit(){this.timer=setInterval(()=>void this.tick(),30_000);setTimeout(()=>void this.tick(),5_000)}
- onModuleDestroy(){if(this.timer)clearInterval(this.timer)}
- private saveCursor(cursor:SyncCursor){return this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}},create:{section:"integration.email.sync",key:"inboxCursor",value:cursor},update:{value:cursor}})}
- private async recordFailure(account:string,uidValidity:string,uid:number,rawPath:string|undefined,error:unknown){const failure={account,mailbox:"INBOX",uidValidity,uid,rawPath,errorType:error instanceof Error?error.constructor.name:"UnknownError",occurredAt:new Date().toISOString()},scope=createHash("sha256").update(`${account}:INBOX:${uidValidity}`).digest("hex").slice(0,24);await this.prisma.$transaction([this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:`failure.${scope}.${uid}`}},create:{section:"integration.email.sync",key:`failure.${scope}.${uid}`,value:failure},update:{value:failure}}),this.prisma.auditLog.create({data:{action:"EMAIL_SYNC_FAILED",entityType:"EmailMessage",entityId:String(uid),after:failure}})]);this.logger.warn(`EMAIL_MESSAGE_QUARANTINED uid=${uid} ${failure.errorType}`)}
- async retryFailure(key:string,actorId:string){if(!/^failure\.[a-f0-9]{24}\.\d+$/.test(key))throw new Error("Некорректный ключ ошибки Gmail");const [row,settings,cursor]=await Promise.all([this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key}}}),this.transport.settings(),this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}}})]);if(!row||!row.value||typeof row.value!=="object"||Array.isArray(row.value))throw new Error("Ошибка Gmail не найдена");const value=row.value as Record<string,unknown>,current=cursor?.value&&typeof cursor.value==="object"&&!Array.isArray(cursor.value)?cursor.value as Record<string,unknown>:{},account=settings.username.trim().toLowerCase(),uid=Number(value.uid),failureUidValidity=String(value.uidValidity||""),rawPath=typeof value.rawPath==="string"?value.rawPath:null;if(value.account!==account||value.mailbox!=="INBOX"||value.uidValidity!==current.uidValidity||current.account!==account||current.mailbox!=="INBOX")throw new Error("Ошибка Gmail относится к другому аккаунту или почтовому ящику");if(!Number.isInteger(uid)||uid<1||uid>Number(current.uid||0))throw new Error("UID ошибки Gmail не относится к текущему курсору");await this.prisma.$transaction(async tx=>{await tx.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}},create:{section:"integration.email.sync",key:"retryMarker",value:{failureKey:key,account,mailbox:"INBOX",uidValidity:failureUidValidity,uid,rawPath}},update:{value:{failureKey:key,account,mailbox:"INBOX",uidValidity:failureUidValidity,uid,rawPath}}});await tx.auditLog.create({data:{actorId,action:"RETRY_REQUESTED",entityType:"EmailMessage",entityId:String(uid),after:{channel:"EMAIL",quarantineKey:key}}})});return{queued:true,uid}}
- private async applyRetryMarker(account:string,uidValidity:string,current:Record<string,unknown>){const applied=await this.prisma.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"email-sync:INBOX"},0))`;const marker=await tx.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}}});if(!marker?.value||typeof marker.value!=="object"||Array.isArray(marker.value))return null;const value=marker.value as Record<string,unknown>,uid=Number(value.uid),retryUid=emailRetryCursor(current,value,account,uidValidity);if(retryUid===null)return null;const next={account,mailbox:"INBOX",uidValidity,uid:retryUid};await tx.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}},create:{section:"integration.email.sync",key:"inboxCursor",value:next},update:{value:next}});if(typeof value.failureKey==="string")await tx.appSetting.deleteMany({where:{section:"integration.email.sync",key:value.failureKey}});await tx.appSetting.delete({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}}});await tx.auditLog.create({data:{action:"RETRY_QUEUED",entityType:"EmailMessage",entityId:String(uid),after:{channel:"EMAIL",uid}}});return{uid:next.uid,rawPath:typeof value.rawPath==="string"?value.rawPath:undefined}});if(applied?.rawPath)await unlink(join(uploadsRoot(),"communication-files",applied.rawPath)).catch(()=>undefined);return applied?.uid??emailCursorUid(current,account,uidValidity)}
- async tick(){if(this.running)return;this.running=true;let client:ImapFlow|undefined;try{const settings=await this.transport.settings();if(!settings.enabled||!settings.password)return;this.transport.requireReady(settings);client=new ImapFlow({host:settings.imapHost,port:settings.imapPort,secure:true,auth:{user:settings.username,pass:settings.password},logger:false});await client.connect();const lock=await client.getMailboxLock("INBOX");try{const uidValidity=String(client.mailbox&&client.mailbox.uidValidity||"0"),account=settings.username.trim().toLowerCase(),saved=await this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}}}),value=saved?.value&&typeof saved.value==="object"&&!Array.isArray(saved.value)?saved.value as Record<string,unknown>:{};let last=await this.applyRetryMarker(account,uidValidity,value);const recent=last?[]:await client.search({since:new Date(Date.now()-7*86400000)},{uid:true}),range=emailUidRange(last,Number(client.mailbox&&client.mailbox.uidNext||0),Array.isArray(recent)?recent:[]);
- for await(const item of range.length?client.fetch(range,{uid:true,source:true,envelope:true,internalDate:true},{uid:true}):[]){
-  if(!item.source){await this.recordFailure(account,uidValidity,item.uid,undefined,new Error("IMAP_SOURCE_MISSING"));last=Math.max(last,item.uid);await this.saveCursor({account,mailbox:"INBOX",uidValidity,uid:last});continue}
-  const directory=join(uploadsRoot(),"communication-files");await mkdir(directory,{recursive:true});const rawPath=`${randomUUID()}.eml`;await writeFile(join(directory,rawPath),item.source,{flag:"wx"});
-  let parsed;try{parsed=await simpleParser(item.source)}catch(error){await this.recordFailure(account,uidValidity,item.uid,rawPath,error);last=Math.max(last,item.uid);await this.saveCursor({account,mailbox:"INBOX",uidValidity,uid:last});continue}
-  const written=[rawPath];try{const from=parsed.from?.value[0],email=from?.address?.trim().toLowerCase();if(!email||email===settings.fromAddress.toLowerCase()){for(const name of written)await unlink(join(directory,name)).catch(()=>undefined);last=Math.max(last,item.uid);await this.saveCursor({account,mailbox:"INBOX",uidValidity,uid:last});continue}const receivedAt=parsed.date?new Date(parsed.date):item.internalDate?new Date(item.internalDate):new Date(),attachments:Array<{name:string;mimeType:string;sizeBytes:number;url:string}>=[];for(const attachment of emailStandaloneAttachments(parsed.attachments)){const extension=inboundExtensions[attachment.contentType];if(!extension||attachment.size>5*1024*1024)continue;const name=`${randomUUID()}.${extension}`;await writeFile(join(directory,name),attachment.content,{flag:"wx"});written.push(name);attachments.push({name:attachment.filename||"attachment",mimeType:attachment.contentType,sizeBytes:attachment.size,url:`/api/communications/files/${name}`})}const content=emailDisplayContent((parsed.text||parsed.html||parsed.subject||"[Письмо]").toString()),persisted=await this.communications.receiveEmailMessage({externalMessageId:parsed.messageId||`imap:${uidValidity}:${item.uid}`,externalSenderId:email,email,displayName:from?.name||email,content,receivedAt,subject:parsed.subject||"Без темы",inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:Array.isArray(parsed.references)?parsed.references:parsed.references?[parsed.references]:[],rawPath,attachments},{uid:item.uid,uidValidity,rawPath,sizeBytes:item.source.length});if(!persisted)for(const name of written)await unlink(join(directory,name)).catch(()=>undefined)}catch(error){for(const name of written)await unlink(join(directory,name)).catch(()=>undefined);throw error}
-  last=Math.max(last,item.uid);await this.saveCursor({account,mailbox:"INBOX",uidValidity,uid:last});
- }
- }finally{lock.release()}}catch(error){this.logger.warn(`EMAIL_SYNC_FAILED ${error instanceof Error?error.constructor.name:"Unknown"}`)}finally{if(client)await client.logout().catch(()=>undefined);this.running=false}}
+  private readonly logger=new Logger(EmailSyncService.name);
+  private timer?:NodeJS.Timeout;
+  private running=false;
+  constructor(private readonly prisma:PrismaService,private readonly transport:EmailTransportService,private readonly communications:CommunicationsService){}
+  onModuleInit(){this.timer=setInterval(()=>void this.tick(),30_000);setTimeout(()=>void this.tick(),5_000)}
+  onModuleDestroy(){if(this.timer)clearInterval(this.timer)}
+
+  private saveCursor(key:SyncMailbox["cursorKey"],cursor:SyncCursor){return this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key}},create:{section:"integration.email.sync",key,value:cursor},update:{value:cursor}})}
+  private async recordFailure(account:string,mailbox:string,uidValidity:string,uid:number,rawPath:string|undefined,error:unknown){
+    const failure={account,mailbox,uidValidity,uid,rawPath,errorType:error instanceof Error?error.constructor.name:"UnknownError",occurredAt:new Date().toISOString()},scope=createHash("sha256").update(`${account}:${mailbox}:${uidValidity}`).digest("hex").slice(0,24);
+    await this.prisma.$transaction([this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:`failure.${scope}.${uid}`}},create:{section:"integration.email.sync",key:`failure.${scope}.${uid}`,value:failure},update:{value:failure}}),this.prisma.auditLog.create({data:{action:"EMAIL_SYNC_FAILED",entityType:"EmailMessage",entityId:String(uid),after:failure}})]);
+    this.logger.warn(`EMAIL_MESSAGE_QUARANTINED mailbox=${mailbox==="INBOX"?"INBOX":"SENT"} uid=${uid} ${failure.errorType}`)
+  }
+  async retryFailure(key:string,actorId:string){
+    if(!/^failure\.[a-f0-9]{24}\.\d+$/.test(key))throw new Error("Некорректный ключ ошибки Gmail");
+    const [row,settings,cursor]=await Promise.all([this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key}}}),this.transport.settings(),this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}}})]);
+    if(!row||!row.value||typeof row.value!=="object"||Array.isArray(row.value))throw new Error("Ошибка Gmail не найдена");
+    const value=row.value as Record<string,unknown>,current=cursor?.value&&typeof cursor.value==="object"&&!Array.isArray(cursor.value)?cursor.value as Record<string,unknown>:{},account=settings.username.trim().toLowerCase(),uid=Number(value.uid),failureUidValidity=String(value.uidValidity||""),rawPath=typeof value.rawPath==="string"?value.rawPath:null;
+    if(value.account!==account||value.mailbox!=="INBOX"||value.uidValidity!==current.uidValidity||current.account!==account||current.mailbox!=="INBOX")throw new Error("Ошибка Gmail относится к другому аккаунту или почтовому ящику");
+    if(!Number.isInteger(uid)||uid<1||uid>Number(current.uid||0))throw new Error("UID ошибки Gmail не относится к текущему курсору");
+    await this.prisma.$transaction(async tx=>{await tx.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}},create:{section:"integration.email.sync",key:"retryMarker",value:{failureKey:key,account,mailbox:"INBOX",uidValidity:failureUidValidity,uid,rawPath}},update:{value:{failureKey:key,account,mailbox:"INBOX",uidValidity:failureUidValidity,uid,rawPath}}});await tx.auditLog.create({data:{actorId,action:"RETRY_REQUESTED",entityType:"EmailMessage",entityId:String(uid),after:{channel:"EMAIL",quarantineKey:key}}})});
+    return{queued:true,uid}
+  }
+  private async applyRetryMarker(account:string,uidValidity:string,current:Record<string,unknown>){
+    const applied=await this.prisma.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"email-sync:INBOX"},0))`;const marker=await tx.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}}});if(!marker?.value||typeof marker.value!=="object"||Array.isArray(marker.value))return null;const value=marker.value as Record<string,unknown>,uid=Number(value.uid),retryUid=emailRetryCursor(current,value,account,uidValidity);if(retryUid===null)return null;const next={account,mailbox:"INBOX",uidValidity,uid:retryUid};await tx.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"inboxCursor"}},create:{section:"integration.email.sync",key:"inboxCursor",value:next},update:{value:next}});if(typeof value.failureKey==="string")await tx.appSetting.deleteMany({where:{section:"integration.email.sync",key:value.failureKey}});await tx.appSetting.delete({where:{section_key:{section:"integration.email.sync",key:"retryMarker"}}});await tx.auditLog.create({data:{action:"RETRY_QUEUED",entityType:"EmailMessage",entityId:String(uid),after:{channel:"EMAIL",uid}}});return{uid:next.uid,rawPath:typeof value.rawPath==="string"?value.rawPath:undefined}});
+    if(applied?.rawPath)await unlink(join(uploadsRoot(),"communication-files",applied.rawPath)).catch(()=>undefined);
+    return applied?.uid??emailCursorUid(current,account,uidValidity,"INBOX")
+  }
+  private async storedAttachments(parsed:ParsedMail,directory:string,written:string[],sentImagesOnly=false){
+    const attachments:StoredAttachment[]=[];
+    for(const attachment of emailStandaloneAttachments(parsed.attachments)){const extension=emailExtensions[attachment.contentType];if(!extension||attachment.size>5*1024*1024||sentImagesOnly&&!emailSentImageAllowed(attachment.contentType,attachment.content))continue;const name=`${randomUUID()}.${extension}`;await writeFile(join(directory,name),attachment.content,{flag:"wx"});written.push(name);attachments.push({name:attachment.filename||"attachment",mimeType:attachment.contentType,sizeBytes:attachment.size,url:`/api/communications/files/${name}`})}
+    return attachments
+  }
+  private messageTime(parsed:ParsedMail,internalDate?:Date|string){return parsed.date?new Date(parsed.date):internalDate?new Date(internalDate):new Date()}
+  private recipients(parsed:ParsedMail){const values=Array.isArray(parsed.to)?parsed.to.flatMap(item=>item.value):parsed.to?.value||[];return values.map(item=>item.address?.trim().toLowerCase()).filter((address):address is string=>Boolean(address))}
+  private references(parsed:ParsedMail){return Array.isArray(parsed.references)?parsed.references:parsed.references?[parsed.references]:[]}
+  private async persistParsed(mailbox:SyncMailbox,settings:EmailConnection,parsed:ParsedMail,uidValidity:string,uid:number,internalDate:Date|string|undefined,rawPath:string,sourceSize:number,directory:string,written:string[]){
+    const own=settings.fromAddress.trim().toLowerCase(),externalMessageId=parsed.messageId||`imap:${createHash("sha256").update(mailbox.path).digest("hex").slice(0,12)}:${uidValidity}:${uid}`,occurredAt=this.messageTime(parsed,internalDate),emailHtml=emailSafeHtml(parsed.html),visibleText=emailPlainTextFromHtml(parsed.html),content=emailDisplayContent(emailLatestContent((visibleText||parsed.text||parsed.subject||"[Письмо]").toString())),subject=parsed.subject||"Без темы";
+    if(mailbox.direction==="INBOUND"){
+      const from=parsed.from?.value[0],email=from?.address?.trim().toLowerCase();
+      if(!email||email===own)return false;
+      const attachments=await this.storedAttachments(parsed,directory,written);
+      return this.communications.receiveEmailMessage({externalMessageId,externalSenderId:email,email,displayName:from?.name||email,content,emailHtml,receivedAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize})
+    }
+    const recipients=[...new Set(this.recipients(parsed).filter(address=>address!==own))];
+    if(recipients.length!==1){await this.prisma.auditLog.create({data:{action:"EMAIL_SENT_SKIPPED",entityType:"EmailMessage",entityId:createHash("sha256").update(externalMessageId).digest("hex").slice(0,24),after:{channel:"EMAIL",reason:recipients.length?"AMBIGUOUS_RECIPIENTS":"RECIPIENT_MISSING",recipientCount:recipients.length}}});return false}
+    const attachments=await this.storedAttachments(parsed,directory,written,true),attachmentFiles=attachments.map(item=>item.url.split("/").pop()).filter((name):name is string=>Boolean(name));
+    const outcome=await this.communications.receiveSentEmailMessage({externalMessageId,recipient:recipients[0]!,content,emailHtml,sentAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize});
+    if(outcome.accepted&&!outcome.retainAttachments)for(const name of attachmentFiles){await unlink(join(directory,name)).catch(()=>undefined);const index=written.indexOf(name);if(index>=0)written.splice(index,1)}
+    if(outcome.accepted&&!outcome.retainRaw){await unlink(join(directory,rawPath)).catch(()=>undefined);const index=written.indexOf(rawPath);if(index>=0)written.splice(index,1)}
+    return outcome.accepted
+  }
+  private async syncMailbox(client:ImapFlow,settings:EmailConnection,mailbox:SyncMailbox){
+    const lock=await client.getMailboxLock(mailbox.path);
+    try{
+      const uidValidity=String(client.mailbox&&client.mailbox.uidValidity||"0"),account=settings.username.trim().toLowerCase(),saved=await this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:mailbox.cursorKey}}}),value=saved?.value&&typeof saved.value==="object"&&!Array.isArray(saved.value)?saved.value as Record<string,unknown>:{};
+      let last=mailbox.direction==="INBOUND"?await this.applyRetryMarker(account,uidValidity,value):emailCursorUid(value,account,uidValidity,mailbox.path);
+      const recent=last?[]:await client.search({since:new Date(Date.now()-7*86400000)},{uid:true}),range=emailUidRange(last,Number(client.mailbox&&client.mailbox.uidNext||0),Array.isArray(recent)?recent:[]);
+      for await(const item of range.length?client.fetch(range,{uid:true,source:true,envelope:true,internalDate:true},{uid:true}):[]){
+        if(!item.source){await this.recordFailure(account,mailbox.path,uidValidity,item.uid,undefined,new Error("IMAP_SOURCE_MISSING"));last=Math.max(last,item.uid);await this.saveCursor(mailbox.cursorKey,{account,mailbox:mailbox.path,uidValidity,uid:last});continue}
+        const directory=join(uploadsRoot(),"communication-files");await mkdir(directory,{recursive:true});const rawPath=`${randomUUID()}.eml`;await writeFile(join(directory,rawPath),item.source,{flag:"wx"});
+        let parsed:ParsedMail;try{parsed=await simpleParser(item.source)}catch(error){const quarantinedPath=mailbox.direction==="INBOUND"?rawPath:undefined;await this.recordFailure(account,mailbox.path,uidValidity,item.uid,quarantinedPath,error);if(!quarantinedPath)await unlink(join(directory,rawPath)).catch(()=>undefined);last=Math.max(last,item.uid);await this.saveCursor(mailbox.cursorKey,{account,mailbox:mailbox.path,uidValidity,uid:last});continue}
+        const written=[rawPath];
+        try{const persisted=await this.persistParsed(mailbox,settings,parsed,uidValidity,item.uid,item.internalDate,rawPath,item.source.length,directory,written);if(!persisted)for(const name of written)await unlink(join(directory,name)).catch(()=>undefined)}catch(error){for(const name of written)await unlink(join(directory,name)).catch(()=>undefined);throw error}
+        last=Math.max(last,item.uid);await this.saveCursor(mailbox.cursorKey,{account,mailbox:mailbox.path,uidValidity,uid:last});
+      }
+    }finally{lock.release()}
+  }
+  async tick(){
+    if(this.running)return;this.running=true;let client:ImapFlow|undefined;
+    try{
+      await this.communications.retryEmailSentCleanup();
+      const settings=await this.transport.settings();if(!settings.enabled||!settings.password)return;this.transport.requireReady(settings);
+      client=new ImapFlow({host:settings.imapHost,port:settings.imapPort,secure:true,auth:{user:settings.username,pass:settings.password},logger:false});await client.connect();
+      await this.syncMailbox(client,settings,{path:"INBOX",cursorKey:"inboxCursor",direction:"INBOUND"});
+      const sent=(await client.list()).find(item=>item.specialUse==="\\Sent");
+      if(sent?.path)await this.syncMailbox(client,settings,{path:sent.path,cursorKey:"sentCursor",direction:"OUTBOUND"});
+    }catch(error){this.logger.warn(`EMAIL_SYNC_FAILED ${error instanceof Error?error.constructor.name:"Unknown"}`)}finally{if(client)await client.logout().catch(()=>undefined);this.running=false}
+  }
 }

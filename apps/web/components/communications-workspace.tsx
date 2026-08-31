@@ -82,7 +82,7 @@ type Message = {
   channel: string;
   status?: string;
   language?: string;
-  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string } };
+  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string }; emailHtml?: string; subject?: string; messageId?: string };
   replyToMessage?: { id: string; content: string; metadata?: { attachments?: Attachment[] } } | null;
 };
 type Template = {
@@ -120,7 +120,7 @@ function sourceBadge(c?: Client) {
 }
 function sendFailureText(reason: string | undefined, messageChannel: string) {
   const reasons = ui.sendFailureReasons as Record<string, string>;
-  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : messageChannel === "CHATWOOT" ? "Chatwoot" : "Facebook";
+  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : messageChannel === "CHATWOOT" ? "Chatwoot" : messageChannel === "EMAIL" ? "Gmail" : "Facebook";
   return (reasons[reason || ""] || ui.failed).replaceAll("Facebook", provider);
 }
 function clientBadges(c: Client) {
@@ -194,6 +194,12 @@ function formatBytes(size: number) {
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
+function gmailConversationUrl(messages: Message[]) {
+  const messageId = [...messages].reverse().find((message) => message.channel === "EMAIL" && typeof message.metadata?.messageId === "string")?.metadata?.messageId?.trim();
+  if (!messageId || messageId.length > 998 || /[\r\n]/.test(messageId)) return "";
+  return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`rfc822msgid:${messageId}`)}`;
+}
+function shortMessagePreview(value:string){const compact=value.replace(/\s+/g," ").trim();return compact.length>160?compact.slice(0,157)+"…":compact}
 function optionalFormFields(data: Record<string, FormDataEntryValue>, names: string[]) {
   return Object.fromEntries(names.map((name) => {
     const value = data[name];
@@ -210,6 +216,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [templateBusy,setTemplateBusy]=useState(false),
     [templateNotice,setTemplateNotice]=useState(""),
     [text, setText] = useState(""),
+    [emailReplyTarget,setEmailReplyTarget]=useState<Message>(),
     [emojiOpen,setEmojiOpen]=useState(false),
     [selectedMessageIds,setSelectedMessageIds]=useState<string[]>([]),
     [replyInstruction,setReplyInstruction]=useState(""),
@@ -283,7 +290,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentClientCount.current=visibleClientCount;
-  const accountUrl = connectedAccountUrl(client, activeChannel);
+  const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
   function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
   async function toggleReaction(message:Message){
@@ -497,7 +504,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     setTasking(false);
     composeEpoch.current++;
     aiOperationSequence.current++;
-    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
+    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setEmailReplyTarget(undefined);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
@@ -718,7 +725,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
         const result = await api("/communications/" + client.id + "/messages", {
           method: "POST",
-          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID() } : {}) }),
+          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}) } : {}) }),
         });
         if(isActive())setMessages((current) => [...current, result]);
         return result as Message;
@@ -727,7 +734,14 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       if (action === "DRAFT") {
         sent.push(await sendOne(messageText || undefined, uploaded));
       } else {
-        if (uploaded && !pendingSend.current.attachmentDelivered) {
+        if (activeChannel === "EMAIL" && uploaded && !pendingSend.current.attachmentDelivered) {
+          const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
+          pendingSend.current = attempt.state;
+          const result = await sendOne(messageText || undefined, uploaded, attempt.requestId);
+          if(!isActive())return false;
+          sent.push(result);
+          pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
+        } else if (uploaded && !pendingSend.current.attachmentDelivered) {
           const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
           pendingSend.current = attempt.state;
           const { requestId } = attempt;
@@ -736,7 +750,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           sent.push(result);
           pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
         }
-        if (!sent.some((message) => message.status === "FAILED") && messageText) {
+        if ((activeChannel !== "EMAIL" && !sent.some((message) => message.status === "FAILED") && messageText) || (activeChannel === "EMAIL" && !uploaded && messageText)) {
           const content = messageText;
           const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
             ? pendingSend.current.textRequestId
@@ -759,6 +773,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
       else {
         setText("");
+        setEmailReplyTarget(undefined);
         setEmojiOpen(false);
         if(action==="DRAFT"){setAiReply(null);setAiDraftText("")}
         setAttachment(undefined);
@@ -1019,7 +1034,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{setActiveChannel(event.target.value);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{setActiveChannel(event.target.value);setEmailReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
             ) : (
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
@@ -1033,7 +1048,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
-                const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO","CHATWOOT"].includes(message.metadata?.source || "");
+                const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO","CHATWOOT","GMAIL"].includes(message.metadata?.source || "");
                 const replyContext=message.metadata?.replyTo;
                 const customerReaction=message.metadata?.reactions?.customer,businessReaction=message.metadata?.reactions?.business;
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
@@ -1046,7 +1061,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
                     {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
-                    <span className="communications-message-content">{message.content}</span>
+                    {message.channel==="EMAIL"&&message.metadata?.emailHtml?<div className="communications-message-content email-rich-content" dangerouslySetInnerHTML={{__html:message.metadata.emailHtml}}/>:<span className="communications-message-content">{message.content}</span>}
                     {attachments.length > 0 && (
                       <div className="communications-attachments">
                         {attachments.map((attachment, index) => {
@@ -1098,6 +1113,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                       {message.direction === "OUTBOUND" && message.metadata?.metaReadAt && <span className="communications-message-read" title={ui.messageRead} aria-label={ui.messageRead} role="img"></span>}
                     </small>
                     {message.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation(message.language) && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}
+                    {message.channel==="EMAIL"&&message.metadata?.messageId&&<button type="button" className="communications-email-reply" aria-label={`${ui.replyToEmail}: ${message.metadata.subject||ui.emailWithoutSubject}`} onClick={()=>{setEmailReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.replyToEmail}</button>}
                     {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" aria-label={ui.saveAsTemplate} title={ui.saveAsTemplate} disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z"/><path d="M12 7v6M9 10h6"/></svg></button>}
                     {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>
@@ -1156,6 +1172,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               </span>
             </div>
             {replyMode&&selectedMessageIds.length>0&&<div className="communications-reply-task"><label>{ui.replyTask}<textarea value={replyInstruction} onChange={event=>setReplyInstruction(event.target.value)} placeholder={ui.replyTaskPlaceholder}/></label><button type="button" disabled={aiPreparing} onClick={()=>void generateSelectedReply()}>{aiPreparing?ui.aiPreparing:ui.prepareRussianDraft}</button></div>}
+            {activeChannel==="EMAIL"&&emailReplyTarget&&<div id="email-reply-target" role="status" className="communications-email-reply-target"><span><b>{ui.replyingToEmail}: {emailReplyTarget.metadata?.subject||ui.emailWithoutSubject}</b><small>{shortMessagePreview(emailReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelEmailReply} title={ui.cancelEmailReply} onClick={()=>{setEmailReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
             {attachment && (
               <div className="communications-selected-attachment">
                 {attachmentPreview && <img src={attachmentPreview} alt={ui.selectedAttachment} />}
@@ -1171,6 +1188,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               {["FACEBOOK", "INSTAGRAM", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
                 ref={composerTextarea}
+                aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":undefined}
                 value={text}
                 onChange={(e) => {invalidateAiOperation();setText(e.target.value)}}
                 placeholder={ui.messagePlaceholder}

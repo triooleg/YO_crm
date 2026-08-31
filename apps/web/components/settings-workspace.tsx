@@ -57,6 +57,7 @@ type IntegrationData = {
     imapPort: number;
     username: string;
     fromAddress: string;
+    signature: string;
     passwordConfigured: boolean;
   };
 };
@@ -114,6 +115,7 @@ function CommunicationsSettings() {
               username: f.get("username"),
               password: f.get("password"),
               fromAddress: f.get("fromAddress"),
+              signature: f.get("signature"),
             };
     try {
       const r = await fetch("/api/communications/integrations/" + channel, {
@@ -300,7 +302,7 @@ function CommunicationsSettings() {
           <label>{settingsUi.imapPort}<input name="imapPort" type="number" min="1" max="65535" defaultValue={data.email.imapPort||993}/></label>
           <label>
             {settingsUi.username}
-            <input name="username" defaultValue={data.email.username||"yoleotard@gmail.com"} />
+            <input name="username" type="email" defaultValue={data.email.username||"yoleotard@gmail.com"} />
           </label>
           <label>
             {settingsUi.password}
@@ -324,7 +326,18 @@ function CommunicationsSettings() {
               defaultValue={data.email.fromAddress||"yoleotard@gmail.com"}
             />
           </label>
+          <label className="settings-span-all">
+            {settingsUi.emailSignature}
+            <textarea
+              name="signature"
+              rows={5}
+              maxLength={5000}
+              defaultValue={data.email.signature||""}
+              placeholder={settingsUi.emailSignaturePlaceholder}
+            />
+          </label>
         </div>
+        <p className="settings-inline-note">{settingsUi.emailSignatureHint}</p>
         <p id="email-app-password-hint">{settingsUi.emailAppPasswordHint}</p>
         {saved === "email" && (
           <div className="settings-success" role="status">
