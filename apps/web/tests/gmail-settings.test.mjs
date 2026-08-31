@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 test("Gmail settings expose accessible save and verification actions", async () => {
-  const source = await readFile(new URL("../components/settings-workspace.tsx", import.meta.url), "utf8");
+  const [source, i18n] = await Promise.all([
+    readFile(new URL("../components/settings-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
+  ]);
   assert.match(source, /aria-describedby="email-app-password-hint"/);
   assert.match(source, /id="email-app-password-hint"/);
   assert.match(source, /settings-actions/);
@@ -11,6 +14,8 @@ test("Gmail settings expose accessible save and verification actions", async () 
   assert.match(source, /disabled=\{saving\|\|!data\.email\.passwordConfigured\}/);
   assert.match(source, /name="signature"/);
   assert.match(source, /settingsUi\.emailSignature/);
+  assert.match(source, /value === "VERIFIED" \? settingsUi\.connected/);
+  assert.match(i18n, /connected: "Подключено"/);
 });
 
 test("e-mail conversations use the same real send action as connected chats", async () => {

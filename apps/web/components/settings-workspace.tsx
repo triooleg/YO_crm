@@ -168,7 +168,7 @@ function CommunicationsSettings() {
       </section>
     );
   const status = (value: string) =>
-    value === "CONFIGURED" ? settingsUi.configured : settingsUi.notConnected;
+    value === "VERIFIED" ? settingsUi.connected : value === "CONFIGURED" ? settingsUi.configured : settingsUi.notConnected;
   const metaStatus = (value: string) => value === "VERIFY_TOKEN_UNSAFE" ? settingsUi.metaVerifyTokenUnsafe : value === "RECEIVING" ? settingsUi.metaDeliveryReceiving : value === "VERIFIED" || value === "SUBSCRIBED" ? settingsUi.metaDeliveryVerified : value === "NOT_VERIFIED" ? settingsUi.metaDeliveryNotVerified : settingsUi.notConnected;
   const instagramConnected = data.meta.instagramStatus === "SUBSCRIBED" || data.meta.instagramStatus === "RECEIVING";
   return (
