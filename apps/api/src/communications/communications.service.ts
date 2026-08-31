@@ -55,6 +55,7 @@ import { sameMessageSet } from "../intelligence/ai-lineage";
 import { EmailDeliveryUncertainError, EmailTransportService } from "./email-transport.service";
 import { blocksEmailDelivery, canReleaseEmailDelivery, emailConnectionSettingsChanged } from "./email-delivery-rules";
 import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSentFirstMetadata, emailSentMergeDecision } from "./email-sync-rules";
+import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -1651,15 +1652,14 @@ export class CommunicationsService {
       if(channel===ContactChannel.EMAIL){
         if(!selected.email)throw new BadRequestException("У клиента не указан e-mail");
         const recipient=selected.email.trim().toLowerCase();
-        const conversation=await this.p.conversation.findFirst({where:{clientId,channel,externalId:{equals:recipient,mode:"insensitive"},archivedAt:null},include:{messages:{orderBy:{createdAt:"desc"},take:30,select:{id:true,metadata:true}}}});
+        const conversation=await this.p.conversation.findFirst({where:{clientId,channel,externalId:{equals:recipient,mode:"insensitive"},archivedAt:null},select:{id:true}});
         if(!conversation)throw new BadRequestException("Для этого клиента нет активной переписки по e-mail");
-        const explicitReply=d.replyToMessageId?await this.p.message.findFirst({where:{id:d.replyToMessageId,conversationId:conversation.id},select:{id:true,metadata:true}}):undefined;
+        const explicitReply=d.replyToMessageId?await this.p.message.findFirst({where:{id:d.replyToMessageId,conversationId:conversation.id,direction:MessageDirection.INBOUND},select:{id:true,metadata:true}}):undefined;
         if(d.replyToMessageId&&!explicitReply)throw new BadRequestException("Выбранное письмо не относится к этой переписке");
-        const replyMessage=explicitReply||conversation.messages.find(item=>{const metadata=item.metadata&&typeof item.metadata==="object"&&!Array.isArray(item.metadata)?item.metadata as Prisma.JsonObject:{};return typeof metadata.messageId==="string"});
+        const replyMessage=explicitReply||await this.p.message.findFirst(latestInboundEmailReplyLookup(conversation.id));
         const latest=replyMessage?.metadata&&typeof replyMessage.metadata==="object"&&!Array.isArray(replyMessage.metadata)?replyMessage.metadata as Prisma.JsonObject:{};
         if(d.replyToMessageId&&typeof latest.messageId!=="string")throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
-        const subject=typeof latest.subject==="string"?(/^re:/i.test(latest.subject)?latest.subject:`Re: ${latest.subject}`):`Сообщение от YOLeotard для ${selected.displayName}`;
-        const parent=typeof latest.messageId==="string"?latest.messageId:undefined,chain=Array.isArray(latest.references)?latest.references.filter((x):x is string=>typeof x==="string"):[],references=parent?[...new Set([...chain,parent])]:chain,replyToMessageId=replyMessage?.id;
+        const {subject,parent,references}=emailReplyHeaders(latest,selected.displayName),replyToMessageId=replyMessage?.id;
         return runMetaSendOnce({
           reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true}});if(!claimedDraft)throw new ConflictException("Черновик уже отправляется или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING"}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING"}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}return{kind:"NEW" as const}}),
           deliver:()=>this.emailTransport.send({to:recipient,subject,text:content,inReplyTo:parent,references,attachment}),

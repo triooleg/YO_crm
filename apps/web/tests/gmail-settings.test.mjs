@@ -28,6 +28,7 @@ test("e-mail conversations use the same real send action as connected chats", as
   assert.match(source, /emailReplyTarget/);
   assert.match(source, /replyToMessageId/);
   assert.match(source, /ui\.replyToEmail/);
+  assert.match(source, /message\.channel==="EMAIL"&&message\.direction==="INBOUND"&&message\.metadata\?\.messageId/);
   assert.match(source, /gmailConversationUrl/);
   assert.match(source, /https:\/\/mail\.google\.com\/mail\/u\/0\/#search\//);
   assert.match(source, /rfc822msgid:/);

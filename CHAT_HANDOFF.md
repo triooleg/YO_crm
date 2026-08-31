@@ -1247,3 +1247,12 @@
 - Проверка Gmail из production UI успешно установила SMTP и IMAP соединения сохранённым паролем приложения. Обнаруженная после smoke ошибка подписи статуса исправлена failing-first: `VERIFIED` теперь отображается как «Подключено», а `CONFIGURED` сохраняет честное «Настроено, доставка не проверена».
 - Follow-up commit `a6d100616049f8297901290d23f89b147ec40db5` fast-forward pushed в `origin/main`; GitHub Actions run `33412756999` завершён `SUCCESS`. Повторный `pnpm quality:check` PASS: API 276/276, web 183/183, database 7/7, typechecks и builds; все пять обязательных review дали PASS.
 - Перед follow-up deployment создан FULL backup `20260831T161534Z-d575d0db`; archive SHA-256 `f46b263a378fb967672db5f859adae9a1f6b776361e70a3b01a4dcac56a0eff1` проверен, пересобран только `web`. После deployment все четыре контейнера healthy с restart count 0, public root и health HTTP 200, web error scan равен 0; live UI показывает `E-mail · Подключено`, а Gmail-ссылка остаётся видимой и открывает точный тред в новой вкладке.
+
+## 2026-08-31 — исторический Gmail HTML и входящий-only ответ (готово к deployment)
+
+- Причина технического текста старых писем подтверждена на production без изменения данных: письмо было импортировано до сохранения `metadata.emailHtml`, хотя raw MIME с `text/html` сохранился.
+- Добавлен ограниченный идемпотентный backfill: восстанавливает только очищенный HTML входящих Gmail-писем, повторно проверяет точный raw path под advisory lock, сохраняет прежний display-content в metadata и пишет audit. Постоянный cursor продолжает обработку после лимита и не проходит мимо временно ошибочного MIME.
+- Кнопка «Ответить на это письмо» отображается только на входящих Gmail-сообщениях; API также отклоняет исходящее сообщение как explicit reply target.
+- Рабочий Gmail threading не заменён. Автоматический fallback теперь напрямую ищет последнее входящее письмо с Message-ID, поэтому сохраняет `In-Reply-To`, полную `References` и тему даже после более чем 30 исходящих сообщений.
+- Failing-first и executable regressions покрывают восстановление legacy MIME, повтор cursor после ошибки и сценарий с 31 исходящим сообщением. Финальный `pnpm quality:check` PASS: API 280/280, database 7/7, полный web suite, typechecks и production builds; compatibility, regression, business/security и visual/accessibility reviews PASS.
+- Production backup, deployment и authenticated live browser-smoke ещё не выполнены.

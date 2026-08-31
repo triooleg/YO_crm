@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import { simpleParser } from "mailparser";
 
 const MAX_EMAIL_HTML = 250_000;
 
@@ -41,4 +42,26 @@ export function emailPlainTextFromHtml(value: string | false | undefined) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return text || undefined;
+}
+
+export async function legacyEmailHtmlFromRaw(raw: Buffer) {
+  const parsed = await simpleParser(raw),
+    emailHtml = emailSafeHtml(parsed.html),
+    visibleText = emailPlainTextFromHtml(parsed.html),
+    source = (visibleText || parsed.text || parsed.subject || "[Письмо]").toString(),
+    markers = [
+      /\nOn [^\n]{0,500}wrote:\s*\n/i,
+      /\n[^\n]{0,250}<[^>\n]+>:\s*\n/i,
+      /-{2,}\s*Original Message\s*-{2,}/i,
+    ],
+    indexes = markers.map((pattern) => source.search(pattern)).filter((index) => index >= 0),
+    latest = (indexes.length ? source.slice(0, Math.min(...indexes)) : source).trim() || source.trim(),
+    content = latest.length > 100_000
+      ? latest.slice(0, 100_000) + "\n\n[Письмо сокращено для отображения. Полная версия сохранена в CRM.]"
+      : latest;
+  return { emailHtml, content };
+}
+
+export function legacyEmailBackfillCursor(current: string | undefined, candidate: string, failed = false) {
+  return failed ? current : candidate;
 }

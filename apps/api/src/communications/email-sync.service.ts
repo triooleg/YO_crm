@@ -1,13 +1,14 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ImapFlow } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { ContactChannel, MessageDirection, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
 import { CommunicationsService } from "./communications.service";
-import { emailPlainTextFromHtml, emailSafeHtml } from "./email-html";
+import { emailPlainTextFromHtml, emailSafeHtml, legacyEmailBackfillCursor, legacyEmailHtmlFromRaw } from "./email-html";
 import { EmailTransportService, type EmailConnection } from "./email-transport.service";
 import { emailCursorUid, emailDisplayContent, emailLatestContent, emailRetryCursor, emailSentImageAllowed, emailStandaloneAttachments, emailUidRange } from "./email-sync-rules";
 
@@ -21,10 +22,50 @@ type StoredAttachment={name:string;mimeType:string;sizeBytes:number;url:string};
 export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
   private readonly logger=new Logger(EmailSyncService.name);
   private timer?:NodeJS.Timeout;
+  private startupTimers:NodeJS.Timeout[]=[];
   private running=false;
+  private backfillRunning=false;
   constructor(private readonly prisma:PrismaService,private readonly transport:EmailTransportService,private readonly communications:CommunicationsService){}
-  onModuleInit(){this.timer=setInterval(()=>void this.tick(),30_000);setTimeout(()=>void this.tick(),5_000)}
-  onModuleDestroy(){if(this.timer)clearInterval(this.timer)}
+  onModuleInit(){this.timer=setInterval(()=>void this.tick(),30_000);this.startupTimers=[setTimeout(()=>void this.backfillLegacyHtml(),2_000),setTimeout(()=>void this.tick(),5_000)]}
+  onModuleDestroy(){if(this.timer)clearInterval(this.timer);for(const timer of this.startupTimers)clearTimeout(timer)}
+
+  private async backfillLegacyHtml(){
+    if(this.backfillRunning)return;this.backfillRunning=true;
+    try{
+      const cursorSetting=await this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"legacyHtmlBackfillCursor"}}}),cursorValue=cursorSetting?.value&&typeof cursorSetting.value==="object"&&!Array.isArray(cursorSetting.value)?cursorSetting.value as Prisma.JsonObject:{};
+      let cursor=typeof cursorValue.messageId==="string"?cursorValue.messageId:undefined,scanned=0;
+      while(scanned<5_000){
+        const batch=await this.prisma.message.findMany({where:{direction:MessageDirection.INBOUND,conversation:{channel:ContactChannel.EMAIL}},orderBy:{id:"asc"},take:100,...(cursor?{cursor:{id:cursor},skip:1}:{}),select:{id:true,content:true,metadata:true}});
+        if(!batch.length)break;
+        let retryRequired=false;
+        for(const message of batch){
+          scanned+=1;
+          const metadata=message.metadata&&typeof message.metadata==="object"&&!Array.isArray(message.metadata)?message.metadata as Prisma.JsonObject:{};
+          if(typeof metadata.emailHtml==="string"||metadata.emailHtmlBackfillVersion===1){cursor=legacyEmailBackfillCursor(cursor,message.id);continue}
+          const rawPath=typeof metadata.rawPath==="string"&&/^[a-f0-9-]{36}\.eml$/.test(metadata.rawPath)?metadata.rawPath:"";
+          if(!rawPath){cursor=legacyEmailBackfillCursor(cursor,message.id);continue}
+          try{
+            const restored=await legacyEmailHtmlFromRaw(await readFile(join(uploadsRoot(),"communication-files",rawPath)));
+            await this.prisma.$transaction(async tx=>{
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"email-html-backfill:"+message.id},0))`;
+              const current=await tx.message.findUnique({where:{id:message.id},select:{direction:true,content:true,metadata:true,conversation:{select:{channel:true}}}});
+              if(!current||current.direction!==MessageDirection.INBOUND||current.conversation.channel!==ContactChannel.EMAIL)return;
+              const currentMetadata=current.metadata&&typeof current.metadata==="object"&&!Array.isArray(current.metadata)?current.metadata as Prisma.JsonObject:{};
+              if(currentMetadata.rawPath!==rawPath||typeof currentMetadata.emailHtml==="string"||currentMetadata.emailHtmlBackfillVersion===1)return;
+              const content=restored.emailHtml?restored.content:current.content,newMetadata={...currentMetadata,...(restored.emailHtml?{emailHtml:restored.emailHtml,emailHtmlBackfillOriginalContent:current.content}:{}),emailHtmlBackfillVersion:1} as Prisma.InputJsonValue;
+              await tx.message.update({where:{id:message.id},data:{content,normalizedText:content.normalize("NFKC"),metadata:newMetadata}});
+              await tx.auditLog.create({data:{action:"EMAIL_HTML_BACKFILL",entityType:"Message",entityId:message.id,after:{channel:"EMAIL",htmlRestored:Boolean(restored.emailHtml),originalContentPreserved:Boolean(restored.emailHtml),version:1}}});
+            });
+            cursor=legacyEmailBackfillCursor(cursor,message.id);
+          }catch(error){retryRequired=true;cursor=legacyEmailBackfillCursor(cursor,message.id,true);this.logger.warn(`EMAIL_HTML_BACKFILL_FAILED message=${message.id} ${error instanceof Error?error.constructor.name:"UnknownError"}`);break}
+        }
+        await this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key:"legacyHtmlBackfillCursor"}},create:{section:"integration.email.sync",key:"legacyHtmlBackfillCursor",value:{messageId:cursor??null}},update:{value:{messageId:cursor??null}}});
+        if(retryRequired){this.startupTimers.push(setTimeout(()=>void this.backfillLegacyHtml(),60_000));break}
+        if(batch.length<100)break;
+      }
+      if(scanned>=5_000){this.logger.warn("EMAIL_HTML_BACKFILL_LIMIT_REACHED");this.startupTimers.push(setTimeout(()=>void this.backfillLegacyHtml(),60_000))}
+    }finally{this.backfillRunning=false}
+  }
 
   private saveCursor(key:SyncMailbox["cursorKey"],cursor:SyncCursor){return this.prisma.appSetting.upsert({where:{section_key:{section:"integration.email.sync",key}},create:{section:"integration.email.sync",key,value:cursor},update:{value:cursor}})}
   private async recordFailure(account:string,mailbox:string,uidValidity:string,uid:number,rawPath:string|undefined,error:unknown){
