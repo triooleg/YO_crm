@@ -88,8 +88,8 @@ test("сохранённый черновик имеет собственную 
   assert.match(locale,/sendSavedDraft:/);
 });
 
-test("composer sends both Facebook and Instagram conversations", () => {
-  assert.match(component, /\["FACEBOOK", "INSTAGRAM"\]\.includes\(activeChannel\)/);
+test("composer sends Facebook, Instagram and Chatwoot conversations", () => {
+  assert.match(component, /\["FACEBOOK", "INSTAGRAM", "CHATWOOT"\]\.includes\(activeChannel\)/);
   assert.match(component, /value=\{activeChannel\}/);
   assert.match(component, /setActiveChannel\(event\.target\.value\)/);
   assert.match(component, /availableChannels\.map/);
@@ -119,11 +119,11 @@ test("сообщения показывают время без секунд и 
   assert.match(component,/className="communications-message-content"/);
   assert.match(css,/\.communications-message-content,\.communications-message-translation span\{[^}]*white-space:pre-wrap/);
 });
-test("ответы отправленные вне CRM имеют подпись социальной сети",()=>{
-  assert.match(component,/\["META","META_ECHO"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
+test("ответы отправленные вне CRM имеют подпись социальной сети или Chatwoot",()=>{
+  assert.match(component,/\["META","META_ECHO","CHATWOOT"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
   assert.match(component,/communications-external-message-source/);
   assert.match(component,/ui\.externalReplyByChannel\[message\.channel as keyof typeof ui\.externalReplyByChannel\]/);
-  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram"\s*\}/);
+  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram",\s*CHATWOOT:\s*"Ответ отправлен через Chatwoot"\s*\}/);
   assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
 });
 test("прочтение клиентом показано возле времени с доступной русской подсказкой",()=>{
@@ -386,7 +386,7 @@ test("ответы на историю и сообщения показываю�
   assert.match(locale, /messageReply:/);
 });
 
-test("редактор Facebook и Instagram предлагает стандартные emoji и вставляет их в позицию курсора", () => {
+test("редактор Facebook, Instagram и Chatwoot предлагает стандартные emoji и вставляет их в позицию курсора", () => {
   assert.match(component, /const standardEmojis\s*=/);
   assert.match(component, /editor\?\.selectionStart/);
   assert.match(component, /setSelectionRange/);
@@ -394,10 +394,16 @@ test("редактор Facebook и Instagram предлагает стандар
   assert.match(component, /setEmojiOpen\(false\)/);
   assert.match(component, /event\.currentTarget\.contains\(event\.relatedTarget\)/);
   assert.match(component, /communications-emoji-picker/);
-  assert.match(component, /\["FACEBOOK",\s*"INSTAGRAM"\]\.includes\(activeChannel\)/);
+  assert.match(component, /\["FACEBOOK",\s*"INSTAGRAM",\s*"CHATWOOT"\]\.includes\(activeChannel\)/);
   assert.match(locale, /chooseEmoji:/);
   assert.match(locale, /emojiPanel:/);
   assert.match(css, /\.communications-emoji-picker/);
+  assert.match(css, /communications-compose \.communications-emoji-picker>button\{grid-column:auto\}/);
+});
+
+test("Chatwoot может отправлять сообщения и отмечает синхронизированные внешние ответы", () => {
+  assert.match(component, /\["META","META_ECHO","CHATWOOT"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
+  assert.match(locale, /CHATWOOT:\s*"Ответ отправлен через Chatwoot"/);
 });
 
 test("реакции клиента отображаются на сообщении, а Instagram позволяет поставить или снять реакцию из CRM", () => {
@@ -425,10 +431,10 @@ test("видео показывает превью и воспроизводит
   assert.match(css, /communications-lightbox>img,.communications-lightbox>video/);
 });
 
-test("ошибка отправки Meta показывает безопасную причину на русском", () => {
+test("ошибка отправки провайдера показывает безопасную причину на русском", () => {
   assert.match(component, /sendFailureReasons/);
   assert.match(component, /sendFailureText\(message\.metadata\?\.reason, message\.channel\)/);
-  assert.match(component, /messageChannel === "INSTAGRAM" \? "Instagram" : "Facebook"/);
+  assert.match(component, /messageChannel === "CHATWOOT" \? "Chatwoot" : "Facebook"/);
   assert.match(locale, /TOKEN_EXPIRED/);
   assert.match(locale, /PERMISSION_REQUIRED/);
   assert.match(locale, /REPLY_WINDOW_CLOSED/);

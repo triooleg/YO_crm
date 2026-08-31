@@ -28,6 +28,9 @@ const service = (
     "utf8",
   )
 ).replace(/\s+/g, "");
+const chatwootDelivery = (
+  await readFile(new URL("../src/communications/chatwoot-delivery.ts", import.meta.url), "utf8")
+).replace(/\s+/g, "");
 const aiResponse = (
   await readFile(new URL("../src/communications/ai-response.ts", import.meta.url), "utf8")
 ).replace(/\s+/g, "");
@@ -288,7 +291,7 @@ test("inbound Meta media is downloaded through an authenticated same-origin endp
   assert.match(controller, /Content-Disposition/);
   assert.match(controller, /res\.send\(download\.body\)/);
   assert.match(service, /downloadMessageAttachment/);
-  assert.match(service, /REMOTE_MEDIA_HOST/);
+  assert.match(chatwootDelivery, /META_MEDIA_HOST/);
   assert.match(service, /redirect:\s*"manual"/);
   assert.match(service, /REMOTE_MEDIA_MAX_BYTES/);
   assert.match(service, /boundedRemoteMedia/);
@@ -350,6 +353,26 @@ test("Meta synchronization scopes dedupe to the connected account and persists e
   assert.match(service, /tx\.messageAttachment\.create/);
   assert.match(service, /mergeMetaEchoMetadata/);
   assert.match(service, /message_echoes/);
+});
+
+test("Chatwoot is a bidirectional idempotent channel with media and audited delivery", () => {
+  assert.match(service, /event\.direction==="OUTBOUND"\?awaitthis\.persistChatwootOutbound/);
+  assert.match(service, /chatwoot-echo:/);
+  assert.match(service, /CHATWOOT_OUTBOUND_IGNORED/);
+  assert.match(service, /OUTBOUND_MESSAGE_SYNCED/);
+  assert.match(service, /sendChatwootProviderMessage/);
+  assert.match(service, /api_access_token:token/);
+  assert.match(service, /\/api\/v1\/accounts\/\$\{encodeURIComponent\(accountId\)\}\/conversations\/\$\{encodeURIComponent\(conversationId\)\}\/messages/);
+  assert.match(chatwootDelivery, /form\.append\("attachments\[\]"/);
+  assert.match(chatwootDelivery, /if\(content\)form\.set\("content",content\)/);
+  assert.match(service, /provider:"CHATWOOT",source:"CRM"/);
+  assert.match(service, /messageDeliveryAttempt\.update/);
+  assert.match(service, /chatwootConversationId/);
+  assert.match(chatwootDelivery, /url\.origin===additionalOrigin/);
+  assert.match(service, /remoteMediaUrl\(rawUrl,chatwootOrigin\)/);
+  assert.match(chatwootDelivery, /chatwootWebhookPayloadHash===payloadHash/);
+  assert.match(service, /chatwootEchoDecision\(previousMetadata,event\.metadata,payloadHash/);
+  assert.match(service, /action:"SYNC",entityType:"OutboundMessage"/);
 });
 
 test("Meta reply context links quoted messages and keeps story media", () => {

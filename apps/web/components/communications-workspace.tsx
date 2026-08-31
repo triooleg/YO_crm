@@ -120,7 +120,7 @@ function sourceBadge(c?: Client) {
 }
 function sendFailureText(reason: string | undefined, messageChannel: string) {
   const reasons = ui.sendFailureReasons as Record<string, string>;
-  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : "Facebook";
+  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : messageChannel === "CHATWOOT" ? "Chatwoot" : "Facebook";
   return (reasons[reason || ""] || ui.failed).replaceAll("Facebook", provider);
 }
 function clientBadges(c: Client) {
@@ -1029,7 +1029,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
-                const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO"].includes(message.metadata?.source || "");
+                const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO","CHATWOOT"].includes(message.metadata?.source || "");
                 const replyContext=message.metadata?.replyTo;
                 const customerReaction=message.metadata?.reactions?.customer,businessReaction=message.metadata?.reactions?.business;
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
@@ -1164,7 +1164,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <span aria-hidden>＋</span>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
               </label>
-              {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
+              {["FACEBOOK", "INSTAGRAM", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
                 ref={composerTextarea}
                 value={text}
@@ -1178,7 +1178,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
-              {["FACEBOOK", "INSTAGRAM"].includes(activeChannel) && (
+              {["FACEBOOK", "INSTAGRAM", "CHATWOOT"].includes(activeChannel) && (
                 <button
                   disabled={busy || !client || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}

@@ -34,7 +34,8 @@ import {
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
-import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootInboundMessage } from "./chatwoot-webhook";
+import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage } from "./chatwoot-webhook";
+import { chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
@@ -59,22 +60,29 @@ const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
   "application/pdf": "pdf", "text/plain": "txt",
 } as const;
-const REMOTE_MEDIA_HOST = /(^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com)$/i;
 const REMOTE_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
-function remoteMediaUrl(value: unknown) {
-  if (typeof value !== "string") return;
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:" && REMOTE_MEDIA_HOST.test(url.hostname)) return url;
-  } catch {}
-}
 function messageAttachments(metadata: Prisma.JsonValue | null) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
   const attachments = (metadata as { attachments?: unknown }).attachments;
   return Array.isArray(attachments) ? attachments : [];
 }
-function replayFragment(event: MetaInboundMessage | ChatwootInboundMessage, provider: "META" | "CHATWOOT") {
+function replayFragment(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT") {
   return JSON.parse(JSON.stringify({ provider, ...event, receivedAt: event.receivedAt.toISOString() })) as Prisma.InputJsonValue;
+}
+function configuredHttpsOrigin(value: unknown) {
+  if (typeof value !== "string") return;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return;
+    return url.origin;
+  } catch {}
+}
+function chatwootConversationId(messages: Array<{ metadata: Prisma.JsonValue | null }>) {
+  for (const message of messages) {
+    if (!message.metadata || typeof message.metadata !== "object" || Array.isArray(message.metadata)) continue;
+    const value = message.metadata.chatwootConversationId;
+    if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  }
 }
 async function boundedRemoteMedia(body: ReadableStream<Uint8Array>) {
   const reader = body.getReader(), chunks: Buffer[] = [];
@@ -320,14 +328,15 @@ export class CommunicationsService {
       Object.fromEntries(
         rows.filter((x) => x.section === section).map((x) => [x.key, x.value]),
       ) as Record<string, unknown>;
-    return {
-      meta: await this.metaSettings(),
-      chatwoot: this.integrationStatus(
+    const meta = await this.metaSettings(), chatwoot = this.integrationStatus(
         "chatwoot",
         value("integration.chatwoot"),
-      ),
+      );
+    return {
+      meta,
+      chatwoot,
       email: this.integrationStatus("email", value("integration.email")),
-      deliveryAvailable: false,
+      deliveryAvailable: ["RECEIVING", "VERIFIED", "SUBSCRIBED"].includes(meta.status) || ["RECEIVING", "VERIFIED", "SUBSCRIBED"].includes(meta.instagramStatus) || Boolean(chatwoot.enabled && chatwoot.accessTokenConfigured),
     };
   }
   async saveIntegration(
@@ -1129,10 +1138,52 @@ export class CommunicationsService {
     if (values.enabled !== true || !secret || (!verifyChatwootSignature(rawBody, signature, secret) && !safeTokenEqual(token, secret))) throw new ForbiddenException("Проверка Chatwoot webhook не пройдена");
     const events = normalizeChatwootWebhook(payload).filter(event => chatwootScopeMatches(values, event));
     let accepted = 0;
-    for (const event of events) if (await this.persistInbound(event, "CHATWOOT", replayFragment(event,"CHATWOOT"))) accepted++;
+    for (const event of events) {
+      const persisted = event.direction === "OUTBOUND"
+        ? await this.persistChatwootOutbound(event, replayFragment(event, "CHATWOOT"))
+        : await this.persistInbound(event, "CHATWOOT", replayFragment(event, "CHATWOOT"));
+      if (persisted) accepted++;
+    }
     return { received: true, accepted, ignored: events.length - accepted };
   }
-  private async persistInbound(event: MetaInboundMessage | ChatwootInboundMessage, provider: "META" | "CHATWOOT", rawPayload: Prisma.InputJsonValue) {
+  private async persistChatwootOutbound(event: ChatwootMessage, rawPayload: Prisma.InputJsonValue) {
+    return this.p.$transaction(async tx => {
+      const channel = event.channel as ContactChannel;
+      const conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } } });
+      if (!conversation || conversation.archivedAt) {
+        this.logger.warn(JSON.stringify({ event: "CHATWOOT_OUTBOUND_IGNORED", channel, externalMessageId: event.externalMessageId, reason: "conversationNotFound" }));
+        return false;
+      }
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"chatwoot-echo:" + conversation.id + ":" + event.externalMessageId}, 0))`;
+      const sentAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
+      const duplicate = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true, metadata: true } });
+      const previousMetadata = duplicate?.metadata && typeof duplicate.metadata === "object" && !Array.isArray(duplicate.metadata) ? duplicate.metadata as Prisma.JsonObject : {};
+      const payloadHash = createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex");
+      const echoDecision = duplicate ? chatwootEchoDecision(previousMetadata, event.metadata, payloadHash, { seenAt: sentAt.toISOString(), accountId: event.accountId, inboxId: event.inboxId }) : undefined;
+      if (echoDecision?.kind === "UNCHANGED") return false;
+      const metadata = duplicate
+        ? echoDecision!.metadata
+        : { ...event.metadata, source: "CHATWOOT", provider: "CHATWOOT", chatwootWebhookPayloadHash: payloadHash, webhookSeenAt: sentAt.toISOString(), accountId: event.accountId, inboxId: event.inboxId };
+      const persistedMetadata = metadata as Prisma.InputJsonValue;
+      const envelope = await tx.webhookEnvelope.create({ data: { provider: "CHATWOOT", payload: rawPayload, payloadHash, receivedAt: sentAt } });
+      const message = duplicate
+        ? await tx.message.update({ where: { id: duplicate.id }, data: { metadata: persistedMetadata, webhookEnvelopeId: envelope.id } })
+        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType: event.metadata.messageType, externalId: event.externalMessageId, createdAt: sentAt, sentAt, metadata: persistedMetadata, rawPayload, webhookEnvelopeId: envelope.id } });
+      const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
+      const existingAttachmentCount = await tx.messageAttachment.count({ where: { messageId: message.id } });
+      if (!existingAttachmentCount) for (const attachment of normalizedAttachments) await tx.messageAttachment.create({ data: { messageId: message.id, type: attachment.type || "attachment", externalUrl: attachment.url, mimeType: attachment.mimeType, width: attachment.width, height: attachment.height, metadata: attachment as Prisma.InputJsonValue } });
+      const lastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > sentAt.getTime() ? conversation.lastMessageAt : sentAt;
+      await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt } });
+      if (duplicate) {
+        await tx.auditLog.create({ data: { action: "SYNC", entityType: "OutboundMessage", entityId: message.id, before: { source: previousMetadata.source }, after: { channel, externalMessageId: event.externalMessageId, source: previousMetadata.source || "CHATWOOT", webhookEnvelopeId: envelope.id } } });
+      } else {
+        await tx.activity.create({ data: { clientId: conversation.clientId, type: "OUTBOUND_MESSAGE_SYNCED", summary: "Исходящее сообщение синхронизировано из Chatwoot", metadata: { messageId: message.id, channel } } });
+        await tx.auditLog.create({ data: { action: "CREATE", entityType: "OutboundMessage", entityId: message.id, after: { channel, externalMessageId: event.externalMessageId, source: "CHATWOOT" } } });
+      }
+      return true;
+    });
+  }
+  private async persistInbound(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT", rawPayload: Prisma.InputJsonValue) {
     return this.p.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
       const channel = event.channel as ContactChannel, externalConversationId = provider === "META" ? metaConversationExternalId(event.receiverId, event.externalSenderId) : event.externalSenderId;
@@ -1338,10 +1389,13 @@ export class CommunicationsService {
   }
   async downloadMessageAttachment(messageId: string, index: number) {
     if (!Number.isInteger(index) || index < 0 || index > 99) throw new NotFoundException("Вложение не найдено");
-    const message = await this.p.message.findFirst({
-      where: { id: messageId, conversation: { archivedAt: null, client: { archivedAt: null } } },
-      select: { metadata: true },
-    });
+    const [message, chatwootValues] = await Promise.all([
+      this.p.message.findFirst({
+        where: { id: messageId, conversation: { archivedAt: null, client: { archivedAt: null } } },
+        select: { metadata: true },
+      }),
+      this.sectionValues("integration.chatwoot"),
+    ]);
     const attachment = messageAttachments(message?.metadata ?? null)[index];
     if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) throw new NotFoundException("Вложение не найдено");
     const type = String((attachment as { type?: unknown }).type || "");
@@ -1358,7 +1412,8 @@ export class CommunicationsService {
       const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : "image/jpeg";
       return { body: await readFile(path), contentType, contentLength: file.size, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
     }
-    let url = remoteMediaUrl(rawUrl);
+    const chatwootOrigin = configuredHttpsOrigin(chatwootValues.baseUrl);
+    let url = remoteMediaUrl(rawUrl, chatwootOrigin);
     if (!url) throw new NotFoundException("Вложение не найдено");
     let response: Response | undefined;
     for (let redirect = 0; redirect < 4; redirect++) {
@@ -1366,7 +1421,7 @@ export class CommunicationsService {
       if (!response) throw new BadGatewayException("Не удалось загрузить вложение");
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
-        url = remoteMediaUrl(location ? new URL(location, url).toString() : undefined);
+        url = remoteMediaUrl(location ? new URL(location, url).toString() : undefined, chatwootOrigin);
         if (!url) throw new BadGatewayException("Источник вложения отклонил загрузку");
         continue;
       }
@@ -1469,6 +1524,28 @@ export class CommunicationsService {
     const signature = createHmac("sha256", secret).update(`${stored.path}:${expires}`).digest("hex");
     return { type: stored.mimeType.startsWith("image/") ? "image" as const : "file" as const, url: `${base}/api/communications/files/${stored.path}`, providerUrl: `${base}/api/communications/meta-files/${stored.path}?expires=${expires}&signature=${signature}`, name: stored.originalName, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, path: stored.path };
   }
+  private async sendChatwootProviderMessage(
+    values: Record<string, unknown>,
+    conversationId: string,
+    content: string,
+    attachment?: { path: string; name: string; mimeType: string },
+  ) {
+    const baseUrl = configuredHttpsOrigin(values.baseUrl), accountId = typeof values.accountId === "string" ? values.accountId.trim() : "", token = this.secretValue(values, "accessTokenEncrypted");
+    if (!baseUrl || !/^\d+$/.test(accountId) || !/^\d+$/.test(conversationId) || !token) throw new BadRequestException("Канал Chatwoot не подключён для отправки");
+    const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}/conversations/${encodeURIComponent(conversationId)}/messages`;
+    let body: string | FormData, headers: Record<string, string> = { api_access_token: token, Accept: "application/json" };
+    if (attachment) {
+      const bytes = await readFile(join(uploadsRoot(), "communication-files", attachment.path));
+      body = chatwootMultipartBody(content, { bytes, name: attachment.name, mimeType: attachment.mimeType });
+    } else {
+      headers = { ...headers, "Content-Type": "application/json" };
+      body = JSON.stringify({ content, message_type: "outgoing", private: false });
+    }
+    const response = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+    const result = await response?.json().catch(() => ({})) as { id?: number | string; content?: string; created_at?: number } | undefined;
+    if (!response?.ok || !result?.id) throw new BadGatewayException("Chatwoot не принял исходящее сообщение");
+    return { id: String(result.id), content: typeof result.content === "string" ? result.content : content, createdAt: Number(result.created_at) || undefined };
+  }
   async send(clientId: string, d: SendMessageDto, u: User) {
     const selected = await this.p.client.findFirst({
       where: { id: clientId, archivedAt: null },
@@ -1515,6 +1592,80 @@ export class CommunicationsService {
     if (d.action === "SEND") {
       if (!d.clientRequestId)
         throw new BadRequestException("Не задан идентификатор отправки");
+      if (channel === ContactChannel.CHATWOOT) {
+        const [conversation, values] = await Promise.all([
+          this.p.conversation.findFirst({ where: { clientId, channel, archivedAt: null }, include: { messages: { orderBy: { createdAt: "desc" }, take: 30, select: { metadata: true } } } }),
+          this.sectionValues("integration.chatwoot"),
+        ]);
+        const providerConversationId = conversation ? chatwootConversationId(conversation.messages) : undefined;
+        const accountId = typeof values.accountId === "string" ? values.accountId.trim() : "";
+        if (values.enabled !== true || !configuredHttpsOrigin(values.baseUrl) || !this.secretValue(values, "accessTokenEncrypted")) throw new BadRequestException("Канал Chatwoot не подключён для отправки");
+        if (!conversation || !providerConversationId) throw new BadRequestException("Для этого клиента нет активного диалога Chatwoot");
+        return runMetaSendOnce({
+          reserve: async () => this.p.$transaction(async tx => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
+            if (existing) {
+              if (existing.clientId !== clientId || existing.conversationId !== conversation.id) throw new ConflictException("Идентификатор отправки уже использован");
+              if (existing.messageId) {
+                const result = await tx.message.findUnique({ where: { id: existing.messageId } });
+                if (result) return { kind: "DONE" as const, result: { ...result, channel } };
+              }
+              return { kind: "PENDING" as const };
+            }
+            if (draft) {
+              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
+              if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
+            }
+            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
+            if (pending) return { kind: "PENDING" as const };
+            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
+            if (attachment) {
+              const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, claimedAt: null, clientRequestId: null, messageId: null }, data: { clientRequestId: d.clientRequestId! } });
+              if (claimed.count !== 1) throw new ConflictException("Вложение уже используется в другой отправке");
+            }
+            return { kind: "NEW" as const };
+          }),
+          deliver: () => this.sendChatwootProviderMessage(values, providerConversationId, content, attachment),
+          pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется"),
+          persistFailure: async error => this.p.$transaction(async tx => {
+            const failedMetadata = { ...draftMetadata, provider: "CHATWOOT", source: "CRM", chatwootConversationId: providerConversationId, failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...(attachment ? { attachments: [(({ providerUrl: _providerUrl, ...safe }) => safe)(attachment)] } : {}) } as Prisma.InputJsonValue;
+            const message = draft
+              ? await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: failedMetadata } })
+              : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: failedMetadata } });
+            if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: message.id, claimedAt: new Date(), clientRequestId: null } });
+            await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: message.id } });
+            await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${message.createdAt}),${message.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
+            await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: "Chatwoot не принял исходящее сообщение", metadata: { messageId: message.id, channel } } });
+            await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: message.id, after: { id: message.id, channel, status: MessageStatus.FAILED } } });
+            return { ...message, channel };
+          }),
+          persistSuccess: async result => this.p.$transaction(async tx => {
+            const externalId = `chatwoot:${accountId}:${result.id}`;
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"chatwoot-echo:" + conversation.id + ":" + externalId}, 0))`;
+            const sentAt = result.createdAt && Number.isFinite(result.createdAt) ? new Date(result.createdAt * 1000) : new Date();
+            const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
+            const successMetadata = { ...draftMetadata, provider: "CHATWOOT", source: "CRM", chatwootConversationId: providerConversationId, accountId, inboxId: values.inboxId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } as Prisma.InputJsonValue;
+            const existingEcho = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId } } });
+            const existingMetadata = existingEcho?.metadata && typeof existingEcho.metadata === "object" && !Array.isArray(existingEcho.metadata) ? existingEcho.metadata as Prisma.JsonObject : {};
+            const message = draft && existingEcho
+              ? await tx.message.update({ where: { id: existingEcho.id }, data: { status: MessageStatus.SENT, content: result.content || content || attachment?.name || "[Вложение]", authorId: u.id, sentAt, metadata: { ...existingMetadata, ...(successMetadata as Prisma.JsonObject) } } })
+              : draft
+                ? await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, content: result.content || content || attachment?.name || "[Вложение]", externalId, authorId: u.id, sentAt, metadata: successMetadata } })
+                : await tx.message.upsert({ where: { conversationId_externalId: { conversationId: conversation.id, externalId } }, create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: result.content || content || attachment?.name || "[Вложение]", externalId, authorId: u.id, sentAt, metadata: successMetadata }, update: { status: MessageStatus.SENT, content: result.content || content || attachment?.name || "[Вложение]", authorId: u.id, sentAt, metadata: { ...existingMetadata, ...(successMetadata as Prisma.JsonObject) } } });
+            if (draft && existingEcho) {
+              await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, sentAt, metadata: { ...draftMetadata, deduplicatedIntoMessageId: message.id } } });
+              await tx.auditLog.create({ data: { actorId: u.id, action: "MERGE", entityType: "Message", entityId: draft.id, after: { deduplicatedIntoMessageId: message.id, externalId } } });
+            }
+            if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: message.id, claimedAt: new Date(), clientRequestId: null } });
+            await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "SENT", messageId: message.id } });
+            await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${sentAt}),${sentAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
+            await tx.activity.create({ data: { clientId, type: "MESSAGE_SENT", summary: "Сообщение отправлено в Chatwoot", metadata: { messageId: message.id, channel } } });
+            await tx.auditLog.create({ data: { actorId: u.id, action: "SEND", entityType: "Message", entityId: message.id, after: { id: message.id, channel, status: message.status, externalId } } });
+            return { ...message, channel };
+          }),
+        });
+      }
       if (channel !== ContactChannel.FACEBOOK && channel !== ContactChannel.INSTAGRAM)
         throw new BadRequestException("Отправка для выбранного канала ещё не настроена. Сохраните сообщение как черновик");
       const metaChannel: "FACEBOOK" | "INSTAGRAM" = channel;
