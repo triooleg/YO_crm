@@ -53,6 +53,8 @@ type IntegrationData = {
     status: string;
     smtpHost: string;
     smtpPort: number;
+    imapHost: string;
+    imapPort: number;
     username: string;
     fromAddress: string;
     passwordConfigured: boolean;
@@ -107,6 +109,8 @@ function CommunicationsSettings() {
               enabled: f.get("enabled") === "on",
               smtpHost: f.get("smtpHost"),
               smtpPort: Number(f.get("smtpPort")),
+              imapHost: f.get("imapHost"),
+              imapPort: Number(f.get("imapPort")),
               username: f.get("username"),
               password: f.get("password"),
               fromAddress: f.get("fromAddress"),
@@ -143,6 +147,7 @@ function CommunicationsSettings() {
   async function connectInstagram(){setError("");if(!data?.meta.instagramAppId||!data.meta.instagramAppSecretConfigured){showInstagramCredentials();return}const subscriptionBaseline=data.meta.instagramSubscriptionVerifiedAt;const popup=window.open("about:blank","yoleotard-instagram-oauth","popup,width=620,height=760");if(!popup){setError(settingsUi.metaPopupBlocked);return}popup.opener=null;setOauthLoading(true);try{const r=await fetch("/api/communications/meta/instagram/oauth/start",{credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaOauthStartError)}const {url}=await r.json();popup.location.href=url;let connected=false;for(let i=0;i<120;i++){await new Promise(resolve=>setTimeout(resolve,1000));const latest=await load();if((latest.meta.instagramStatus==="SUBSCRIBED"||latest.meta.instagramStatus==="RECEIVING")&&latest.meta.instagramSubscriptionVerifiedAt!==subscriptionBaseline){connected=true;break}if(popup.closed)throw new Error(settingsUi.metaOauthNotFinished)}if(!connected)throw new Error(settingsUi.metaOauthNotFinished);popup.close()}catch(x){if(!popup.closed)popup.close();setError((x as Error).message)}finally{setOauthLoading(false)}}
   async function selectMetaPage(pageId:string){setSaving(true);setError("");try{const r=await fetch("/api/communications/meta/oauth/connect",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({flowId:metaFlowId,pageId})});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.channelsSaveError)}await load();setMetaFlowId("");setMetaPages([]);setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   async function verifyMetaDelivery(){setSaving(true);setSaved(null);setError("");try{const r=await fetch("/api/communications/meta/delivery/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaVerifyDeliveryError)}await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
+  async function verifyEmail(){setSaving(true);setError("");try{const r=await fetch("/api/communications/email/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.emailVerifyError)}setSaved("email");await load()}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   if (!data)
     return (
       <section
@@ -288,12 +293,14 @@ function CommunicationsSettings() {
               type="number"
               min="1"
               max="65535"
-              defaultValue={data.email.smtpPort}
+              defaultValue={data.email.smtpPort||465}
             />
           </label>
+          <label>{settingsUi.imapHost}<input name="imapHost" defaultValue={data.email.imapHost||"imap.gmail.com"}/></label>
+          <label>{settingsUi.imapPort}<input name="imapPort" type="number" min="1" max="65535" defaultValue={data.email.imapPort||993}/></label>
           <label>
             {settingsUi.username}
-            <input name="username" defaultValue={data.email.username} />
+            <input name="username" defaultValue={data.email.username||"yoleotard@gmail.com"} />
           </label>
           <label>
             {settingsUi.password}
@@ -301,6 +308,7 @@ function CommunicationsSettings() {
               name="password"
               type="password"
               autoComplete="new-password"
+              aria-describedby="email-app-password-hint"
               placeholder={
                 data.email.passwordConfigured
                   ? settingsUi.secretSaved
@@ -313,18 +321,21 @@ function CommunicationsSettings() {
             <input
               name="fromAddress"
               type="email"
-              defaultValue={data.email.fromAddress}
+              defaultValue={data.email.fromAddress||"yoleotard@gmail.com"}
             />
           </label>
         </div>
+        <p id="email-app-password-hint">{settingsUi.emailAppPasswordHint}</p>
         {saved === "email" && (
           <div className="settings-success" role="status">
             {settingsUi.saved}
           </div>
         )}
-        <button className="phase2-primary" disabled={saving}>
-          {settingsUi.save}
-        </button>
+        {!data.email.passwordConfigured&&<p className="settings-inline-note">{settingsUi.emailSaveBeforeVerify}</p>}
+        <div className="settings-actions">
+          <button className="phase2-primary" disabled={saving}>{settingsUi.save}</button>
+          <button className="settings-secondary" type="button" disabled={saving||!data.email.passwordConfigured} onClick={()=>void verifyEmail()}>{settingsUi.emailVerify}</button>
+        </div>
       </form>
     </section>
   );

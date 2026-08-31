@@ -20,10 +20,12 @@ import { TasksController } from "./tasks/tasks.controller";
 import { TasksService } from "./tasks/tasks.service";
 import { BackupsModule } from "./backups/backups.module";
 import { IntelligenceModule } from "./intelligence/intelligence.module";
+import { EmailTransportService } from "./communications/email-transport.service";
+import { EmailSyncService } from "./communications/email-sync.service";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
   controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController],
-  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, CommunicationsService, AiAssistantService, TasksService],
+  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService],
 })
 export class AppModule {}

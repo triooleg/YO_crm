@@ -1217,3 +1217,12 @@
 - Пересобраны и пересозданы только `api` и `web`; PostgreSQL, Redis, `.env` и persistent volumes не заменялись. API/web/PostgreSQL/Redis healthy, restart count 0; все 19 миграций актуальны.
 - Internal/public root и `/api/health` возвращают HTTP 200; PostgreSQL, Redis и uploads — `up`. Свежие production-логи содержат штатный запуск без ошибок.
 - Авторизованный read-only browser-smoke реальных данных подтвердил оранжевый бейдж активного заказа слева сверху, отдельный значок канала справа снизу и ссылку «Открыть переписку в Chatwoot» на точный диалог `accounts/2/conversations/83`. Фото и сквозные входящие/исходящие Chatwoot отображаются; horizontal overflow и console errors/warnings равны 0. Сообщения не отправлялись и данные клиентов не изменялись.
+
+## 2026-08-31 — сквозной Gmail-канал (подготовлен к релизу)
+
+- Добавлен двусторонний канал `EMAIL`: входящие Gmail забираются по IMAP, связываются с клиентом по точному e-mail и отображаются в общей ленте; ответы CRM отправляются через SMTP и остаются в том же диалоге.
+- Gmail ограничен официальными endpoint: `smtp.gmail.com` (465/587) и `imap.gmail.com:993`; пароль приложения зашифрован и не возвращается в браузер. Настройки получили отдельную проверку SMTP+IMAP и русскую подсказку.
+- IMAP cursor привязан к аккаунту, mailbox и `UIDVALIDITY`, использует UID mode и `UIDNEXT`; poison-message изолируется durable audit-записью без блокировки следующих писем. Успешный raw MIME сохраняется, экранный текст и количество отдельных вложений ограничены.
+- RFC threading сохраняет `Message-ID`, `In-Reply-To` и полную `References` chain. Вложения Gmail показываются через существующий защищённый файловый endpoint и включены в data-deletion cleanup.
+- Исходящая отправка использует durable attempt, advisory lock и атомарный attachment claim. Неопределённый SMTP-результат переводится в `UNCERTAIN`, блокирует дубликат и может быть вручную разрешён OWNER/ADMIN под тем же lock.
+- Локальные проверки: API 266/266, web 183/183, database 7/7, typechecks и production builds PASS; отдельные executable tests покрывают UIDVALIDITY/UIDNEXT, scope-safe quarantine retry, лимиты, PENDING/UNCERTAIN/release rules и реальный `runMetaSendOnce` SMTP-success/DB-failure recovery.

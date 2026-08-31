@@ -84,8 +84,10 @@ export function deliverMetaMessage<T>(channel: "FACEBOOK" | "INSTAGRAM", operati
 }
 
 export class MetaGraphRequestError extends Error {
-  constructor(public readonly failure: ReturnType<typeof metaSendFailure>) {
+  readonly failure: ReturnType<typeof metaSendFailure>;
+  constructor(failure: ReturnType<typeof metaSendFailure>) {
     super("Meta Graph request failed");
+    this.failure = failure;
     this.name = "MetaGraphRequestError";
   }
 }
@@ -99,6 +101,7 @@ export async function runMetaSendOnce<T, P>(operations: {
   reserve: () => Promise<MetaSendReservation<T>>;
   deliver: () => Promise<P>;
   persistSuccess: (providerResult: P) => Promise<T>;
+  persistSuccessFailure?: (providerResult: P, error: unknown) => Promise<T>;
   persistFailure: (error: unknown) => Promise<T>;
   pendingError: () => Error;
 }) {
@@ -111,5 +114,6 @@ export async function runMetaSendOnce<T, P>(operations: {
   } catch (error) {
     return operations.persistFailure(error);
   }
-  return operations.persistSuccess(providerResult);
+  try { return await operations.persistSuccess(providerResult); }
+  catch (error) { if (operations.persistSuccessFailure) return operations.persistSuccessFailure(providerResult,error); throw error; }
 }

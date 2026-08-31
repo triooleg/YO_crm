@@ -10,9 +10,10 @@ import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
 import{uploadsRoot}from"../uploads";
+import{EmailSyncService}from"./email-sync.service";
 
 @Controller("communications")@UseGuards(SessionGuard,RolesGuard)
-export class CommunicationsController{constructor(private c:CommunicationsService){}
+export class CommunicationsController{constructor(private c:CommunicationsService,private emailSync:EmailSyncService){}
 private sessionBinding(r:Request,u:User,res?:Response,create=false){
  const reviewMode=process.env.AUTH_DISABLED?.toLowerCase()==="true";
  if(!reviewMode){const token=r.cookies?.yoleotard_crm_session;if(typeof token==="string"&&token)return createHash("sha256").update(token).digest("hex");throw new UnauthorizedException("Для подключения Meta войдите в CRM")}
@@ -30,6 +31,9 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("templates/:id/archive")@Roles("OWNER","ADMIN")archiveTemplate(@Param("id")id:string,@Req()r:Request&{user:User}){return this.c.archiveTemplate(id,r.user)}
 @Get("integrations")@Roles("OWNER","ADMIN")integrations(){return this.c.integrations()}
 @Patch("integrations/:channel")@Roles("OWNER","ADMIN")saveIntegration(@Param("channel")channel:string,@Body()d:IntegrationSettingsDto,@Req()r:Request&{user:User}){return this.c.saveIntegration(channel,d,r.user)}
+@Post("email/verify")@Roles("OWNER","ADMIN")verifyEmail(){return this.c.verifyEmail()}
+@Post("email/attempts/:id/release")@Roles("OWNER","ADMIN")releaseEmailAttempt(@Param("id")id:string,@Req()r:Request&{user:User}){return this.c.releaseEmailAttempt(id,r.user)}
+@Post("email/failures/:key/retry")@Roles("OWNER","ADMIN")retryEmailFailure(@Param("key")key:string,@Req()r:Request&{user:User}){return this.emailSync.retryFailure(key,r.user.id)}
 @Get("meta/settings")@Roles("OWNER","ADMIN")metaSettings(){return this.c.metaSettings()}
 @Patch("meta/settings")@Roles("OWNER","ADMIN")saveMetaSettings(@Body()d:MetaIntegrationDto,@Req()r:Request&{user:User}){return this.c.saveMetaSettings(d,r.user)}
 @Get("meta/oauth/start")@Roles("OWNER","ADMIN")metaOauthStart(@Req()r:Request&{user:User},@Res({passthrough:true})res:Response){return this.c.metaOauthStart(r.user,this.sessionBinding(r,r.user,res,true))}

@@ -35,6 +35,10 @@ button { cursor: pointer; }
 .phase2-header h1 { margin: 0; font-size: clamp(28px, 3vw, 40px); }
 .phase2-header span { display: block; margin-top: 6px; color: var(--muted); }
 .phase2-primary { border: 0; border-radius: 10px; padding: 11px 17px; background: var(--violet); color: #fff; font-weight: 750; white-space: nowrap; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.settings-secondary { min-height: 38px; padding: 9px 15px; border: 1px solid var(--violet); border-radius: 10px; background: #fff; color: var(--violet); font-weight: 750; }
+.settings-secondary:disabled { opacity: .55; cursor: not-allowed; }
+.settings-inline-note { font-size: 12px; }
 .phase2-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px; max-width: 1540px; min-height: 670px; margin: auto; transition: grid-template-columns .2s ease; }
 .phase2-shell.is-collapsed .phase2-workspace { grid-template-columns: 64px minmax(0, 1fr); }
 .phase2-list, .phase2-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }

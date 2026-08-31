@@ -162,6 +162,7 @@ function sortClients(data: Client[]) {
 }
 function safeAttachmentUrl(url?: string) {
   if (!url) return;
+  if (/^\/api\/communications\/files\/[a-zA-Z0-9._-]+$/.test(url)) return url;
   try {
     const parsed = new URL(url);
     return parsed.protocol === "https:" || parsed.protocol === "http:"
@@ -1181,7 +1182,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
-              {["FACEBOOK", "INSTAGRAM", "CHATWOOT"].includes(activeChannel) && (
+              {["FACEBOOK", "INSTAGRAM", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
                 <button
                   disabled={busy || !client || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}

@@ -82,8 +82,10 @@ export class IntegrationSettingsDto {
   @IsOptional() @ValidateIf((_object, value) => value !== "") @IsString() @Length(8, 500) webhookSecret?: string;
   @IsOptional() @IsBoolean() removeAccessToken?: boolean;
   @IsOptional() @IsBoolean() removeWebhookSecret?: boolean;
-  @IsOptional() @IsString() @MaxLength(255) smtpHost?: string;
-  @IsOptional() @IsInt() @Min(1) @Max(65535) smtpPort?: number;
+  @IsOptional() @IsIn(["smtp.gmail.com"] as const) smtpHost?: string;
+  @IsOptional() @IsIn([465, 587] as const) smtpPort?: number;
+  @IsOptional() @IsIn(["imap.gmail.com"] as const) imapHost?: string;
+  @IsOptional() @IsIn([993] as const) imapPort?: number;
   @IsOptional() @IsString() @MaxLength(255) username?: string;
   @IsOptional() @IsString() @MaxLength(500) password?: string;
   @IsOptional() @IsBoolean() removePassword?: boolean;
