@@ -6,11 +6,16 @@ import ts from "typescript";
 import { createRequire } from "node:module";
 
 const source = await readFile(new URL("../src/communications/meta-webhook.ts", import.meta.url), "utf8");
+const sendSource = await readFile(new URL("../src/communications/meta-send.ts", import.meta.url), "utf8");
 const service = await readFile(new URL("../src/communications/communications.service.ts", import.meta.url), "utf8");
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} }, require = createRequire(import.meta.url);
 vm.runInNewContext(javascript, { module, exports: module.exports, require, Buffer });
 const { facebookFallbackProfileTargets, isMetaManagedAvatarUrl, isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaFacebookProfilePatch, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfile, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature } = module.exports;
+const sendJavascript = ts.transpileModule(sendSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const sendModule = { exports: {} };
+vm.runInNewContext(sendJavascript, { module: sendModule, exports: sendModule.exports });
+const { metaRecipientId, whatsappMessageId } = sendModule.exports;
 
 test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", () => {
   const facebook = normalizeMetaWebhook({ object: "page", entry: [{ messaging: [{ sender: { id: "fb-1" }, timestamp: 1000, message: { mid: "fb-mid", text: "Facebook text" } }] }] });
@@ -352,6 +357,64 @@ test("normalizes Facebook message echoes as outbound messages with text and atta
     receivedAt: "1970-01-01T00:00:00.042Z",
     metadata: { messageType: "text", attachmentTypes: ["image"], attachments: [{ type: "image", url: "https://cdn.example/reply.jpg" }] },
   });
+});
+
+test("normalizes WhatsApp Business App message echoes as outbound messages", () => {
+  const [echo] = normalizeMetaEchoMessages({
+    object: "whatsapp_business_account",
+    entry: [{
+      id: "waba-1",
+      changes: [{
+        field: "smb_message_echoes",
+        value: {
+          metadata: { display_phone_number: "380932354616", phone_number_id: "phone-1" },
+          message_echoes: [{
+            from: "380932354616",
+            to: "380633582077",
+            id: "wa-echo-mid",
+            timestamp: "1504902988",
+            type: "text",
+            text: { body: "Ответ из WhatsApp Business" },
+          }],
+        },
+      }],
+    }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(echo)), {
+    channel: "WHATSAPP",
+    externalRecipientId: "380633582077",
+    externalMessageId: "wa-echo-mid",
+    content: "Ответ из WhatsApp Business",
+    receiverId: "phone-1",
+    receivedAt: "2017-09-08T20:36:28.000Z",
+    metadata: { messageType: "text" },
+  });
+});
+
+test("preserves WhatsApp media ids for authenticated attachment delivery", () => {
+  const [inbound] = normalizeMetaWebhook({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { metadata: { phone_number_id: "phone-1" }, messages: [{ id: "wa-in-photo", from: "380633582077", timestamp: "1504902988", type: "image", image: { id: "media-in-1", mime_type: "image/jpeg", caption: "Фото модели" } }] } }] }] });
+  const [echo] = normalizeMetaEchoMessages({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "smb_message_echoes", value: { metadata: { phone_number_id: "phone-1" }, message_echoes: [{ from: "380932354616", to: "380633582077", id: "wa-out-doc", timestamp: "1504902988", type: "document", document: { id: "media-out-1", mime_type: "application/pdf", filename: "invoice.pdf", caption: "Инвойс" } }] } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(inbound.metadata.attachments)), [{ type: "image", mediaId: "media-in-1", mimeType: "image/jpeg" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(echo.metadata.attachments)), [{ type: "file", mediaId: "media-out-1", mimeType: "application/pdf", name: "invoice.pdf" }]);
+});
+
+test("keeps WhatsApp inbound send result and app echo in one scoped identity", () => {
+  const [inbound] = normalizeMetaWebhook({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { metadata: { phone_number_id: "phone-1" }, messages: [{ id: "wa-in-1", from: "380633582077", timestamp: "1504902988", type: "text", text: { body: "Входящее" } }] } }] }] });
+  const conversationExternalId = metaConversationExternalId(inbound.receiverId, inbound.externalSenderId);
+  assert.equal(conversationExternalId, "phone-1:380633582077");
+  assert.equal(metaRecipientId("phone-1", conversationExternalId), "380633582077");
+  assert.equal(metaRecipientId("phone-2", conversationExternalId), "");
+  const wamid = whatsappMessageId({ messages: [{ id: "wamid.crm-1" }] });
+  const [echo] = normalizeMetaEchoMessages({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "smb_message_echoes", value: { metadata: { phone_number_id: "phone-1" }, message_echoes: [{ from: "380932354616", to: "380633582077", id: wamid, timestamp: "1504902989", type: "text", text: { body: "Ответ" } }] } }] }] });
+  assert.equal(metaConversationExternalId(echo.receiverId, echo.externalRecipientId), conversationExternalId);
+  assert.equal(echo.externalMessageId, wamid);
+  assert.deepEqual(JSON.parse(JSON.stringify(metaEchoConversationExternalIds(echo.receiverId, echo.externalRecipientId, { receiverId: "phone-1" }))), [conversationExternalId, "380633582077"]);
+});
+
+test("summarizes WhatsApp Business App echoes without logging message content", () => {
+  const [summary] = summarizeMetaWebhook({ object: "whatsapp_business_account", entry: [{ id: "waba-1", changes: [{ field: "smb_message_echoes", value: { metadata: { phone_number_id: "phone-1" }, message_echoes: [{ from: "380932354616", to: "380633582077", id: "wa-echo-mid", timestamp: "1504902988", type: "text", text: { body: "private reply" } }] } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), { object: "whatsapp_business_account", entryId: "waba-1", eventType: "message_echo", senderId: "380932354616", recipientId: "380633582077", mid: "wa-echo-mid", hasText: true, attachmentCount: 0, attachmentTypes: [], isEcho: true, isTest: false });
+  assert.equal(JSON.stringify(summary).includes("private reply"), false);
 });
 
 test("normalizes a read watermark without a message id and keeps exact account identity", () => {

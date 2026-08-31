@@ -88,8 +88,9 @@ test("сохранённый черновик имеет собственную 
   assert.match(locale,/sendSavedDraft:/);
 });
 
-test("composer sends Facebook, Instagram and Chatwoot conversations", () => {
-  assert.match(component, /\["FACEBOOK", "INSTAGRAM", "CHATWOOT"\]\.includes\(activeChannel\)/);
+test("composer sends Facebook, Instagram, WhatsApp and Chatwoot conversations", () => {
+  assert.match(component, /\["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"\]\.includes\(activeChannel\)/);
+  assert.match(component, /\["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"\]\.includes\(activeChannel\)/);
   assert.match(component, /value=\{activeChannel\}/);
   assert.match(component, /setActiveChannel\(event\.target\.value\)/);
   assert.match(component, /availableChannels\.map/);
@@ -379,6 +380,7 @@ test("вложения Meta отображаются в истории пере�
   assert.match(component, /message\.metadata\?\.attachments/);
   assert.match(component, /communications-attachments/);
   assert.match(component, /ui\.openAttachment/);
+  assert.equal(component.includes("messages\\/[a-zA-Z0-9_-]+\\/attachments"), true);
   assert.match(locale, /openAttachment:/);
   assert.match(component, /communications-lightbox/);
   assert.match(component, /setPreview\(\{url,type:/);
@@ -409,7 +411,7 @@ test("редактор Facebook, Instagram и Chatwoot предлагает ст
   assert.match(component, /setEmojiOpen\(false\)/);
   assert.match(component, /event\.currentTarget\.contains\(event\.relatedTarget\)/);
   assert.match(component, /communications-emoji-picker/);
-  assert.match(component, /\["FACEBOOK",\s*"INSTAGRAM",\s*"CHATWOOT"\]\.includes\(activeChannel\)/);
+  assert.match(component, /\["FACEBOOK",\s*"INSTAGRAM",\s*"WHATSAPP",\s*"CHATWOOT"\]\.includes\(activeChannel\)/);
   assert.match(locale, /chooseEmoji:/);
   assert.match(locale, /emojiPanel:/);
   assert.match(css, /\.communications-emoji-picker/);

@@ -29,6 +29,26 @@ export function metaAttachmentMessageParams(recipientId: string, type: "image" |
   };
 }
 
+export function whatsappTextMessageParams(recipientId: string, content: string) {
+  return {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: recipientId,
+    type: "text",
+    text: { preview_url: true, body: content },
+  };
+}
+
+export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string) {
+  return type === "image"
+    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "image", image: { link: url, caption: name } }
+    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "document", document: { link: url, filename: name } };
+}
+
+export function whatsappMessageId(result: { messages?: Array<{ id?: string }> }) {
+  return typeof result.messages?.[0]?.id === "string" ? result.messages[0].id : "";
+}
+
 export function metaThreadControlParams(recipientId: string) {
   return { recipient: JSON.stringify({ id: recipientId }) };
 }
@@ -77,7 +97,7 @@ export async function deliverMetaWithThreadControl<T>(operations: {
   }
 }
 
-export function deliverMetaMessage<T>(channel: "FACEBOOK" | "INSTAGRAM", operations: Parameters<typeof deliverMetaWithThreadControl<T>>[0]) {
+export function deliverMetaMessage<T>(channel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP", operations: Parameters<typeof deliverMetaWithThreadControl<T>>[0]) {
   return channel === "FACEBOOK"
     ? deliverMetaWithThreadControl(operations)
     : operations.send();
@@ -90,6 +110,24 @@ export class MetaGraphRequestError extends Error {
     this.failure = failure;
     this.name = "MetaGraphRequestError";
   }
+}
+
+export class MetaDeliveryUncertainError extends Error {
+  constructor() {
+    super("Meta did not confirm the delivery result");
+    this.name = "MetaDeliveryUncertainError";
+  }
+}
+
+export async function releaseUncertainWhatsappAttempt<T>(operations: {
+  claim: () => Promise<boolean>;
+  releaseAttachment: () => Promise<unknown>;
+  recordResolution: () => Promise<T>;
+  changedError: () => Error;
+}) {
+  if (!(await operations.claim())) throw operations.changedError();
+  await operations.releaseAttachment();
+  return operations.recordResolution();
 }
 
 export type MetaSendReservation<T> =

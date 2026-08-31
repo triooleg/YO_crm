@@ -120,7 +120,7 @@ function sourceBadge(c?: Client) {
 }
 function sendFailureText(reason: string | undefined, messageChannel: string) {
   const reasons = ui.sendFailureReasons as Record<string, string>;
-  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : messageChannel === "CHATWOOT" ? "Chatwoot" : messageChannel === "EMAIL" ? "Gmail" : "Facebook";
+  const provider = messageChannel === "INSTAGRAM" ? "Instagram" : messageChannel === "WHATSAPP" ? "WhatsApp" : messageChannel === "CHATWOOT" ? "Chatwoot" : messageChannel === "EMAIL" ? "Gmail" : "Facebook";
   return (reasons[reason || ""] || ui.failed).replaceAll("Facebook", provider);
 }
 function clientBadges(c: Client) {
@@ -163,6 +163,7 @@ function sortClients(data: Client[]) {
 function safeAttachmentUrl(url?: string) {
   if (!url) return;
   if (/^\/api\/communications\/files\/[a-zA-Z0-9._-]+$/.test(url)) return url;
+  if (/^\/api\/communications\/messages\/[a-zA-Z0-9_-]+\/attachments\/\d+\/download\?inline=1$/.test(url)) return url;
   try {
     const parsed = new URL(url);
     return parsed.protocol === "https:" || parsed.protocol === "http:"
@@ -1185,7 +1186,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <span aria-hidden>＋</span>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
               </label>
-              {["FACEBOOK", "INSTAGRAM", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
+              {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
                 ref={composerTextarea}
                 aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":undefined}
@@ -1200,7 +1201,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               >
                 {busy ? ui.saving : ui.saveDraft}
               </button>
-              {["FACEBOOK", "INSTAGRAM", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
+              {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
                 <button
                   disabled={busy || !client || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}

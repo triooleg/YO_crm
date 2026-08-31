@@ -446,9 +446,35 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
   return output;
 }
 
+function whatsappAttachments(message: AnyRecord) {
+  const type = String(message.type || "unknown"), typed = message[type];
+  if (!typed || typeof typed !== "object" || !typed.id || !["image", "video", "audio", "document", "sticker"].includes(type)) return [];
+  return [{
+    type: type === "document" || type === "audio" ? "file" : type,
+    mediaId: String(typed.id),
+    ...(typeof typed.mime_type === "string" ? { mimeType: typed.mime_type } : {}),
+    ...(typeof typed.filename === "string" ? { name: typed.filename.slice(0, 180) } : {}),
+  }];
+}
+
 export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
   if (!payload || typeof payload !== "object") return [];
   const value = payload as AnyRecord;
+  if (value.object === "whatsapp_business_account") {
+    const output: MetaEchoMessage[] = [];
+    for (const entry of records(value.entry)) for (const change of records(entry.changes)) {
+      const changeValue = change.value || {};
+      for (const message of records(changeValue.message_echoes)) {
+        if (!message.id || !message.to) continue;
+        const type = String(message.type || "unknown"), typed = message[type] || {};
+        const content = String(type === "text" ? message.text?.body : typed.caption || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
+        if (!content) continue;
+        const attachments = whatsappAttachments(message);
+        output.push({ channel: "WHATSAPP", externalRecipientId: String(message.to), externalMessageId: String(message.id), content, receiverId: String(changeValue.metadata?.phone_number_id || "") || undefined, receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
+      }
+    }
+    return output;
+  }
   if (value.object !== "page" && value.object !== "instagram") return [];
   const channel: MetaEchoMessage["channel"] = value.object === "page" ? "FACEBOOK" : "INSTAGRAM", output: MetaEchoMessage[] = [];
   for (const entry of records(value.entry)) for (const event of [...records(entry.messaging), ...records(entry.standby)]) {
@@ -500,9 +526,10 @@ export function summarizeMetaWebhook(payload: unknown): MetaWebhookEventSummary[
       });
     }
     if (object === "whatsapp_business_account") for (const change of records(entry.changes)) {
-      const messages = records(change.value?.messages);
-      if (!messages.length) output.push({ object, ...(entry.id !== undefined ? { entryId: String(entry.id) } : {}), eventType: records(change.value?.statuses).length ? "status" : String(change.field || "change"), hasText: false, attachmentCount: 0, attachmentTypes: [], isEcho: false, isTest: false });
+      const messages = records(change.value?.messages), echoes = records(change.value?.message_echoes);
+      if (!messages.length && !echoes.length) output.push({ object, ...(entry.id !== undefined ? { entryId: String(entry.id) } : {}), eventType: records(change.value?.statuses).length ? "status" : String(change.field || "change"), hasText: false, attachmentCount: 0, attachmentTypes: [], isEcho: false, isTest: false });
       for (const message of messages) output.push({ object, ...(entry.id !== undefined ? { entryId: String(entry.id) } : {}), eventType: "message", ...(message.from !== undefined ? { senderId: String(message.from) } : {}), ...(change.value?.metadata?.phone_number_id !== undefined ? { recipientId: String(change.value.metadata.phone_number_id) } : {}), ...(message.id !== undefined ? { mid: String(message.id) } : {}), hasText: message.type === "text" && typeof message.text?.body === "string", attachmentCount: message.type === "text" ? 0 : 1, attachmentTypes: message.type === "text" ? [] : [String(message.type || "unknown")], isEcho: false, isTest: String(message.id || "").includes("test_message") });
+      for (const message of echoes) output.push({ object, ...(entry.id !== undefined ? { entryId: String(entry.id) } : {}), eventType: "message_echo", ...(message.from !== undefined ? { senderId: String(message.from) } : {}), ...(message.to !== undefined ? { recipientId: String(message.to) } : {}), ...(message.id !== undefined ? { mid: String(message.id) } : {}), hasText: message.type === "text" && typeof message.text?.body === "string", attachmentCount: message.type === "text" ? 0 : 1, attachmentTypes: message.type === "text" ? [] : [String(message.type || "unknown")], isEcho: true, isTest: String(message.id || "").includes("test_message") });
     }
   }
   return output;
@@ -542,7 +569,8 @@ function whatsappMessages(payload: AnyRecord) {
       if (!message.id || !message.from) continue;
       const type = String(message.type || "unknown"), typed = message[type] || {};
       const content = String(type === "text" ? message.text?.body : typed.caption || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
-      output.push({ channel: "WHATSAPP", externalSenderId: String(message.from), externalMessageId: String(message.id), content, displayName: contacts.get(String(message.from)) || undefined, receiverId: String(value.metadata?.phone_number_id || "") || undefined, phone: String(message.from), receivedAt: asDate(message.timestamp, true), metadata: { messageType: type } });
+      const attachments = whatsappAttachments(message);
+      output.push({ channel: "WHATSAPP", externalSenderId: String(message.from), externalMessageId: String(message.id), content, displayName: contacts.get(String(message.from)) || undefined, receiverId: String(value.metadata?.phone_number_id || "") || undefined, phone: String(message.from), receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
     }
   }
   return output;

@@ -1,5 +1,18 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-08-31 — сквозной WhatsApp Business (готово к release gate)
+
+- Входящие события WhatsApp Cloud API и `smb_message_echoes` из приложения WhatsApp Business используют одну строгую identity-цепочку `phone_number_id + wa_id`, поэтому ответ менеджера из приложения сохраняется как `OUTBOUND` в существующем диалоге и не создаёт клиента или дубль.
+- CRM отправляет текст, изображение и документ через официальный `/{phone_number_id}/messages`, сохраняет возвращённый `wamid` и объединяет последующий echo с той же записью. Durable delivery attempts, статусы `SENT/FAILED`, audit/activity и существующие Facebook/Instagram пути сохранены.
+- WhatsApp-медиа загружается сервером только с доверенных HTTPS-host Meta, без redirect, с лимитом 50 МБ и сохраняется в persistent `communication-files`; audio/video-расширения разрешены тем же защищённым endpoint. Временный отказ media не блокирует историю: сообщение сохраняется с `mediaId` и fallback proxy, а успешно созданные orphan-файлы удаляются при duplicate/DB failure.
+- Неопределённый сетевой результат отправки WhatsApp переводит delivery attempt в `UNCERTAIN` и блокирует новые попытки в диалоге, чтобы исключить повтор клиенту; подтверждённый ответ Meta по-прежнему использует `FAILED`.
+- Если Meta уже вернула `wamid`, но локальное сохранение результата не завершилось, `wamid` сохраняется отдельно, попытка становится `UNCERTAIN`, а точный последующий echo автоматически reconciles её в `SENT`; повтор до reconciliation/release не вызывает Meta второй раз.
+- При гонке echo с сохранённым draft reconciliation переводит исходный draft в `SENT`, записывает `deduplicatedIntoMessageId`, MERGE-аудит и завершает зарезервированный AI feedback; canonical-сообщение сохраняет CRM-автора и `source=CRM`, поэтому не получает подпись внешнего ответа и черновик нельзя отправить клиенту повторно.
+- OWNER/ADMIN может вручную разрешить WhatsApp `UNCERTAIN` через защищённый endpoint: операция сериализована тем же lock диалога, переводит попытку в `FAILED`, освобождает незавершённое вложение и AI feedback reservation, создаёт Activity/Audit; повторный или конкурентный вызов не выполняет разрешение дважды.
+- В composer WhatsApp включены существующие вложения, emoji и кнопка «Отправить». Подпись ответа из приложения: «Ответ отправлен вне CRM».
+- Реальный production inbound уже подтверждён до изменения: сообщение создано в существующем WhatsApp-диалоге. Для получения ответов из WhatsApp Business после deployment требуется отдельное подтверждённое включение поля Meta Webhook `smb_message_echoes`; сейчас поле не подписано.
+- Финальный локальный `pnpm quality:check` PASS одним последовательным запуском: API 299/299, database 7/7, web suite, все typechecks и production builds. Browser-smoke детерминированной WhatsApp-ленты прошёл на 1920×1080, 1366×768 и 390×844; временные visual fixtures удалены. Production deployment и внешний outbound smoke ещё не выполнялись.
+
 ## 2026-08-30 — production scheduling rules and defaults (local only)
 
 - В `Настройки → Производство` OWNER/ADMIN могут задать стандартную длительность производства (1–90 дней) и резерв до отправки (0–30 дней). Пара значений сохраняется одним атомарным API-запросом под общим advisory lock и с отдельным audit event для каждого значения.

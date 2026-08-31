@@ -33,7 +33,7 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
+import { deliverMetaMessage, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentMessageParams, whatsappMessageId, whatsappTextMessageParams } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -56,19 +56,32 @@ import { EmailDeliveryUncertainError, EmailTransportService } from "./email-tran
 import { blocksEmailDelivery, canReleaseEmailDelivery, emailConnectionSettingsChanged } from "./email-delivery-rules";
 import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSentFirstMetadata, emailSentMergeDecision } from "./email-sync-rules";
 import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
+import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
+import { COMMUNICATION_FILE_NAME } from "./communication-file";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
-const COMMUNICATION_FILE = /^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/;
+const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
   "application/pdf": "pdf", "text/plain": "txt",
 } as const;
-const REMOTE_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const REMOTE_MEDIA_MAX_BYTES = WHATSAPP_MEDIA_MAX_BYTES;
 function messageAttachments(metadata: Prisma.JsonValue | null) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
   const attachments = (metadata as { attachments?: unknown }).attachments;
   return Array.isArray(attachments) ? attachments : [];
+}
+function messageMetadataForClient(messageId: string, metadata: Prisma.JsonValue | null) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return metadata;
+  const current = metadata as Prisma.JsonObject, attachments = messageAttachments(metadata);
+  if (!attachments.some(item => item && typeof item === "object" && !Array.isArray(item) && typeof (item as { mediaId?: unknown }).mediaId === "string" && typeof (item as { url?: unknown }).url !== "string")) return metadata;
+  return {
+    ...current,
+    attachments: attachments.map((item, index) => item && typeof item === "object" && !Array.isArray(item) && typeof (item as { mediaId?: unknown }).mediaId === "string" && typeof (item as { url?: unknown }).url !== "string"
+      ? { ...item, url: `/api/communications/messages/${encodeURIComponent(messageId)}/attachments/${index}/download?inline=1` }
+      : item),
+  } as Prisma.JsonObject;
 }
 function replayFragment(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT") {
   return JSON.parse(JSON.stringify({ provider, ...event, receivedAt: event.receivedAt.toISOString() })) as Prisma.InputJsonValue;
@@ -445,6 +458,49 @@ export class CommunicationsService {
       throw this.metaIntegrationFailure(operation, response.status, body.error);
     }
     return body;
+  }
+  private async whatsappGraph<T>(path: string, token: string, payload: Record<string, unknown>) {
+    const url = new URL("https://graph.facebook.com/" + this.metaGraphVersion() + "/" + path.replace(/^\//, ""));
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch { throw new MetaDeliveryUncertainError(); }
+    let body: T & { error?: { message?: string; code?: number; error_subcode?: number } };
+    try { body = await response.json() as typeof body; }
+    catch { if (response.ok) throw new MetaDeliveryUncertainError(); body = {} as typeof body; }
+    if (!response.ok || body.error) throw new MetaGraphRequestError(metaSendFailure(body.error));
+    return body;
+  }
+  private async materializeWhatsappMedia<T extends MetaInboundMessage | MetaEchoMessage>(event: T, token: string | undefined) {
+    if (event.channel !== "WHATSAPP") return { event, paths: [] as string[] };
+    const attachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
+    const media = attachments.filter(item => item && typeof item === "object" && typeof (item as { mediaId?: unknown }).mediaId === "string");
+    if (!media.length) return { event, paths: [] as string[] };
+    const directory = join(uploadsRoot(), "communication-files");
+    await mkdir(directory, { recursive: true });
+    const result = await materializeWhatsappAttachments(attachments, Boolean(token), {
+      lookup: async mediaId => {
+        const details = await this.metaGraph<{ url?: string; mime_type?: string; file_size?: number }>(mediaId, token!, {}, "GET", undefined, true);
+        return { url: details.url, mimeType: details.mime_type, fileSize: details.file_size };
+      },
+      download: async url => {
+        const response = await fetch(url, { headers: { Authorization: "Bearer " + token! }, redirect: "error", signal: AbortSignal.timeout(30_000) });
+        if (!response.ok || !response.body) throw new BadGatewayException("Не удалось сохранить вложение WhatsApp");
+        return { body: response.body, contentType: response.headers.get("content-type") || undefined };
+      },
+      store: async (body, extension) => {
+        const path = `${randomUUID()}.${extension}`;
+        await writeFile(join(directory, path), body, { flag: "wx" });
+        return { path, url: `/api/communications/files/${path}` };
+      },
+      onFailure: (mediaId, error) => this.logger.warn(`WHATSAPP_MEDIA_MATERIALIZATION_FAILED mediaRef=${metaIdentityLogRef(mediaId)} failure=${error instanceof Error ? error.constructor.name : "UnknownError"}`),
+    });
+    return { event: { ...event, metadata: { ...event.metadata, attachments: result.attachments } } as T, paths: result.paths };
   }
   private async metaTokenExchange(params: Record<string,string>) {
     const response = await fetch("https://graph.facebook.com/" + this.metaGraphVersion() + "/oauth/access_token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params), signal: AbortSignal.timeout(15_000) });
@@ -931,10 +987,11 @@ export class CommunicationsService {
         if (!matches) this.logger.warn(JSON.stringify({ event: "META_MESSAGE_SCOPE_IGNORED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId }));
         return matches;
       });
-      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),events=scopedEvents;
-      const persisted = await Promise.all(events.map(async event => {
+      const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),whatsappToken=this.secretValue(values,"whatsappAccessTokenEncrypted"),events=scopedEvents;
+      const persisted = await Promise.all(events.map(async originalEvent => {
+        const materialized = await this.materializeWhatsappMedia(originalEvent, whatsappToken), event = materialized.event;
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
-        return this.persistInbound(event, "META", replayFragment(event,"META"));
+        return persistMaterializedWhatsapp(materialized.paths, () => this.persistInbound(event, "META", replayFragment(event,"META")), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
       }));
       const accepted = persisted.filter(Boolean).length;
       const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM");
@@ -943,7 +1000,10 @@ export class CommunicationsService {
       const echoes = normalizeMetaEchoMessages(payload).filter(event => {
         return metaWebhookReceiverMatches(event.channel, event.receiverId, values);
       });
-      const echoResults = await Promise.all(echoes.map(event => this.persistMetaEcho(event)));
+      const echoResults = await Promise.all(echoes.map(async originalEvent => {
+        const materialized = await this.materializeWhatsappMedia(originalEvent, whatsappToken);
+        return persistMaterializedWhatsapp(materialized.paths, () => this.persistMetaEcho(materialized.event), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
+      }));
       const echoesAccepted = echoResults.filter(Boolean).length;
       const controls = normalizeMetaControlEvents(payload).filter(event => event.eventType !== "message_echo").filter(event => {
         return metaWebhookReceiverMatches(event.channel, event.receiverId, values);
@@ -953,7 +1013,7 @@ export class CommunicationsService {
       if (events.length || echoes.length || controls.length) {
         const section = "integration.meta", value = new Date().toISOString();
         const keys = new Set<string>(["lastWebhookAt"]);
-        for (const event of [...events, ...echoes, ...controls]) if (event.channel === "FACEBOOK") keys.add("lastFacebookWebhookAt"); else if (event.channel === "INSTAGRAM") keys.add("lastInstagramWebhookAt");
+        for (const event of [...events, ...echoes, ...controls]) if (event.channel === "FACEBOOK") keys.add("lastFacebookWebhookAt"); else if (event.channel === "INSTAGRAM") keys.add("lastInstagramWebhookAt"); else if (event.channel === "WHATSAPP") keys.add("lastWhatsAppWebhookAt");
         await this.p.$transaction([...keys].map(key => this.p.appSetting.upsert({ where: { section_key: { section, key } }, create: { section, key, value }, update: { value } })));
       }
       const result = { received: true, accepted: accepted + echoesAccepted, ignored: Math.max(0, summaries.length - accepted - echoesAccepted - controlsAccepted) };
@@ -1117,19 +1177,36 @@ export class CommunicationsService {
       }
       if (!conversation || conversation.archivedAt) { this.logger.warn(JSON.stringify({ event: "META_ECHO_IGNORED", channel: event.channel, recipientRef: metaIdentityLogRef(event.externalRecipientId), mid: event.externalMessageId, reason: "conversationNotFound" })); return false; }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + event.externalMessageId}, 0))`;
+      if(event.channel==="WHATSAPP")await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;
       const sentAt = Number.isFinite(event.receivedAt.getTime()) ? event.receivedAt : new Date();
       const duplicate = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true, metadata: true } });
+      const uncertaintyCandidate=event.channel==="WHATSAPP"?await tx.appSetting.findFirst({where:{section:"integration.whatsapp.delivery-uncertain",value:{path:["providerMessageId"],equals:event.externalMessageId}},select:{key:true,value:true}}):null;
+      const uncertainAttempt=uncertaintyCandidate?await tx.messageDeliveryAttempt.findFirst({where:{id:uncertaintyCandidate.key,conversationId:conversation.id,status:"UNCERTAIN"}}):null;
+      const uncertaintyValue=uncertaintyCandidate?.value&&typeof uncertaintyCandidate.value==="object"&&!Array.isArray(uncertaintyCandidate.value)?uncertaintyCandidate.value as Prisma.JsonObject:{};
+      const uncertainDraftId=typeof uncertaintyValue.draftMessageId==="string"?uncertaintyValue.draftMessageId:undefined,uncertainAiRunId=typeof uncertaintyValue.aiRunId==="string"?uncertaintyValue.aiRunId:undefined,uncertainActorId=typeof uncertaintyValue.actorId==="string"?uncertaintyValue.actorId:undefined;
       const oldMetadata = duplicate?.metadata && typeof duplicate.metadata === "object" && !Array.isArray(duplicate.metadata) ? duplicate.metadata as Prisma.JsonObject : {};
-      if (duplicate && metaEchoAlreadyProcessed(oldMetadata)) return false;
+      if (duplicate && metaEchoAlreadyProcessed(oldMetadata) && !uncertainAttempt) return false;
       const mergedMetadata = mergeMetaEchoMetadata(oldMetadata, event.metadata, event.receiverId, sentAt);
-      const source = mergedMetadata.source === "CRM" ? "CRM" : "META";
-      const metadata = mergedMetadata as Prisma.InputJsonValue;
+      const metadata = { ...mergedMetadata, ...(uncertainAttempt ? { provider: "META", source: "CRM", receiverId: event.receiverId, recipientId: event.externalRecipientId } : {}) } as Prisma.InputJsonValue;
+      const source = (metadata as Prisma.JsonObject).source === "CRM" ? "CRM" : "META";
       const message = duplicate
-        ? await tx.message.update({ where: { id: duplicate.id }, data: { direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, createdAt: sentAt, sentAt, metadata } })
-        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, sentAt, metadata } });
+        ? await tx.message.update({ where: { id: duplicate.id }, data: { direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, createdAt: sentAt, sentAt, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } })
+        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, sentAt, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } });
       const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
       const existingAttachmentCount = duplicate ? await tx.messageAttachment.count({ where: { messageId: message.id } }) : 0;
       if (!existingAttachmentCount) for (const attachment of normalizedAttachments) await tx.messageAttachment.create({ data: { messageId: message.id, type: attachment.type || "attachment", externalUrl: attachment.url, metadata: attachment as Prisma.InputJsonValue } });
+      if(uncertainAttempt){
+        if(uncertainDraftId&&uncertainDraftId!==message.id){
+          const uncertainDraft=await tx.message.findFirst({where:{id:uncertainDraftId,conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT},select:{id:true,metadata:true}});
+          if(uncertainDraft){const draftMetadata=uncertainDraft.metadata&&typeof uncertainDraft.metadata==="object"&&!Array.isArray(uncertainDraft.metadata)?uncertainDraft.metadata as Prisma.JsonObject:{};await tx.message.update({where:{id:uncertainDraft.id},data:{status:MessageStatus.SENT,sentAt,metadata:{...draftMetadata,deduplicatedIntoMessageId:message.id}}});await tx.auditLog.create({data:{actorId:uncertainActorId,action:"MERGE",entityType:"Message",entityId:uncertainDraft.id,after:{channel:"WHATSAPP",deduplicatedIntoMessageId:message.id,externalId:event.externalMessageId}}})}
+        }
+        await tx.communicationAttachment.updateMany({where:{clientRequestId:uncertainAttempt.clientRequestId,messageId:null},data:{messageId:message.id,claimedAt:sentAt,clientRequestId:null}});
+        await tx.messageDeliveryAttempt.update({where:{id:uncertainAttempt.id},data:{status:"SENT",messageId:message.id}});
+        await tx.appSetting.deleteMany({where:{section:"integration.whatsapp.delivery-uncertain",key:uncertainAttempt.id}});
+        await tx.activity.create({data:{clientId:conversation.clientId,type:"WHATSAPP_DELIVERY_RECONCILED",summary:"Отправка WhatsApp подтверждена по echo",metadata:{attemptId:uncertainAttempt.id,messageId:message.id,channel:"WHATSAPP"}}});
+        await tx.auditLog.create({data:{action:"RECONCILE",entityType:"MessageDeliveryAttempt",entityId:uncertainAttempt.id,after:{channel:"WHATSAPP",status:"SENT",messageId:message.id,providerMessageIdMatched:true}}});
+        if(uncertainAiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:uncertainAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:conversation.clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:event.content,wasEdited:feedback.draftText!==event.content,accepted:true,rejected:false,sentMessageId:message.id}});else await tx.auditLog.create({data:{actorId:uncertainActorId,action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:uncertainAiRunId,after:{messageId:message.id}}})}
+      }
       const lastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt.getTime() > sentAt.getTime() ? conversation.lastMessageAt : sentAt;
       await tx.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt } });
       await tx.activity.create({ data: { clientId: conversation.clientId, type: "OUTBOUND_MESSAGE_SYNCED", summary: "Исходящее сообщение синхронизировано из " + event.channel, metadata: { messageId: message.id, channel: event.channel, source } } });
@@ -1240,6 +1317,24 @@ export class CommunicationsService {
   private cleanupEmailSentDuplicates(items:Array<{id:string;name:string}>){return cleanupEmailSentDuplicateFiles(items,name=>unlink(join(uploadsRoot(),"communication-files",name)),id=>this.p.$transaction([this.p.messageAttachment.deleteMany({where:{id}}),this.p.appSetting.deleteMany({where:{section:"integration.email.sent-cleanup",key:id}})]),error=>this.logger.warn(`EMAIL_SENT_DUPLICATE_CLEANUP_FAILED ${error instanceof Error?error.constructor.name:"UnknownError"}`))}
   async retryEmailSentCleanup(){const rows=await this.p.appSetting.findMany({where:{section:"integration.email.sent-cleanup"},select:{key:true,value:true},take:50}),items=rows.map(row=>({id:row.key,name:row.value&&typeof row.value==="object"&&!Array.isArray(row.value)&&typeof (row.value as Prisma.JsonObject).name==="string"?(row.value as Prisma.JsonObject).name as string:""})).filter(item=>COMMUNICATION_FILE.test(item.name));await this.cleanupEmailSentDuplicates(items)}
   async releaseEmailAttempt(id:string,u:User){return this.p.$transaction(async tx=>{const attempt=await tx.messageDeliveryAttempt.findFirst({where:{id,conversation:{channel:ContactChannel.EMAIL}},include:{conversation:{select:{clientId:true}}}});if(!attempt||!canReleaseEmailDelivery(attempt.status))throw new NotFoundException("Неопределённая отправка Gmail не найдена");await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+attempt.conversationId},0))`;const current=await tx.messageDeliveryAttempt.findUnique({where:{id}});if(!current||!canReleaseEmailDelivery(current.status))throw new ConflictException("Состояние отправки Gmail уже изменилось");await tx.communicationAttachment.updateMany({where:{clientRequestId:attempt.clientRequestId,messageId:null},data:{clientRequestId:null}});await tx.appSetting.deleteMany({where:{section:"integration.email.delivery-uncertain",key:id}});await tx.messageDeliveryAttempt.update({where:{id},data:{status:"FAILED"}});await tx.activity.create({data:{clientId:attempt.conversation.clientId,type:"EMAIL_DELIVERY_RESOLVED",summary:"Неопределённая отправка Gmail вручную разрешена для повторной отправки",metadata:{attemptId:id,channel:"EMAIL"}}});await tx.auditLog.create({data:{actorId:u.id,action:"RESOLVE",entityType:"MessageDeliveryAttempt",entityId:id,after:{channel:"EMAIL",status:"FAILED",retryAllowed:true}}});return{released:true,id}})}
+  async releaseWhatsappAttempt(id:string,u:User){return this.p.$transaction(async tx=>{
+    const attempt=await tx.messageDeliveryAttempt.findFirst({where:{id,conversation:{channel:ContactChannel.WHATSAPP}},include:{conversation:{select:{clientId:true}}}});
+    if(!attempt||attempt.status!=="UNCERTAIN")throw new NotFoundException("Неопределённая отправка WhatsApp не найдена");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+attempt.conversationId},0))`;
+    const uncertainty=await tx.appSetting.findUnique({where:{section_key:{section:"integration.whatsapp.delivery-uncertain",key:id}},select:{value:true}}),uncertaintyValue=uncertainty?.value&&typeof uncertainty.value==="object"&&!Array.isArray(uncertainty.value)?uncertainty.value as Prisma.JsonObject:{},aiRunId=typeof uncertaintyValue.aiRunId==="string"?uncertaintyValue.aiRunId:undefined;
+    return releaseUncertainWhatsappAttempt({
+      claim:async()=>(await tx.messageDeliveryAttempt.updateMany({where:{id,status:"UNCERTAIN",conversationId:attempt.conversationId},data:{status:"FAILED"}})).count===1,
+      releaseAttachment:()=>tx.communicationAttachment.updateMany({where:{clientRequestId:attempt.clientRequestId,messageId:null,claimedAt:null},data:{clientRequestId:null}}),
+      recordResolution:async()=>{
+        if(aiRunId)await tx.aiResponseFeedback.updateMany({where:{aiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:attempt.conversation.clientId,conversationId:attempt.conversationId,operation:"REPLY",status:AiRunStatus.COMPLETED}},data:{accepted:null}});
+        await tx.appSetting.deleteMany({where:{section:"integration.whatsapp.delivery-uncertain",key:id}});
+        await tx.activity.create({data:{clientId:attempt.conversation.clientId,type:"WHATSAPP_DELIVERY_RESOLVED",summary:"Неопределённая отправка WhatsApp вручную разрешена для повторной отправки",metadata:{attemptId:id,channel:"WHATSAPP"}}});
+        await tx.auditLog.create({data:{actorId:u.id,action:"RESOLVE",entityType:"MessageDeliveryAttempt",entityId:id,after:{channel:"WHATSAPP",status:"FAILED",retryAllowed:true}}});
+        return{released:true,id};
+      },
+      changedError:()=>new ConflictException("Состояние отправки WhatsApp уже изменилось"),
+    });
+  })}
   private async persistInbound(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT" | "EMAIL", rawPayload: Prisma.InputJsonValue) {
     return this.p.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
@@ -1386,7 +1481,7 @@ export class CommunicationsService {
       cursor = batch.at(-1)?.id;
       if (!cursor) break;
     }
-    return visible.slice(0, 300).reverse().map(({ conversation, ...message }) => ({ ...message, channel: conversation.channel }));
+    return visible.slice(0, 300).reverse().map(({ conversation, ...message }) => ({ ...message, metadata: messageMetadataForClient(message.id, message.metadata), channel: conversation.channel }));
   }
   async detail(clientId: string, channel?: ContactChannel) {
     const client = await this.p.client.findFirst({
@@ -1446,27 +1541,45 @@ export class CommunicationsService {
   }
   async downloadMessageAttachment(messageId: string, index: number) {
     if (!Number.isInteger(index) || index < 0 || index > 99) throw new NotFoundException("Вложение не найдено");
-    const [message, chatwootValues] = await Promise.all([
+    const [message, chatwootValues, metaValues] = await Promise.all([
       this.p.message.findFirst({
         where: { id: messageId, conversation: { archivedAt: null, client: { archivedAt: null } } },
-        select: { metadata: true },
+        select: { metadata: true, conversation: { select: { channel: true } } },
       }),
       this.sectionValues("integration.chatwoot"),
+      this.sectionValues("integration.meta"),
     ]);
     const attachment = messageAttachments(message?.metadata ?? null)[index];
     if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) throw new NotFoundException("Вложение не найдено");
     const type = String((attachment as { type?: unknown }).type || "");
     const rawUrl = (attachment as { url?: unknown }).url;
-    if (!["image", "sticker", "video"].includes(type) || typeof rawUrl !== "string") throw new NotFoundException("Вложение не найдено");
+    const mediaId = (attachment as { mediaId?: unknown }).mediaId;
+    if (message?.conversation.channel === ContactChannel.WHATSAPP && typeof mediaId === "string" && /^\d+$/.test(mediaId)) {
+      const token = this.secretValue(metaValues, "whatsappAccessTokenEncrypted");
+      if (!token) throw new BadRequestException("Канал WhatsApp не подключён");
+      const media = await this.metaGraph<{ url?: string; mime_type?: string; file_size?: number }>(mediaId, token, {}, "GET", undefined, true);
+      const mediaUrl = trustedWhatsappMediaUrl(media.url);
+      if (!mediaUrl || Number(media.file_size || 0) > REMOTE_MEDIA_MAX_BYTES) throw new NotFoundException("Вложение не найдено");
+      const response = await fetch(mediaUrl, { headers: { Authorization: "Bearer " + token }, redirect: "error", signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+      if (!response?.ok || !response.body) throw new BadGatewayException("Не удалось загрузить вложение WhatsApp");
+      const contentLength = Number(response.headers.get("content-length") || media.file_size || 0);
+      if (contentLength > REMOTE_MEDIA_MAX_BYTES) throw new BadRequestException("Вложение превышает 50 МБ");
+      const contentType = String(media.mime_type || response.headers.get("content-type") || "application/octet-stream").split(";")[0]!.trim().toLowerCase();
+      if (!(contentType.startsWith("image/") || contentType.startsWith("video/") || contentType.startsWith("audio/") || ["application/pdf", "text/plain", "application/octet-stream"].includes(contentType))) throw new BadGatewayException("Источник вернул неподдерживаемый формат");
+      const extension = whatsappMediaExtension(contentType);
+      const body = await boundedRemoteMedia(response.body);
+      return { body, contentType, contentLength: body.length, filename: `whatsapp-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
+    }
+    if (!["image", "sticker", "video", "file"].includes(type) || typeof rawUrl !== "string") throw new NotFoundException("Вложение не найдено");
     const webOrigin = new URL((process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim());
     const candidateLocal = new URL(rawUrl, webOrigin);
-    const localMatch = candidateLocal.origin === webOrigin.origin ? /^\/api\/communications\/files\/([a-f0-9-]+\.(?:jpg|png|webp|gif))$/.exec(candidateLocal.pathname) : null;
+    const localMatch = candidateLocal.origin === webOrigin.origin ? /^\/api\/communications\/files\/([a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|mp4|ogg|mp3|m4a))$/.exec(candidateLocal.pathname) : null;
     if (localMatch?.[1] && COMMUNICATION_FILE.test(localMatch[1])) {
       const path = join(uploadsRoot(), "communication-files", localMatch[1]);
       const file = await stat(path).catch(() => null);
       if (!file?.isFile() || file.size > REMOTE_MEDIA_MAX_BYTES) throw new NotFoundException("Вложение не найдено");
       const extension = localMatch[1].split(".").at(-1) || "jpg";
-      const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : "image/jpeg";
+      const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : extension === "pdf" ? "application/pdf" : extension === "txt" ? "text/plain" : extension === "mp4" ? "video/mp4" : extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "image/jpeg";
       return { body: await readFile(path), contentType, contentLength: file.size, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
     }
     const chatwootOrigin = configuredHttpsOrigin(chatwootValues.baseUrl);
@@ -1694,7 +1807,7 @@ export class CommunicationsService {
               const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
               if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
             }
-            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
+            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return { kind: "PENDING" as const };
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
             if (attachment) {
@@ -1743,29 +1856,35 @@ export class CommunicationsService {
           }),
         });
       }
-      if (channel !== ContactChannel.FACEBOOK && channel !== ContactChannel.INSTAGRAM)
+      if (channel !== ContactChannel.FACEBOOK && channel !== ContactChannel.INSTAGRAM && channel !== ContactChannel.WHATSAPP)
         throw new BadRequestException("Отправка для выбранного канала ещё не настроена. Сохраните сообщение как черновик");
-      const metaChannel: "FACEBOOK" | "INSTAGRAM" = channel;
+      const metaChannel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" = channel;
       const [conversation, values] = await Promise.all([
         this.p.conversation.findFirst({ where: { clientId, channel, archivedAt: null } }),
         this.sectionValues("integration.meta"),
       ]);
-      const receiverId = channel === ContactChannel.INSTAGRAM
-          ? (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "")
-          : (typeof values.pageId === "string" ? values.pageId : ""),
+      const receiverId = channel === ContactChannel.WHATSAPP
+          ? (typeof values.whatsappPhoneNumberId === "string" ? values.whatsappPhoneNumberId : "")
+          : channel === ContactChannel.INSTAGRAM
+            ? (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "")
+            : (typeof values.pageId === "string" ? values.pageId : ""),
         instagramWebhookReceiverId = channel === ContactChannel.INSTAGRAM && typeof values.instagramWebhookReceiverId === "string" && /^\d+$/.test(values.instagramWebhookReceiverId)
           ? values.instagramWebhookReceiverId
           : "",
-        pageToken = channel === ContactChannel.INSTAGRAM
-          ? this.secretValue(values, "instagramAccessTokenEncrypted")
-          : this.secretValue(values, "pageAccessTokenEncrypted"),
-        appSecret = channel === ContactChannel.INSTAGRAM
-          ? this.secretValue(values, "instagramAppSecretEncrypted")
-          : this.secretValue(values, "appSecretEncrypted"),
+        pageToken = channel === ContactChannel.WHATSAPP
+          ? this.secretValue(values, "whatsappAccessTokenEncrypted")
+          : channel === ContactChannel.INSTAGRAM
+            ? this.secretValue(values, "instagramAccessTokenEncrypted")
+            : this.secretValue(values, "pageAccessTokenEncrypted"),
+        appSecret = channel === ContactChannel.WHATSAPP
+          ? undefined
+          : channel === ContactChannel.INSTAGRAM
+            ? this.secretValue(values, "instagramAppSecretEncrypted")
+            : this.secretValue(values, "appSecretEncrypted"),
         recipientId = channel === ContactChannel.INSTAGRAM
           ? metaRecipientIdForReceivers([receiverId, instagramWebhookReceiverId], conversation?.externalId)
           : metaRecipientId(receiverId, conversation?.externalId);
-      const channelName = channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
+      const channelName = channel === ContactChannel.WHATSAPP ? "WhatsApp" : channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
       if (values.enabled !== true || !receiverId || !pageToken)
         throw new BadRequestException(`Канал ${channelName} не подключён`);
       if (!conversation || !recipientId)
@@ -1781,7 +1900,7 @@ export class CommunicationsService {
               const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
               if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
             }
-            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: "PENDING" } });
+            const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return pending;
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
             if (attachment) {
@@ -1801,10 +1920,18 @@ export class CommunicationsService {
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
         deliver: async () => {
-          const params = attachment ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl) : metaTextMessageParams(recipientId, content);
-          const send = () => channel === ContactChannel.INSTAGRAM
-            ? this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params, "POST", true)
-            : this.metaGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params, "POST", appSecret, true);
+          const params = channel === ContactChannel.WHATSAPP
+            ? attachment
+              ? whatsappAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, attachment.name)
+              : whatsappTextMessageParams(recipientId, content)
+            : attachment
+              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl)
+              : metaTextMessageParams(recipientId, content);
+          const send = () => channel === ContactChannel.WHATSAPP
+            ? this.whatsappGraph<{ messages?: Array<{ id?: string }> }>(receiverId + "/messages", pageToken, params)
+            : channel === ContactChannel.INSTAGRAM
+              ? this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", true)
+              : this.metaGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", appSecret, true);
           const result = await deliverMetaMessage(metaChannel, {
             send,
             takeControl: () => channel === ContactChannel.FACEBOOK
@@ -1814,11 +1941,31 @@ export class CommunicationsService {
             onTakeControlSuccess: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_TAKEN"),
             onTakeControlFailure: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_FAILED"),
           });
-          if (!result.message_id)
-            throw new BadGatewayException("Meta не вернула идентификатор сообщения");
-          return result;
+          const providerMessageId = "message_id" in result && typeof result.message_id === "string" ? result.message_id : "";
+          const messageId = channel === ContactChannel.WHATSAPP ? whatsappMessageId(result) : providerMessageId;
+          if (!messageId)
+            throw channel === ContactChannel.WHATSAPP ? new MetaDeliveryUncertainError() : new BadGatewayException("Meta не вернула идентификатор сообщения");
+          return {
+            ...(typeof (result as { recipient_id?: unknown }).recipient_id === "string" ? { recipient_id: (result as { recipient_id: string }).recipient_id } : {}),
+            message_id: messageId,
+          };
         },
-        persistFailure: async (error) => this.p.$transaction(async (tx) => {
+        persistFailure: async (error) => {
+          if (channel === ContactChannel.WHATSAPP && error instanceof MetaDeliveryUncertainError) {
+            await this.p.$transaction(async tx => {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id}, 0))`;
+              const attempt = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
+              if (!attempt || attempt.conversationId !== conversation.id || attempt.status !== "PENDING")
+                throw new ConflictException("Состояние отправки WhatsApp уже изменилось");
+              await tx.messageDeliveryAttempt.update({ where: { id: attempt.id }, data: { status: "UNCERTAIN" } });
+              const uncertaintyValue = { ...(draft ? { draftMessageId: draft.id } : {}), ...(d.aiRunId ? { aiRunId: d.aiRunId } : {}), actorId: u.id };
+              await tx.appSetting.upsert({ where: { section_key: { section: "integration.whatsapp.delivery-uncertain", key: attempt.id } }, create: { section: "integration.whatsapp.delivery-uncertain", key: attempt.id, value: uncertaintyValue }, update: { value: uncertaintyValue } });
+              await tx.activity.create({ data: { clientId, type: "MESSAGE_DELIVERY_UNCERTAIN", summary: "WhatsApp не подтвердил результат отправки; повтор заблокирован", metadata: { attemptId: attempt.id, channel } } });
+              await tx.auditLog.create({ data: { actorId: u.id, action: "DELIVERY_UNCERTAIN", entityType: "MessageDeliveryAttempt", entityId: attempt.id, after: { channel, status: "UNCERTAIN", requiresManualResolution: true } } });
+            });
+            throw new ConflictException("WhatsApp не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат");
+          }
+          return this.p.$transaction(async (tx) => {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
           const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
           const failureMetadata={...draftMetadata,provider:"META",source:"CRM",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
@@ -1830,7 +1977,8 @@ export class CommunicationsService {
           await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: m.id, after: { id: m.id, channel, status: MessageStatus.FAILED } } });
           if(d.aiRunId)await tx.aiResponseFeedback.updateMany({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:false},data:{accepted:null}});
           return { ...m, status: MessageStatus.FAILED, channel };
-        }),
+          });
+        },
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
         const sentAt=new Date();
         const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
@@ -1859,6 +2007,39 @@ export class CommunicationsService {
         if(d.aiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:false,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback){await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:content,wasEdited:feedback.draftText!==content,accepted:true,rejected:false,sentMessageId:m.id}})}else await tx.auditLog.create({data:{actorId:u.id,action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:d.aiRunId,after:{messageId:m.id}}})}
         return { ...m, channel };
         }),
+        persistSuccessFailure:channel===ContactChannel.WHATSAPP?async(result,error)=>{
+          const outcome=await this.p.$transaction(async tx=>{
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;
+            const attempt=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});
+            let existing=await tx.message.findUnique({where:{conversationId_externalId:{conversationId:conversation.id,externalId:result.message_id!}}});
+            if(existing){
+              if(attempt?.status==="PENDING"){
+                const existingMetadata=existing.metadata&&typeof existing.metadata==="object"&&!Array.isArray(existing.metadata)?existing.metadata as Prisma.JsonObject:{},persistedAttachment=attachment&&(({providerUrl:_providerUrl,...safe})=>safe)(attachment),reconciledMetadata={...existingMetadata,...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+                existing=await tx.message.update({where:{id:existing.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:content||attachment?.name||"[Вложение]",authorId:u.id,metadata:reconciledMetadata}});
+                if(draft&&draft.id!==existing.id){
+                  const currentDraft=await tx.message.findFirst({where:{id:draft.id,conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT},select:{id:true,metadata:true}});
+                  if(currentDraft){const currentDraftMetadata=currentDraft.metadata&&typeof currentDraft.metadata==="object"&&!Array.isArray(currentDraft.metadata)?currentDraft.metadata as Prisma.JsonObject:{};await tx.message.update({where:{id:currentDraft.id},data:{status:MessageStatus.SENT,sentAt:new Date(),metadata:{...currentDraftMetadata,deduplicatedIntoMessageId:existing.id}}});await tx.auditLog.create({data:{actorId:u.id,action:"MERGE",entityType:"Message",entityId:currentDraft.id,after:{channel:"WHATSAPP",deduplicatedIntoMessageId:existing.id,externalId:result.message_id}}})}
+                }
+                await tx.communicationAttachment.updateMany({where:{clientRequestId:attempt.clientRequestId,messageId:null},data:{messageId:existing.id,claimedAt:new Date(),clientRequestId:null}});
+                await tx.messageDeliveryAttempt.update({where:{id:attempt.id},data:{status:"SENT",messageId:existing.id}});
+                await tx.appSetting.deleteMany({where:{section:"integration.whatsapp.delivery-uncertain",key:attempt.id}});
+                await tx.activity.create({data:{clientId,type:"WHATSAPP_DELIVERY_RECONCILED",summary:"Отправка WhatsApp подтверждена по echo",metadata:{attemptId:attempt.id,messageId:existing.id,channel:"WHATSAPP"}}});
+                await tx.auditLog.create({data:{actorId:u.id,action:"RECONCILE",entityType:"MessageDeliveryAttempt",entityId:attempt.id,after:{channel:"WHATSAPP",status:"SENT",messageId:existing.id,providerMessageIdMatched:true}}});
+                if(d.aiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:false,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:content,wasEdited:feedback.draftText!==content,accepted:true,rejected:false,sentMessageId:existing.id}});else await tx.auditLog.create({data:{actorId:u.id,action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:d.aiRunId,after:{messageId:existing.id}}})}
+              }
+              return{kind:"SENT" as const,message:{...existing,channel}};
+            }
+            if(!attempt||attempt.status!=="PENDING")throw new ConflictException("Состояние отправки WhatsApp уже изменилось");
+            await tx.messageDeliveryAttempt.update({where:{id:attempt.id},data:{status:"UNCERTAIN"}});
+            const uncertaintyValue={providerMessageId:result.message_id,...(draft?{draftMessageId:draft.id}:{}),...(d.aiRunId?{aiRunId:d.aiRunId}:{}),actorId:u.id};
+            await tx.appSetting.upsert({where:{section_key:{section:"integration.whatsapp.delivery-uncertain",key:attempt.id}},create:{section:"integration.whatsapp.delivery-uncertain",key:attempt.id,value:uncertaintyValue},update:{value:uncertaintyValue}});
+            await tx.activity.create({data:{clientId,type:"MESSAGE_DELIVERY_UNCERTAIN",summary:"WhatsApp принял сообщение, но CRM не сохранила результат; повтор заблокирован",metadata:{attemptId:attempt.id,channel:"WHATSAPP"}}});
+            await tx.auditLog.create({data:{actorId:u.id,action:"DELIVERY_UNCERTAIN",entityType:"MessageDeliveryAttempt",entityId:attempt.id,after:{channel:"WHATSAPP",status:"UNCERTAIN",providerMessageIdStored:true,requiresManualResolution:true,failureType:error instanceof Error?error.constructor.name:"UnknownError"}}});
+            return{kind:"UNCERTAIN" as const};
+          });
+          if(outcome.kind==="SENT")return outcome.message;
+          throw new ConflictException("WhatsApp принял сообщение, но CRM не подтвердила сохранение. Повтор заблокирован, чтобы клиент не получил дубликат");
+        }:undefined,
       });
     }
     return this.p.$transaction(async (tx) => {

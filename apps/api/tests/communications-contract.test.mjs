@@ -16,6 +16,7 @@ const controller = await readFile(
   ),
   "utf8",
 );
+const whatsappMedia = await readFile(new URL("../src/communications/whatsapp-media.ts", import.meta.url), "utf8");
 const dto = (
   await readFile(
     new URL("../src/communications/communications.dto.ts", import.meta.url),
@@ -210,7 +211,7 @@ test("conversation and draft are created atomically", () => {
   );
   assert.doesNotMatch(x, /this\.p\.conversation\.upsert/);
 });
-test("outbound Facebook and Instagram messages distinguish drafts from real Meta sends", () => {
+test("outbound Facebook, Instagram and WhatsApp messages distinguish drafts from real provider sends", () => {
   assert.match(dto, /@IsIn\(\["DRAFT","SEND"\]asconst\)action/);
   const x = service.slice(
     service.indexOf("asyncsend"),
@@ -219,6 +220,11 @@ test("outbound Facebook and Instagram messages distinguish drafts from real Meta
   assert.match(x, /d\.action==="SEND"/);
   assert.match(x, /receiverId\+"\/messages"/);
   assert.match(x, /ContactChannel\.INSTAGRAM/);
+  assert.match(x, /ContactChannel\.WHATSAPP/);
+  assert.match(x, /whatsappAccessTokenEncrypted/);
+  assert.match(x, /whatsappTextMessageParams/);
+  assert.match(x, /whatsappAttachmentMessageParams/);
+  assert.match(x, /whatsappMessageId/);
   assert.match(x, /deliverMetaMessage\(metaChannel/);
   assert.match(x, /metaTextMessageParams\(recipientId,content\)/);
   assert.match(x, /metaRecipientIdForReceivers\(\[receiverId,instagramWebhookReceiverId\],conversation\?\.externalId\)/);
@@ -295,10 +301,45 @@ test("inbound Meta media is downloaded through an authenticated same-origin endp
   assert.match(service, /redirect:\s*"manual"/);
   assert.match(service, /REMOTE_MEDIA_MAX_BYTES/);
   assert.match(service, /boundedRemoteMedia/);
-  assert.match(service, /\["image","sticker","video"\]/);
+  assert.match(service, /\["image","sticker","video","file"\]/);
   assert.match(service, /candidateLocal\.origin===webOrigin\.origin/);
   assert.match(service, /readFile\(path\)/);
   assert.match(service, /type==="video"\|\|contentType\.startsWith\("video\/"\)/);
+  assert.match(service, /materializeWhatsappMedia/);
+  assert.match(service, /materializeWhatsappAttachments/);
+  assert.match(whatsappMedia, /materializationStatus/);
+  assert.match(service, /url:`\/api\/communications\/files\/\$\{path\}`/);
+  assert.match(controller, /isCommunicationFileName/);
+});
+
+test("uncertain WhatsApp sends remain blocked from retries", () => {
+  const whatsappSend = service.slice(
+    service.indexOf('constchannelName=channel===ContactChannel.WHATSAPP'),
+    service.indexOf('@Injectable()exportclassAiAssistantService'),
+  );
+  assert.match(whatsappSend, /MetaDeliveryUncertainError/);
+  assert.match(whatsappSend, /status:\s*"UNCERTAIN"/);
+  assert.match(whatsappSend, /conversationId:conversation\.id,status:\{in:\["PENDING","UNCERTAIN"\]\}/);
+  assert.match(whatsappSend, /Повторзаблокирован,чтобыклиентнеполучилдубликат/);
+  assert.match(controller, /@Post\("whatsapp\/attempts\/:id\/release"\)@Roles\("OWNER","ADMIN"\)/);
+  assert.match(service, /asyncreleaseWhatsappAttempt/);
+  assert.match(service, /message-send:"\+attempt\.conversationId/);
+  assert.match(service, /status:"UNCERTAIN",conversationId:attempt\.conversationId/);
+  assert.match(service, /WHATSAPP_DELIVERY_RESOLVED/);
+  assert.match(service, /clientRequestId:attempt\.clientRequestId,messageId:null,claimedAt:null/);
+  assert.match(whatsappSend, /persistSuccessFailure:channel===ContactChannel\.WHATSAPP/);
+  assert.match(whatsappSend, /integration\.whatsapp\.delivery-uncertain/);
+  assert.match(whatsappSend, /message-send:"\+conversation\.id/);
+  assert.match(whatsappSend, /uncertaintyValue=.*aiRunId:d\.aiRunId/);
+  assert.match(whatsappSend, /providerMessageId:result\.message_id/);
+  assert.match(whatsappSend, /draftMessageId:draft\.id/);
+  assert.match(whatsappSend, /deduplicatedIntoMessageId:existing\.id/);
+  assert.match(whatsappSend, /sentMessageId:existing\.id/);
+  assert.match(service, /uncertainDraftId&&uncertainDraftId!==message\.id/);
+  assert.match(service, /data:\{accepted:null\}/);
+  assert.match(service, /source:"CRM",receiverId:event\.receiverId,recipientId:event\.externalRecipientId/);
+  assert.match(whatsappSend, /authorId:u\.id,metadata:reconciledMetadata/);
+  assert.match(service, /WHATSAPP_DELIVERY_RECONCILED/);
 });
 test("AI requests are rate limited and concurrency bounded per user", () => {
   assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);

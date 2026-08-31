@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, metaThreadControlParams, metaSendFailure, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { MetaDeliveryUncertainError, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -36,6 +36,32 @@ test("Meta send builds a reusable Messenger attachment payload", () => {
   assert.equal(JSON.stringify(params).includes("token"), false);
 });
 
+test("WhatsApp send builds Cloud API text and attachment payloads without credentials", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappTextMessageParams("380633582077", "Здравствуйте"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "text",
+    text: { preview_url: true, body: "Здравствуйте" },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "image",
+    image: { link: "https://crm.yoleotard.com/media.jpg", caption: "model.jpg" },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "file", "https://crm.yoleotard.com/model.pdf", "model.pdf"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "document",
+    document: { link: "https://crm.yoleotard.com/model.pdf", filename: "model.pdf" },
+  });
+  assert.equal(whatsappMessageId({ messages: [{ id: "wamid-1" }] }), "wamid-1");
+  assert.equal(whatsappMessageId({ messages: [] }), "");
+});
+
 test("Instagram send uses the configured account scope and never invokes Facebook thread control", async () => {
   assert.equal(metaRecipientId("ig-business-1", "ig-business-1:igsid-7"), "igsid-7");
   const calls = [];
@@ -47,6 +73,19 @@ test("Instagram send uses the configured account scope and never invokes Faceboo
     onTakeControlFailure: async () => calls.push("audit-failure"),
   });
   assert.equal(result.message_id, "ig-mid-1");
+  assert.deepEqual(calls, ["send"]);
+});
+
+test("WhatsApp send never invokes Facebook thread control", async () => {
+  const calls = [];
+  const result = await deliverMetaMessage("WHATSAPP", {
+    send: async () => (calls.push("send"), { messages: [{ id: "wamid-1" }] }),
+    takeControl: async () => calls.push("take-control"),
+    isThreadControlError: () => true,
+    onTakeControlSuccess: async () => calls.push("audit-success"),
+    onTakeControlFailure: async () => calls.push("audit-failure"),
+  });
+  assert.equal(result.messages[0].id, "wamid-1");
   assert.deepEqual(calls, ["send"]);
 });
 
@@ -189,4 +228,199 @@ test("concurrent and repeated delivery uses the provider exactly once", async ()
   assert.deepEqual(await first, { id: "message-1", externalId: "mid-1" });
   assert.deepEqual(await operation(), { id: "message-1", externalId: "mid-1" });
   assert.equal(providerCalls, 1);
+});
+
+test("an uncertain provider result reaches the durable blocking path instead of confirmed failure", async () => {
+  let uncertain = false, confirmedFailure = false;
+  await assert.rejects(() => runMetaSendOnce({
+    reserve: async () => ({ kind: "NEW" }),
+    deliver: async () => { throw new MetaDeliveryUncertainError(); },
+    persistSuccess: async () => { throw new Error("not expected"); },
+    persistFailure: async error => {
+      uncertain = error instanceof MetaDeliveryUncertainError;
+      if (!uncertain) confirmedFailure = true;
+      throw new Error("retry blocked");
+    },
+    pendingError: () => new Error("pending"),
+  }), /retry blocked/);
+  assert.equal(uncertain, true);
+  assert.equal(confirmedFailure, false);
+});
+
+test("network uncertainty persists the AI reservation so manual release makes it reusable", async () => {
+  let status = "EMPTY", aiAccepted = null;
+  const records = new Map();
+  await assert.rejects(() => runMetaSendOnce({
+    reserve: async () => {
+      status = "PENDING";
+      aiAccepted = false;
+      return { kind: "NEW" };
+    },
+    deliver: async () => { throw new MetaDeliveryUncertainError(); },
+    persistSuccess: async () => { throw new Error("not expected"); },
+    persistFailure: async error => {
+      assert.equal(error instanceof MetaDeliveryUncertainError, true);
+      status = "UNCERTAIN";
+      records.set("attempt-1", { aiRunId: "ai-run-1", actorId: "owner-1" });
+      throw new Error("UNCERTAIN");
+    },
+    pendingError: () => new Error("PENDING"),
+  }), /UNCERTAIN/);
+
+  const result = await releaseUncertainWhatsappAttempt({
+    claim: async () => {
+      if (status !== "UNCERTAIN") return false;
+      status = "FAILED";
+      return true;
+    },
+    releaseAttachment: async () => {},
+    recordResolution: async () => {
+      if (records.get("attempt-1")?.aiRunId === "ai-run-1" && aiAccepted === false) aiAccepted = null;
+      records.delete("attempt-1");
+      return { released: true };
+    },
+    changedError: () => new Error("CHANGED"),
+  });
+
+  assert.deepEqual(result, { released: true });
+  assert.equal(status, "FAILED");
+  assert.equal(aiAccepted, null);
+  assert.equal(records.size, 0);
+});
+
+test("an uncertain WhatsApp attempt blocks a different request id before a second provider call", async () => {
+  const attempts = new Map();
+  let providerCalls = 0;
+  const operation = requestId => runMetaSendOnce({
+    reserve: async () => {
+      const existing = attempts.get(requestId);
+      if (existing === "PENDING" || existing === "UNCERTAIN") return { kind: "PENDING" };
+      if ([...attempts.values()].some(status => status === "PENDING" || status === "UNCERTAIN")) return { kind: "PENDING" };
+      attempts.set(requestId, "PENDING");
+      return { kind: "NEW" };
+    },
+    deliver: async () => {
+      providerCalls += 1;
+      throw new MetaDeliveryUncertainError();
+    },
+    persistSuccess: async () => { throw new Error("not expected"); },
+    persistFailure: async error => {
+      assert.equal(error instanceof MetaDeliveryUncertainError, true);
+      attempts.set(requestId, "UNCERTAIN");
+      throw new Error("UNCERTAIN");
+    },
+    pendingError: () => new Error("PENDING_OR_UNCERTAIN"),
+  });
+
+  await assert.rejects(operation("request-1"), /UNCERTAIN/);
+  await assert.rejects(operation("request-2"), /PENDING_OR_UNCERTAIN/);
+  assert.equal(providerCalls, 1);
+});
+
+test("manual WhatsApp uncertainty release is single-winner and releases attachment and AI reservation once", async () => {
+  let status = "UNCERTAIN", attachmentClaim = "request-1", aiAccepted = false, attachmentReleases = 0, auditRecords = 0;
+  const release = () => releaseUncertainWhatsappAttempt({
+    claim: async () => {
+      if (status !== "UNCERTAIN") return false;
+      status = "FAILED";
+      return true;
+    },
+    releaseAttachment: async () => {
+      attachmentClaim = null;
+      attachmentReleases += 1;
+    },
+    recordResolution: async () => {
+      aiAccepted = null;
+      auditRecords += 1;
+      return { released: true };
+    },
+    changedError: () => new Error("CHANGED"),
+  });
+
+  const results = await Promise.allSettled([release(), release()]);
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter(result => result.status === "rejected" && /CHANGED/.test(result.reason.message)).length, 1);
+  assert.equal(status, "FAILED");
+  assert.equal(attachmentClaim, null);
+  assert.equal(attachmentReleases, 1);
+  assert.equal(aiAccepted, null);
+  assert.equal(auditRecords, 1);
+  await assert.rejects(release(), /CHANGED/);
+  assert.equal(attachmentReleases, 1);
+  assert.equal(auditRecords, 1);
+});
+
+test("provider success followed by persistence failure blocks duplicates until an authorized release", async () => {
+  const attempts = new Map();
+  let providerCalls = 0, storedProviderId = "", failPersistence = true;
+  const operation = requestId => runMetaSendOnce({
+    reserve: async () => {
+      if ([...attempts.values()].some(status => status === "PENDING" || status === "UNCERTAIN")) return { kind: "PENDING" };
+      attempts.set(requestId, "PENDING");
+      return { kind: "NEW" };
+    },
+    deliver: async () => ({ message_id: `wamid-${++providerCalls}` }),
+    persistSuccess: async provider => {
+      if (failPersistence) throw new Error("database unavailable");
+      attempts.set(requestId, "SENT");
+      return { externalId: provider.message_id };
+    },
+    persistSuccessFailure: async (provider, error) => {
+      assert.match(error.message, /database unavailable/);
+      storedProviderId = provider.message_id;
+      attempts.set(requestId, "UNCERTAIN");
+      throw new Error("UNCERTAIN");
+    },
+    persistFailure: async () => { throw new Error("provider did not fail"); },
+    pendingError: () => new Error("PENDING_OR_UNCERTAIN"),
+  });
+
+  await assert.rejects(operation("request-1"), /UNCERTAIN/);
+  assert.equal(storedProviderId, "wamid-1");
+  await assert.rejects(operation("request-2"), /PENDING_OR_UNCERTAIN/);
+  assert.equal(providerCalls, 1);
+
+  await releaseUncertainWhatsappAttempt({
+    claim: async () => attempts.get("request-1") === "UNCERTAIN" && (attempts.set("request-1", "FAILED"), true),
+    releaseAttachment: async () => undefined,
+    recordResolution: async () => ({ released: true }),
+    changedError: () => new Error("CHANGED"),
+  });
+  failPersistence = false;
+  assert.deepEqual(await operation("request-2"), { externalId: "wamid-2" });
+  assert.equal(providerCalls, 2);
+});
+
+test("an echo-first persistence race reconciles the draft and prevents it from being sent again", async () => {
+  let attemptStatus = "PENDING", draftStatus = "DRAFT", deduplicatedIntoMessageId = "", aiFeedbackMessageId = "", providerCalls = 0;
+  const echoedMessage = { id: "echo-message-1", externalId: "wamid-1", authorId: null, metadata: { source: "META", providerSnapshot: { status: "echo" }, attachments: [{ type: "image", mediaId: "media-1" }] } };
+  const result = await runMetaSendOnce({
+    reserve: async () => attemptStatus === "PENDING" ? { kind: "NEW" } : { kind: "PENDING" },
+    deliver: async () => ({ message_id: `wamid-${++providerCalls}` }),
+    persistSuccess: async () => { throw new Error("echo won the database race"); },
+    persistSuccessFailure: async provider => {
+      assert.equal(provider.message_id, echoedMessage.externalId);
+      echoedMessage.authorId = "owner-1";
+      echoedMessage.metadata = { ...echoedMessage.metadata, source: "CRM", provider: "META", receiverId: "phone-1", recipientId: "client-1" };
+      draftStatus = "SENT";
+      deduplicatedIntoMessageId = echoedMessage.id;
+      aiFeedbackMessageId = echoedMessage.id;
+      attemptStatus = "SENT";
+      return echoedMessage;
+    },
+    persistFailure: async () => { throw new Error("provider did not fail"); },
+    pendingError: () => new Error("BLOCKED"),
+  });
+
+  assert.deepEqual(result, echoedMessage);
+  assert.equal(providerCalls, 1);
+  assert.equal(attemptStatus, "SENT");
+  assert.equal(draftStatus, "SENT");
+  assert.equal(deduplicatedIntoMessageId, echoedMessage.id);
+  assert.equal(aiFeedbackMessageId, echoedMessage.id);
+  assert.equal(draftStatus === "DRAFT", false);
+  assert.equal(echoedMessage.authorId, "owner-1");
+  assert.equal(echoedMessage.metadata.source, "CRM");
+  assert.deepEqual(echoedMessage.metadata.providerSnapshot, { status: "echo" });
+  assert.deepEqual(echoedMessage.metadata.attachments, [{ type: "image", mediaId: "media-1" }]);
 });

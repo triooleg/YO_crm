@@ -11,6 +11,7 @@ import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
 import{uploadsRoot}from"../uploads";
 import{EmailSyncService}from"./email-sync.service";
+import{isCommunicationFileName}from"./communication-file";
 
 @Controller("communications")@UseGuards(SessionGuard,RolesGuard)
 export class CommunicationsController{constructor(private c:CommunicationsService,private emailSync:EmailSyncService){}
@@ -33,6 +34,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Patch("integrations/:channel")@Roles("OWNER","ADMIN")saveIntegration(@Param("channel")channel:string,@Body()d:IntegrationSettingsDto,@Req()r:Request&{user:User}){return this.c.saveIntegration(channel,d,r.user)}
 @Post("email/verify")@Roles("OWNER","ADMIN")verifyEmail(){return this.c.verifyEmail()}
 @Post("email/attempts/:id/release")@Roles("OWNER","ADMIN")releaseEmailAttempt(@Param("id")id:string,@Req()r:Request&{user:User}){return this.c.releaseEmailAttempt(id,r.user)}
+@Post("whatsapp/attempts/:id/release")@Roles("OWNER","ADMIN")releaseWhatsappAttempt(@Param("id")id:string,@Req()r:Request&{user:User}){return this.c.releaseWhatsappAttempt(id,r.user)}
 @Post("email/failures/:key/retry")@Roles("OWNER","ADMIN")retryEmailFailure(@Param("key")key:string,@Req()r:Request&{user:User}){return this.emailSync.retryFailure(key,r.user.id)}
 @Get("meta/settings")@Roles("OWNER","ADMIN")metaSettings(){return this.c.metaSettings()}
 @Patch("meta/settings")@Roles("OWNER","ADMIN")saveMetaSettings(@Body()d:MetaIntegrationDto,@Req()r:Request&{user:User}){return this.c.saveMetaSettings(d,r.user)}
@@ -48,7 +50,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Get("meta/data-deletion-requests")@Roles("OWNER","ADMIN")metaDataDeletionRequests(){return this.c.listMetaDataDeletionRequests()}
 @Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
 @Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}
-@Get("messages/:messageId/attachments/:index/download")@Roles("OWNER","ADMIN","MANAGER")async downloadAttachment(@Param("messageId")messageId:string,@Param("index")indexRaw:string,@Res()res:Response){const download=await this.c.downloadMessageAttachment(messageId,Number(indexRaw));res.setHeader("Content-Type",download.contentType);res.setHeader("Content-Disposition",`attachment; filename="${download.filename}"`);res.setHeader("Content-Length",String(download.contentLength));return res.send(download.body)}
+@Get("messages/:messageId/attachments/:index/download")@Roles("OWNER","ADMIN","MANAGER")async downloadAttachment(@Param("messageId")messageId:string,@Param("index")indexRaw:string,@Query("inline")inline:string|undefined,@Res()res:Response){const download=await this.c.downloadMessageAttachment(messageId,Number(indexRaw));res.setHeader("Content-Type",download.contentType);res.setHeader("Content-Disposition",`${inline==="1"?"inline":"attachment"}; filename="${download.filename}"`);res.setHeader("Content-Length",String(download.contentLength));return res.send(download.body)}
 @Post("messages/:messageId/reaction")@Roles("OWNER","ADMIN","MANAGER")react(@Param("messageId")messageId:string,@Body()d:MessageReactionDto,@Req()r:Request&{user:User}){return this.c.reactToMessage(messageId,d,r.user)}
 @Patch(":clientId/read")@Roles("OWNER","ADMIN","MANAGER")markRead(@Param("clientId")id:string,@Body()d:MarkConversationsReadDto,@Req()r:Request&{user:User}){return this.c.markRead(id,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
@@ -56,12 +58,12 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 
 @Controller("communications/files")@UseGuards(SessionGuard,RolesGuard)
 export class CommunicationFilesController{
-@Get(":name")@Roles("OWNER","ADMIN","MANAGER")file(@Param("name")name:string,@Res()res:Response){if(!/^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/.test(name))return res.status(404).end();return res.sendFile(join(uploadsRoot(),"communication-files",name))}}
+@Get(":name")@Roles("OWNER","ADMIN","MANAGER")file(@Param("name")name:string,@Res()res:Response){if(!isCommunicationFileName(name))return res.status(404).end();return res.sendFile(join(uploadsRoot(),"communication-files",name))}}
 
 @Controller("communications/meta-files")
 export class CommunicationMetaFilesController{
 @Get(":name")file(@Param("name")name:string,@Query("expires")expiresRaw:string,@Query("signature")signature:string,@Res()res:Response){
- if(!/^[a-f0-9-]+\.(jpg|png|webp|gif|pdf|txt)$/.test(name))return res.status(404).end();
+ if(!isCommunicationFileName(name))return res.status(404).end();
  const expires=Number(expiresRaw),now=Math.floor(Date.now()/1000),secret=process.env.SETTINGS_ENCRYPTION_KEY||"";
  if(!secret||!Number.isInteger(expires)||expires<now||expires>now+20*60||!/^[a-f0-9]{64}$/.test(signature||""))return res.status(403).end();
  const expected=createHmac("sha256",secret).update(`${name}:${expires}`).digest("hex"),a=Buffer.from(expected),b=Buffer.from(signature);
