@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "../src/communications/chatwoot-delivery.ts";
+import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "../src/communications/chatwoot-delivery.ts";
 
 const event = {
   channel: "CHATWOOT",
@@ -34,6 +34,21 @@ test("Chatwoot media accepts only the exact configured origin through every redi
   const firstRedirect = remoteMediaUrl(`${origin}/redirect`, origin);
   assert.ok(firstRedirect);
   assert.equal(remoteMediaUrl(new URL("https://internal.example/file", firstRedirect).toString(), origin), undefined);
+});
+
+test("Chatwoot conversation link is scoped to the configured HTTPS account", () => {
+  assert.equal(chatwootConversationInboxUrl("https://chatwoot.yoleotard.com", "2", "115"), "https://chatwoot.yoleotard.com/app/accounts/2/conversations/115");
+  assert.equal(chatwootConversationInboxUrl("https://user:pass@chatwoot.yoleotard.com", "2", "115"), "");
+  assert.equal(chatwootConversationInboxUrl("javascript:alert(1)", "2", "115"), "");
+  assert.equal(chatwootConversationInboxUrl("https://chatwoot.yoleotard.com", "2/x", "115"), "");
+});
+
+test("Chatwoot conversation link survives a newer local message without provider metadata", () => {
+  const messages = [
+    { metadata: { source: "CRM" } },
+    { metadata: { source: "CHATWOOT", chatwootConversationId: "115" } },
+  ];
+  assert.equal(chatwootConversationId(messages), "115");
 });
 
 test("Chatwoot multipart includes text and one attachment in the same provider request", async () => {

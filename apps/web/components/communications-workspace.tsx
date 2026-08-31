@@ -955,7 +955,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 latest = latestConversation(c),
                 last = latest?.messages?.[0],
                 primaryBadge=badges.find(badge=>badge.key===latest?.channel)||badges[0],
-                purchaseCount=c.buyerSummary?.purchaseCount||0;
+                purchaseCount=c.buyerSummary?.purchaseCount||0,
+                activeOrderCount=c.orders?.length||0;
               return (
                 <button
                   key={c.id}
@@ -965,7 +966,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                   <span className="communications-client-avatar-wrap">
                     <ClientAvatar className="communications-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
                     {primaryBadge&&<span className={`communications-avatar-source source-${primaryBadge.key.toLowerCase()}`} title={primaryBadge.label} aria-label={primaryBadge.label}>{primaryBadge.icon}</span>}
-                    {purchaseCount>0&&<span className="communications-client-order-count" title={`${ui.orderCount}: ${purchaseCount}`} aria-label={`${ui.orderCount}: ${purchaseCount}`}>{purchaseCount>99?"99+":purchaseCount}</span>}
+                    {purchaseCount>0&&<span className={`communications-client-order-count ${activeOrderCount>0?"is-active":"is-completed"}`} title={`${ui.orderCount}: ${purchaseCount}. ${activeOrderCount>0?ui.activeOrderBadge:ui.completedOrderBadge}`} aria-label={`${ui.orderCount}: ${purchaseCount}. ${activeOrderCount>0?ui.activeOrderBadge:ui.completedOrderBadge}`}>{purchaseCount>99?"99+":purchaseCount}</span>}
                   </span>
                   <div>
                     <span className="communications-client-name">

@@ -373,6 +373,11 @@ test("Chatwoot is a bidirectional idempotent channel with media and audited deli
   assert.match(chatwootDelivery, /chatwootWebhookPayloadHash===payloadHash/);
   assert.match(service, /chatwootEchoDecision\(previousMetadata,event\.metadata,payloadHash/);
   assert.match(service, /action:"SYNC",entityType:"OutboundMessage"/);
+  assert.match(service, /sectionValues\("integration\.chatwoot"\)/);
+  assert.match(service, /chatwootConversationInboxUrl/);
+  assert.match(service, /metadata:\s*\{\s*path:\s*\["chatwootConversationId"\],\s*not:\s*Prisma\.JsonNull\s*\}/);
+  assert.match(service, /distinct:\s*\["conversationId"\]/);
+  assert.match(service, /chatwootIdentityByConversation/);
 });
 
 test("Meta reply context links quoted messages and keeps story media", () => {

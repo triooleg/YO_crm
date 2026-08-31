@@ -35,7 +35,7 @@ import {
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverMetaMessage, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, runMetaSendOnce } from "./meta-send";
 import { normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage } from "./chatwoot-webhook";
-import { chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
+import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
@@ -76,13 +76,6 @@ function configuredHttpsOrigin(value: unknown) {
     if (url.protocol !== "https:" || url.username || url.password) return;
     return url.origin;
   } catch {}
-}
-function chatwootConversationId(messages: Array<{ metadata: Prisma.JsonValue | null }>) {
-  for (const message of messages) {
-    if (!message.metadata || typeof message.metadata !== "object" || Array.isArray(message.metadata)) continue;
-    const value = message.metadata.chatwootConversationId;
-    if (typeof value === "string" && /^\d+$/.test(value)) return value;
-  }
 }
 async function boundedRemoteMedia(body: ReadableStream<Uint8Array>) {
   const reader = body.getReader(), chunks: Buffer[] = [];
@@ -154,7 +147,7 @@ export class CommunicationsService {
       ] } : {}),
     };
     const limit = query.limit ?? 15;
-    const [clients, total, metaSettings] = await Promise.all([this.p.client.findMany({
+    const [clients, total, metaSettings, chatwootSettings] = await Promise.all([this.p.client.findMany({
       where,
       orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }, { id: "asc" }],
       include: {
@@ -166,9 +159,10 @@ export class CommunicationsService {
       },
       skip: query.offset ?? 0,
       take: limit,
-    }), this.p.client.count({ where }), this.sectionValues("integration.meta")]);
+    }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot")]);
     const clientIds = clients.map(client => client.id);
-    const [orderCounts, activeOrders, payments] = clientIds.length ? await Promise.all([
+    const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
+    const [orderCounts, activeOrders, payments, chatwootIdentityMessages] = clientIds.length ? await Promise.all([
       this.p.order.groupBy({ by: ["clientId"], where: { clientId: { in: clientIds }, archivedAt: null }, _count: { _all: true } }),
       this.p.order.findMany({
         where: { clientId: { in: clientIds }, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } },
@@ -178,7 +172,14 @@ export class CommunicationsService {
         where: { order: { clientId: { in: clientIds }, archivedAt: null } },
         select: { amountMinor: true, currency: true, order: { select: { clientId: true } } },
       }),
-    ]) : [[], [], []];
+      chatwootConversationIds.length ? this.p.message.findMany({
+        where: { conversationId: { in: chatwootConversationIds }, metadata: { path: ["chatwootConversationId"], not: Prisma.JsonNull } },
+        orderBy: { createdAt: "desc" },
+        distinct: ["conversationId"],
+        select: { conversationId: true, metadata: true },
+      }) : Promise.resolve([]),
+    ]) : [[], [], [], []];
+    const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
     const items = clients.map(client => ({
       ...client,
       orders: activeOrders.filter(order => order.clientId === client.id),
@@ -195,7 +196,7 @@ export class CommunicationsService {
         connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, {
           ...metaSettings,
           instagramClientUsername: client.instagramUsername,
-        }),
+        }) || (conversation.channel === ContactChannel.CHATWOOT ? chatwootConversationInboxUrl(chatwootSettings.baseUrl, chatwootSettings.accountId, chatwootIdentityByConversation.get(conversation.id)) : ""),
       })),
     }));
     return { items, total, hasMore: (query.offset ?? 0) + items.length < total };

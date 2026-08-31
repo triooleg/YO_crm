@@ -144,7 +144,7 @@ test("ссылка на соцсеть содержит только видим�
   assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><\/a>/);
   assert.doesNotMatch(component,/<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
   assert.doesNotMatch(component,/function connectedAccountLabel/);
-  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram"/);
+  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram",\s*CHATWOOT:\s*"Открыть переписку в Chatwoot"/);
 });
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
@@ -229,13 +229,19 @@ test("список клиентов показывает все связанны
   assert.match(component, /badges\.filter\(badge=>badge\.key!==primaryBadge\?\.key\)\.map/);
 });
 
-test("список клиентов показывает контурный бейдж количества заказов возле аватара", () => {
+test("список клиентов показывает статусный бейдж количества заказов возле аватара", () => {
   assert.match(component, /purchaseCount=c\.buyerSummary\?\.purchaseCount\|\|0/);
-  assert.match(component, /purchaseCount>0&&<span className="communications-client-order-count"/);
+  assert.match(component, /activeOrderCount=c\.orders\?\.length\|\|0/);
+  assert.match(component, /purchaseCount>0&&<span className=\{`communications-client-order-count \$\{activeOrderCount>0\?"is-active":"is-completed"\}`\}/);
   assert.match(component, /purchaseCount>99\?"99\+":purchaseCount/);
-  assert.match(component, /aria-label=\{`\$\{ui\.orderCount\}: \$\{purchaseCount\}`\}/);
+  assert.match(component, /aria-label=\{`\$\{ui\.orderCount\}: \$\{purchaseCount\}\. \$\{activeOrderCount>0\?ui\.activeOrderBadge:ui\.completedOrderBadge\}`\}/);
   assert.match(locale, /orderCount:\s*"Заказов"/);
-  assert.match(css, /\.communications-client-order-count\{[^}]*border:2px solid var\(--violet\);[^}]*background:#fff;[^}]*color:var\(--violet\)/);
+  assert.match(locale, /activeOrderBadge:\s*"Есть активные заказы"/);
+  assert.match(locale, /completedOrderBadge:\s*"Все заказы завершены или отменены"/);
+  assert.match(component, /activeOrderCount>0\?ui\.activeOrderBadge:ui\.completedOrderBadge/);
+  assert.match(css, /\.communications-client-order-count\.is-active\{background:#a84f00;color:#fff\}/);
+  assert.match(css, /\.communications-client-order-count\.is-completed\{background:#237a45;color:#fff\}/);
+  assert.match(css, /\.communications-client-order-count\{[^}]*left:-5px;top:-5px/);
 });
 
 test("аватар Meta отображается в списке и заголовке чата с безопасным fallback", () => {

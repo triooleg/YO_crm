@@ -1,5 +1,22 @@
 const META_MEDIA_HOST = /(^|\.)(?:fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com|instagram\.com)$/i;
 
+export function chatwootConversationId(messages: Array<{ metadata: unknown }>) {
+  for (const message of messages) {
+    if (!message.metadata || typeof message.metadata !== "object" || Array.isArray(message.metadata)) continue;
+    const value = (message.metadata as Record<string, unknown>).chatwootConversationId;
+    if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  }
+}
+
+export function chatwootConversationInboxUrl(baseUrl: unknown, accountId: unknown, conversationId: unknown) {
+  if (typeof baseUrl !== "string" || typeof accountId !== "string" || typeof conversationId !== "string" || !/^\d+$/.test(accountId) || !/^\d+$/.test(conversationId)) return "";
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== "https:" || url.username || url.password) return "";
+    return `${url.origin}/app/accounts/${encodeURIComponent(accountId)}/conversations/${encodeURIComponent(conversationId)}`;
+  } catch { return ""; }
+}
+
 export function remoteMediaUrl(value: unknown, additionalOrigin?: string) {
   if (typeof value !== "string") return;
   try {
