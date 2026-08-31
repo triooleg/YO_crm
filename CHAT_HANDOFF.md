@@ -1256,3 +1256,12 @@
 - Рабочий Gmail threading не заменён. Автоматический fallback теперь напрямую ищет последнее входящее письмо с Message-ID, поэтому сохраняет `In-Reply-To`, полную `References` и тему даже после более чем 30 исходящих сообщений.
 - Failing-first и executable regressions покрывают восстановление legacy MIME, повтор cursor после ошибки и сценарий с 31 исходящим сообщением. Финальный `pnpm quality:check` PASS: API 280/280, database 7/7, полный web suite, typechecks и production builds; compatibility, regression, business/security и visual/accessibility reviews PASS.
 - Production backup, deployment и authenticated live browser-smoke ещё не выполнены.
+
+## 2026-08-31 — deployment исторического Gmail HTML и inbound-only ответа
+
+- Runtime commit `0ff65cc69d0974e6405889b90e6fe143c546fbae` fast-forward pushed в `origin/main`; GitHub Actions `Quality gates` run `33416594416` завершён `SUCCESS`.
+- Перед restart создан и полностью проверен FULL backup `20260831T165605Z-60e22b1e`: SHA-256 для `postgres.dump`, `uploads.tar.gz` и `manifest.json` совпали; PostgreSQL custom dump читается через container `pg_restore --list`, uploads archive и JSON manifest валидны.
+- Source-only release archive SHA-256 `eb7c34c71731d11536aecd988a2cde6141287b778b7fa69b7656dd3cfc2de7bd` совпал локально и на сервере. В `/home/trio/yoleotard-crm` развёрнут exact commit; пересобраны и пересозданы только `api` и `web`.
+- Post-deploy API/web/PostgreSQL/Redis healthy, restart count 0; все 19 Prisma migrations актуальны. Public root и `/api/health` возвращают HTTP 200, PostgreSQL/Redis/uploads — `up`; свежий API/web error scan и `EMAIL_HTML_BACKFILL_FAILED` пусты.
+- Backfill успешно обработал 27 исторических писем. Контрольное письмо Google имеет очищенный `emailHtml`, marker version 1, прежний content сохранён в metadata, технические `[image: Google]`/tracking fragments удалены из display-content, audit и durable cursor присутствуют.
+- Авторизованный read-only browser-smoke production подтвердил: письмо Google отображается таблицей, текстом и безопасными ссылками вместо кода; кнопка ответа есть у входящего письма. В диалоге Oleg TriO 5 входящих имеют кнопку ответа, а у всех 5 исходящих кнопки нет; console errors/warnings отсутствуют. Рабочие цитаты, изображения, Gmail-ссылка и цепочка ответов сохранены. Сообщения не отправлялись и клиентские данные вручную не изменялись.
