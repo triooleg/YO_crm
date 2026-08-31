@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-08-31 — сквозной WhatsApp Business (готово к release gate)
+## 2026-09-01 — сквозной WhatsApp Business (deployed)
 
 - Входящие события WhatsApp Cloud API и `smb_message_echoes` из приложения WhatsApp Business используют одну строгую identity-цепочку `phone_number_id + wa_id`, поэтому ответ менеджера из приложения сохраняется как `OUTBOUND` в существующем диалоге и не создаёт клиента или дубль.
 - CRM отправляет текст, изображение и документ через официальный `/{phone_number_id}/messages`, сохраняет возвращённый `wamid` и объединяет последующий echo с той же записью. Durable delivery attempts, статусы `SENT/FAILED`, audit/activity и существующие Facebook/Instagram пути сохранены.
@@ -10,8 +10,10 @@
 - При гонке echo с сохранённым draft reconciliation переводит исходный draft в `SENT`, записывает `deduplicatedIntoMessageId`, MERGE-аудит и завершает зарезервированный AI feedback; canonical-сообщение сохраняет CRM-автора и `source=CRM`, поэтому не получает подпись внешнего ответа и черновик нельзя отправить клиенту повторно.
 - OWNER/ADMIN может вручную разрешить WhatsApp `UNCERTAIN` через защищённый endpoint: операция сериализована тем же lock диалога, переводит попытку в `FAILED`, освобождает незавершённое вложение и AI feedback reservation, создаёт Activity/Audit; повторный или конкурентный вызов не выполняет разрешение дважды.
 - В composer WhatsApp включены существующие вложения, emoji и кнопка «Отправить». Подпись ответа из приложения: «Ответ отправлен вне CRM».
-- Реальный production inbound уже подтверждён до изменения: сообщение создано в существующем WhatsApp-диалоге. Для получения ответов из WhatsApp Business после deployment требуется отдельное подтверждённое включение поля Meta Webhook `smb_message_echoes`; сейчас поле не подписано.
-- Финальный локальный `pnpm quality:check` PASS одним последовательным запуском: API 299/299, database 7/7, web suite, все typechecks и production builds. Browser-smoke детерминированной WhatsApp-ленты прошёл на 1920×1080, 1366×768 и 390×844; временные visual fixtures удалены. Production deployment и внешний outbound smoke ещё не выполнялись.
+- Реальный production inbound уже подтверждён до изменения: сообщение создано в существующем WhatsApp-диалоге. Для получения ответов из WhatsApp Business требуется отдельное подтверждённое включение поля Meta Webhook `smb_message_echoes`; на момент deployment поле ещё не было подписано.
+- Финальный локальный `pnpm quality:check` PASS одним последовательным запуском: API 299/299, database 7/7, web suite, все typechecks и production builds. Browser-smoke детерминированной WhatsApp-ленты прошёл на 1920×1080, 1366×768 и 390×844; временные visual fixtures удалены. Compatibility, regression, business/security, UI/accessibility и release reviews — PASS.
+- Runtime commit `258f18ef3c83ce881c5088ab61ad017b0cf3826a` fast-forward pushed в `origin/main`; GitHub Actions `Quality gates` run `33440592324` завершён `SUCCESS`. Перед deployment создан и независимо проверен FULL backup `20260901T-whatsapp-258f18e-predeploy`; rollback archive commit `8d179062aa5ece79e8509ab31080e18c75df72f1` сохранён на сервере.
+- В production пересобраны только `api` и `web`; PostgreSQL и Redis не пересоздавались. Все четыре контейнера healthy с restart count 0, актуальны 19 Prisma migrations, internal/public `/api/health` и public root возвращают HTTP 200, fresh API/web error scan равен 0. Внешний smoke `smb_message_echoes` и отправка из CRM ожидают подтверждённого включения подписки и операторского теста.
 
 ## 2026-08-30 — production scheduling rules and defaults (local only)
 
