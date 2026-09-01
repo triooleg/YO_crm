@@ -1297,3 +1297,9 @@
 - Post-deploy API/web/PostgreSQL/Redis healthy, restart count 0; все 19 Prisma migrations актуальны. Public root и `/api/health` возвращают HTTP 200, PostgreSQL/Redis/uploads — `up`; свежий API/web error scan и `EMAIL_HTML_BACKFILL_FAILED` пусты.
 - Backfill успешно обработал 27 исторических писем. Контрольное письмо Google имеет очищенный `emailHtml`, marker version 1, прежний content сохранён в metadata, технические `[image: Google]`/tracking fragments удалены из display-content, audit и durable cursor присутствуют.
 - Авторизованный read-only browser-smoke production подтвердил: письмо Google отображается таблицей, текстом и безопасными ссылками вместо кода; кнопка ответа есть у входящего письма. В диалоге Oleg TriO 5 входящих имеют кнопку ответа, а у всех 5 исходящих кнопки нет; console errors/warnings отсутствуют. Рабочие цитаты, изображения, Gmail-ссылка и цепочка ответов сохранены. Сообщения не отправлялись и клиентские данные вручную не изменялись.
+
+## 2026-09-01 — production routing для Chatwoot read receipts
+
+- Production API закрепляет `chatwoot.yoleotard.com` за LAN-адресом сервера через `CHATWOOT_HOST_IP`; значение по умолчанию `192.168.31.219` соответствует текущему серверу и обязательно переопределяется в `.env` после переноса. HTTPS hostname, SNI и проверка сертификата сохраняются.
+- Причина: Docker-контейнер CRM не мог подключиться к публичному адресу Chatwoot из-за hairpin NAT timeout, хотя Chatwoot доступен на том же сервере. Обычный API healthcheck эту зависимость не проверяет.
+- Обязательный post-deploy smoke: rendered Compose с default и override проходит `config --quiet`; внутри API `chatwoot.yoleotard.com` резолвится в ожидаемый LAN IP; HTTPS-запрос к Chatwoot выполняется без `-k`, редиректов и раскрытия токена; webhook содержит `message_created` и `message_updated`; пересоздан только API, PostgreSQL/Redis/web и volumes не затронуты.
