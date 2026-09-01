@@ -746,12 +746,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
           pendingSend.current = attempt.state;
           const { requestId } = attempt;
-          const result = await sendOne(undefined, uploaded, requestId);
+          const attachmentContent=activeChannel==="WHATSAPP"?messageText||undefined:undefined;
+          const result = await sendOne(attachmentContent, uploaded, requestId);
           if(!isActive())return false;
           sent.push(result);
           pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
         }
-        if ((activeChannel !== "EMAIL" && !sent.some((message) => message.status === "FAILED") && messageText) || (activeChannel === "EMAIL" && !uploaded && messageText)) {
+        if (((activeChannel!=="WHATSAPP"||!uploaded)&&activeChannel !== "EMAIL" && !sent.some((message) => message.status === "FAILED") && messageText) || (activeChannel === "EMAIL" && !uploaded && messageText)) {
           const content = messageText;
           const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
             ? pendingSend.current.textRequestId
@@ -911,6 +912,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     activeOrders=client?.orders||[],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     grid = left + "px 6px minmax(380px,1fr) " + (contextCollapsed?"0px 46px":"6px "+right+"px");
+  const attachmentAccept=activeChannel==="WHATSAPP"?"image/jpeg,image/png,application/pdf,text/plain":"image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain";
   return (
     <div className="communications-page">
       <header className="phase2-header">
@@ -1184,7 +1186,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             <div className="communications-compose">
               <label className="communications-attach" aria-label={ui.attachFile}>
                 <span aria-hidden>＋</span>
-                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                <input type="file" accept={attachmentAccept} disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
               </label>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea

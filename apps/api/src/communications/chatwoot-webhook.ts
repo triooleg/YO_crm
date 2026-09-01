@@ -34,6 +34,36 @@ export type ChatwootMessage = Omit<MetaInboundMessage, "channel" | "metadata"> &
   };
 };
 
+export type ChatwootReadReceipt = {
+  channel: MetaInboundMessage["channel"] | "CHATWOOT" | "EMAIL";
+  externalMessageId: string;
+  accountId: string;
+  inboxId: string;
+  conversationId: string;
+  receivedAt: Date;
+};
+
+export type ChatwootMessageUpdate = Omit<ChatwootReadReceipt, "receivedAt">;
+
+export async function boundedChatwootResponseJson(response: Response, maxBytes = 2_000_000) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new RangeError("CHATWOOT_RESPONSE_TOO_LARGE");
+  if (!response.body) throw new TypeError("CHATWOOT_RESPONSE_BODY_MISSING");
+  const reader = response.body.getReader(), chunks: Buffer[] = [];
+  let size = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    size += part.value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw new RangeError("CHATWOOT_RESPONSE_TOO_LARGE");
+    }
+    chunks.push(Buffer.from(part.value));
+  }
+  return JSON.parse(Buffer.concat(chunks, size).toString("utf8")) as unknown;
+}
+
 const attachmentType = (value: unknown) => {
   const type = String(value || "file").toLowerCase();
   if (type.includes("image")) return "image";
@@ -56,6 +86,44 @@ const finiteInteger = (value: unknown) => {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.round(number) : undefined;
 };
+
+const chatwootTimestamp = (value: unknown) => {
+  const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (Number.isSafeInteger(seconds) && seconds > 0) {
+    const parsed = new Date(seconds * 1000);
+    return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+  }
+  if (typeof value !== "string") return undefined;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+};
+
+export function normalizeChatwootMessageUpdate(payload: unknown): ChatwootMessageUpdate | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const value = payload as RecordLike;
+  if (value.event !== "message_updated" || value.message_type !== "outgoing" || value.private === true) return undefined;
+  const messageId = String(value.id || ""), accountId = String(value.account?.id || value.conversation?.account_id || ""), inboxId = String(value.inbox?.id || value.conversation?.inbox_id || value.conversation?.inbox?.id || ""), conversationId = String(value.conversation?.id || value.conversation_id || "");
+  if (!/^\d+$/.test(messageId) || !/^\d+$/.test(accountId) || !/^\d+$/.test(inboxId) || !/^\d+$/.test(conversationId)) return undefined;
+  const channelType = value.inbox?.channel_type || value.conversation?.inbox?.channel_type || value.conversation?.channel;
+  return { channel: channelFor(channelType), externalMessageId: `chatwoot:${accountId}:${messageId}`, accountId, inboxId, conversationId };
+}
+
+export function normalizeChatwootReadReceipt(payload: unknown): ChatwootReadReceipt | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const value = payload as RecordLike, candidate = normalizeChatwootMessageUpdate(value), receivedAt = chatwootTimestamp(value.updated_at);
+  return candidate && value.status === "read" && receivedAt ? { ...candidate, receivedAt } : undefined;
+}
+
+export function chatwootReadReceiptFromApi(candidate: ChatwootMessageUpdate | undefined, payload: unknown): ChatwootReadReceipt | undefined {
+  if (!candidate || !payload || typeof payload !== "object") return undefined;
+  const messages = Array.isArray((payload as RecordLike).payload) ? (payload as RecordLike).payload as RecordLike[] : [];
+  const messageId = candidate.externalMessageId.split(":").at(-1);
+  const message = messages.find(item => String(item.id || "") === messageId);
+  if (!message || message.status !== "read" || ![1, "1", "outgoing"].includes(message.message_type)) return undefined;
+  if (String(message.account_id || "") !== candidate.accountId || String(message.inbox_id || "") !== candidate.inboxId || String(message.conversation_id || "") !== candidate.conversationId) return undefined;
+  const receivedAt = chatwootTimestamp(message.updated_at);
+  return receivedAt ? { ...candidate, receivedAt } : undefined;
+}
 
 const mimeType = (type: string, extension: string) => {
   const key = extension.toLowerCase().replace(/^\./, "");

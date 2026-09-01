@@ -39,10 +39,21 @@ export function whatsappTextMessageParams(recipientId: string, content: string) 
   };
 }
 
-export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string) {
+export function whatsappImageMimeAllowed(mimeType: string) {
+  return mimeType === "image/jpeg" || mimeType === "image/png";
+}
+
+export function whatsappAttachmentHistoryContent(type: "image" | "file", name: string, content = "") {
+  const caption = content.trim();
+  return caption || (type === "image" ? "[Фото]" : name);
+}
+
+export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string, content = "") {
+  const caption = content.trim();
+  if ([...caption].length > 1024) throw new RangeError("WhatsApp media caption exceeds 1024 characters");
   return type === "image"
-    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "image", image: { link: url, caption: name } }
-    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "document", document: { link: url, filename: name } };
+    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }
+    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "document", document: { link: url, filename: name, ...(caption ? { caption } : {}) } };
 }
 
 export function whatsappMessageId(result: { messages?: Array<{ id?: string }> }) {

@@ -58,7 +58,7 @@ export type MetaWebhookEventSummary = {
 };
 
 export type MetaControlEvent = {
-  channel: "FACEBOOK" | "INSTAGRAM";
+  channel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP";
   receiverId?: string;
   externalPartyId?: string;
   externalMessageId?: string;
@@ -82,6 +82,12 @@ const strictMetaTimestamp = (value: unknown) => {
   const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0 || n > 8_640_000_000_000_000) return undefined;
   const parsed = new Date(n);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+};
+const strictWhatsAppTimestamp = (value: unknown) => {
+  const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) return undefined;
+  const parsed = new Date(seconds * 1000);
   return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 };
 
@@ -467,7 +473,7 @@ export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
       for (const message of records(changeValue.message_echoes)) {
         if (!message.id || !message.to) continue;
         const type = String(message.type || "unknown"), typed = message[type] || {};
-        const content = String(type === "text" ? message.text?.body : typed.caption || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
+        const content = String(type === "text" ? message.text?.body : typed.caption || (type === "document" && typed.filename ? typed.filename : undefined) || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
         if (!content) continue;
         const attachments = whatsappAttachments(message);
         output.push({ channel: "WHATSAPP", externalRecipientId: String(message.to), externalMessageId: String(message.id), content, receiverId: String(changeValue.metadata?.phone_number_id || "") || undefined, receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
@@ -538,6 +544,26 @@ export function summarizeMetaWebhook(payload: unknown): MetaWebhookEventSummary[
 export function normalizeMetaControlEvents(payload: unknown): MetaControlEvent[] {
   if (!payload || typeof payload !== "object") return [];
   const value = payload as AnyRecord;
+  if (value.object === "whatsapp_business_account") {
+    const output: MetaControlEvent[] = [];
+    for (const entry of records(value.entry)) for (const change of records(entry.changes)) {
+      const receiverId = String(change.value?.metadata?.phone_number_id || "");
+      for (const status of records(change.value?.statuses)) {
+        if (status.status !== "read") continue;
+        const externalMessageId = String(status.id || ""), externalPartyId = String(status.recipient_id || ""), receivedAt = strictWhatsAppTimestamp(status.timestamp);
+        if (!receiverId || !externalMessageId || !externalPartyId || !receivedAt) continue;
+        output.push({ channel: "WHATSAPP", receiverId, externalPartyId, externalMessageId, eventType: "read", receivedAt });
+      }
+      for (const message of records(change.value?.messages)) {
+        if (message.type !== "reaction" || typeof message.reaction?.emoji !== "string") continue;
+        const externalMessageId = String(message.reaction?.message_id || ""), externalPartyId = String(message.from || ""), receivedAt = strictWhatsAppTimestamp(message.timestamp);
+        const reactionEmoji = [...message.reaction.emoji.trim()].slice(0, 16).join("");
+        if (!receiverId || !externalMessageId || !externalPartyId || !receivedAt) continue;
+        output.push({ channel: "WHATSAPP", receiverId, externalPartyId, externalMessageId, eventType: "reaction", receivedAt, reactionAction: reactionEmoji ? "react" : "unreact", reactionName: "whatsapp", ...(reactionEmoji ? { reactionEmoji } : {}), reactionActor: "CUSTOMER" });
+      }
+    }
+    return output;
+  }
   if (value.object !== "page" && value.object !== "instagram") return [];
   const channel: MetaControlEvent["channel"] = value.object === "page" ? "FACEBOOK" : "INSTAGRAM", output: MetaControlEvent[] = [];
   for (const entry of records(value.entry)) for (const event of records(entry.messaging)) {
@@ -568,7 +594,8 @@ function whatsappMessages(payload: AnyRecord) {
     for (const message of records(value.messages)) {
       if (!message.id || !message.from) continue;
       const type = String(message.type || "unknown"), typed = message[type] || {};
-      const content = String(type === "text" ? message.text?.body : typed.caption || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
+      if (type === "reaction") continue;
+      const content = String(type === "text" ? message.text?.body : typed.caption || (type === "document" && typed.filename ? typed.filename : undefined) || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
       const attachments = whatsappAttachments(message);
       output.push({ channel: "WHATSAPP", externalSenderId: String(message.from), externalMessageId: String(message.id), content, displayName: contacts.get(String(message.from)) || undefined, receiverId: String(value.metadata?.phone_number_id || "") || undefined, phone: String(message.from), receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
     }

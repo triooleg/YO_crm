@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { MetaDeliveryUncertainError, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { MetaDeliveryUncertainError, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -49,7 +49,14 @@ test("WhatsApp send builds Cloud API text and attachment payloads without creden
     recipient_type: "individual",
     to: "380633582077",
     type: "image",
-    image: { link: "https://crm.yoleotard.com/media.jpg", caption: "model.jpg" },
+    image: { link: "https://crm.yoleotard.com/media.jpg" },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg", "Подпись менеджера"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "image",
+    image: { link: "https://crm.yoleotard.com/media.jpg", caption: "Подпись менеджера" },
   });
   assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "file", "https://crm.yoleotard.com/model.pdf", "model.pdf"))), {
     messaging_product: "whatsapp",
@@ -58,6 +65,24 @@ test("WhatsApp send builds Cloud API text and attachment payloads without creden
     type: "document",
     document: { link: "https://crm.yoleotard.com/model.pdf", filename: "model.pdf" },
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "file", "https://crm.yoleotard.com/model.pdf", "model.pdf", "Документ к заказу"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "document",
+    document: { link: "https://crm.yoleotard.com/model.pdf", filename: "model.pdf", caption: "Документ к заказу" },
+  });
+  const unicodeCaption = "😀".repeat(1024);
+  assert.equal(whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg", unicodeCaption).image.caption, unicodeCaption);
+  assert.throws(() => whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg", "😀".repeat(1025)), /1024/);
+  assert.equal(whatsappImageMimeAllowed("image/jpeg"), true);
+  assert.equal(whatsappImageMimeAllowed("image/png"), true);
+  assert.equal(whatsappImageMimeAllowed("image/webp"), false);
+  assert.equal(whatsappImageMimeAllowed("image/gif"), false);
+  assert.equal(whatsappAttachmentHistoryContent("image", "model.jpg", ""), "[Фото]");
+  assert.equal(whatsappAttachmentHistoryContent("image", "model.jpg", " Подпись "), "Подпись");
+  assert.equal(whatsappAttachmentHistoryContent("file", "model.pdf", ""), "model.pdf");
+  assert.equal(whatsappAttachmentHistoryContent("file", "model.pdf", " Документ "), "Документ");
   assert.equal(whatsappMessageId({ messages: [{ id: "wamid-1" }] }), "wamid-1");
   assert.equal(whatsappMessageId({ messages: [] }), "");
 });

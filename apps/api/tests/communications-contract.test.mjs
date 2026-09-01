@@ -435,6 +435,17 @@ test("Chatwoot is a bidirectional idempotent channel with media and audited deli
   assert.match(service, /chatwootIdentityByConversation/);
 });
 
+test("Chatwoot read updates mark only the exact sent outbound message",()=>{
+  assert.match(service,/normalizeChatwootReadReceipt\(payload\)/);
+  assert.match(service,/chatwootScopeMatches\(values,readReceipt\)/);
+  assert.match(service,/externalId:receipt\.externalMessageId,direction:MessageDirection\.OUTBOUND,status:MessageStatus\.SENT/);
+  assert.match(service,/metadata:\{path:\["accountId"\],equals:receipt\.accountId\}/);
+  assert.match(service,/mergeMetaReadMetadata\(message\.metadata,receipt\.receivedAt\)/);
+  assert.match(service,/entityType:"ChatwootReadReceipt"/);
+  assert.match(service,/redirect:"error"/);
+  assert.match(service,/boundedChatwootResponseJson\(response\)/);
+});
+
 test("Meta reply context links quoted messages and keeps story media", () => {
   assert.match(service, /event\.metadata\.replyTo\?\.externalMessageId/);
   assert.match(service, /replyToMessageId/);
@@ -458,6 +469,10 @@ test("Meta reactions are subscribed, persisted on the target message and Instagr
   assert.match(service, /REACTION_STALE_RECOVERED/);
   assert.match(service, /instagramSubscriptionOutcome==="UNAVAILABLE"&&savedInstagramWebhookReceiverId/);
   assert.match(service, /message-reaction:/);
+  assert.match(service, /META_CONTROL_EVENT_DUPLICATE_SKIPPED/);
+  assert.match(service, /reactionActor:event\.reactionActor/);
+  assert.match(service, /reactionAction:event\.reactionAction/);
+  assert.match(service, /reactionEmoji:event\.reactionEmoji/);
 });
 
 test("Meta secrets are encrypted and settings return only safe connection status", () => {

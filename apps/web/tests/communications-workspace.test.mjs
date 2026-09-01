@@ -478,7 +478,8 @@ test("при открытии переписки лента показывает
 
 test("к сообщению можно прикрепить изображение или файл и сохранить его как черновик", () => {
   assert.match(component, /type="file"/);
-  assert.match(component, /accept="image\/jpeg,image\/png,image\/webp,image\/gif,application\/pdf,text\/plain"/);
+  assert.match(component, /const attachmentAccept=activeChannel==="WHATSAPP"\?"image\/jpeg,image\/png,application\/pdf,text\/plain":"image\/jpeg,image\/png,image\/webp,image\/gif,application\/pdf,text\/plain"/);
+  assert.match(component, /accept=\{attachmentAccept\}/);
   assert.match(component, /\/communications\/attachments/);
   assert.match(component, /pendingSend/);
   assert.match(component, /attachmentDelivered/);
@@ -489,6 +490,9 @@ test("к сообщению можно прикрепить изображени
   assert.match(component, /setAttachment\(undefined\)[\s\S]*setAttachmentPreview\(""\)[\s\S]*pendingSend\.current\s*=\s*\{\}/);
   assert.match(component, /readFile\(attachment\)/);
   assert.match(component, /attachment: file/);
+  assert.match(component, /const attachmentContent=activeChannel==="WHATSAPP"\?messageText\|\|undefined:undefined/);
+  assert.match(component, /sendOne\(attachmentContent, uploaded, requestId\)/);
+  assert.match(component, /activeChannel!=="WHATSAPP"\|\|!uploaded/);
   assert.match(component, /communications-selected-attachment/);
   assert.match(component, /message\.status === "FAILED"/);
   assert.match(css, /\.communications-attach/);

@@ -398,6 +398,11 @@ test("preserves WhatsApp media ids for authenticated attachment delivery", () =>
   assert.deepEqual(JSON.parse(JSON.stringify(echo.metadata.attachments)), [{ type: "file", mediaId: "media-out-1", mimeType: "application/pdf", name: "invoice.pdf" }]);
 });
 
+test("keeps a captionless WhatsApp document filename as durable echo content", () => {
+  const [echo] = normalizeMetaEchoMessages({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "smb_message_echoes", value: { metadata: { phone_number_id: "phone-1" }, message_echoes: [{ from: "380932354616", to: "380633582077", id: "wa-out-doc", timestamp: "1504902988", type: "document", document: { id: "media-out-1", mime_type: "application/pdf", filename: "invoice.pdf" } }] } }] }] });
+  assert.equal(echo.content, "invoice.pdf");
+});
+
 test("keeps WhatsApp inbound send result and app echo in one scoped identity", () => {
   const [inbound] = normalizeMetaWebhook({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { metadata: { phone_number_id: "phone-1" }, messages: [{ id: "wa-in-1", from: "380633582077", timestamp: "1504902988", type: "text", text: { body: "Входящее" } }] } }] }] });
   const conversationExternalId = metaConversationExternalId(inbound.receiverId, inbound.externalSenderId);
@@ -434,6 +439,42 @@ test("normalizes an Instagram read receipt by exact message id", () => {
   assert.equal(event.externalPartyId,"igsid-1");
   assert.equal(event.externalMessageId,"ig-mid-1");
   assert.equal(event.readWatermarkAt,undefined);
+});
+
+test("normalizes a WhatsApp read status by exact message and conversation identity", () => {
+  const [event] = normalizeMetaControlEvents({ object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, statuses:[{id:"wamid.crm-1",status:"read",timestamp:"1504902988",recipient_id:"380633582077"}] } }] }] });
+  assert.equal(event.channel,"WHATSAPP");
+  assert.equal(event.eventType,"read");
+  assert.equal(event.receiverId,"phone-1");
+  assert.equal(event.externalPartyId,"380633582077");
+  assert.equal(event.externalMessageId,"wamid.crm-1");
+  assert.equal(event.receivedAt.toISOString(),"2017-09-08T20:36:28.000Z");
+  assert.equal(event.readWatermarkAt,undefined);
+  assert.equal(normalizeMetaControlEvents({ object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, statuses:[{id:"wamid.crm-1",status:"delivered",timestamp:"1504902988",recipient_id:"380633582077"}] } }] }] }).length,0);
+});
+
+test("normalizes WhatsApp reactions onto the referenced message instead of a separate inbound message", () => {
+  const reactedPayload = { object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, messages:[{id:"wamid.reaction-event-1",from:"380633582077",timestamp:"1504902988",type:"reaction",reaction:{message_id:"wamid.crm-1",emoji:"👍"}}] } }] }] };
+  assert.equal(normalizeMetaWebhook(reactedPayload).length,0);
+  const [reacted] = normalizeMetaControlEvents(reactedPayload);
+  assert.deepEqual(JSON.parse(JSON.stringify(reacted)), {
+    channel:"WHATSAPP",
+    receiverId:"phone-1",
+    externalPartyId:"380633582077",
+    externalMessageId:"wamid.crm-1",
+    eventType:"reaction",
+    receivedAt:"2017-09-08T20:36:28.000Z",
+    reactionAction:"react",
+    reactionName:"whatsapp",
+    reactionEmoji:"👍",
+    reactionActor:"CUSTOMER",
+  });
+  const metadata = mergeMetaReactionMetadata({source:"CRM"},reacted);
+  assert.equal(metadata.reactions.customer.emoji,"👍");
+
+  const [removed] = normalizeMetaControlEvents({ object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, messages:[{id:"wamid.reaction-event-2",from:"380633582077",timestamp:"1504902990",type:"reaction",reaction:{message_id:"wamid.crm-1",emoji:""}}] } }] }] });
+  assert.equal(removed.reactionAction,"unreact");
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReactionMetadata(metadata,removed).reactions)),{});
 });
 
 test("read metadata is monotonic and idempotent",()=>{

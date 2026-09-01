@@ -7,8 +7,8 @@ import { createRequire } from "node:module";
 
 const source=await readFile(new URL("../src/communications/chatwoot-webhook.ts",import.meta.url),"utf8");
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
-const require=createRequire(import.meta.url),module={exports:{}};vm.runInNewContext(js,{module,exports:module.exports,require,Buffer,Date,URL});
-const {normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
+const require=createRequire(import.meta.url),module={exports:{}};vm.runInNewContext(js,{module,exports:module.exports,require,Buffer,Date,URL,Response,ReadableStream,RangeError,TypeError});
+const {boundedChatwootResponseJson,chatwootReadReceiptFromApi,normalizeChatwootMessageUpdate,normalizeChatwootReadReceipt,normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
 
 test("Chatwoot normalizes Facebook, Instagram, WhatsApp, e-mail and native inboxes",()=>{
   const base={event:"message_created",message_type:"incoming",id:17,content:"Здравствуйте",created_at:1700000000,sender:{id:9,name:"Анна"},conversation:{contact_inbox:{source_id:"contact-9"},account_id:2}};
@@ -18,6 +18,49 @@ test("Chatwoot normalizes Facebook, Instagram, WhatsApp, e-mail and native inbox
 
 test("Chatwoot ignores unsupported and duplicate-unsafe events",()=>{
   assert.equal(normalizeChatwootWebhook({event:"message_updated",message_type:"incoming",id:1}).length,0);
+});
+
+test("Chatwoot normalizes only an exact outgoing read update",()=>{
+  const payload={event:"message_updated",message_type:"outgoing",status:"read",id:19,updated_at:1700000010,account:{id:2},inbox:{id:7,channel_type:"Channel::Api"},conversation:{id:77,account_id:2,inbox_id:7}};
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeChatwootReadReceipt(payload))),{
+    channel:"CHATWOOT",
+    externalMessageId:"chatwoot:2:19",
+    accountId:"2",
+    inboxId:"7",
+    conversationId:"77",
+    receivedAt:"2023-11-14T22:13:30.000Z",
+  });
+  for(const invalid of [
+    {...payload,status:"delivered"},
+    {...payload,message_type:"incoming"},
+    {...payload,private:true},
+    {...payload,updated_at:"bad"},
+    {...payload,account:{},conversation:{...payload.conversation,account_id:undefined}},
+    {...payload,inbox:{},conversation:{...payload.conversation,inbox_id:undefined}},
+  ])assert.equal(normalizeChatwootReadReceipt(invalid),undefined);
+});
+
+test("Chatwoot resolves a source-shaped message update through the scoped messages API",()=>{
+  const sourcePayload={event:"message_updated",message_type:"outgoing",id:19,created_at:"2026-09-01T03:10:00.000Z",account:{id:2},inbox:{id:7,channel_type:"Channel::Api"},conversation:{id:77,account_id:2,inbox_id:7}};
+  const candidate=normalizeChatwootMessageUpdate(sourcePayload);
+  assert.equal(candidate.externalMessageId,"chatwoot:2:19");
+  assert.equal(normalizeChatwootReadReceipt(sourcePayload),undefined);
+  const receipt=chatwootReadReceiptFromApi(candidate,{payload:[{id:19,account_id:2,inbox_id:7,conversation_id:77,message_type:1,status:"read",updated_at:1788232320}]});
+  assert.equal(receipt.receivedAt.toISOString(),"2026-09-01T03:12:00.000Z");
+  for(const message of [
+    {id:19,account_id:2,inbox_id:7,conversation_id:77,message_type:1,status:"delivered",updated_at:1788232320},
+    {id:19,account_id:3,inbox_id:7,conversation_id:77,message_type:1,status:"read",updated_at:1788232320},
+    {id:19,account_id:2,inbox_id:8,conversation_id:77,message_type:1,status:"read",updated_at:1788232320},
+    {id:19,account_id:2,inbox_id:7,conversation_id:78,message_type:1,status:"read",updated_at:1788232320},
+    {id:19,account_id:2,inbox_id:7,conversation_id:77,message_type:0,status:"read",updated_at:1788232320},
+  ])assert.equal(chatwootReadReceiptFromApi(candidate,{payload:[message]}),undefined);
+});
+
+test("Chatwoot read lookup parses only a bounded streamed JSON response",async()=>{
+  assert.deepEqual(JSON.parse(JSON.stringify(await boundedChatwootResponseJson(new Response('{"payload":[]}')))),{payload:[]});
+  await assert.rejects(()=>boundedChatwootResponseJson(new Response("1234",{headers:{"content-length":"4"}}),3),/CHATWOOT_RESPONSE_TOO_LARGE/);
+  await assert.rejects(()=>boundedChatwootResponseJson(new Response("1234"),3),/CHATWOOT_RESPONSE_TOO_LARGE/);
+  await assert.rejects(()=>boundedChatwootResponseJson(new Response("not-json")),/Unexpected token|not valid JSON/);
 });
 
 test("Chatwoot preserves safe inbound photo and video attachment metadata",()=>{
