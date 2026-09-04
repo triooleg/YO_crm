@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ClientWorkspace } from "./client-workspace";
-import { OrdersWorkspace } from "./orders-workspace";
+import { OrdersDashboard } from "./orders-dashboard";
 import { ProductionWorkspace } from "./production-workspace";
 import { FinanceWorkspace } from "./finance-workspace";
 import { SettingsWorkspace } from "./settings-workspace";
@@ -32,7 +32,7 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
       <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{icon}</i></button>)}</nav>
       <button className="crm-logout" type="button" title={authUi.logout} aria-label={authUi.logout} onClick={async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}}}>⇥</button>
     </aside>
-    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate}/>:sectionId==="orders"?<OrdersWorkspace onClients={()=>navigate("clients")}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate}/>:sectionId==="orders"?<OrdersDashboard onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
   </main>
 }
 

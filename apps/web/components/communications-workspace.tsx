@@ -237,7 +237,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
     [reactionBusyIds,setReactionBusyIds]=useState<Set<string>>(()=>new Set()),
     [reactionPickerMessageId,setReactionPickerMessageId]=useState<string>(),
-    [search, setSearch] = useState(""),
+    [search, setSearch] = useState(()=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get("clientName")||""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
     [visibleClientCount,setVisibleClientCount]=useState(15),
@@ -266,6 +266,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [right, setRight] = useState(defaults.right);
   const widths = useRef({ ...defaults }),
     selectedClientId = useRef<string | undefined>(undefined),
+    initialClientId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined),
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
     listLoading = useRef(false),
@@ -662,7 +663,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     } catch {
       localStorage.removeItem("communications-widths");
     }
-    void loadClients();
+    void loadClients(initialClientId.current,15,search,socialFilters,orderScope);
     api("/communications/templates")
       .then(setTemplates)
       .catch((e) => setError((e as Error).message));

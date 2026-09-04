@@ -43,6 +43,7 @@ type Activity = { id: string; summary: string; createdAt: string };
 
 export function ClientWorkspace() {
   const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
   const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
   const [auth, setAuth] = useState<boolean | null>(null),
     [clients, setClients] = useState<Client[]>([]),
@@ -78,7 +79,7 @@ export function ClientWorkspace() {
     );
     setClients(data);
     setAuth(true);
-    if (!selected && data[0]) setSelected(pendingOrderClientId.current||data[0].id);
+    if (!selected && data[0]) setSelected(pendingOrderClientId.current||initialClientId.current||data[0].id);
   }
   useEffect(() => {
     request("/auth/me")

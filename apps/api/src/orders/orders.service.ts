@@ -59,10 +59,11 @@ export class OrdersService {
       orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
       take: 100,
       select: {
-        id: true, number: true, type: true, requiredDeliveryAt: true, priceMinor: true,
+        id: true, number: true, type: true, discipline: true, country: true, requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
+        deliveryMinor: true, discountMinor: true,
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
         paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true, productionSlot: true,
-        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true } },
+        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, measuredAt: true, values: true } },
         items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, measuredAt: true, values: true } } } },
