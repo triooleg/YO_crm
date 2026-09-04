@@ -5,6 +5,8 @@ import test from "node:test";
 const source = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
+const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+const orderPanel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const api = readFileSync(new URL("../../api/src/orders/orders.service.ts", import.meta.url), "utf8");
 const ui = source + dashboard + i18n;
@@ -45,4 +47,36 @@ test("Orders redesign has isolated responsive table and expanded layout", () => 
   assert.match(css, /\.orders-expanded-layout/);
   assert.match(css, /\.orders-table-scroll/);
   assert.match(css, /overflow-x:auto/);
+});
+
+test("Orders summary keeps headers aligned and exposes the canonical order number", () => {
+  assert.match(css, /\.orders-dashboard-table\{[^}]*table-layout:fixed/);
+  assert.match(css, /\.orders-dashboard-table thead\{[^}]*display:table-header-group!important/);
+  assert.match(css, /\.orders-dashboard-table tbody\{[^}]*display:table-row-group!important/);
+  assert.match(css, /tbody>tr:not\(\.orders-expanded-row\)\{display:table-row!important;grid-template-columns:none!important/);
+  assert.match(dashboard, /orders-order-number[^>]*onClick=\{onOpen\}[^>]*>\{order\.number\}/);
+  assert.doesNotMatch(dashboard, /orderListNumber\(/);
+});
+
+test("Orders summary retains editable deadlines, prefixed country flags, and readable type", () => {
+  assert.match(dashboard, /orders-deadline-button[^\n]*type="date"[^\n]*aria-label=\{ui\.changeDeadline\}/);
+  assert.match(dashboard, /prefixedCode = normalized\.toUpperCase\(\)\.match\(/);
+  assert.match(dashboard, /function countryLabel\(country\?: string\)/);
+  assert.match(dashboard, /function CountryFlag/);
+  assert.match(dashboard, /fi-\$\{code\.toLowerCase\(\)\}/);
+  assert.match(layout, /flag-icons\/css\/flag-icons\.min\.css/);
+  assert.match(css, /orders-deadline-button:focus-within/);
+  assert.doesNotMatch(css, /font-size:(?:8|9)px/);
+});
+
+test("New order button opens the existing order form through client selection", () => {
+  assert.match(dashboard, /import \{ OrderPanel \} from "\.\/order-panel"/);
+  assert.match(dashboard, /onClick=\{\(\) => openNewOrder\(\)\}/);
+  assert.match(dashboard, /<OrderClientPicker/);
+  assert.match(dashboard, /<OrderPanel client=\{newOrderClient\}/);
+  assert.match(dashboard, /\?search=\$\{encodeURIComponent\(query\)\}/);
+  assert.match(dashboard, /bindDialogKeyboard/);
+  assert.match(orderPanel, /role="dialog" aria-modal="true" aria-label=\{orderFormUi\.title\}/);
+  assert.match(orderPanel, /aria-label=\{orderFormUi\.close\}/);
+  assert.doesNotMatch(dashboard, /orders-new-order" onClick=\{\(\) => onNavigate\("clients"\)\}/);
 });

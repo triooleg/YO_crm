@@ -1,15 +1,18 @@
 "use client";
 
-import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ordersDashboardUi as ui } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { MeasurementPanel } from "./measurement-panel";
+import { OrderPanel } from "./order-panel";
 import { OrderWorkspaceCard, type Order } from "./orders-workspace";
 
 type ColumnId = keyof typeof ui.columnsMap;
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "work" | "ready" | "completed" | "overdue";
 type Props = { onNavigate: (section: "clients" | "inbox", context?: Record<string, string>) => void };
 type Preview = { src: string; left: number; top: number; width: number };
+type OrderClientBrief = { id: string; displayName: string; country?: string };
+type OrderClientDetail = OrderClientBrief & { athletes: { id: string; firstName: string; lastName?: string; measurements: { id: string; measuredAt: string }[] }[] };
 
 const PAGE_SIZE = 20;
 const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
@@ -37,6 +40,12 @@ export function OrdersDashboard({ onNavigate }: Props) {
   const [draggedColumn, setDraggedColumn] = useState<ColumnId>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<Preview>();
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [newOrderClients, setNewOrderClients] = useState<OrderClientBrief[]>([]);
+  const [newOrderClient, setNewOrderClient] = useState<OrderClientDetail>();
+  const [newOrderLoading, setNewOrderLoading] = useState(false);
+  const [newOrderQuery, setNewOrderQuery] = useState("");
+  const newOrderTrigger = useRef<HTMLButtonElement>(null);
 
   async function request(path: string, init?: RequestInit) {
     const response = await fetch(`/api${path}`, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
@@ -75,6 +84,24 @@ export function OrdersDashboard({ onNavigate }: Props) {
   }, []);
 
   useEffect(() => setPage(1), [quickFilter, statusFilter, disciplineFilter, sort, search]);
+
+  useEffect(() => {
+    if (!newOrderOpen) return;
+    let cancelled = false;
+    setNewOrderLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const query = newOrderQuery.trim();
+        const clients = await request(`/clients${query ? `?search=${encodeURIComponent(query)}` : ""}`);
+        if (!cancelled) { setNewOrderClients(clients); setError(""); }
+      } catch (reason) {
+        if (!cancelled) setError((reason as Error).message);
+      } finally {
+        if (!cancelled) setNewOrderLoading(false);
+      }
+    }, 220);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [newOrderOpen, newOrderQuery]);
 
   const metrics = useMemo(() => ({
     active: orders.filter(isActiveOrder).length,
@@ -154,13 +181,28 @@ export function OrdersDashboard({ onNavigate }: Props) {
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
   }
+  function openNewOrder() {
+    setNewOrderOpen(true);
+    setNewOrderQuery("");
+    setNewOrderClients([]);
+    setNewOrderLoading(true);
+    setError("");
+  }
+  async function selectNewOrderClient(clientId: string) {
+    setNewOrderLoading(true);
+    setError("");
+    try { setNewOrderClient(await request(`/clients/${clientId}`)); }
+    catch (reason) { setError((reason as Error).message); }
+    finally { setNewOrderLoading(false); }
+  }
+  function closeNewOrder() { setNewOrderOpen(false); setNewOrderClient(undefined); window.requestAnimationFrame(() => newOrderTrigger.current?.focus()); }
 
   if (workspace) return <OrderWorkspaceCard order={workspace} onBack={() => setWorkspaceId(undefined)} request={request} refresh={load} />;
 
   return <section className="phase2-main orders-page orders-dashboard">
     <header className="phase2-header orders-dashboard-header">
       <div><p>{ui.eyebrow}</p><h1>{ui.title}</h1><span>{ui.subtitle}</span></div>
-      <button className="phase2-primary orders-new-order" onClick={() => onNavigate("clients")}>{ui.newOrder} <span aria-hidden="true">⌄</span></button>
+      <button ref={newOrderTrigger} className="phase2-primary orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder} <span aria-hidden="true">⌄</span></button>
     </header>
     {error && <div className="phase2-error" role="alert">{error}<button onClick={() => void load()}>{ui.retry}</button></div>}
 
@@ -219,6 +261,8 @@ export function OrdersDashboard({ onNavigate }: Props) {
 
     {columnsOpen && <div className="orders-column-settings-overlay" onMouseDown={(event) => event.target === event.currentTarget && setColumnsOpen(false)}><aside className="orders-column-settings" role="dialog" aria-modal="true" aria-label={ui.columns}><header><div><h2>{ui.columns}</h2><small>{ui.columnsHint}</small></div><button onClick={() => setColumnsOpen(false)} aria-label={ui.close}>×</button></header><div className="orders-columns-list">{columnOrder.map((id) => <div key={id} draggable onDragStart={() => setDraggedColumn(id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropColumn(id)}><span>⋮⋮</span><label><input type="checkbox" checked={!hiddenColumns.has(id)} onChange={() => toggleColumn(id)} />{ui.columnsMap[id]}</label><button onClick={() => moveColumn(id, -1)} aria-label={ui.moveUp}>↑</button><button onClick={() => moveColumn(id, 1)} aria-label={ui.moveDown}>↓</button></div>)}</div><footer><button onClick={() => persistColumns(DEFAULT_COLUMNS, new Set())}>{ui.reset}</button><button onClick={() => setColumnsOpen(false)}>{ui.done}</button></footer></aside></div>}
     {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
+    {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
+    {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={() => setPaymentOrderId(undefined)} onSaved={async () => { setPaymentOrderId(undefined); await load(); }} />}
     {measurementOrder && measurementAthlete(measurementOrder) && <MeasurementPanel client={{ id: measurementOrder.client.id, displayName: measurementOrder.client.displayName, athletes: [measurementAthlete(measurementOrder)!] }} request={request} orderId={measurementOrder.id} initialValues={primaryMeasurement(measurementOrder)?.values} expectedMeasurementId={primaryMeasurement(measurementOrder)?.id} title={primaryMeasurement(measurementOrder) ? ui.editMeasurements : ui.addMeasurements} onClose={() => setMeasurementOrder(undefined)} onSaved={async () => { setMeasurementOrder(undefined); await load(); }} />}
   </section>;
@@ -226,7 +270,7 @@ export function OrdersDashboard({ onNavigate }: Props) {
 
 function OrderCell({ id, order, columnOrder, onStatus, onDeadline, onPreview, onPreviewLeave, onOpen, onClient }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onOpen: () => void; onClient: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
-  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><span className="orders-row-number">{orderListNumber(order.number)}</span><OrderChannelIcon channel={order.client.source} /><button onClick={onClient}><strong>{order.client.displayName}</strong><small>{countryFlag(order.client.country)} {order.client.country || ui.countryMissing}</small></button></div></td>;
+  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onOpen}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient}><strong>{order.client.displayName}</strong><small><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "discipline") { const value = discipline(order.discipline); return <td className="orders-col orders-col-discipline" style={style}><strong>{value.code}</strong><small>{value.label}</small></td>; }
   if (id === "designs") return <td className="orders-col orders-col-designs" style={style}><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><small>{designCount(order) > 1 ? order.type === "GROUP_ORDER" ? `${ui.viewAll} (${designCount(order)})` : ui.viewAll : order.items[0]?.name || order.notes || ui.designMissing}</small></td>;
@@ -234,7 +278,7 @@ function OrderCell({ id, order, columnOrder, onStatus, onDeadline, onPreview, on
   if (id === "payment") return <td className="orders-col orders-col-payment" style={style}><strong>{money(order.priceMinor, order.currency)}</strong><small className="orders-paid-line">{ui.paidPrefix} {money(paid(order), order.currency)}</small><small className="orders-balance-line">{ui.balancePrefix} {money(balance(order), order.currency)}</small></td>;
   if (id === "status") return <td className="orders-col orders-col-status" style={style}><select className={`orders-inline-status orders-status--${statusTone(order.salesStatus)}`} value={order.salesStatus} onChange={(event) => void onStatus(order, event.target.value)} aria-label={ui.changeStatus}>{SALES_STATUSES.map((status) => <option key={status} value={status}>{orderLabel("sales", status)}</option>)}</select><small>{orderLabel("production", order.productionStatus)}</small></td>;
   if (id === "nextAction") { const action = nextOrderAction(order); return <td className="orders-col orders-col-nextAction" style={style}><span className={`orders-next-action tone-${action.tone}`}><UiIcon name={action.icon} /><b>{action.label}</b></span>{action.detail && <small>{action.detail}</small>}</td>; }
-  if (id === "delivery") return <td className="orders-col orders-col-delivery" style={style}><strong>{countryFlag(order.country || order.client.country)} {order.country || order.client.country || ui.addressMissing}</strong><small>{order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : orderLabel("shipping", order.shippingStatus)}</small>{order.shipment?.trackingNumber && <small>{order.shipment.trackingNumber}</small>}</td>;
+  if (id === "delivery") return <td className="orders-col orders-col-delivery" style={style}><strong><CountryFlag country={order.country || order.client.country} />{countryLabel(order.country || order.client.country) || ui.addressMissing}</strong><small>{order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : orderLabel("shipping", order.shippingStatus)}</small>{order.shipment?.trackingNumber && <small>{order.shipment.trackingNumber}</small>}</td>;
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><strong>{date(order.createdAt)}</strong><small>{ageText(order.createdAt)}</small></td>;
   if (id === "problems") { const problems = orderProblems(order); return <td className="orders-col orders-col-problems" style={style}>{problems.length ? <span className="orders-problem-badge" title={problems.join("\n")}><UiIcon name="warning" />{problems.length === 1 ? problems[0] : problems.length}</span> : <span className="orders-no-problems">{ui.noProblems}</span>}</td>; }
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onOpen} aria-label={ui.openOrder} title={ui.openOrder}>•••</button></td>;
@@ -245,7 +289,7 @@ function ExpandedOrder({ order, onOpen, onClient, onConversation, onPayment, onM
   return <div className="orders-expanded-layout">
     <section className="orders-expanded-designs"><header><div><h3>{ui.designsInOrder} ({items.length})</h3><small>{itemQuantity(order)} {ui.itemsInOrder}</small></div>{measurementAthlete(order) && <button onClick={onMeasurements}>{primaryMeasurement(order) ? ui.editMeasurements : ui.addMeasurements}</button>}</header><div className="orders-expanded-items">{items.map((item, index) => <article key={item.id}><span className="orders-item-index">{index + 1}</span>{item.modelImagePath ? <img loading="lazy" src={`/api/orders/images/${item.modelImagePath}`} alt={item.name} /> : <span className="orders-item-placeholder"><UiIcon name="image" /></span>}<div className="orders-item-name"><strong>{item.name}</strong><small>{ui.skuMissing}</small><em>{item.quantity} {ui.pieces}</em></div><Detail label={ui.dimensions} value={item.measurement ? measurementSizes(item.measurement.values) : ui.notReceived} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><div className="orders-item-payment"><small>{ui.payment}</small><strong>{ui.paymentAtOrderLevel}</strong><span className={`orders-status orders-status--${statusTone(item.productionStatus)}`}>{orderLabel("production", item.productionStatus)}</span></div></article>)}</div></section>
     <section className="orders-expanded-card orders-expanded-finance"><h3>{ui.finance}</h3><MoneyLine label={`${ui.products} (${items.length})`} value={order.priceMinor - (order.deliveryMinor || 0) + (order.discountMinor || 0)} currency={order.currency} /><MoneyLine label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} muted /><MoneyLine label={ui.shipping} value={order.deliveryMinor || order.shipment?.costMinor || 0} currency={order.currency} /><hr /><MoneyLine label={ui.total} value={order.priceMinor} currency={order.currency} strong /><MoneyLine label={ui.paid} value={paid(order)} currency={order.currency} success /><MoneyLine label={ui.balance} value={balance(order)} currency={order.currency} danger={balance(order) > 0} /><button className="orders-open-order" onClick={onOpen}>{ui.openOrder}</button><button className="orders-secondary-action" onClick={onPayment}>{ui.addPayment}</button></section>
-    <section className="orders-expanded-card orders-expanded-delivery"><h3>{ui.shipping}</h3><Detail label={ui.country} value={order.country || order.client.country || ui.notSpecifiedFeminine} /><Detail label={ui.address} value={[order.client.city, order.client.address, order.client.postalCode].filter(Boolean).join(", ") || ui.notSpecified} /><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || ui.notSpecified} /></section>
+    <section className="orders-expanded-card orders-expanded-delivery"><h3>{ui.shipping}</h3><Detail label={ui.country} value={<><CountryFlag country={order.country || order.client.country} />{countryLabel(order.country || order.client.country) || ui.notSpecifiedFeminine}</>} /><Detail label={ui.address} value={[order.client.city, order.client.address, order.client.postalCode].filter(Boolean).join(", ") || ui.notSpecified} /><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || ui.notSpecified} /></section>
     <section className="orders-expanded-card orders-expanded-notes"><div><h3>{ui.customerWishes}</h3><p>{order.notes || ui.notSpecified}</p></div><div><h3>{ui.managerNotes}</h3><p>{ui.notSpecified}</p></div><div className="orders-expanded-links"><button onClick={onClient}>{ui.openClient}</button><button onClick={onConversation}>{ui.openConversation}</button></div></section>
   </div>;
 }
@@ -256,9 +300,33 @@ function QuickPayment({ order, request, onClose, onSaved }: { order: Order; requ
   return <div className="orders-drawer-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="orders-quick-payment" onSubmit={submit}><header><div><small>{ui.paymentTitle}</small><h2>{order.number}</h2></div><button type="button" onClick={onClose}>×</button></header><p>{ui.balance}: <strong>{money(balance(order), order.currency)}</strong></p><label>{ui.amount}<input autoFocus value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" required /></label>{error && <div className="phase2-error">{error}</div>}<footer><button type="button" onClick={onClose}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy ? ui.saving : ui.addPaymentPlain}</button></footer></form></div>;
 }
 
+function OrderClientPicker({ clients, loading, query, onQuery, onSelect, onClose }: { clients: OrderClientBrief[]; loading: boolean; query: string; onQuery: (value: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
+  const dialog = useRef<HTMLElement>(null);
+  useEffect(() => bindDialogKeyboard(dialog.current, onClose), []);
+  return <div className="orders-drawer-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside ref={dialog} className="orders-client-picker" role="dialog" aria-modal="true" aria-label={ui.selectClient}><header><div><small>{ui.newOrder}</small><h2>{ui.selectClient}</h2></div><button onClick={onClose} aria-label={ui.close}>×</button></header><input autoFocus value={query} onChange={(event) => onQuery(event.target.value)} placeholder={ui.searchClient} />{loading ? <p>{ui.loadingClients}</p> : <div>{clients.map((client) => <button key={client.id} onClick={() => onSelect(client.id)}><strong>{client.displayName}</strong><small><CountryFlag country={client.country} />{countryLabel(client.country) || ui.countryMissing}</small></button>)}{!clients.length && <p>{ui.noClients}</p>}</div>}</aside></div>;
+}
+
+function CountryFlag({ country }: { country?: string }) { const code = countryCode(country); return code ? <span className={`fi fi-${code.toLowerCase()} orders-country-flag`} role="img" aria-label={code} /> : null; }
+
+function bindDialogKeyboard(dialog: HTMLElement | null, onClose: () => void) {
+  if (!dialog) return;
+  const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusable = () => [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')];
+  const keydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+    if (event.key !== "Tab") return;
+    const items = focusable(); if (!items.length) return;
+    const first = items[0]!, last = items[items.length - 1]!;
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+  document.addEventListener("keydown", keydown);
+  return () => { document.removeEventListener("keydown", keydown); previous?.focus(); };
+}
+
 function Kpi({ label, value, icon, tone = "purple", active, onClick }: { label: string; value: number; icon: string; tone?: string; active?: boolean; onClick: () => void }) { return <button className={`orders-kpi tone-${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><span><small>{label}</small><strong>{value}</strong></span><i><UiIcon name={icon} /></i></button>; }
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) { return <button className="orders-filter-chip" onClick={onRemove}>{label}<span aria-hidden="true">×</span></button>; }
-function Detail({ label, value }: { label: string; value: string }) { return <div className="orders-detail"><small>{label}</small><strong>{value}</strong></div>; }
+function Detail({ label, value }: { label: string; value: ReactNode }) { return <div className="orders-detail"><small>{label}</small><strong>{value}</strong></div>; }
 function MoneyLine({ label, value, currency, strong, success, danger, muted }: { label: string; value: number; currency: string; strong?: boolean; success?: boolean; danger?: boolean; muted?: boolean }) { return <div className={`orders-money-line${strong ? " strong" : ""}${success ? " success" : ""}${danger ? " danger" : ""}${muted ? " muted" : ""}`}><span>{label}</span><b>{money(value, currency)}</b></div>; }
 
 function UiIcon({ name }: { name: string }) { const paths: Record<string, React.ReactNode> = { search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>, filter: <><path d="M4 5h16M7 12h10M10 19h4" /></>, settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></>, download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>, chevronRight: <path d="m9 6 6 6-6 6" />, chevronLeft: <path d="m15 6-6 6 6 6" />, chevronDown: <path d="m6 9 6 6 6-6" />, warning: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4m0 3h.01" /></>, image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 15-5-5L5 20" /></>, bag: <><path d="M6 8h12l1 13H5L6 8Z" /><path d="M9 9V6a3 3 0 0 1 6 0v3" /></>, payment: <><path d="M7 3h10v18H7z" /><path d="M10 7h4m-4 4h4m-5 6h6" /></>, calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>, clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>, truck: <><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>, check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></> }; return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.check}</svg>; }
@@ -290,6 +358,6 @@ function deliveryDate(order: Order) { return order.requiredDeliveryAt ? date(ord
 function dayText(order: Order) { const value = days(order); return value === 9999 ? ui.noDeadline : value < 0 ? `${ui.overdueBy} ${Math.abs(value)} ${ui.daysShort}` : value === 0 ? ui.today : `${ui.inDays} ${value} ${ui.daysShort}`; }
 function ageText(value: string) { const count = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000)); return count === 0 ? ui.today : `${count} ${ui.daysAgo}`; }
 function deliveryPlace(order: Order) { return [order.country || order.client.country, order.client.city, order.client.address].filter(Boolean).join(", ") || ui.addressMissing; }
-function orderListNumber(number: string) { const match = number.match(/^YO-\d{2}-(\d{4})$/); return match ? String(Number(match[1])) : number; }
-function countryFlag(country?: string) { if (!country) return ""; const aliases: Record<string, string> = { Ukraine: "UA", France: "FR", Italy: "IT", Spain: "ES", Germany: "DE", Netherlands: "NL", Poland: "PL", USA: "US", "United States": "US", "United Kingdom": "GB" }; const code = aliases[country] || (country.length === 2 ? country.toUpperCase() : ""); return code ? [...code].map((character) => String.fromCodePoint(127397 + character.charCodeAt(0))).join("") : ""; }
+function countryCode(country?: string) { if (!country) return ""; const normalized = country.trim(); const prefixedCode = normalized.toUpperCase().match(/^([A-Z]{2})(?:\s|$)/)?.[1]; const aliases: Record<string, string> = { ukraine: "UA", украина: "UA", україна: "UA", france: "FR", франция: "FR", italy: "IT", италия: "IT", spain: "ES", испания: "ES", germany: "DE", германия: "DE", netherlands: "NL", нидерланды: "NL", poland: "PL", польша: "PL", usa: "US", "united states": "US", "united kingdom": "GB", britain: "GB" }; return prefixedCode || aliases[normalized.toLocaleLowerCase("ru")] || (normalized.length === 2 ? normalized.toUpperCase() : ""); }
+function countryLabel(country?: string) { return country?.trim().replace(/^[A-Z]{2}\s+/i, "") || ""; }
 function quickFilterLabel(value: QuickFilter) { return ({ active: ui.kpis.active, urgent: ui.urgent, deposit: ui.withoutDeposit, work: ui.inWork, ready: ui.ready, completed: ui.kpis.completed, overdue: ui.kpis.overdue, all: ui.all })[value]; }

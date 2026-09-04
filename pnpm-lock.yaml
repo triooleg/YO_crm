@@ -101,6 +101,9 @@ importers:
 
   apps/web:
     dependencies:
+      flag-icons:
+        specifier: 7.5.0
+        version: 7.5.0
       next:
         specifier: ^15.5.4
         version: 15.5.22(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1696,6 +1699,9 @@ packages:
   finalhandler@2.1.1:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
+
+  flag-icons@7.5.0:
+    resolution: {integrity: sha512-kd+MNXviFIg5hijH766tt+3x76ele1AXlo4zDdCxIvqWZhKt4T83bOtxUOOMlTx/EcFdUMH5yvQgYlFh1EqqFg==}
 
   fontkit@2.0.4:
     resolution: {integrity: sha512-syetQadaUEDNdxdugga9CpEYVaQIxOwk7GlwZWWZ19//qW4zE5bknOKeMBDYAASwnpaSHKJITRLMF9m1fp3s6g==}
@@ -4092,6 +4098,8 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
+
+  flag-icons@7.5.0: {}
 
   fontkit@2.0.4:
     dependencies:

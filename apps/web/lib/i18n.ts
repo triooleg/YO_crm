@@ -304,6 +304,8 @@ export const financeUi = {
   archivedValue: "в архиве",
 } as const;
 export const orderFormUi = {
+  title: "Новый заказ",
+  close: "Закрыть",
   deposit: "Предоплата",
   depositHint: "Рассчитано автоматически: {percent}% от общей цены",
   selectAthlete: "Выберите спортсмена",
@@ -807,6 +809,10 @@ export const ordersDashboardUi = {
   title: "Заказы",
   subtitle: "Модели, размеры, сроки, оплата и доставка",
   newOrder: "+ Новый заказ",
+  selectClient: "Выберите клиента",
+  searchClient: "Найти клиента…",
+  loadingClients: "Загрузка клиентов…",
+  noClients: "Клиенты не найдены",
   loading: "Загрузка заказов…",
   retry: "Повторить",
   empty: "Заказы не найдены",
