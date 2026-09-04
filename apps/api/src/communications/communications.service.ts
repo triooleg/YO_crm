@@ -30,6 +30,7 @@ import {
   MessageTemplateDto,
   MetaIntegrationDto,
   SendMessageDto,
+  UpdateMessageDraftDto,
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
@@ -142,9 +143,9 @@ export class CommunicationsService {
       ["chatwoot", "CHATWOOT"], ["email e-mail почта", "EMAIL"],
       ["website сайт", "WEBSITE"], ["manual вручную", "MANUAL"],
     ] as const).find(([aliases])=>channelQuery.length>=2&&aliases.split(" ").some(alias=>alias.includes(channelQuery)))?.[1] as ContactChannel|undefined;
-    const where: Prisma.ClientWhereInput = {
+    const baseWhere: Prisma.ClientWhereInput = {
       archivedAt: null,
-      ...(selectedChannels ? { conversations: { some: { channel: { in: selectedChannels }, archivedAt: null } } } : {}),
+      ...(query.conversationScope === "CLIENTS" ? { status: { not: "LEAD" } } : {}),
       ...(query.orderScope === "WITH_ORDERS" ? { orders: { some: { archivedAt: null } } } : {}),
       ...(query.orderScope === "ACTIVE_ORDERS" ? { orders: { some: { archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } } } } : {}),
       ...(search ? { OR: [
@@ -153,12 +154,23 @@ export class CommunicationsService {
         { email: { contains: search, mode: "insensitive" } },
         { instagram: { contains: search, mode: "insensitive" } },
         { instagramUsername: { contains: search, mode: "insensitive" } },
+        { orders: { some: { number: { contains: search, mode: "insensitive" }, archivedAt: null } } },
+        { athletes: { some: { archivedAt: null, OR: [{ firstName: { contains: search, mode: "insensitive" } }, { lastName: { contains: search, mode: "insensitive" } }] } } },
         { conversations: { some: { externalId: { contains: search, mode: "insensitive" }, archivedAt: null } } },
         ...(channelSearch ? [{ source: channelSearch }, { preferredChannel: channelSearch }, { conversations: { some: { channel: channelSearch, archivedAt: null } } }] : []),
       ] } : {}),
     };
+    const where: Prisma.ClientWhereInput = {
+      ...baseWhere,
+      ...(selectedChannels || query.conversationScope === "UNREAD" ? { conversations: { some: {
+        archivedAt: null,
+        ...(selectedChannels ? { channel: { in: selectedChannels } } : {}),
+        ...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {}),
+      } } } : {}),
+    };
     const limit = query.limit ?? 15;
-    const [clients, total, metaSettings, chatwootSettings] = await Promise.all([this.p.client.findMany({
+    const countedChannels=[ContactChannel.FACEBOOK,ContactChannel.INSTAGRAM,ContactChannel.WHATSAPP,ContactChannel.CHATWOOT,ContactChannel.EMAIL];
+    const [clients, total, metaSettings, chatwootSettings, channelTotals] = await Promise.all([this.p.client.findMany({
       where,
       orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }, { id: "asc" }],
       include: {
@@ -170,7 +182,7 @@ export class CommunicationsService {
       },
       skip: query.offset ?? 0,
       take: limit,
-    }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot")]);
+    }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>this.p.client.count({where:{...baseWhere,conversations:{some:{channel,archivedAt:null,...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {})}}}})))]);
     const clientIds = clients.map(client => client.id);
     const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
     const [orderCounts, activeOrders, payments, chatwootIdentityMessages] = clientIds.length ? await Promise.all([
@@ -178,6 +190,7 @@ export class CommunicationsService {
       this.p.order.findMany({
         where: { clientId: { in: clientIds }, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } },
         orderBy: { createdAt: "desc" },
+        include: { payments: { orderBy: { receivedAt: "desc" } } },
       }),
       this.p.payment.findMany({
         where: { order: { clientId: { in: clientIds }, archivedAt: null } },
@@ -210,7 +223,7 @@ export class CommunicationsService {
         }) || (conversation.channel === ContactChannel.CHATWOOT ? chatwootConversationInboxUrl(chatwootSettings.baseUrl, chatwootSettings.accountId, chatwootIdentityByConversation.get(conversation.id)) : ""),
       })),
     }));
-    return { items, total, hasMore: (query.offset ?? 0) + items.length < total };
+    return { items, total, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + items.length < total };
   }
   templates() {
     return this.p.messageTemplate.findMany({
@@ -1777,6 +1790,21 @@ export class CommunicationsService {
     const result = await response?.json().catch(() => ({})) as { id?: number | string; content?: string; created_at?: number } | undefined;
     if (!response?.ok || !result?.id) throw new BadGatewayException("Chatwoot не принял исходящее сообщение");
     return { id: String(result.id), content: typeof result.content === "string" ? result.content : content, createdAt: Number(result.created_at) || undefined };
+  }
+  async updateDraft(clientId:string,draftKey:string,d:UpdateMessageDraftDto,u:User){
+    const content=d.content.trim();
+    if(!content)throw new BadRequestException("Черновик не может быть пустым");
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(draftKey))throw new BadRequestException("Некорректный идентификатор черновика");
+    return this.p.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"composer-draft:"+clientId+":"+draftKey},0))`;
+      const conversation=await tx.conversation.upsert({where:{clientId_channel:{clientId,channel:d.channel}},create:{clientId,channel:d.channel},update:{}});
+      const existing=await tx.message.findFirst({where:{conversationId:conversation.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,metadata:{path:["composerDraftKey"],equals:draftKey}}});
+      const message=existing?await tx.message.update({where:{id:existing.id},data:{content}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT,content,authorId:u.id,metadata:{composerDraftKey:draftKey}}});
+      await tx.conversation.update({where:{id:conversation.id},data:{lastMessageAt:message.createdAt}});
+      if(!existing)await tx.activity.create({data:{clientId,type:"MESSAGE_DRAFTED",summary:"Автоматически сохранён исходящий черновик",metadata:{messageId:message.id,channel:conversation.channel}}});
+      await tx.auditLog.create({data:{actorId:u.id,action:existing?"UPDATE":"CREATE",entityType:"Message",entityId:message.id,after:{status:"DRAFT",channel:conversation.channel,autosaved:true}}});
+      return{...message,channel:conversation.channel};
+    });
   }
   async send(clientId: string, d: SendMessageDto, u: User) {
     const selected = await this.p.client.findFirst({

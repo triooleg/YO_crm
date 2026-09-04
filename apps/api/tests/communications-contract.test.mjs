@@ -46,6 +46,8 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
   assert.match(controller.replace(/\s+/g, ""), /list\(@Query\(\)query:CommunicationsListQueryDto\)/);
   assert.match(service, /skip:query\.offset\?\?0,take:limit/);
   for (const field of ["displayName", "phone", "email", "instagram"]) assert.match(service, new RegExp(`\\{${field}:\\{contains:search`));
+  assert.match(service,/orders:\{some:\{number:\{contains:search/);
+  assert.match(service,/athletes:\{some:\{archivedAt:null,OR:\[\{firstName:\{contains:search/);
   assert.match(service, /channelSearch/);
   assert.match(service, /websiteсайт/);
   assert.match(service, /manualвручную/);
@@ -59,7 +61,7 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
 test("inbox list can be narrowed to several validated social channels", () => {
   assert.match(dto, /classCommunicationsListQueryDto.*@IsArray\(\).*@ArrayMaxSize\(5\).*@IsEnum\(ContactChannel,\{each:true\}\)channels\?:ContactChannel\[\]/s);
   assert.match(service, /query\.channels\?\.length/);
-  assert.match(service, /conversations:\{some:\{channel:\{in:selectedChannels\},archivedAt:null\}\}/);
+  assert.match(service, /selectedChannels\?\{channel:\{in:selectedChannels\}\}:\{\}/);
   assert.match(service, /conversations:\{where:\{archivedAt:null,\.\.\.\(selectedChannels\?\{channel:\{in:selectedChannels\}\}:\{\}\)\}/);
 });
 
@@ -271,6 +273,31 @@ test("a saved draft is sent in place without creating a duplicate message",()=>{
   assert.match(service,/"meta-echo:"\+conversation\.id\+":"\+result\.message_id/);
   assert.match(service,/deduplicatedIntoMessageId:m\.id/);
   assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,sentAt,metadata:/);
+});
+
+test("inbox secondary filters and channel counters are server complete", () => {
+  assert.match(dto, /@IsIn\(\["UNREAD","CLIENTS"\]asconst\)conversationScope\?:"UNREAD"\|"CLIENTS"/);
+  assert.match(service, /query\.conversationScope==="CLIENTS"/);
+  assert.match(service, /query\.conversationScope==="UNREAD"/);
+  assert.match(service, /unreadCount:\{gt:0\}/);
+  assert.match(service, /channelCounts:Object\.fromEntries/);
+});
+
+test("inbox active order context includes real payment rows",()=>{
+  assert.match(service,/include:\{payments:\{orderBy:\{receivedAt:"desc"\}\}\}/);
+});
+
+test("composer autosave updates one owned draft instead of appending duplicates",()=>{
+  assert.match(dto,/classUpdateMessageDraftDto/);
+  assert.match(controller,/@Put\(":clientId\/drafts\/:draftKey"\)@Roles\("OWNER","ADMIN","MANAGER"\)/);
+  assert.match(controller,/updateDraft\(clientId,draftKey,d,r\.user\)/);
+  assert.match(service,/asyncupdateDraft\(clientId:string,draftKey:string,d:UpdateMessageDraftDto,u:User\)/);
+  assert.match(service,/pg_advisory_xact_lock/);
+  assert.match(service,/composerDraftKey/);
+  assert.match(service,/status:MessageStatus\.DRAFT/);
+  assert.match(service,/direction:MessageDirection\.OUTBOUND/);
+  assert.match(service,/conversation:\{clientId,archivedAt:null\}/);
+  assert.match(service,/action:existing\?"UPDATE":"CREATE",entityType:"Message"/);
 });
 
 test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundaries",async()=>{

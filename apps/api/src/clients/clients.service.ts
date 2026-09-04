@@ -37,6 +37,12 @@ export class ClientsService {
           orderBy: { firstName: "asc" },
           include: { measurements: { orderBy: { measuredAt: "desc" }, take: 1 } }
         },
+        workTasks: {
+          where: { archivedAt: null, completedAt: null, column: { archivedAt: null, isDone: false } },
+          orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
+          take: 5,
+          include: { assignee: { select: { id: true, displayName: true } }, column: { select: { id: true, name: true, color: true, isDone: true } } }
+        },
         orders: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 20 },
         activities: { orderBy: { createdAt: "desc" }, take: 50 }
       }

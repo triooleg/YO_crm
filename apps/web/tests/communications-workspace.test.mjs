@@ -15,13 +15,20 @@ test("входящие используют централизованные р�
     assert.match(locale, new RegExp(`${key}:`));
 });
 
-test("composer offers a real send action separately from saving a draft", () => {
+test("composer autosaves one draft and keeps a separate real send action", () => {
   assert.match(component, /async function save\(action: "DRAFT" \| "SEND",contentOverride\?:string\)/);
   assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: activeChannel, action,/);
-  assert.match(component, /onClick=\{\(\) => void save\("DRAFT"\)\}/);
+  assert.match(component, /async function autosaveDraft/);
+  assert.match(component, /draftSavePromise/);
+  assert.match(component, /composerDraftKey/);
+  assert.match(component, /method:"PUT"/);
+  assert.match(component, /setTimeout\(\(\)=>/);
+  assert.doesNotMatch(component, /className="communications-draft"/);
   assert.match(component, /onClick=\{\(\) => void save\("SEND"\)\}/);
   assert.match(component, /ui\.sendMessage/);
   assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
+  for(const key of ["draftAutosaving","draftAutosaved","draftAutosaveFailed"])
+    assert.match(locale,new RegExp(`${key}:`));
 });
 
 test("каждое входящее переводится внутри сообщения и перевод сохраняется",()=>{
@@ -60,7 +67,7 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/const isActive=\(\)=>selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
   assert.match(component,/aiOperationSequence\.current===operationSequence/);
   assert.match(component,/function invalidateAiOperation\(\)\{aiOperationSequence\.current\+\+;setAiPreparing\(false\)\}/);
-  assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);setText\(e\.target\.value\)\}\}/);
+  assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);setText\(e\.target\.value\);/);
   assert.match(component,/function chooseTemplate[\s\S]*setAiReply\(null\)/);
   assert.match(component,/if\(action==="DRAFT"\)\{setAiReply\(null\);setAiDraftText\(""\)\}/);
   assert.match(component,/ui\.confirmTranslationAndSend/);
@@ -152,7 +159,7 @@ test("mobile template menu anchors to the full toolbar inside the chat panel",()
 
 test("поиск клиентов работает, а источник расположен рядом с именем", () => {
   assert.match(component, /setSearch/);
-  assert.match(component, /filteredClients/);
+  assert.match(component, /search=\$\{encodeURIComponent\(query\.trim\(\)\)\}/);
   assert.match(component, /communications-client-name/);
   assert.match(component, /sourceBadge/);
 });
@@ -312,7 +319,7 @@ test("список входящих показывает по 15 чатов и �
   assert.match(component, /listRequestSequence/);
   assert.match(component, /currentSearch\.current/);
   assert.match(component, /currentClientCount\.current/);
-  assert.match(component, /const filteredClients = clients/);
+  assert.match(component, /const visibleClients=clients/);
   assert.match(locale, /loadMoreChats:/);
   assert.match(css, /communications-load-more/);
 });
@@ -350,7 +357,7 @@ test("под каналами можно отфильтровать клиент
   assert.match(component, /type OrderScope = "WITH_ORDERS" \| "ACTIVE_ORDERS"/);
   assert.match(component, /orderScope,setOrderScope/);
   assert.match(component, /orderScope=\$\{encodeURIComponent\(selectedOrderScope\)\}/);
-  assert.match(component, /className="communications-order-filters"/);
+  assert.match(component, /className="communications-order-filters communications-secondary-filters"/);
   assert.match(component, /ui\.clientsWithOrders/);
   assert.match(component, /ui\.clientsWithActiveOrders/);
   assert.match(component, /aria-pressed=\{orderScope==="WITH_ORDERS"\}/);
@@ -522,6 +529,107 @@ test("при открытии переписки лента показывает
   assert.match(component, /\[messagesLoading,client\?\.id,messages\.length\]/);
   assert.match(component, /<img[^>]*onLoad=\{scrollMessagesToLatest\}/);
   assert.match(component, /<video[^>]*onLoadedMetadata=\{scrollMessagesToLatest\}/);
+});
+
+test("новые сообщения не сбивают чтение истории и предлагают переход вниз", () => {
+  assert.match(component,/newMessageCount,setNewMessageCount/);
+  assert.match(component,/newInbound&&!stickToBottom\.current/);
+  assert.match(component,/communications-new-messages/);
+  assert.match(component,/autoScrollPending\.current=true;scrollMessagesToLatest\(\)/);
+  assert.match(css,/\.communications-new-messages\{[^}]*position:sticky[^}]*bottom:12px/);
+  assert.match(locale,/newMessages:\s*"новых сообщений"/);
+});
+
+test("редизайн входящих использует компактный viewport и прижимает короткую переписку к composer", () => {
+  assert.match(component, /className="communications-inbox-heading"/);
+  assert.match(component, /className="communications-message-stack"/);
+  assert.match(css, /\.communications-page\{[^}]*height:calc\(100dvh - [^)]+\)[^}]*overflow:hidden/);
+  assert.match(css, /\.communications-grid\{[^}]*height:100%[^}]*min-height:0/);
+  assert.match(css, /\.communications-messages\{[^}]*display:flex[^}]*flex-direction:column/);
+  assert.match(css, /\.communications-message-stack\{[^}]*margin-top:auto/);
+  assert.match(css, /@media\(max-width:1366px\)/);
+});
+
+test("Inbox имеет стабильные skeleton и состояние потери polling-соединения",()=>{
+  assert.match(component,/function InboxSkeleton/);
+  assert.match(component,/kind="conversations"/);
+  assert.match(component,/kind="messages"/);
+  assert.match(component,/connectionLost,setConnectionLost/);
+  assert.match(component,/setConnectionLost\(true\)/);
+  assert.match(component,/role="status">\{ui\.connectionLost\}/);
+  assert.match(css,/prefers-reduced-motion:reduce/);
+});
+
+test("сброс ширин убран из основной панели действий в компактное меню",()=>{
+  assert.match(component,/communications-header-menu/);
+  assert.match(component,/<summary aria-label=\{ui\.moreActions\}/);
+  assert.match(css,/\.communications-header-actions \.communications-header-menu>button\{[^}]*position:absolute/);
+});
+
+test("фильтры каналов показывают Все и реальные счетчики", () => {
+  assert.match(component, /channelCounts=Object\.fromEntries/);
+  assert.match(component, /communications-channel-filter-all/);
+  assert.match(component, /ui\.allChannels/);
+  assert.match(component, /channelCounts\[item\]/);
+  for (const key of ["allChannels", "unreadChats", "clientFilter"])
+    assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("вторичные фильтры выполняются сервером для всей пагинации", () => {
+  assert.match(component, /conversationScopeParam/);
+  assert.match(component, /conversationScope=\$\{encodeURIComponent\(selectedConversationScope\)\}/);
+  assert.match(component, /setClientTotal\(page\.total\)/);
+  assert.match(component, /setChannelTotals\(page\.channelCounts\)/);
+  assert.doesNotMatch(component, /const filteredClients = clients\.filter/);
+});
+
+test("вторичная фильтрация и шапка чата показывают рабочий контекст",()=>{
+  assert.match(component,/type ConversationScope = "ALL" \| "UNREAD" \| "CLIENTS"/);
+  assert.match(component,/communications-secondary-filters/);
+  assert.match(component,/communications-chat-badges/);
+  assert.match(component,/client\.country/);
+  assert.match(component,/activeOrders\.length/);
+});
+
+test("composer предлагает контекстные быстрые действия",()=>{
+  assert.match(component,/communications-compose-shortcuts/);
+  assert.match(component,/attachmentInput/);
+  assert.match(component,/ui\.attachPhotoVideo/);
+  assert.match(component,/ui\.measurementsShortcut/);
+  assert.match(component,/ui\.quickReply/);
+  assert.match(component,/action:"new-invoice"/);
+  assert.match(component,/rows=\{1\}/);
+  assert.match(component,/Math\.min\(e\.currentTarget\.scrollHeight,140\)/);
+});
+
+test("правая панель организована доступными вкладками клиента, заказов, заметок и файлов", () => {
+  assert.match(component, /type ContextTab = "CLIENT" \| "ORDERS" \| "NOTES" \| "FILES"/);
+  assert.match(component, /function ContextTabs/);
+  assert.match(component, /role="tablist"/);
+  assert.match(component, /aria-selected=\{active===tab\.key\}/);
+  assert.match(component, /role="tabpanel"/);
+  assert.match(css, /\.communications-context-tabs\{[^}]*display:grid/);
+  for (const key of ["contextClient", "contextOrders", "contextNotes", "contextFiles"])
+    assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("переписка разделяет дни и даёт компактные действия сообщения", () => {
+  assert.match(component, /messageDayKey/);
+  assert.match(component, /communications-date-separator/);
+  assert.match(component, /communications-message-actions/);
+  assert.match(component, /navigator\.clipboard\.writeText/);
+  for (const key of ["copyMessage", "messageCopied", "moreActions"])
+    assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("меню сообщения выполняет реальные действия вместо скрытого копирования",()=>{
+  assert.match(component,/communications-message-more/);
+  assert.match(component,/role="menu"/);
+  assert.match(component,/role="menuitem"/);
+  assert.match(component,/\{ui\.copyMessage\}/);
+  assert.match(component,/\{ui\.reply\}/);
+  assert.match(component,/\{ui\.translate\}/);
+  assert.doesNotMatch(component,/aria-label=\{ui\.moreActions\}[^>]*onClick=/);
 });
 
 test("к сообщению можно прикрепить изображение, короткое MP4-видео или файл и сохранить его как черновик", () => {

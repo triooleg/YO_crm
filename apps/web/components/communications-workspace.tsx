@@ -1,6 +1,6 @@
 "use client";
 import type { FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
   canRefreshInbox,
@@ -69,6 +69,7 @@ type ClientDetail = {
   id: string;
   displayName: string;
   athletes: ClientAthlete[];
+  workTasks?: { id:string; title:string; description?:string; dueAt?:string; markerColor:string; assignee?:{id:string;displayName:string}; column:{id:string;name:string;color:string;isDone:boolean} }[];
 };
 type TaskBoard = {
   columns: { id: string; name: string; color: string; isDone: boolean; sortOrder: number; tasks: never[] }[];
@@ -76,7 +77,7 @@ type TaskBoard = {
 };
 type ContextTarget = "clients" | "tasks" | "finance";
 type CommunicationsWorkspaceProps = { onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
-type ClientPage = { items: Client[]; total: number; hasMore: boolean };
+type ClientPage = { items: Client[]; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
   externalId?: string;
@@ -99,6 +100,8 @@ type Template = {
 type Side = "left" | "right";
 type SocialChannel = "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "CHATWOOT" | "EMAIL";
 type OrderScope = "WITH_ORDERS" | "ACTIVE_ORDERS";
+type ContextTab = "CLIENT" | "ORDERS" | "NOTES" | "FILES";
+type ConversationScope = "ALL" | "UNREAD" | "CLIENTS";
 const limits = { left: [200, 430], right: [260, 560] } as const,
   defaults = { left: 280, right: 360 },
   icons: Record<string, string> = {
@@ -206,6 +209,9 @@ function formatBytes(size: number) {
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
+function orderPaidMinor(order:Order){return (order.payments||[]).filter(payment=>payment.currency===order.currency).reduce((total,payment)=>total+payment.amountMinor,0)}
+function messageDayKey(value:string){const date=new Date(value);return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+function formatMessageDay(value:string){return new Date(value).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
 function gmailConversationUrl(messages: Message[]) {
   const messageId = [...messages].reverse().find((message) => message.channel === "EMAIL" && typeof message.metadata?.messageId === "string")?.metadata?.messageId?.trim();
   if (!messageId || messageId.length > 998 || /[\r\n]/.test(messageId)) return "";
@@ -223,11 +229,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [client, setClient] = useState<Client>(),
     [activeChannel,setActiveChannel]=useState("MANUAL"),
     [messages, setMessages] = useState<Message[]>([]),
+    [newMessageCount,setNewMessageCount]=useState(0),
     [templates, setTemplates] = useState<Template[]>([]),
     [templatesOpen, setTemplatesOpen] = useState(false),
     [templateBusy,setTemplateBusy]=useState(false),
     [templateNotice,setTemplateNotice]=useState(""),
     [text, setText] = useState(""),
+    [draftStatus,setDraftStatus]=useState<"IDLE"|"SAVING"|"SAVED"|"ERROR">("IDLE"),
     [emailReplyTarget,setEmailReplyTarget]=useState<Message>(),
     [socialReplyTarget,setSocialReplyTarget]=useState<Message>(),
     [emojiOpen,setEmojiOpen]=useState(false),
@@ -244,12 +252,16 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [search, setSearch] = useState(()=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get("clientName")||""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
+    [conversationScope,setConversationScope]=useState<ConversationScope>("ALL"),
+    [clientTotal,setClientTotal]=useState(0),
+    [channelTotals,setChannelTotals]=useState<Partial<Record<SocialChannel,number>>>({}),
     [visibleClientCount,setVisibleClientCount]=useState(15),
     [clientsHasMore,setClientsHasMore]=useState(false),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [messagesLoading, setMessagesLoading] = useState(false),
     [error, setError] = useState(""),
+    [connectionLost,setConnectionLost]=useState(false),
     [attachment, setAttachment] = useState<File>(),
     [attachmentPreview, setAttachmentPreview] = useState(""),
     [creating, setCreating] = useState(false),
@@ -265,6 +277,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [taskSaving,setTaskSaving]=useState(false),
     [contextOpen,setContextOpen]=useState(false),
     [contextCollapsed,setContextCollapsed]=useState(false),
+    [contextTab,setContextTab]=useState<ContextTab>("CLIENT"),
     [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
     [right, setRight] = useState(defaults.right);
@@ -280,6 +293,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     currentSearch = useRef(""),
     currentSocialFilters = useRef<SocialChannel[]>([]),
     currentOrderScope = useRef<OrderScope | undefined>(undefined),
+    currentConversationScope=useRef<ConversationScope>("ALL"),
     currentClientCount = useRef(15),
     aiOperationSequence = useRef(0),
     detailVersion = useRef(0),
@@ -290,6 +304,11 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
     pendingAiSend = useRef<{textContent?:string;textRequestId?:string}>({}),
     pendingDraftSends = useRef(new Map<string,string>()),
+    composerDraftId=useRef<string|undefined>(undefined),
+    composerDraftKey=useRef<string|undefined>(undefined),
+    draftSavePromise=useRef<Promise<void>|null>(null),
+    draftSequence=useRef(0),
+    lastAutosavedText=useRef(""),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     addAthleteTriggerRef = useRef<HTMLButtonElement | null>(null),
@@ -298,18 +317,22 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     previewClose = useRef<HTMLButtonElement | null>(null),
     previewVideo = useRef<HTMLVideoElement | null>(null),
     messagesViewport = useRef<HTMLDivElement | null>(null),
+    currentMessages=useRef<Message[]>([]),
     autoScrollPending = useRef(true),
     stickToBottom = useRef(true),
     aiDraftEditor = useRef<HTMLTextAreaElement | null>(null),
     composerTextarea=useRef<HTMLTextAreaElement|null>(null),
+    attachmentInput=useRef<HTMLInputElement|null>(null),
     emojiTrigger=useRef<HTMLButtonElement|null>(null),
     emojiPicker=useRef<HTMLDivElement|null>(null);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentOrderScope.current=orderScope;
+  currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
+  currentMessages.current=messages;
   const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
-  function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
+  function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48;if(stickToBottom.current)setNewMessageCount(0)}
   function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
   function handleComposerKeyDown(event:KeyboardEvent<HTMLTextAreaElement>){
     if(event.key!=="Enter"||!(event.ctrlKey||event.metaKey)||event.nativeEvent.isComposing)return;
@@ -340,23 +363,41 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     }
     return r.json();
   }
-  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope) {
+  async function autosaveDraft(content:string){
+    const operationClientId=selectedClientId.current,operationChannel=activeChannel,operationEpoch=composeEpoch.current,sequence=++draftSequence.current;
+    if(!operationClientId||!content.trim()||content.trim()===lastAutosavedText.current)return;
+    setDraftStatus("SAVING");
+    try{
+      const draftKey=composerDraftKey.current||crypto.randomUUID();composerDraftKey.current=draftKey;
+      const result=await api(`/communications/${operationClientId}/drafts/${encodeURIComponent(draftKey)}`,{method:"PUT",body:JSON.stringify({content:content.trim(),channel:operationChannel})}) as Message;
+      if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch||sequence!==draftSequence.current)return;
+      composerDraftId.current=result.id;lastAutosavedText.current=content.trim();setDraftStatus("SAVED");
+      setMessages(current=>current.some(message=>message.id===result.id)?current.map(message=>message.id===result.id?{...message,...result}:message):[...current,result]);
+    }catch{
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&sequence===draftSequence.current)setDraftStatus("ERROR");
+    }
+  }
+  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope, selectedConversationScope:ConversationScope="ALL") {
     const items: Client[] = [];
     const seenIds = new Set<string>();
     let offset = 0;
     let hasMore = true;
     let requests = 0;
+    let total=0;
+    let channelCounts:Partial<Record<SocialChannel,number>>={};
     while (items.length < count && hasMore && requests++ < 100) {
       const limit = Math.min(60, Math.max(15, count - items.length));
       const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
       const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}`) as ClientPage;
+      const conversationScopeParam=selectedConversationScope!=="ALL"?`&conversationScope=${encodeURIComponent(selectedConversationScope)}`:"";
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}`) as ClientPage;
+      total=page.total;channelCounts=page.channelCounts||{};
       offset += page.items.length;
       for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
       hasMore = page.hasMore;
       if (!page.items.length) break;
     }
-    return { items:items.slice(0,count), hasMore:hasMore||items.length>count };
+    return { items:items.slice(0,count), total, channelCounts, hasMore:hasMore||items.length>count };
   }
   async function saveClientNote(event:FormEvent<HTMLFormElement>){
     event.preventDefault();
@@ -528,11 +569,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     setOrdering(false);
     setTasking(false);
     composeEpoch.current++;
+    draftSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";setDraftStatus("IDLE");setText("");
     aiOperationSequence.current++;
     setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
+    setNewMessageCount(0);
     setActiveChannel(latestConversation(c)?.channel||channel(c));
     autoScrollPending.current = true;
     stickToBottom.current = true;
@@ -574,17 +617,18 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
     }
   }
-  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope) {
+  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope, requestedConversationScope=conversationScope) {
     const request=++listRequestSequence.current;
     listLoading.current=true;
     setLoading(true);
     setError("");
     try {
-      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope);
+      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope);
       if(request!==listRequestSequence.current)return;
       const data = sortClients(page.items);
       setClients(data);
       setClientsHasMore(page.hasMore);
+      setClientTotal(page.total);setChannelTotals(page.channelCounts);
       const selected = id ? data.find((x) => x.id === id) : data[0];
       if (selected&&selected.id===selectedClientId.current)setClient(selected);
       else if(id&&selected)await open(selected);
@@ -606,7 +650,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     const listRequest=++listRequestSequence.current;
     const observedReadVersion = readVersion.current;
     try {
-      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current);
+      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current,currentConversationScope.current);
+      setConnectionLost(false);
       const data = sortClients(page.items).map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
@@ -627,6 +672,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       if (observedReadVersion !== readVersion.current||listRequest!==listRequestSequence.current) return;
       setClients(data);
       setClientsHasMore(page.hasMore);
+      setClientTotal(page.total);setChannelTotals(page.channelCounts);
       const selected = data.find((x) => x.id === selectedClientId.current);
       if (selected) {
         const request = {
@@ -642,10 +688,14 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           )
         ) {
           setClient(selected);
-          setMessages(detail.messages || []);
+          const nextMessages=detail.messages||[],knownIds=new Set(currentMessages.current.map(message=>message.id)),newInbound=nextMessages.filter((message:Message)=>message.direction==="INBOUND"&&!knownIds.has(message.id)).length;
+          if(newInbound&&!stickToBottom.current)setNewMessageCount(current=>current+newInbound);
+          else if(stickToBottom.current)autoScrollPending.current=true;
+          setMessages(nextMessages);
         }
       }
     } catch {
+      setConnectionLost(true);
     } finally {
       refreshing.current = false;
     }
@@ -696,15 +746,20 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   useEffect(()=>{if(aiReply){aiDraftEditor.current?.scrollIntoView({block:"nearest"});aiDraftEditor.current?.focus()}},[aiReply?.phase]);
   useEffect(()=>{if(emojiOpen)requestAnimationFrame(()=>emojiPicker.current?.querySelector<HTMLButtonElement>("button")?.focus())},[emojiOpen]);
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
-  const filteredClients = clients;
-  const visibleClients=filteredClients;
+  useEffect(()=>{
+    const content=text.trim();
+    if(!client||!content||busy||content===lastAutosavedText.current){if(!content)setDraftStatus("IDLE");return}
+    const timer=setTimeout(()=>{const previous=draftSavePromise.current,promise=(async()=>{if(previous)await previous;await autosaveDraft(content)})();draftSavePromise.current=promise;void promise.finally(()=>{if(draftSavePromise.current===promise)draftSavePromise.current=null})},900);
+    return()=>clearTimeout(timer);
+  },[text,client?.id,activeChannel,busy]);
+  const visibleClients=clients;
   useEffect(()=>{
     selectedClientId.current=undefined;
     setClient(undefined);
     setMessages([]);
-    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search,socialFilters,orderScope)},250);
+    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search,socialFilters,orderScope,conversationScope)},250);
     return()=>clearTimeout(timer);
-  },[search,socialFilters,orderScope]);
+  },[search,socialFilters,orderScope,conversationScope]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,
@@ -729,6 +784,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
     if (!client || (!messageText && !attachment)) return false;
+    if(action==="SEND"&&draftSavePromise.current)await draftSavePromise.current;
     if(action==="DRAFT")invalidateAiOperation();
     const operationClientId=client.id,operationEpoch=composeEpoch.current;
     const isActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
@@ -748,11 +804,12 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         }
       }
       const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
+        const draftId=action==="SEND"&&content?composerDraftId.current:undefined;
         const result = await api("/communications/" + client.id + "/messages", {
           method: "POST",
-          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) }),
+          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) }),
         });
-        if(isActive())setMessages((current) => [...current, socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result]);
+        if(isActive())setMessages((current) => {const next=socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result;return draftId&&current.some(message=>message.id===draftId)?current.map(message=>message.id===draftId?next:message):[...current,next]});
         return result as Message;
       };
       const sent: Message[] = [];
@@ -799,6 +856,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
       else {
         setText("");
+        composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";draftSequence.current++;setDraftStatus("IDLE");
         setEmailReplyTarget(undefined);
         setSocialReplyTarget(undefined);
         setEmojiOpen(false);
@@ -939,14 +997,18 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   const active = sourceBadge({source:activeChannel} as Client),
     availableChannels = client ? clientBadges(client) : [],
     activeOrders=client?.orders||[],
+    displayedContextOrders=contextTab==="CLIENT"?activeOrders.slice(0,1):activeOrders,
+    nextTask=clientDetail?.workTasks?.[0],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
+    channelCounts=Object.fromEntries(socialChannels.map(item=>[item,channelTotals[item]||0])) as Record<SocialChannel,number>,
+    conversationFiles=messages.flatMap(message=>(message.metadata?.attachments||[]).map((attachment,index)=>({messageId:message.id,index,attachment}))),
     grid = left + "px 6px minmax(380px,1fr) " + (contextCollapsed?"0px 46px":"6px "+right+"px");
   const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
   const attachmentAccept=attachmentMimeTypes.join(",");
   return (
     <div className="communications-page">
       <header className="phase2-header">
-        <div>
+        <div className="communications-inbox-heading">
           <p>{ui.eyebrow}</p>
           <h1>{ui.title}</h1>
           <span>{ui.subtitle}</span>
@@ -955,18 +1017,17 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           <button onClick={() => setCreating(true)}>
             {ui.createClient}
           </button>
-          <button
-            onClick={() => {
+          <details className="communications-header-menu">
+            <summary aria-label={ui.moreActions} title={ui.moreActions}>•••</summary>
+            <button type="button" onClick={() => {
               widths.current = { ...defaults };
               setLeft(defaults.left);
               setRight(defaults.right);
               setContextCollapsed(false);
               localStorage.removeItem("communications-widths");
               localStorage.removeItem("communications-context-collapsed");
-            }}
-          >
-            {ui.resetWidths}
-          </button>
+            }}>{ui.resetWidths}</button>
+          </details>
         </div>
       </header>
       {error && (
@@ -975,6 +1036,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           <button onClick={() => setError("")}>{ui.close}</button>
         </div>
       )}
+      {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
       {templateNotice && <div className="communications-template-notice" role="status">{templateNotice}<button type="button" onClick={()=>setTemplateNotice("")}>{ui.close}</button></div>}
       <section
         className="communications-grid"
@@ -989,15 +1051,19 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             aria-label={ui.search}
           />
           <div className="communications-social-filters" role="group" aria-label={ui.socialNetworkFilter}>
-            {socialChannels.map(item=><button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={item==="EMAIL"?ui.gmail:ui.sources[item]} title={item==="EMAIL"?ui.gmail:ui.sources[item]} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}>{icons[item]}</button>)}
+            <button type="button" className="communications-social-filter communications-channel-filter-all" aria-pressed={!socialFilters.length} onClick={()=>setSocialFilters([])}><span>{ui.allChannels}</span><strong>{clientTotal}</strong></button>
+            {socialChannels.map(item=><button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={item==="EMAIL"?ui.gmail:ui.sources[item]} title={item==="EMAIL"?ui.gmail:ui.sources[item]} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}><span aria-hidden="true">{icons[item]}</span><b>{item==="EMAIL"?ui.gmail:ui.sources[item]}</b><strong>{channelCounts[item]}</strong></button>)}
           </div>
-          <div className="communications-order-filters" role="group" aria-label={ui.orderFilter}>
+          <div className="communications-order-filters communications-secondary-filters" role="group" aria-label={ui.orderFilter}>
+            <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope} onClick={()=>{setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels}</button>
+            <button type="button" aria-pressed={conversationScope==="UNREAD"} onClick={()=>setConversationScope(current=>current==="UNREAD"?"ALL":"UNREAD")}>{ui.unreadChats}</button>
+            <button type="button" aria-pressed={conversationScope==="CLIENTS"} onClick={()=>setConversationScope(current=>current==="CLIENTS"?"ALL":"CLIENTS")}>{ui.clientFilter}</button>
             <button type="button" aria-pressed={orderScope==="WITH_ORDERS"} onClick={()=>setOrderScope(current=>current==="WITH_ORDERS"?undefined:"WITH_ORDERS")}>{ui.clientsWithOrders}</button>
             <button type="button" aria-pressed={orderScope==="ACTIVE_ORDERS"} onClick={()=>setOrderScope(current=>current==="ACTIVE_ORDERS"?undefined:"ACTIVE_ORDERS")}>{ui.clientsWithActiveOrders}</button>
           </div>
           <div className="communications-client-list">
           {loading ? (
-            <State text={ui.loading} />
+            <InboxSkeleton kind="conversations" rows={6}/>
           ) : (
             visibleClients.map((c) => {
               const badges = clientBadges(c),
@@ -1049,8 +1115,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               );
             })
           )}
-          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters,orderScope)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
-          {!loading && !filteredClients.length && (
+          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters,orderScope,conversationScope)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
+          {!loading && !visibleClients.length && (
             <State text={orderScope ? ui.noOrderFilterResults : socialFilters.length ? ui.noSocialNetworkResults : search ? ui.noSearchResults : ui.noClients} />
           )}
           </div>
@@ -1067,21 +1133,23 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
+                {client&&<span className="communications-chat-badges"><span>{active.icon} {active.label}</span>{client.country&&<span>⌖ {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{setActiveChannel(event.target.value);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
             ) : (
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
           </header>
           <div className="communications-messages" ref={messagesViewport} onScroll={updateMessagesScrollIntent}>
+            <div className="communications-message-stack">
             {messagesLoading ? (
-              <State text={ui.loadingMessages} />
+              <InboxSkeleton kind="messages" rows={4}/>
             ) : (
-              messages.map((message) => {
+              messages.map((message,messageIndex) => {
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
@@ -1092,17 +1160,22 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 const canSocialReply=message.direction==="INBOUND"&&Boolean(message.externalId)&&["INSTAGRAM","WHATSAPP"].includes(message.channel);
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
                 const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url);
-                return (
+                const previousCreatedAt=messages[messageIndex-1]?.createdAt,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(message.createdAt);
+                return (<Fragment key={message.id}>
+                  {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(message.createdAt)}</span></div>}
                   <article
-                    key={message.id}
                     className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}`}
                   >
+                    <span className="communications-message-actions">
+                      <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
+                      <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}</span></details>
+                    </span>
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
                     {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
                     {message.channel==="EMAIL"&&message.metadata?.emailHtml?<div className="communications-message-content email-rich-content" dangerouslySetInnerHTML={{__html:message.metadata.emailHtml}}/>:<span className="communications-message-content">{message.content}</span>}
                     {attachments.length > 0 && (
-                      <div className="communications-attachments">
+                      <div className={`communications-attachments${attachments.length>1?" is-gallery":""}`}>
                         {attachments.map((attachment, index) => {
                           const url = safeAttachmentUrl(attachment.url),
                             label =
@@ -1160,6 +1233,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                     {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" aria-label={ui.saveAsTemplate} title={ui.saveAsTemplate} disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z"/><path d="M12 7v6M9 10h6"/></svg></button>}
                     {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>
+                </Fragment>
                 );
               })
             )}
@@ -1177,6 +1251,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               <State text={ui.emptyMessages} />
             )}{" "}
             {!client && !loading && <State text={ui.selectClientHint} />}
+            </div>
+            {newMessageCount>0&&<button type="button" className="communications-new-messages" onClick={()=>{setNewMessageCount(0);autoScrollPending.current=true;scrollMessagesToLatest()}}>↓ {newMessageCount} {ui.newMessages}</button>}
           </div>
           <footer>
             <div className="communications-ai">
@@ -1224,29 +1300,32 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
               </div>
             )}
+            <div className="communications-compose-shortcuts" aria-label={ui.composerShortcuts}>
+              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
+              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
+              <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
+              <button type="button" disabled={!client||client.status==="LEAD"} onClick={()=>client&&onNavigate?.("clients",{clientId:client.id})}>⌁ {ui.measurementsShortcut}</button>
+              <button type="button" disabled={!templates.length} onClick={()=>setTemplatesOpen(true)}>▣ {ui.quickReply}</button>
+            </div>
             <div className="communications-compose">
               <label className="communications-attach" aria-label={ui.attachFile}>
                 <span aria-hidden>＋</span>
-                <input type="file" accept={attachmentAccept} disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                <input ref={attachmentInput} type="file" accept={attachmentAccept} disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
               </label>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
                 ref={composerTextarea}
+                rows={1}
                 aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?"social-reply-target":undefined}
                 value={text}
-                onChange={(e) => {invalidateAiOperation();setText(e.target.value)}}
+                onChange={(e) => {invalidateAiOperation();setText(e.target.value);e.currentTarget.style.height="auto";e.currentTarget.style.height=`${Math.min(e.currentTarget.scrollHeight,140)}px`}}
                 onKeyDown={handleComposerKeyDown}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 title={ui.sendShortcut}
                 placeholder={ui.messagePlaceholder}
                 disabled={!client}
               />
-              <button className="communications-draft"
-                disabled={busy || !client || (!text.trim() && !attachment)}
-                onClick={() => void save("DRAFT")}
-              >
-                {busy ? ui.saving : ui.saveDraft}
-              </button>
+              <span className={`communications-draft-status is-${draftStatus.toLowerCase()}`} role="status">{draftStatus==="SAVING"?ui.draftAutosaving:draftStatus==="SAVED"?ui.draftAutosaved:draftStatus==="ERROR"?ui.draftAutosaveFailed:""}</span>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
                 <button
                   disabled={busy || !client || (!text.trim() && !attachment)}
@@ -1269,12 +1348,14 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           <button type="button" className="communications-context-collapse" aria-label={contextCollapsed?ui.expandClientCard:ui.collapseClientCard} aria-expanded={!contextCollapsed} onClick={()=>{const next=!contextCollapsed;setContextCollapsed(next);localStorage.setItem("communications-context-collapsed",String(next))}}>{contextCollapsed?"‹":"›"}</button>
           <button type="button" className="communications-context-close" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}>×</button>
           {client&&<>
+          <ContextTabs active={contextTab} onChange={setContextTab}/>
+          <div className="communications-context-tabpanel" role="tabpanel" aria-labelledby={`communications-context-tab-${contextTab.toLowerCase()}`} data-active-tab={contextTab}>
           <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b>{client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b>{client.timezone}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
-          {activeOrders.map((o) => (
+          {displayedContextOrders.map((o) => (
             <article key={o.id}>
               {o.modelImagePath ? (
                 <img
@@ -1297,11 +1378,16 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <strong>
                   {(o.priceMinor / 100).toFixed(2)} {o.currency}
                 </strong>
+                <small className="communications-order-payment is-paid">{ui.paid}: {(orderPaidMinor(o)/100).toFixed(2)} {o.currency}</small>
+                <small className="communications-order-payment is-balance">{ui.balance}: {(Math.max(0,o.priceMinor-orderPaidMinor(o))/100).toFixed(2)} {o.currency}</small>
               </div>
             </article>
           ))}
+          {contextTab==="CLIENT"&&activeOrders.length>1&&<button type="button" className="communications-more-orders" onClick={()=>setContextTab("ORDERS")}>{ui.moreOrders.replace("{count}",String(activeOrders.length-1))}</button>}
           {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b></header>{client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b>{nextTask&&<button type="button" onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:nextTask.id})}>{ui.edit}</button>}</header>{nextTask?<p style={{borderLeftColor:nextTask.markerColor}}><b>{nextTask.title}</b>{nextTask.description&&<span>{nextTask.description}</span>}{nextTask.dueAt&&<small>{new Date(nextTask.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small>}{nextTask.assignee&&<small>{ui.responsible}: {nextTask.assignee.displayName}</small>}</p>:client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
+          <section className="communications-context-section communications-context-files"><header><b>{ui.contextFiles}</b><small>{conversationFiles.length}</small></header>{conversationFiles.length?<div>{conversationFiles.map(({messageId,index,attachment})=>{const url=safeAttachmentUrl(attachment.url);return url?<a key={`${messageId}-${index}`} href={url} target="_blank" rel="noopener noreferrer">{attachment.name||ui.attachmentTypes[attachment.type as keyof typeof ui.attachmentTypes]||ui.attachmentTypes.fallback}</a>:null})}</div>:<small>{ui.noContextFiles}</small>}</section>
+          </div>
           </>}
         </aside>
       </section>
@@ -1419,6 +1505,11 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
 }
 function State({ text }: { text: string }) {
   return <div className="communications-state">{text}</div>;
+}
+function InboxSkeleton({kind,rows}:{kind:"conversations"|"messages";rows:number}){return <div className={`communications-skeleton is-${kind}`} aria-label={kind==="conversations"?ui.loading:ui.loadingMessages}>{Array.from({length:rows},(_,index)=><span key={index}/>)}</div>}
+function ContextTabs({active,onChange}:{active:ContextTab;onChange:(tab:ContextTab)=>void}){
+  const tabs:{key:ContextTab;label:string}[]=[{key:"CLIENT",label:ui.contextClient},{key:"ORDERS",label:ui.contextOrders},{key:"NOTES",label:ui.contextNotes},{key:"FILES",label:ui.contextFiles}];
+  return <div className="communications-context-tabs" role="tablist" aria-label={ui.clientCard}>{tabs.map(tab=><button id={`communications-context-tab-${tab.key.toLowerCase()}`} type="button" role="tab" key={tab.key} aria-selected={active===tab.key} onClick={()=>onChange(tab.key)}>{tab.label}</button>)}</div>
 }
 function ReplyMedia({url,type,label,onOpen,onLoad}:{url:string;type?:"image"|"video";label:string;onOpen:(event:MouseEvent<HTMLButtonElement>,type:"image"|"video")=>void;onLoad:()=>void}){
   const[video,setVideo]=useState(type==="video");

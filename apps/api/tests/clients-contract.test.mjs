@@ -9,6 +9,13 @@ import { validate } from "class-validator";
 
 const controller = await readFile(new URL("../src/clients/clients.controller.ts", import.meta.url), "utf8");
 const service = await readFile(new URL("../src/clients/clients.service.ts", import.meta.url), "utf8");
+
+test("client detail exposes only active next-action tasks",()=>{
+  assert.match(service,/workTasks:\s*\{/);
+  assert.match(service,/where:\s*\{ archivedAt: null, completedAt: null, column: \{ archivedAt: null, isDone: false \} \}/);
+  assert.match(service,/orderBy:\s*\[\{ dueAt: "asc" \}, \{ createdAt: "desc" \}\]/);
+  assert.match(service,/take: 5/);
+});
 const dto = await readFile(new URL("../src/clients/clients.dto.ts", import.meta.url), "utf8");
 const require = createRequire(import.meta.url);
 const compiledDto = ts.transpileModule(dto, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true } }).outputText;

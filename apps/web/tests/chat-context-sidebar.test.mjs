@@ -31,6 +31,23 @@ test("вариант A показывает постоянный обзор кл
     assert.match(locale, new RegExp(`${key}:`));
 });
 
+test("следующее действие берётся из существующих задач клиента",()=>{
+  assert.match(communications,/nextTask=clientDetail\?\.workTasks\?\.\[0\]/);
+  assert.match(communications,/taskId:nextTask\.id/);
+  assert.match(communications,/markerColor/);
+  assert.match(communications,/ui\.responsible/);
+  assert.match(locale,/responsible:\s*"Ответственный"/);
+});
+
+test("основная вкладка показывает один актуальный заказ с оплатой, полный список остаётся во вкладке заказов",()=>{
+  assert.match(communications,/displayedContextOrders=contextTab==="CLIENT"\?activeOrders\.slice\(0,1\):activeOrders/);
+  assert.match(communications,/orderPaidMinor/);
+  assert.match(communications,/ui\.paid/);
+  assert.match(communications,/ui\.balance/);
+  assert.match(communications,/setContextTab\("ORDERS"\)/);
+  assert.match(locale,/moreOrders:\s*"Ещё заказов: \{count\}"/);
+});
+
 test("заказ из чата открывается поверх переписки и не переводит в Клиенты", () => {
   assert.match(shell, /<CommunicationsWorkspace onNavigate=\{navigate\}/);
   assert.doesNotMatch(communications, /onNavigate\?\.\("clients",\{action:"new-order",clientId:client\.id/);
@@ -64,6 +81,8 @@ test("правая панель показывает спортсменов и �
   for (const key of ["athletes", "noAthletes", "selectAthlete"])
     assert.match(locale, new RegExp(`${key}:`));
   assert.match(css, /communications-context-athletes/);
+  assert.match(communications,/athlete\.measurements\[0\]\.measuredAt/);
+  assert.match(locale,/latestMeasurements:\s*"Последние мерки"/);
 });
 
 test("правую панель можно свернуть стрелкой и раскрыть без потери активного чата", () => {

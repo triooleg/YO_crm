@@ -37,6 +37,7 @@ export class CommunicationsListQueryDto {
   @Transform(({ value }) => Array.isArray(value) ? value : String(value).split(",").filter(Boolean))
   @IsArray() @ArrayMaxSize(5) @IsEnum(ContactChannel, { each: true }) channels?: ContactChannel[];
   @IsOptional() @IsIn(["WITH_ORDERS", "ACTIVE_ORDERS"] as const) orderScope?: "WITH_ORDERS" | "ACTIVE_ORDERS";
+  @IsOptional() @IsIn(["UNREAD", "CLIENTS"] as const) conversationScope?: "UNREAD" | "CLIENTS";
 }
 export class ReadConversationDto {
   @IsString() @Length(1, 80) id!: string;
@@ -61,6 +62,10 @@ export class SendMessageDto {
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @IsString() @Length(20, 80) replyToMessageId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
+}
+export class UpdateMessageDraftDto {
+  @IsString() @Length(1, 5000) content!: string;
+  @IsEnum(ContactChannel) channel!: ContactChannel;
 }
 export class MessageReactionDto {
   @IsIn(["react", "unreact"] as const) action!: "react" | "unreact";
