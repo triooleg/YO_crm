@@ -546,7 +546,9 @@ test("редизайн входящих использует компактны�
   assert.match(css, /\.communications-page\{[^}]*height:calc\(100dvh - [^)]+\)[^}]*overflow:hidden/);
   assert.match(css, /\.communications-grid\{[^}]*height:100%[^}]*min-height:0/);
   assert.match(css, /\.communications-messages\{[^}]*display:flex[^}]*flex-direction:column/);
-  assert.match(css, /\.communications-message-stack\{[^}]*margin-top:auto/);
+  assert.match(css, /\.communications-message-stack\{[^}]*flex:0 0 auto[^}]*min-height:0[^}]*margin-top:auto/);
+  assert.doesNotMatch(css, /\.communications-message-stack\{[^}]*min-height:100%/);
+  assert.doesNotMatch(css, /\.communications-message-stack\{[^}]*justify-content:flex-end/);
   assert.match(css, /@media\(max-width:1366px\)/);
 });
 
@@ -571,6 +573,11 @@ test("фильтры каналов показывают Все и реальн�
   assert.match(component, /communications-channel-filter-all/);
   assert.match(component, /ui\.allChannels/);
   assert.match(component, /channelCounts\[item\]/);
+  assert.match(component, /aria-label=\{`\$\{label\}: \$\{channelCounts\[item\]\}`\}/);
+  assert.match(component, /<span aria-hidden="true">\{icons\[item\]\}<\/span><strong aria-hidden="true">\{channelCounts\[item\]\}<\/strong>/);
+  assert.doesNotMatch(component, /<b>\{item==="EMAIL"\?ui\.gmail:ui\.sources\[item\]\}<\/b>/);
+  assert.doesNotMatch(css, /communications-social-filter>b/);
+  assert.doesNotMatch(css, /communications-social-filter>strong[^}]*display:none/);
   for (const key of ["allChannels", "unreadChats", "clientFilter"])
     assert.match(locale, new RegExp(`${key}:`));
 });
@@ -611,6 +618,16 @@ test("правая панель организована доступными в
   assert.match(css, /\.communications-context-tabs\{[^}]*display:grid/);
   for (const key of ["contextClient", "contextOrders", "contextNotes", "contextFiles"])
     assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("вкладка файлов показывает media-превью и открывает его в общем lightbox", () => {
+  assert.match(component, /communications-context-file-grid/);
+  assert.match(component, /communications-context-file-preview/);
+  assert.match(component, /setPreview\(\{url,type:attachment\.type==="video"\?"video":"image"\}\)/);
+  assert.match(component, /attachment\.type==="video"\?<video[^>]*preload="metadata"[^>]*muted[^>]*playsInline/);
+  assert.match(component, /<img src=\{url\} alt=\{label\}/);
+  assert.match(css, /\.communications-context-file-grid\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.communications-context-file-preview img,.communications-context-file-preview video\{[^}]*object-fit:cover/);
 });
 
 test("переписка разделяет дни и даёт компактные действия сообщения", () => {
