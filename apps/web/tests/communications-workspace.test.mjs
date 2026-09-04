@@ -632,6 +632,16 @@ test("меню сообщения выполняет реальные дейст
   assert.doesNotMatch(component,/aria-label=\{ui\.moreActions\}[^>]*onClick=/);
 });
 
+test("на мобильном список клиентов открывается отдельной панелью и не сжимает переписку",()=>{
+  assert.match(component,/mobileClientListOpen/);
+  assert.match(component,/communications-mobile-list-toggle/);
+  assert.match(component,/communications-mobile-clients-backdrop/);
+  assert.match(component,/communications-clients\$\{mobileClientListOpen\?" mobile-open":""\}/);
+  assert.match(css,/@media\(max-width:650px\)\{[\s\S]*?\.communications-grid\{grid-template-columns:minmax\(0,1fr\)!important/);
+  assert.match(css,/\.communications-clients\.mobile-open\{display:grid;position:fixed/);
+  assert.match(locale,/openClientList:/);
+});
+
 test("к сообщению можно прикрепить изображение, короткое MP4-видео или файл и сохранить его как черновик", () => {
   assert.match(component, /type="file"/);
   assert.match(component, /video\/mp4/);

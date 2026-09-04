@@ -649,6 +649,7 @@ export const communicationsUi = {
   subtitle: "Клиенты, переписка и заказы",
   workspace: "Рабочее пространство входящих",
   clientsList: "Список клиентов",
+  openClientList: "Чаты",
     orderCount: "Заказов",
     activeOrderBadge: "Есть активные заказы",
     completedOrderBadge: "Все заказы завершены или отменены",

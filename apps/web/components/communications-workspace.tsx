@@ -277,6 +277,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [taskSaving,setTaskSaving]=useState(false),
     [contextOpen,setContextOpen]=useState(false),
     [contextCollapsed,setContextCollapsed]=useState(false),
+    [mobileClientListOpen,setMobileClientListOpen]=useState(false),
     [contextTab,setContextTab]=useState<ContextTab>("CLIENT"),
     [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
@@ -550,6 +551,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     }
   }
   async function open(c: Client) {
+    setMobileClientListOpen(false);
     if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
       if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
       setAttachment(undefined);
@@ -1043,7 +1045,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         style={{ gridTemplateColumns: grid }}
         aria-label={ui.workspace}
       >
-        <aside className="communications-clients" aria-label={ui.clientsList}>
+        {mobileClientListOpen&&<button type="button" className="communications-mobile-clients-backdrop" aria-label={ui.close} onClick={()=>setMobileClientListOpen(false)}/>}
+        <aside className={`communications-clients${mobileClientListOpen?" mobile-open":""}`} aria-label={ui.clientsList}>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -1129,6 +1132,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         />
         <main className="communications-chat">
           <header className="communications-chat-header">
+            <button type="button" className="communications-mobile-list-toggle" aria-expanded={mobileClientListOpen} onClick={()=>setMobileClientListOpen(true)}>{ui.openClientList}</button>
             <span className="communications-chat-client">
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
