@@ -162,6 +162,12 @@ test("conversation detail returns the latest messages in chronological order", (
   assert.match(x, /this\.latestVisibleMessages\(\{conversation:/);
   assert.match(x, /this\.latestVisibleMessages\(\{conversationId:c\.id\}\)/);
 });
+test("legacy Meta reaction control records stay out of conversation previews and message history", () => {
+  const list = service.slice(service.indexOf("asynclist"), service.indexOf("templates()"));
+  const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));
+  assert.match(list, /messages:\{where:\{messageType:\{not:"reaction"\}\},orderBy:\{createdAt:"desc"\},take:1\}/);
+  assert.match(window, /where:\{AND:\[where,\{messageType:\{not:"reaction"\}\}\]\}/);
+});
 test("AI requires opt in and separate context consent", () => {
   assert.match(service, /enabled:v\.enabled===true/);
   assert.match(service, /allowClientContext:v\.allowClientContext===true/);

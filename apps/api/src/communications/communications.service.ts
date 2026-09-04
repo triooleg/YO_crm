@@ -173,7 +173,7 @@ export class CommunicationsService {
         conversations: {
           where: { archivedAt: null, ...(selectedChannels ? { channel: { in: selectedChannels } } : {}) },
           orderBy: { lastMessageAt: "desc" },
-          include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+          include: { messages: { where: { messageType: { not: "reaction" } }, orderBy: { createdAt: "desc" }, take: 1 } },
         },
       },
       skip: query.offset ?? 0,
@@ -1535,7 +1535,7 @@ export class CommunicationsService {
     let cursor: string | undefined;
     while (visible.length < 300) {
       const batch = await this.p.message.findMany({
-        where,
+        where: { AND: [where, { messageType: { not: "reaction" } }] },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 300,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
