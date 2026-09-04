@@ -1,5 +1,14 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-04 — завершение аудита незакрытых задач (release candidate)
+
+- Повторно проверен аудит от 2026-09-02. Production settings, AI Intelligence P0, Meta reactions/read receipts, WhatsApp media/read/reactions и основной Chatwoot read webhook уже входят в `origin/main` и были захвачены последующими production-релизами; повторная реализация не выполнялась.
+- Во «Входящих» добавлены два взаимоисключающих серверных фильтра: «Покупали» показывает клиентов с любым неархивированным заказом, «Активные заказы» — клиентов с неархивированным заказом, чей sales status не `COMPLETED`/`CANCELLED`. Повторное нажатие снимает выбранный фильтр; фильтры совместимы с поиском, каналами и пагинацией.
+- Failing-first контракт подтвердил отсутствие функции. После реализации targeted communications tests PASS 90/90; полный suite PASS: API 309/309, database 7/7, web suite, все typecheck. Production builds API/web/database PASS после разрешения сетевого доступа Next.js к Google Fonts; `git diff --check` PASS.
+- Browser review локального UI с изолированными mock-данными PASS на 1920×1080, 1366×768 и 390×844. Оба фильтра доступны с клавиатуры и screen reader через `aria-pressed`, переключаются взаимоисключающе; horizontal body overflow на 390 px равен 0.
+- `ROADMAP.md` приведён к фактам: Tasks Kanban и production scheduling больше не обозначены как local/deployment-pending; Communications описывает фактически развёрнутые каналы и отдельно сохраняет обязательность контролируемых provider-smoke.
+- Production SSH во время проверки временно недоступен с рабочей машины (`Cannot assign requested address`), поэтому текущий runtime/health и наличие реального Chatwoot read event остаются непроверенными до восстановления сетевого маршрута. Instagram reaction нельзя отправлять произвольному клиенту ради smoke; нужен контролируемый тестовый диалог или уже существующее production-доказательство.
+
 ## 2026-09-01 — сквозной WhatsApp Business (deployed)
 
 - Входящие события WhatsApp Cloud API и `smb_message_echoes` из приложения WhatsApp Business используют одну строгую identity-цепочку `phone_number_id + wa_id`, поэтому ответ менеджера из приложения сохраняется как `OUTBOUND` в существующем диалоге и не создаёт клиента или дубль.

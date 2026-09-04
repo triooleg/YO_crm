@@ -28,10 +28,12 @@ Order types, pipeline, ready models, designs, files, prices and deposits. The
 configured deposit percentage supplies the server-side default, with an explicit
 authorized override path.
 
-## Phase 4 - Production (complete; audit warning closed locally)
+## Phase 4 - Production (complete and deployed)
 
 Calendar, capacity, slots, deadlines, tasks and readiness/deposit gates. Receipt
 of the required deposit automatically confirms an existing tentative slot.
+Server-owned production duration and shipping-reserve settings, automatic
+tentative scheduling and their controlled production UAT are complete.
 
 ## Phase 5 - Finance (complete; audit gaps closed locally)
 
@@ -44,20 +46,20 @@ Shipments, carriers, tracking, delivery states and overdue alerts. Shipping
 state changes are owned by the shipment flow and cannot be bypassed through the
 generic order-status route.
 
-## Phase 7 - Communications (in progress)
+## Phase 7 - Communications (operational; provider smoke follow-ups remain)
 
-Internal drafts, message references, templates, channel settings and timeline.
-Facebook Messenger inbound and text replies are implemented with scoped
-Page/PSID identity, audited delivery attempts and duplicate-send protection.
-Outbound attachments plus external Chatwoot/e-mail ingestion and delivery remain
-pending credentials and integration work.
+The unified inbox has bidirectional Facebook, Instagram, WhatsApp, Chatwoot and
+Gmail flows, scoped identities, attachments, replies, reactions, read receipts,
+audited delivery attempts and duplicate-send protection. Channel, order-history
+and active-order filters are implemented. Real provider-side smoke evidence is
+tracked separately whenever it requires a controlled customer/test action.
 
-## Phase 7.5 - Tasks Kanban (implemented locally; deployment pending)
+## Phase 7.5 - Tasks Kanban (complete and deployed)
 
 Customizable Kanban with compact C and visual B views, client/incoming and
 administrative tasks, assignees, deadlines, markers, labels, persistent images,
-audited movement and soft archive. Production migration and live smoke remain
-pending.
+audited movement and soft archive. Production migration and live smoke are
+complete.
 
 ## Phase 8 - Automation and AI
 
