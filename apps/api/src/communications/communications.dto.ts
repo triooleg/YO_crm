@@ -63,6 +63,7 @@ export class SendMessageDto {
 }
 export class MessageReactionDto {
   @IsIn(["react", "unreact"] as const) action!: "react" | "unreact";
+  @IsOptional() @IsString() @IsIn(["❤️", "😂", "😮", "😢", "😡", "👍"] as const) emoji?: string;
 }
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;

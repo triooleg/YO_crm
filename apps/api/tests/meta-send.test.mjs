@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { MetaDeliveryUncertainError, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { MetaDeliveryUncertainError, instagramReactionMessageParams, whatsappReactionMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -24,6 +24,36 @@ test("Meta send builds a RESPONSE text payload without credentials", () => {
     message: JSON.stringify({ text: "Здравствуйте" }),
   });
   assert.equal(JSON.stringify(params).includes("token"), false);
+});
+
+test("Instagram reaction removal omits the reaction value rejected by Meta", () => {
+  const react = instagramReactionMessageParams("igsid-7", "ig-mid-1", "react");
+  const unreact = instagramReactionMessageParams("igsid-7", "ig-mid-1", "unreact");
+  assert.deepEqual(JSON.parse(react.payload), { message_id: "ig-mid-1", reaction: "love" });
+  assert.deepEqual(JSON.parse(unreact.payload), { message_id: "ig-mid-1" });
+  assert.equal(react.sender_action, "react");
+  assert.equal(unreact.sender_action, "unreact");
+});
+
+test("WhatsApp reaction payload attaches an emoji to a message and removes it with an empty emoji", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappReactionMessageParams("380633582077", "wamid.in-1", "react", "👍"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "reaction",
+    reaction: { message_id: "wamid.in-1", emoji: "👍" },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappReactionMessageParams("380633582077", "wamid.in-1", "unreact", "👍"))).reaction, {
+    message_id: "wamid.in-1",
+    emoji: "",
+  });
+  assert.throws(() => whatsappReactionMessageParams("380633582077", "wamid.in-1", "react", "🔥"), /reaction emoji/i);
+});
+
+test("WhatsApp and Instagram reply payloads preserve the referenced provider message", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappTextMessageParams("380633582077", "Ответ", "wamid.in-1"))).context, { message_id:"wamid.in-1" });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/image.jpg", "image.jpg", "Фото", "wamid.in-1"))).context, { message_id:"wamid.in-1" });
+  assert.deepEqual(JSON.parse(metaTextMessageParams("igsid-7", "Ответ", "ig-mid-1").message).reply_to, { mid:"ig-mid-1" });
 });
 
 test("Meta send builds a reusable Messenger attachment payload", () => {

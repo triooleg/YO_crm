@@ -374,6 +374,7 @@ test("normalizes WhatsApp Business App message echoes as outbound messages", () 
             id: "wa-echo-mid",
             timestamp: "1504902988",
             type: "text",
+            context: { id: "wa-inbound-mid" },
             text: { body: "Ответ из WhatsApp Business" },
           }],
         },
@@ -387,7 +388,7 @@ test("normalizes WhatsApp Business App message echoes as outbound messages", () 
     content: "Ответ из WhatsApp Business",
     receiverId: "phone-1",
     receivedAt: "2017-09-08T20:36:28.000Z",
-    metadata: { messageType: "text" },
+    metadata: { messageType: "text", replyTo: { kind: "message", externalMessageId: "wa-inbound-mid" } },
   });
 });
 
@@ -475,6 +476,29 @@ test("normalizes WhatsApp reactions onto the referenced message instead of a sep
   const [removed] = normalizeMetaControlEvents({ object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, messages:[{id:"wamid.reaction-event-2",from:"380633582077",timestamp:"1504902990",type:"reaction",reaction:{message_id:"wamid.crm-1",emoji:""}}] } }] }] });
   assert.equal(removed.reactionAction,"unreact");
   assert.deepEqual(JSON.parse(JSON.stringify(mergeMetaReactionMetadata(metadata,removed).reactions)),{});
+});
+
+test("normalizes WhatsApp replies with the same quoted-message contract as Instagram", () => {
+  const [reply] = normalizeMetaWebhook({ object:"whatsapp_business_account", entry:[{ changes:[{ value:{ metadata:{phone_number_id:"phone-1"}, messages:[{id:"wamid.reply-1",from:"380633582077",timestamp:"1504902992",type:"text",context:{id:"wamid.crm-1"},text:{body:"Когда заказ будет готов?"}}] } }] }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(reply.metadata.replyTo)), {kind:"message",externalMessageId:"wamid.crm-1"});
+});
+
+test("normalizes WhatsApp Business App reaction echoes as business control events, never message bubbles", () => {
+  const payload = { object:"whatsapp_business_account", entry:[{ changes:[{ field:"smb_message_echoes", value:{ metadata:{phone_number_id:"phone-1"}, message_echoes:[{id:"wamid.echo-reaction-1",from:"380932354616",to:"380633582077",timestamp:"1504902991",type:"reaction",reaction:{message_id:"wamid.in-1",emoji:"😂"}}] } }] }] };
+  assert.equal(normalizeMetaEchoMessages(payload).length, 0);
+  const [reaction] = normalizeMetaControlEvents(payload);
+  assert.deepEqual(JSON.parse(JSON.stringify(reaction)), {
+    channel:"WHATSAPP",
+    receiverId:"phone-1",
+    externalPartyId:"380633582077",
+    externalMessageId:"wamid.in-1",
+    eventType:"reaction",
+    receivedAt:"2017-09-08T20:36:31.000Z",
+    reactionAction:"react",
+    reactionName:"whatsapp",
+    reactionEmoji:"😂",
+    reactionActor:"BUSINESS",
+  });
 });
 
 test("read metadata is monotonic and idempotent",()=>{

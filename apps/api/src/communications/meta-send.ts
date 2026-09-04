@@ -13,27 +13,51 @@ export function metaRecipientIdForReceivers(receiverIds: string[], conversationE
   return "";
 }
 
-export function metaTextMessageParams(recipientId: string, content: string) {
+export function metaTextMessageParams(recipientId: string, content: string, replyExternalMessageId?: string) {
   return {
     recipient: JSON.stringify({ id: recipientId }),
     messaging_type: "RESPONSE",
-    message: JSON.stringify({ text: content }),
+    message: JSON.stringify({ text: content, ...(replyExternalMessageId ? { reply_to: { mid: replyExternalMessageId } } : {}) }),
   };
 }
 
-export function metaAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string) {
+export function instagramReactionMessageParams(recipientId: string, externalMessageId: string, action: "react" | "unreact") {
   return {
     recipient: JSON.stringify({ id: recipientId }),
-    messaging_type: "RESPONSE",
-    message: JSON.stringify({ attachment: { type, payload: { url, is_reusable: true } } }),
+    sender_action: action,
+    payload: JSON.stringify({ message_id: externalMessageId, ...(action === "react" ? { reaction: "love" } : {}) }),
   };
 }
 
-export function whatsappTextMessageParams(recipientId: string, content: string) {
+const whatsappReactionEmojis = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const;
+
+export function whatsappReactionMessageParams(recipientId: string, externalMessageId: string, action: "react" | "unreact", emoji?: string) {
+  if (action === "react" && !whatsappReactionEmojis.includes(emoji as typeof whatsappReactionEmojis[number])) {
+    throw new RangeError("Unsupported WhatsApp reaction emoji");
+  }
   return {
     messaging_product: "whatsapp",
     recipient_type: "individual",
     to: recipientId,
+    type: "reaction",
+    reaction: { message_id: externalMessageId, emoji: action === "react" ? emoji! : "" },
+  };
+}
+
+export function metaAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, replyExternalMessageId?: string) {
+  return {
+    recipient: JSON.stringify({ id: recipientId }),
+    messaging_type: "RESPONSE",
+    message: JSON.stringify({ attachment: { type, payload: { url, is_reusable: true } }, ...(replyExternalMessageId ? { reply_to: { mid: replyExternalMessageId } } : {}) }),
+  };
+}
+
+export function whatsappTextMessageParams(recipientId: string, content: string, replyExternalMessageId?: string) {
+  return {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: recipientId,
+    ...(replyExternalMessageId ? { context: { message_id: replyExternalMessageId } } : {}),
     type: "text",
     text: { preview_url: true, body: content },
   };
@@ -48,12 +72,13 @@ export function whatsappAttachmentHistoryContent(type: "image" | "file", name: s
   return caption || (type === "image" ? "[Фото]" : name);
 }
 
-export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string, content = "") {
+export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string, content = "", replyExternalMessageId?: string) {
   const caption = content.trim();
   if ([...caption].length > 1024) throw new RangeError("WhatsApp media caption exceeds 1024 characters");
+  const context = replyExternalMessageId ? { context: { message_id: replyExternalMessageId } } : {};
   return type === "image"
-    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }
-    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, type: "document", document: { link: url, filename: name, ...(caption ? { caption } : {}) } };
+    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }
+    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "document", document: { link: url, filename: name, ...(caption ? { caption } : {}) } };
 }
 
 export function whatsappMessageId(result: { messages?: Array<{ id?: string }> }) {

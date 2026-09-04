@@ -437,18 +437,36 @@ test("Chatwoot может отправлять сообщения и отмеч�
   assert.match(locale, /CHATWOOT:\s*"Ответ отправлен через Chatwoot"/);
 });
 
-test("реакции клиента отображаются на сообщении, а Instagram позволяет поставить или снять реакцию из CRM", () => {
+test("реакции клиента отображаются на сообщении, а Instagram и WhatsApp используют единый picker без дубля реакции", () => {
   assert.match(component, /message\.metadata\?\.reactions/);
   assert.match(component, /communications-message-reactions/);
   assert.match(component, /\/communications\/messages\/.*\/reaction/);
-  assert.match(component, /message\.channel==="INSTAGRAM"/);
-  assert.match(component, /action:businessReaction\?"unreact":"react"/);
+  assert.match(component, /reactionEmojisByChannel/);
+  assert.match(component, /INSTAGRAM:\s*\["❤️"\]/);
+  assert.match(component, /WHATSAPP:\s*\["❤️","😂","😮","😢","😡","👍"\]/);
+  assert.match(component, /reactionPickerMessageId/);
+  assert.match(component, /communications-reaction-trigger/);
+  assert.match(component, /communications-reaction-picker/);
+  assert.match(component, /emoji:action==="react"\?emoji:businessReaction\?\.emoji/);
+  assert.doesNotMatch(component, />\{businessReaction\?"−❤️":"♡"\}<\/button>/);
   assert.match(component, /replyToMessage:item\.replyToMessage/);
   assert.match(component, /operationEpoch=composeEpoch\.current/);
   assert.match(component, /if\(isActive\(\)\)setError/);
   assert.match(locale, /reactToMessage:/);
   assert.match(locale, /removeReaction:/);
   assert.match(css, /\.communications-message-reactions/);
+  assert.match(css, /\.communications-reaction-trigger/);
+  assert.match(css, /\.communications-reaction-picker/);
+});
+
+test("Instagram и WhatsApp позволяют ответить на конкретное сообщение из CRM", () => {
+  assert.match(component, /socialReplyTarget/);
+  assert.match(component, /communications-message-reply/);
+  assert.match(component, /\["INSTAGRAM","WHATSAPP"\]\.includes\(message\.channel\)/);
+  assert.match(component, /replyToMessageId:socialReplyTarget\.id/);
+  assert.match(component, /communications-social-reply-target/);
+  assert.match(locale, /replyToSocialMessage:/);
+  assert.match(css, /\.communications-message-reply/);
 });
 
 test("видео показывает превью и воспроизводится только в открытом просмотрщике", () => {

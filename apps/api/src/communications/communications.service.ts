@@ -33,7 +33,7 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappMessageId, whatsappTextMessageParams } from "./meta-send";
+import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
@@ -1200,9 +1200,11 @@ export class CommunicationsService {
       const mergedMetadata = mergeMetaEchoMetadata(oldMetadata, event.metadata, event.receiverId, sentAt);
       const metadata = { ...mergedMetadata, ...(uncertainAttempt ? { provider: "META", source: "CRM", receiverId: event.receiverId, recipientId: event.externalRecipientId } : {}) } as Prisma.InputJsonValue;
       const source = (metadata as Prisma.JsonObject).source === "CRM" ? "CRM" : "META";
+      const replyExternalId = event.metadata.replyTo?.externalMessageId;
+      const replyToMessage = replyExternalId ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: replyExternalId } }, select: { id: true } }) : null;
       const message = duplicate
-        ? await tx.message.update({ where: { id: duplicate.id }, data: { direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, createdAt: sentAt, sentAt, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } })
-        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, sentAt, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } });
+        ? await tx.message.update({ where: { id: duplicate.id }, data: { direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, createdAt: sentAt, sentAt, replyToMessageId:replyToMessage?.id, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } })
+        : await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content: event.content, externalId: event.externalMessageId, createdAt: sentAt, sentAt, replyToMessageId:replyToMessage?.id, metadata, ...(uncertainActorId ? { authorId: uncertainActorId } : {}) } });
       const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
       const existingAttachmentCount = duplicate ? await tx.messageAttachment.count({ where: { messageId: message.id } }) : 0;
       if (!existingAttachmentCount) for (const attachment of normalizedAttachments) await tx.messageAttachment.create({ data: { messageId: message.id, type: attachment.type || "attachment", externalUrl: attachment.url, metadata: attachment as Prisma.InputJsonValue } });
@@ -1679,16 +1681,23 @@ export class CommunicationsService {
     ]);
     if (!message) throw new NotFoundException("Сообщение не найдено");
     const channel = message.conversation.channel;
-    if (channel !== ContactChannel.INSTAGRAM) throw new BadRequestException("Реакции из CRM поддерживаются только для Instagram");
-    if (!message.externalId) throw new BadRequestException("У сообщения нет идентификатора Instagram");
+    if (channel !== ContactChannel.INSTAGRAM && channel !== ContactChannel.WHATSAPP) throw new BadRequestException("Реакции из CRM поддерживаются только для Instagram и WhatsApp");
+    const channelName = channel === ContactChannel.WHATSAPP ? "WhatsApp" : "Instagram";
+    if (!message.externalId) throw new BadRequestException(`У сообщения нет идентификатора ${channelName}`);
     const externalMessageId = message.externalId;
-    const receiverId = typeof values.instagramAccountId === "string" ? values.instagramAccountId : "";
+    const receiverId = channel === ContactChannel.WHATSAPP
+      ? (typeof values.whatsappPhoneNumberId === "string" ? values.whatsappPhoneNumberId : "")
+      : (typeof values.instagramAccountId === "string" ? values.instagramAccountId : "");
     const webhookReceiverId = typeof values.instagramWebhookReceiverId === "string" && /^\d+$/.test(values.instagramWebhookReceiverId) ? values.instagramWebhookReceiverId : "";
-    const token = this.secretValue(values, "instagramAccessTokenEncrypted");
-    const recipientId = metaRecipientIdForReceivers([receiverId, webhookReceiverId], message.conversation.externalId);
-    if (values.enabled !== true || !receiverId || !token) throw new BadRequestException("Канал Instagram не подключён");
-    if (!Array.isArray(values.instagramSubscribedFields) || !values.instagramSubscribedFields.includes("message_reactions")) throw new BadRequestException("Подписка на реакции Instagram не подтверждена. Повторите проверку доставки в настройках");
-    if (!recipientId) throw new BadRequestException("Для этого клиента нет активного диалога Instagram");
+    const token = this.secretValue(values, channel === ContactChannel.WHATSAPP ? "whatsappAccessTokenEncrypted" : "instagramAccessTokenEncrypted");
+    const recipientId = channel === ContactChannel.WHATSAPP
+      ? metaRecipientId(receiverId, message.conversation.externalId)
+      : metaRecipientIdForReceivers([receiverId, webhookReceiverId], message.conversation.externalId);
+    if (values.enabled !== true || !receiverId || !token) throw new BadRequestException(`Канал ${channelName} не подключён`);
+    if (channel === ContactChannel.INSTAGRAM && (!Array.isArray(values.instagramSubscribedFields) || !values.instagramSubscribedFields.includes("message_reactions"))) throw new BadRequestException("Подписка на реакции Instagram не подтверждена. Повторите проверку доставки в настройках");
+    if (!recipientId) throw new BadRequestException(`Для этого клиента нет активного диалога ${channelName}`);
+    const reactionEmoji = channel === ContactChannel.INSTAGRAM ? "❤️" : d.emoji;
+    if (d.action === "react" && !reactionEmoji) throw new BadRequestException("Выберите реакцию WhatsApp");
     const operationId = randomUUID(), requestedAt = new Date();
     await this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
@@ -1699,15 +1708,12 @@ export class CommunicationsService {
       const pendingAt = typeof pending?.requestedAt === "string" ? Date.parse(pending.requestedAt) : NaN;
       if (pending?.status === "PENDING" && (!Number.isFinite(pendingAt) || Date.now() - pendingAt < 5 * 60 * 1000)) throw new ConflictException("Предыдущая операция с реакцией ещё выполняется. Обновите диалог перед повтором");
       if (pending?.status === "PENDING") await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_STALE_RECOVERED", entityType: "Message", entityId: current.id, after: { previousOperationId: pending.id, ageSeconds: Math.floor((Date.now() - pendingAt) / 1000) } } });
-      await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { id: operationId, action: d.action, status: "PENDING", requestedAt: requestedAt.toISOString() } } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_REQUESTED", entityType: "Message", entityId: current.id, after: { channel, action: d.action, operationId } } });
+      await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { id: operationId, action: d.action, emoji: reactionEmoji, status: "PENDING", requestedAt: requestedAt.toISOString() } } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "REACTION_REQUESTED", entityType: "Message", entityId: current.id, after: { channel, action: d.action, emoji: reactionEmoji, operationId } } });
     });
     try {
-      await this.instagramGraph(receiverId + "/messages", token, {
-        recipient: JSON.stringify({ id: recipientId }),
-        sender_action:d.action,
-        payload: JSON.stringify({ message_id: externalMessageId, reaction:"love" }),
-      }, "POST", true);
+      if (channel === ContactChannel.WHATSAPP) await this.whatsappGraph(receiverId + "/messages", token, whatsappReactionMessageParams(recipientId, externalMessageId, d.action, reactionEmoji));
+      else await this.instagramGraph(receiverId + "/messages", token, instagramReactionMessageParams(recipientId, externalMessageId, d.action), "POST", true);
     } catch {
       const webhookConfirmed = await this.p.$transaction(async tx => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
@@ -1722,7 +1728,7 @@ export class CommunicationsService {
         return null;
       });
       if (webhookConfirmed) return { ...webhookConfirmed, channel };
-      throw new BadGatewayException(d.action === "unreact" ? "Instagram не снял реакцию" : "Instagram не принял реакцию");
+      throw new BadGatewayException(d.action === "unreact" ? `${channelName} не снял реакцию` : `${channelName} не принял реакцию`);
     }
     return this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-reaction:" + message.id}, 0))`;
@@ -1730,17 +1736,17 @@ export class CommunicationsService {
       if (!current) throw new NotFoundException("Сообщение не найдено");
       const receivedAt = new Date();
       const metadata = mergeMetaReactionMetadata(current.metadata, {
-        channel: "INSTAGRAM",
+        channel: channel === ContactChannel.WHATSAPP ? "WHATSAPP" : "INSTAGRAM",
         eventType: "reaction",
         receivedAt,
         externalMessageId,
         reactionAction: d.action,
-        reactionName: "love",
-        reactionEmoji: "❤️",
+        reactionName: channel === ContactChannel.INSTAGRAM ? "love" : "whatsapp",
+        reactionEmoji,
         reactionActor: "BUSINESS",
       });
       const updated = await tx.message.update({ where: { id: current.id }, data: { metadata: { ...metadata, reactionOperation: { id: operationId, action: d.action, status: "SUCCEEDED", requestedAt: requestedAt.toISOString(), completedAt: receivedAt.toISOString() } } } });
-      await tx.auditLog.create({ data: { actorId: u.id, action: d.action === "unreact" ? "UNREACT" : "REACT", entityType: "Message", entityId: current.id, after: { channel, reaction: "love", operationId } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: d.action === "unreact" ? "UNREACT" : "REACT", entityType: "Message", entityId: current.id, after: { channel, reaction: channel === ContactChannel.INSTAGRAM ? "love" : reactionEmoji, operationId } } });
       return { ...updated, channel };
     });
   }
@@ -1956,6 +1962,17 @@ export class CommunicationsService {
         throw new BadRequestException(`Канал ${channelName} не подключён`);
       if (!conversation || !recipientId)
         throw new BadRequestException(`Для этого клиента нет активного диалога ${channelName}`);
+      if (d.replyToMessageId && channel !== ContactChannel.INSTAGRAM && channel !== ContactChannel.WHATSAPP)
+        throw new BadRequestException("Ответ на конкретное сообщение доступен только для Instagram и WhatsApp");
+      const metaReplyToMessage = d.replyToMessageId ? await this.p.message.findFirst({
+        where: { id: d.replyToMessageId, conversationId: conversation.id, direction: MessageDirection.INBOUND },
+        select: { id: true, externalId: true },
+      }) : undefined;
+      if (d.replyToMessageId && !metaReplyToMessage)
+        throw new BadRequestException("Выбранное сообщение не относится к этой переписке");
+      if (d.replyToMessageId && !metaReplyToMessage?.externalId)
+        throw new BadRequestException("У выбранного сообщения нет идентификатора для ответа");
+      const metaReplyToMessageId = metaReplyToMessage?.externalId || undefined;
       if(d.aiRunId){const scopedFeedback=await this.p.aiResponseFeedback.findFirst({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется")}
       const messageContent=channel===ContactChannel.WHATSAPP&&attachment?whatsappAttachmentHistoryContent(attachment.type,attachment.name,content):content||attachment?.name||"[Вложение]";
       return runMetaSendOnce({
@@ -1990,11 +2007,11 @@ export class CommunicationsService {
         deliver: async () => {
           const params = channel === ContactChannel.WHATSAPP
             ? attachment
-              ? whatsappAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, attachment.name, content)
-              : whatsappTextMessageParams(recipientId, content)
+              ? whatsappAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, attachment.name, content, metaReplyToMessageId)
+              : whatsappTextMessageParams(recipientId, content, metaReplyToMessageId)
             : attachment
-              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl)
-              : metaTextMessageParams(recipientId, content);
+              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, metaReplyToMessageId)
+              : metaTextMessageParams(recipientId, content, metaReplyToMessageId);
           const send = () => channel === ContactChannel.WHATSAPP
             ? this.whatsappGraph<{ messages?: Array<{ id?: string }> }>(receiverId + "/messages", pageToken, params)
             : channel === ContactChannel.INSTAGRAM
@@ -2037,7 +2054,7 @@ export class CommunicationsService {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
           const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
           const failureMetadata={...draftMetadata,provider:"META",source:"CRM",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
-          const m=draft?await tx.message.update({where:{id:draft.id},data:{metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: messageContent, authorId: u.id, metadata:failureMetadata } });
+          const m=draft?await tx.message.update({where:{id:draft.id},data:{replyToMessageId:metaReplyToMessage?.id,metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: messageContent, authorId: u.id, replyToMessageId:metaReplyToMessage?.id, metadata:failureMetadata } });
           if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
           await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
@@ -2057,11 +2074,11 @@ export class CommunicationsService {
         const mergedSuccessMetadata={...existingEchoMetadata,...successMetadata};
         const m = draft && existingEcho ? await tx.message.update({
           where: { id: existingEcho.id },
-          data: { status: MessageStatus.SENT, content:messageContent, authorId: u.id, sentAt, metadata: mergedSuccessMetadata },
-        }) : draft ? await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content:messageContent,externalId:result.message_id,authorId:u.id,sentAt,metadata:successMetadata}}) : await tx.message.upsert({
+          data: { status: MessageStatus.SENT, content:messageContent, authorId: u.id, sentAt, replyToMessageId:metaReplyToMessage?.id, metadata: mergedSuccessMetadata },
+        }) : draft ? await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content:messageContent,externalId:result.message_id,authorId:u.id,sentAt,replyToMessageId:metaReplyToMessage?.id,metadata:successMetadata}}) : await tx.message.upsert({
           where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } },
-          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content:messageContent, externalId: result.message_id, authorId: u.id, sentAt, metadata:successMetadata },
-          update: { status: MessageStatus.SENT, content:messageContent, authorId: u.id, sentAt, metadata:mergedSuccessMetadata },
+          create: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.SENT, content:messageContent, externalId: result.message_id, authorId: u.id, sentAt, replyToMessageId:metaReplyToMessage?.id, metadata:successMetadata },
+          update: { status: MessageStatus.SENT, content:messageContent, authorId: u.id, sentAt, replyToMessageId:metaReplyToMessage?.id, metadata:mergedSuccessMetadata },
         });
         if (draft && existingEcho) {
           await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.SENT, sentAt, metadata: { ...draftMetadata, deduplicatedIntoMessageId: m.id } } });
@@ -2083,7 +2100,7 @@ export class CommunicationsService {
             if(existing){
               if(attempt?.status==="PENDING"){
                 const existingMetadata=existing.metadata&&typeof existing.metadata==="object"&&!Array.isArray(existing.metadata)?existing.metadata as Prisma.JsonObject:{},persistedAttachment=attachment&&(({providerUrl:_providerUrl,...safe})=>safe)(attachment),reconciledMetadata={...existingMetadata,...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
-                existing=await tx.message.update({where:{id:existing.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:messageContent,authorId:u.id,metadata:reconciledMetadata}});
+                existing=await tx.message.update({where:{id:existing.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:messageContent,authorId:u.id,replyToMessageId:metaReplyToMessage?.id,metadata:reconciledMetadata}});
                 if(draft&&draft.id!==existing.id){
                   const currentDraft=await tx.message.findFirst({where:{id:draft.id,conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT},select:{id:true,metadata:true}});
                   if(currentDraft){const currentDraftMetadata=currentDraft.metadata&&typeof currentDraft.metadata==="object"&&!Array.isArray(currentDraft.metadata)?currentDraft.metadata as Prisma.JsonObject:{};await tx.message.update({where:{id:currentDraft.id},data:{status:MessageStatus.SENT,sentAt:new Date(),metadata:{...currentDraftMetadata,deduplicatedIntoMessageId:existing.id}}});await tx.auditLog.create({data:{actorId:u.id,action:"MERGE",entityType:"Message",entityId:currentDraft.id,after:{channel:"WHATSAPP",deduplicatedIntoMessageId:existing.id,externalId:result.message_id}}})}

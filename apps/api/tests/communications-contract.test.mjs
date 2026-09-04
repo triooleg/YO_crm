@@ -235,7 +235,7 @@ test("outbound Facebook, Instagram and WhatsApp messages distinguish drafts from
   assert.match(x, /whatsappAttachmentMessageParams/);
   assert.match(x, /whatsappMessageId/);
   assert.match(x, /deliverMetaMessage\(metaChannel/);
-  assert.match(x, /metaTextMessageParams\(recipientId,content\)/);
+  assert.match(x, /metaTextMessageParams\(recipientId,content,metaReplyToMessageId\)/);
   assert.match(x, /metaRecipientIdForReceivers\(\[receiverId,instagramWebhookReceiverId\],conversation\?\.externalId\)/);
   assert.match(x, /MessageStatus\.SENT/);
   assert.match(x, /MessageStatus\.FAILED/);
@@ -299,7 +299,7 @@ test("chat attachments are validated, stored outside the web root and sent throu
   assert.match(service, /validCommunicationFile/);
   assert.match(service, /5\*1024\*1024/);
   assert.match(service, /communication-files/);
-  assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl\)/);
+  assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl,metaReplyToMessageId\)/);
   assert.match(controller, /@Controller\("communications\/files"\)@UseGuards\(SessionGuard,RolesGuard\)/);
   assert.match(controller, /@Controller\("communications\/meta-files"\)/);
   assert.match(controller, /timingSafeEqual/);
@@ -360,7 +360,7 @@ test("uncertain WhatsApp sends remain blocked from retries", () => {
   assert.match(service, /uncertainDraftId&&uncertainDraftId!==message\.id/);
   assert.match(service, /data:\{accepted:null\}/);
   assert.match(service, /source:"CRM",receiverId:event\.receiverId,recipientId:event\.externalRecipientId/);
-  assert.match(whatsappSend, /authorId:u\.id,metadata:reconciledMetadata/);
+  assert.match(whatsappSend, /authorId:u\.id,replyToMessageId:metaReplyToMessage\?\.id,metadata:reconciledMetadata/);
   assert.match(service, /WHATSAPP_DELIVERY_RECONCILED/);
 });
 test("AI requests are rate limited and concurrency bounded per user", () => {
@@ -458,6 +458,8 @@ test("Meta reply context links quoted messages and keeps story media", () => {
   assert.match(service, /event\.metadata\.replyTo\?\.externalMessageId/);
   assert.match(service, /replyToMessageId/);
   assert.match(service, /replyToMessage:\s*\{\s*select:/);
+  assert.match(service, /metaReplyToMessageId/);
+  assert.match(service, /replyToMessageId:metaReplyToMessage\?\.id/);
 });
 
 test("Meta reactions are subscribed, persisted on the target message and Instagram reactions can be sent from CRM", () => {
@@ -466,9 +468,9 @@ test("Meta reactions are subscribed, persisted on the target message and Instagr
   assert.match(controller, /messages\/:messageId\/reaction/);
   assert.match(dto, /classMessageReactionDto/);
   assert.match(service, /asyncreactToMessage/);
-  assert.match(service, /sender_action:d\.action/);
-  assert.match(service, /reaction:"love"/);
-  assert.match(service, /channel!==ContactChannel\.INSTAGRAM/);
+  assert.match(service, /instagramReactionMessageParams/);
+  assert.match(service, /whatsappReactionMessageParams/);
+  assert.match(service, /ContactChannel\.WHATSAPP/);
   assert.match(service, /instagramSubscribedFields.*message_reactions/);
   assert.match(service, /REACTION_REQUESTED/);
   assert.match(service, /REACTION_FAILED/);

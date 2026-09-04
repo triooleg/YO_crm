@@ -471,12 +471,14 @@ export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
     for (const entry of records(value.entry)) for (const change of records(entry.changes)) {
       const changeValue = change.value || {};
       for (const message of records(changeValue.message_echoes)) {
+        if (message.type === "reaction") continue;
         if (!message.id || !message.to) continue;
         const type = String(message.type || "unknown"), typed = message[type] || {};
         const content = String(type === "text" ? message.text?.body : typed.caption || (type === "document" && typed.filename ? typed.filename : undefined) || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
         if (!content) continue;
         const attachments = whatsappAttachments(message);
-        output.push({ channel: "WHATSAPP", externalRecipientId: String(message.to), externalMessageId: String(message.id), content, receiverId: String(changeValue.metadata?.phone_number_id || "") || undefined, receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
+        const replyExternalMessageId = String(message.context?.id || "");
+        output.push({ channel: "WHATSAPP", externalRecipientId: String(message.to), externalMessageId: String(message.id), content, receiverId: String(changeValue.metadata?.phone_number_id || "") || undefined, receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(replyExternalMessageId ? { replyTo: { kind: "message", externalMessageId: replyExternalMessageId } as const } : {}), ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
       }
     }
     return output;
@@ -561,6 +563,13 @@ export function normalizeMetaControlEvents(payload: unknown): MetaControlEvent[]
         if (!receiverId || !externalMessageId || !externalPartyId || !receivedAt) continue;
         output.push({ channel: "WHATSAPP", receiverId, externalPartyId, externalMessageId, eventType: "reaction", receivedAt, reactionAction: reactionEmoji ? "react" : "unreact", reactionName: "whatsapp", ...(reactionEmoji ? { reactionEmoji } : {}), reactionActor: "CUSTOMER" });
       }
+      for (const message of records(change.value?.message_echoes)) {
+        if (message.type !== "reaction" || typeof message.reaction?.emoji !== "string") continue;
+        const externalMessageId = String(message.reaction?.message_id || ""), externalPartyId = String(message.to || ""), receivedAt = strictWhatsAppTimestamp(message.timestamp);
+        const reactionEmoji = [...message.reaction.emoji.trim()].slice(0, 16).join("");
+        if (!receiverId || !externalMessageId || !externalPartyId || !receivedAt) continue;
+        output.push({ channel: "WHATSAPP", receiverId, externalPartyId, externalMessageId, eventType: "reaction", receivedAt, reactionAction: reactionEmoji ? "react" : "unreact", reactionName: "whatsapp", ...(reactionEmoji ? { reactionEmoji } : {}), reactionActor: "BUSINESS" });
+      }
     }
     return output;
   }
@@ -597,7 +606,8 @@ function whatsappMessages(payload: AnyRecord) {
       if (type === "reaction") continue;
       const content = String(type === "text" ? message.text?.body : typed.caption || (type === "document" && typed.filename ? typed.filename : undefined) || ({ image: "[Фото]", video: "[Видео]", audio: "[Аудио]", document: "[Документ]", sticker: "[Стикер]", location: "[Геопозиция]", contacts: "[Контакт]" } as Record<string,string>)[type] || "[Сообщение]").trim().slice(0, 5000);
       const attachments = whatsappAttachments(message);
-      output.push({ channel: "WHATSAPP", externalSenderId: String(message.from), externalMessageId: String(message.id), content, displayName: contacts.get(String(message.from)) || undefined, receiverId: String(value.metadata?.phone_number_id || "") || undefined, phone: String(message.from), receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
+      const replyExternalMessageId = String(message.context?.id || "");
+      output.push({ channel: "WHATSAPP", externalSenderId: String(message.from), externalMessageId: String(message.id), content, displayName: contacts.get(String(message.from)) || undefined, receiverId: String(value.metadata?.phone_number_id || "") || undefined, phone: String(message.from), receivedAt: asDate(message.timestamp, true), metadata: { messageType: type, ...(replyExternalMessageId ? { replyTo: { kind: "message", externalMessageId: replyExternalMessageId } as const } : {}), ...(attachments.length ? { attachmentTypes: attachments.map(item => item.type), attachments } : {}) } });
     }
   }
   return output;
