@@ -459,6 +459,22 @@ test("реакции клиента отображаются на сообщен
   assert.match(css, /\.communications-reaction-picker/);
 });
 
+test("Ctrl+Enter отправляет сообщение по тому же безопасному пути для каждого отправляемого канала", () => {
+  assert.match(component, /function handleComposerKeyDown\(event:KeyboardEvent<HTMLTextAreaElement>\)/);
+  assert.match(component, /event\.key!=="Enter"\|\|!\(event\.ctrlKey\|\|event\.metaKey\)\|\|event\.nativeEvent\.isComposing/);
+  assert.match(component, /sendableChannels\.includes\(activeChannel as SocialChannel\)/);
+  assert.match(component, /event\.preventDefault\(\);void save\("SEND"\)/);
+  assert.match(component, /onKeyDown=\{handleComposerKeyDown\}/);
+  assert.match(locale, /sendShortcut:\s*"Ctrl\+Enter — отправить"/);
+});
+
+test("правая панель показывает доступные контактные и региональные данные клиента", () => {
+  for (const field of ["phone", "email", "city", "country", "timezone", "language"]) {
+    assert.match(component, new RegExp(`client\\.${field}&&<p`));
+    assert.match(locale, new RegExp(`${field}:\\s*"`));
+  }
+});
+
 test("Instagram и WhatsApp позволяют ответить на конкретное сообщение из CRM", () => {
   assert.match(component, /socialReplyTarget/);
   assert.match(component, /communications-message-reply/);

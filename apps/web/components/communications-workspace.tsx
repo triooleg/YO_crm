@@ -45,6 +45,10 @@ type Client = {
   preferredChannel?: string;
   phone?: string;
   email?: string;
+  city?: string;
+  country?: string;
+  timezone?: string;
+  language?: string;
   instagram?: string;
   instagramUsername?: string;
   facebook?: string;
@@ -108,6 +112,7 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
     MANUAL: "✎",
   };
 const socialChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
+const sendableChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
 const standardEmojis = ["😀","😂","🥰","😍","😊","😉","😅","😢","😭","😮","🙏","👍","👎","👏","🙌","❤️","💜","🔥","✨","🎉","✅","💯"];
 const reactionEmojisByChannel:Record<string,string[]>={INSTAGRAM:["❤️"],WHATSAPP:["❤️","😂","😮","😢","😡","👍"]};
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
@@ -301,6 +306,11 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
   function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
+  function handleComposerKeyDown(event:KeyboardEvent<HTMLTextAreaElement>){
+    if(event.key!=="Enter"||!(event.ctrlKey||event.metaKey)||event.nativeEvent.isComposing)return;
+    if(busy||!client||(!text.trim()&&!attachment)||!sendableChannels.includes(activeChannel as SocialChannel))return;
+    event.preventDefault();void save("SEND");
+  }
   async function setReaction(message:Message,emoji?:string){
     if(!reactionEmojisByChannel[message.channel]||message.direction!=="INBOUND"||!message.externalId||reactionBusyIds.has(message.id))return;
     const businessReaction=message.metadata?.reactions?.business,operationClientId=selectedClientId.current,operationEpoch=composeEpoch.current;
@@ -1215,6 +1225,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?"social-reply-target":undefined}
                 value={text}
                 onChange={(e) => {invalidateAiOperation();setText(e.target.value)}}
+                onKeyDown={handleComposerKeyDown}
+                aria-keyshortcuts="Control+Enter Meta+Enter"
+                title={ui.sendShortcut}
                 placeholder={ui.messagePlaceholder}
                 disabled={!client}
               />
@@ -1246,7 +1259,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           <button type="button" className="communications-context-collapse" aria-label={contextCollapsed?ui.expandClientCard:ui.collapseClientCard} aria-expanded={!contextCollapsed} onClick={()=>{const next=!contextCollapsed;setContextCollapsed(next);localStorage.setItem("communications-context-collapsed",String(next))}}>{contextCollapsed?"‹":"›"}</button>
           <button type="button" className="communications-context-close" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}>×</button>
           {client&&<>
-          <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
+          <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b>{client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b>{client.timezone}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}

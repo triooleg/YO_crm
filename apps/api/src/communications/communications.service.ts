@@ -1043,14 +1043,14 @@ export class CommunicationsService {
     return this.p.$transaction(async tx=>{
       const conversation=await tx.conversation.findUnique({
         where:{externalId_channel:{externalId:metaConversationExternalId(receiverId,senderId),channel:eventChannel}},
-        select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,email:true,phone:true,language:true,timezone:true,instagramUsername:true,archivedAt:true}}},
+        select:{client:{select:{id:true,firstName:true,lastName:true,displayName:true,avatarUrl:true,country:true,city:true,email:true,phone:true,language:true,timezone:true,instagramUsername:true,archivedAt:true}}},
       });
       const before=conversation?.client;
       if(!before||before.archivedAt)return false;
       return persistMetaFacebookProfilePatch(
         before,
         profile,
-        async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null,displayName:before.displayName,firstName:before.firstName,lastName:before.lastName,avatarUrl:before.avatarUrl,language:before.language,timezone:before.timezone,instagramUsername:before.instagramUsername},data})).count>0,
+        async data=>(await tx.client.updateMany({where:{id:before.id,archivedAt:null,displayName:before.displayName,firstName:before.firstName,lastName:before.lastName,avatarUrl:before.avatarUrl,city:before.city,email:before.email,language:before.language,timezone:before.timezone,instagramUsername:before.instagramUsername},data})).count>0,
         async changedFields=>{
           const source=channel==="INSTAGRAM"?"INSTAGRAM_PROFILE":actorId?"FACEBOOK_PROFILE_BACKFILL":"FACEBOOK_PROFILE";
           await tx.activity.create({data:{clientId:before.id,type:"CLIENT_PROFILE_ENRICHED",summary:`Профиль клиента дополнен данными ${channel==="INSTAGRAM"?"Instagram":"Facebook"}`,metadata:{source,changedFields}}});
@@ -1064,9 +1064,9 @@ export class CommunicationsService {
     if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
     const boundedLimit=Math.max(1,Math.min(50,limit));
     const conversations=await this.p.conversation.findMany({
-      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}}]}},
+      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}},{city:null},{email:null},{language:null},{timezone:null}]}},
       orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
-      select:{externalId:true,client:{select:{id:true,displayName:true,avatarUrl:true}}},
+      select:{externalId:true,client:{select:{id:true,displayName:true,avatarUrl:true,city:true,email:true,language:true,timezone:true}}},
     });
     return runFacebookProfileBackfillBatch(
       conversations,pageId,boundedLimit,dryRun,

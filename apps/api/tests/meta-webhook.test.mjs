@@ -42,6 +42,7 @@ test("normalizes Messenger standby messages while another app controls the threa
 test("Facebook sender profile is resolved and technical lead names are upgraded",()=>{
   assert.match(source,/"first_name,last_name,profile_pic"/);
   assert.match(source,/"locale,timezone"/);
+  assert.match(source,/"location,email"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
   assert.match(service,/Facebook\|Instagram/);
 });
@@ -50,24 +51,26 @@ test("Facebook identity survives an unavailable optional profile lookup",async()
   const requested=[];
   const profile=await resolveMetaFacebookProfile(async fields=>{
     requested.push(fields);
-    if(fields==="locale,timezone")throw new Error("optional fields unavailable");
+    if(fields!=="first_name,last_name,profile_pic")throw new Error("optional fields unavailable");
     return {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"};
   });
-  assert.deepEqual(requested,["first_name,last_name,profile_pic","locale,timezone"]);
+  assert.deepEqual(requested,["first_name,last_name,profile_pic","locale,timezone","location,email"]);
   assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
 });
 
 test("Facebook optional profile details are preserved when Meta returns them",async()=>{
   const profile=await resolveMetaFacebookProfile(async fields=>fields==="locale,timezone"
     ? {locale:"uk_UA",timezone:2}
-    : {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
-  assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg",locale:"uk_UA",timezone:2});
+    : fields==="location,email"
+      ? {location:{name:"Kyiv, Ukraine"},email:"client@example.com"}
+      : {first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg"});
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)),{first_name:"Юлия",last_name:"Огилько",profile_pic:"https://example.com/avatar.jpg",locale:"uk_UA",timezone:2,location:{name:"Kyiv, Ukraine"},email:"client@example.com"});
 });
 
 test("Facebook User Profile API remains the primary identity source",async()=>{
   const calls=[];
   const result=await resolveMetaFacebookProfileWithFallback(
-    async fields=>(calls.push(["profile",fields]),fields==="locale,timezone"?{}:{first_name:"Oleg",last_name:"Ogilko",profile_pic:"https://example.com/a.jpg"}),
+    async fields=>(calls.push(["profile",fields]),fields==="first_name,last_name,profile_pic"?{first_name:"Oleg",last_name:"Ogilko",profile_pic:"https://example.com/a.jpg"}:{}),
     async()=>{calls.push(["conversations"]);return {data:[]}},
     ()=>false,
     "psid-1","page-1",
@@ -101,8 +104,17 @@ test("Facebook backfill targets only exact fallback clients and deduplicates cli
     {externalId:"page-1:104",client:{id:"c4",displayName:"Meta name",avatarUrl:"https://scontent.xx.fbcdn.net/expired.jpg?token=old"}},
   ],"page-1");
   assert.deepEqual(JSON.parse(JSON.stringify(targets)),[
-    {clientId:"c1",psid:"101",needsName:true,needsAvatar:false},
-    {clientId:"c4",psid:"104",needsName:false,needsAvatar:true},
+    {clientId:"c1",psid:"101",needsName:true,needsAvatar:false,needsDetails:false},
+    {clientId:"c4",psid:"104",needsName:false,needsAvatar:true,needsDetails:false},
+  ]);
+});
+
+test("Facebook backfill includes a known client when optional profile details are missing",()=>{
+  const targets=facebookFallbackProfileTargets([
+    {externalId:"page-1:105",client:{id:"c5",displayName:"Known client",avatarUrl:"https://assets.yoleotard.com/manual.jpg",city:null,email:null,language:null,timezone:null}},
+  ],"page-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)),[
+    {clientId:"c5",psid:"105",needsName:false,needsAvatar:false,needsDetails:true},
   ]);
 });
 
@@ -155,10 +167,11 @@ test("normalizes available Facebook profile details without inventing contacts",
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({
     name:"Юлия Огилько",first_name:"Юлия",last_name:"Огилько",
     profile_pic:"https://scontent.xx.fbcdn.net/avatar.jpg",locale:"uk_UA",timezone:2,
+    location:{name:"Kyiv, Ukraine"},email:"CLIENT@Example.COM",
   }))),{
     displayName:"Юлия Огилько",firstName:"Юлия",lastName:"Огилько",
     avatarUrl:"https://scontent.xx.fbcdn.net/avatar.jpg",language:"uk",
-    timezone:"UTC+02:00",
+    timezone:"UTC+02:00",city:"Kyiv, Ukraine",email:"client@example.com",
   });
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaFacebookProfile({name:"Anna",locale:"en"}))),{
     displayName:"Anna",firstName:"Anna",language:"en",
@@ -171,13 +184,15 @@ test("normalizes available Facebook profile details without inventing contacts",
 test("profile normalization rejects invented location and malformed timezone",()=>{
   for (const timezone of [null,"",false,2.999]) assert.equal(normalizeMetaFacebookProfile({timezone}).timezone,undefined);
   assert.equal(normalizeMetaFacebookProfile({locale:"uk_UA"}).country,undefined);
+  assert.equal(normalizeMetaFacebookProfile({hometown:{name:"Lviv"}}).city,undefined);
+  assert.equal(normalizeMetaFacebookProfile({location:{name:""},email:"not-an-email",phone:"+380000000"}).phone,undefined);
 });
 
 test("profile patch contains only real missing-field changes and preserves maintained values",()=>{
-  const empty={firstName:"Facebook 123",lastName:null,displayName:"Facebook 123",avatarUrl:null,country:null,email:null,phone:null,language:null,timezone:null};
-  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(empty,{displayName:"Anna",firstName:"Anna"}))),{displayName:"Anna",firstName:"Anna"});
-  const maintained={...empty,firstName:"Manual",displayName:"Manual",avatarUrl:"https://example.com/a.jpg",language:"ru",timezone:"UTC+02:00"};
-  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(maintained,{displayName:"Meta",firstName:"Meta",avatarUrl:"https://example.com/b.jpg",language:"uk",timezone:"UTC+03:00"}))),{});
+  const empty={firstName:"Facebook 123",lastName:null,displayName:"Facebook 123",avatarUrl:null,country:null,city:null,email:null,phone:null,language:null,timezone:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(empty,{displayName:"Anna",firstName:"Anna",city:"Kyiv, Ukraine",email:"client@example.com"}))),{displayName:"Anna",firstName:"Anna",city:"Kyiv, Ukraine",email:"client@example.com"});
+  const maintained={...empty,firstName:"Manual",displayName:"Manual",avatarUrl:"https://example.com/a.jpg",city:"Lviv",email:"manual@example.com",language:"ru",timezone:"UTC+02:00"};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(maintained,{displayName:"Meta",firstName:"Meta",avatarUrl:"https://example.com/b.jpg",city:"Kyiv",email:"meta@example.com",language:"uk",timezone:"UTC+03:00"}))),{});
 });
 
 test("profile patch refreshes expired Meta CDN avatars but preserves manual avatars",()=>{
@@ -235,7 +250,7 @@ test("Instagram username patch is separate and idempotent", () => {
 });
 
 test("profile enrichment guards archived clients and logs only pseudonymous Meta identities",()=>{
-  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null,displayName:before\.displayName,firstName:before\.firstName,lastName:before\.lastName,avatarUrl:before\.avatarUrl,language:before\.language,timezone:before\.timezone,instagramUsername:before\.instagramUsername\}/);
+  assert.match(service,/updateMany\(\{where:\{id:before\.id,archivedAt:null,displayName:before\.displayName,firstName:before\.firstName,lastName:before\.lastName,avatarUrl:before\.avatarUrl,city:before\.city,email:before\.email,language:before\.language,timezone:before\.timezone,instagramUsername:before\.instagramUsername\}/);
   assert.match(service,/persistMetaFacebookProfilePatch/);
   assert.doesNotMatch(service,/senderId:event\.externalSenderId/);
   assert.equal(metaIdentityLogRef("psid-123"),metaIdentityLogRef("psid-123"));

@@ -136,6 +136,9 @@ export type MetaFacebookProfile = {
   profile_pic?: unknown;
   locale?: unknown;
   timezone?: unknown;
+  location?: unknown;
+  hometown?: unknown;
+  email?: unknown;
 };
 
 export type NormalizedMetaFacebookProfile = {
@@ -146,20 +149,19 @@ export type NormalizedMetaFacebookProfile = {
   language?: string;
   timezone?: string;
   instagramUsername?: string;
+  city?: string;
+  email?: string;
 };
 
 export async function resolveMetaFacebookProfile(
   lookup: (fields: string) => Promise<MetaFacebookProfile>,
 ): Promise<MetaFacebookProfile> {
   const identity = await lookup("first_name,last_name,profile_pic");
-  try {
-    const optional = await lookup("locale,timezone");
-    return { ...optional, ...identity };
-  } catch {
-    // Some Page/profile combinations reject optional fields. Identity must
-    // still be usable so the conversation is not left with a technical name.
-    return identity;
-  }
+  // Meta can reject one optional field group while allowing another. Keep the
+  // identity response and evaluate both optional groups independently.
+  const optional = await lookup("locale,timezone").catch(() => ({}));
+  const contact = await lookup("location,email").catch(() => ({}));
+  return { ...contact, ...optional, ...identity };
 }
 
 export type MetaConversationsResponse = {
@@ -204,25 +206,26 @@ export function isMetaManagedAvatarUrl(value: string | null | undefined) {
 }
 
 export function facebookFallbackProfileTargets(
-  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null } }>,
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null; city?: string | null; email?: string | null; language?: string | null; timezone?: string | null } }>,
   pageId: string,
 ) {
-  const targets = new Map<string, { clientId: string; psid: string; needsName: boolean; needsAvatar: boolean }>();
+  const targets = new Map<string, { clientId: string; psid: string; needsName: boolean; needsAvatar: boolean; needsDetails: boolean }>();
   const prefix = pageId + ":";
   for (const conversation of conversations) {
     const needsName = /^Facebook \d+$/.test(conversation.client.displayName);
     const needsAvatar = conversation.client.avatarUrl === null || isMetaManagedAvatarUrl(conversation.client.avatarUrl);
-    if ((!needsName && !needsAvatar) || targets.has(conversation.client.id)) continue;
+    const needsDetails = [conversation.client.city, conversation.client.email, conversation.client.language, conversation.client.timezone].some(value => value === null);
+    if ((!needsName && !needsAvatar && !needsDetails) || targets.has(conversation.client.id)) continue;
     const externalId = conversation.externalId || "";
     const psid = externalId.startsWith(prefix) ? externalId.slice(prefix.length) : "";
     if (!/^\d+$/.test(psid)) continue;
-    targets.set(conversation.client.id, { clientId: conversation.client.id, psid, needsName, needsAvatar });
+    targets.set(conversation.client.id, { clientId: conversation.client.id, psid, needsName, needsAvatar, needsDetails });
   }
   return [...targets.values()];
 }
 
 export async function runFacebookProfileBackfillBatch(
-  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null } }>,
+  conversations: Array<{ externalId?: string | null; client: { id: string; displayName: string; avatarUrl?: string | null; city?: string | null; email?: string | null; language?: string | null; timezone?: string | null } }>,
   pageId: string,
   limit: number,
   dryRun: boolean,
@@ -269,6 +272,7 @@ export type ExistingMetaClientProfile = {
   displayName: string;
   avatarUrl?: string | null;
   country?: string | null;
+  city?: string | null;
   email?: string | null;
   phone?: string | null;
   language?: string | null;
@@ -278,6 +282,11 @@ export type ExistingMetaClientProfile = {
 
 const cleanProfileText = (value: unknown, max = 160) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
+
+const cleanProfileEmail = (value: unknown) => {
+  const email = cleanProfileText(value, 254).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+};
 
 export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): NormalizedMetaFacebookProfile {
   const output: NormalizedMetaFacebookProfile = {};
@@ -313,6 +322,14 @@ export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): Norm
     output.timezone = `UTC${sign}${absolute.toString().padStart(2, "0")}:00`;
   }
 
+  const location = profile.location && typeof profile.location === "object" && !Array.isArray(profile.location)
+    ? profile.location as { name?: unknown }
+    : undefined;
+  const city = cleanProfileText(location?.name, 160);
+  if (city) output.city = city;
+  const email = cleanProfileEmail(profile.email);
+  if (email) output.email = email;
+
   return output;
 }
 
@@ -331,7 +348,7 @@ export function metaFacebookProfilePatch(before: ExistingMetaClientProfile, prof
     profile.avatarUrl !== before.avatarUrl &&
     (!before.avatarUrl || (isMetaManagedAvatarUrl(before.avatarUrl) && isMetaManagedAvatarUrl(profile.avatarUrl)))
   ) patch.avatarUrl = profile.avatarUrl;
-  for (const key of ["language", "timezone"] as const) {
+  for (const key of ["city", "email", "language", "timezone"] as const) {
     if (!before[key] && profile[key]) patch[key] = profile[key];
   }
   if (profile.instagramUsername && profile.instagramUsername !== before.instagramUsername) patch.instagramUsername = profile.instagramUsername;

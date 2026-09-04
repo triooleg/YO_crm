@@ -28,6 +28,16 @@ test("Meta settings expose a delivery verification action and honest status", ()
   assert.match(source, /settings-meta-actions/);
 });
 
+test("Facebook settings expose an explicit paginated profile refresh with a localized result", () => {
+  assert.match(source, /meta\/profiles\/backfill/);
+  assert.match(source, /dryRun:false,limit:50,cursor/);
+  assert.match(source, /while\(cursor&&batches<20\)/);
+  assert.match(source, /settingsUi\.metaRefreshProfiles/);
+  assert.match(source, /settingsUi\.metaProfilesUpdated/);
+  assert.match(i18n, /metaRefreshProfiles:\s*"Обновить профили клиентов"/);
+  assert.match(i18n, /metaProfileDataHint:\s*"Facebook передаёт имя, аватар и иногда язык, часовой пояс, город и e-mail\. Номер телефона API Facebook не предоставляет\."/);
+});
+
 test("Instagram settings link directly to Meta conversation routing", () => {
   assert.match(source, /https:\/\/www\.facebook\.com\/settings\/\?tab=ig_conversation_routing/);
   assert.match(source, /settingsUi\.metaInstagramRouting/);
