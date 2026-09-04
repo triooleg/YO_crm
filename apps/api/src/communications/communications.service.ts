@@ -33,10 +33,10 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
+import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
-import { chatwootScopeMatches, uniqueCandidate } from "./inbound-routing";
+import { chatwootScopeMatches, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
@@ -57,13 +57,14 @@ import { blocksEmailDelivery, canReleaseEmailDelivery, emailConnectionSettingsCh
 import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSentFirstMetadata, emailSentMergeDecision } from "./email-sync-rules";
 import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
-import { COMMUNICATION_FILE_NAME } from "./communication-file";
+import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  "video/mp4": "mp4",
   "application/pdf": "pdf", "text/plain": "txt",
 } as const;
 const REMOTE_MEDIA_MAX_BYTES = WHATSAPP_MEDIA_MAX_BYTES;
@@ -108,15 +109,6 @@ async function boundedRemoteMedia(body: ReadableStream<Uint8Array>) {
     chunks.push(Buffer.from(part.value));
   }
   return Buffer.concat(chunks, size);
-}
-function validCommunicationFile(bytes: Buffer, mimeType: string) {
-  if (!bytes.length || bytes.length > 5 * 1024 * 1024) return false;
-  if (mimeType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8;
-  if (mimeType === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (mimeType === "image/webp") return bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
-  if (mimeType === "image/gif") return ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString());
-  if (mimeType === "application/pdf") return bytes.subarray(0, 5).toString() === "%PDF-";
-  return mimeType === "text/plain" && !bytes.includes(0);
 }
 function isDeduplicatedDraft(metadata: Prisma.JsonValue | null) {
   return !!metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.deduplicatedIntoMessageId === "string";
@@ -1440,7 +1432,7 @@ export class CommunicationsService {
         await tx.auditLog.create({ data: { action: "REACTIVATE", entityType: "Client", entityId: client.id, before: { archived: true }, after: { archived: false, source: event.channel } } });
         await tx.activity.create({ data: { clientId: client.id, type: "CLIENT_REACTIVATED_BY_INBOUND", summary: "Клиент возвращён из архива новым входящим сообщением", metadata: { channel: event.channel, previousArchivedAt: before.archivedAt } } });
       }
-      if(client&&event.displayName?.trim()&&/^(Facebook|Instagram) \d+$/.test(client.displayName)){
+      if(client&&event.displayName?.trim()&&shouldRefreshInboundDisplayName(client.displayName,event.displayName,provider,event.channel)){
         const displayName=event.displayName.trim();client=await tx.client.update({where:{id:client.id},data:{firstName:displayName,displayName},select:{id:true,archivedAt:true,lastContactAt:true,displayName:true}});
       }
       if (!clientId) {
@@ -1582,9 +1574,10 @@ export class CommunicationsService {
       if (won.count === 1) await unlink(join(uploadsRoot(), "communication-files", item.path)).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
     }
     const extension = communicationMime[d.mimeType as keyof typeof communicationMime];
-    if (!extension) throw new BadRequestException("Допустимы изображения, PDF или TXT");
-    const bytes = Buffer.from(d.data.replace(/^data:[^;]+;base64,/, ""), "base64");
-    if (!validCommunicationFile(bytes, d.mimeType)) throw new BadRequestException("Файл повреждён, имеет неверный формат или превышает 5 МБ");
+    if (!extension) throw new BadRequestException("Допустимы изображения, короткие MP4-видео, PDF или TXT");
+    const bytes = decodeCommunicationDataUrl(d.data, d.mimeType);
+    const maxMegabytes = d.mimeType === "video/mp4" ? COMMUNICATION_VIDEO_MAX_BYTES / 1024 / 1024 : 5;
+    if (!bytes || !validCommunicationFile(bytes, d.mimeType)) throw new BadRequestException(`Файл повреждён, имеет неверный формат или превышает ${maxMegabytes} МБ`);
     const directory = join(uploadsRoot(), "communication-files");
     await mkdir(directory, { recursive: true });
     const path = `${randomUUID()}.${extension}`;
@@ -1756,12 +1749,12 @@ export class CommunicationsService {
     if (!stored || stored.createdById !== u.id || stored.mimeType !== input.mimeType) throw new BadRequestException("Вложение не найдено");
     if ((stored.claimedAt || stored.clientRequestId) && stored.clientRequestId !== clientRequestId) throw new ConflictException("Вложение уже использовано в другом сообщении");
     const file = await stat(join(uploadsRoot(), "communication-files", input.path)).catch(() => null);
-    if (!file?.isFile() || file.size !== stored.sizeBytes || file.size > 5 * 1024 * 1024) throw new BadRequestException("Вложение не найдено");
+    if (!file?.isFile() || file.size !== stored.sizeBytes || file.size > communicationFileMaxBytes(stored.mimeType)) throw new BadRequestException("Вложение не найдено");
     const base = (process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim().replace(/\/$/, "");
     const expires = Math.floor(Date.now() / 1000) + 15 * 60, secret = process.env.SETTINGS_ENCRYPTION_KEY;
     if (!secret) throw new BadGatewayException("Безопасная отправка вложений не настроена");
     const signature = createHmac("sha256", secret).update(`${stored.path}:${expires}`).digest("hex");
-    return { type: stored.mimeType.startsWith("image/") ? "image" as const : "file" as const, url: `${base}/api/communications/files/${stored.path}`, providerUrl: `${base}/api/communications/meta-files/${stored.path}?expires=${expires}&signature=${signature}`, name: stored.originalName, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, path: stored.path };
+    return { type: stored.mimeType.startsWith("image/") ? "image" as const : stored.mimeType.startsWith("video/") ? "video" as const : "file" as const, url: `${base}/api/communications/files/${stored.path}`, providerUrl: `${base}/api/communications/meta-files/${stored.path}?expires=${expires}&signature=${signature}`, name: stored.originalName, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes, path: stored.path };
   }
   private async sendChatwootProviderMessage(
     values: Record<string, unknown>,
@@ -1832,6 +1825,7 @@ export class CommunicationsService {
       if(channel===ContactChannel.WHATSAPP&&attachment){
         if([...content].length>1024)throw new BadRequestException("Подпись к медиа WhatsApp не может быть длиннее 1024 символов");
         if(attachment.type==="image"&&!whatsappImageMimeAllowed(attachment.mimeType))throw new BadRequestException("WhatsApp поддерживает изображения только JPEG и PNG");
+        if(attachment.type==="video"&&!whatsappVideoMimeAllowed(attachment.mimeType))throw new BadRequestException("WhatsApp поддерживает короткие видео только в формате MP4");
       }
       if (!d.clientRequestId)
         throw new BadRequestException("Не задан идентификатор отправки");

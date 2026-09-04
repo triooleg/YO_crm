@@ -92,6 +92,17 @@ test("Chatwoot keeps canonical sender and configured scope identifiers",()=>{
   assert.equal(event.accountId,"8");assert.equal(event.inboxId,"12");assert.equal(event.email,"anna@example.com");assert.equal(event.phone,"+380501112233");assert.equal(Number.isNaN(event.receivedAt.getTime()),false);
 });
 
+test("Chatwoot prefers the incoming message sender name over an obsolete generated conversation name",()=>{
+  const [event]=normalizeChatwootWebhook({
+    event:"message_created",message_type:"incoming",id:20,content:"Hello",created_at:1700000002,
+    account:{id:2},inbox:{id:2,channel_type:"Channel::Api"},
+    sender:{id:9,name:"Nicola.Faccioli",email:"nicola@example.com"},
+    conversation:{id:117,account_id:2,contact_inbox:{source_id:"contact-9"},meta:{sender:{id:9,name:"delicate-pond-188"}}},
+  });
+  assert.equal(event.displayName,"Nicola.Faccioli");
+  assert.equal(event.email,"nicola@example.com");
+});
+
 test("Chatwoot signature uses raw request body",()=>{
   const crypto=require("node:crypto"),body=Buffer.from('{"event":"message_created"}'),secret="test-webhook-secret";
   const signature=crypto.createHmac("sha256",secret).update(body).digest("hex");

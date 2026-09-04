@@ -44,7 +44,7 @@ export function whatsappReactionMessageParams(recipientId: string, externalMessa
   };
 }
 
-export function metaAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, replyExternalMessageId?: string) {
+export function metaAttachmentMessageParams(recipientId: string, type: "image" | "video" | "file", url: string, replyExternalMessageId?: string) {
   return {
     recipient: JSON.stringify({ id: recipientId }),
     messaging_type: "RESPONSE",
@@ -67,18 +67,22 @@ export function whatsappImageMimeAllowed(mimeType: string) {
   return mimeType === "image/jpeg" || mimeType === "image/png";
 }
 
-export function whatsappAttachmentHistoryContent(type: "image" | "file", name: string, content = "") {
-  const caption = content.trim();
-  return caption || (type === "image" ? "[Фото]" : name);
+export function whatsappVideoMimeAllowed(mimeType: string) {
+  return mimeType === "video/mp4";
 }
 
-export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "file", url: string, name: string, content = "", replyExternalMessageId?: string) {
+export function whatsappAttachmentHistoryContent(type: "image" | "video" | "file", name: string, content = "") {
+  const caption = content.trim();
+  return caption || (type === "image" ? "[Фото]" : type === "video" ? "[Видео]" : name);
+}
+
+export function whatsappAttachmentMessageParams(recipientId: string, type: "image" | "video" | "file", url: string, name: string, content = "", replyExternalMessageId?: string) {
   const caption = content.trim();
   if ([...caption].length > 1024) throw new RangeError("WhatsApp media caption exceeds 1024 characters");
   const context = replyExternalMessageId ? { context: { message_id: replyExternalMessageId } } : {};
-  return type === "image"
-    ? { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }
-    : { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "document", document: { link: url, filename: name, ...(caption ? { caption } : {}) } };
+  if (type === "image") return { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "image", image: { link: url, ...(caption ? { caption } : {}) } };
+  if (type === "video") return { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "video", video: { link: url, ...(caption ? { caption } : {}) } };
+  return { messaging_product: "whatsapp", recipient_type: "individual", to: recipientId, ...context, type: "document", document: { link: url, filename: name, ...(caption ? { caption } : {}) } };
 }
 
 export function whatsappMessageId(result: { messages?: Array<{ id?: string }> }) {

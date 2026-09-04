@@ -26,3 +26,12 @@ test("canonical identity links only when exactly one candidate exists",()=>{
   assert.equal(uniqueCandidate([{id:"one"}]).id,"one");
   assert.equal(uniqueCandidate([{id:"one"},{id:"two"}]),null);
 });
+
+test("only technical inbound names may be replaced by a better provider name",()=>{
+  const {shouldRefreshInboundDisplayName}=load();
+  assert.equal(shouldRefreshInboundDisplayName("delicate-pond-188","Nicola.Faccioli","CHATWOOT","CHATWOOT"),true);
+  assert.equal(shouldRefreshInboundDisplayName("Chatwoot tact-9","Nicola.Faccioli","CHATWOOT","CHATWOOT"),true);
+  assert.equal(shouldRefreshInboundDisplayName("Facebook 123456","Nicola.Faccioli","META","FACEBOOK"),true);
+  assert.equal(shouldRefreshInboundDisplayName("Имя исправлено вручную","Nicola.Faccioli","CHATWOOT","CHATWOOT"),false);
+  assert.equal(shouldRefreshInboundDisplayName("delicate-pond-188","delicate-pond-188","CHATWOOT","CHATWOOT"),false);
+});

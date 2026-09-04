@@ -20,6 +20,7 @@ import {
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
 import { ContactChannel } from "@prisma/client";
+import { COMMUNICATION_UPLOAD_MAX_DATA_CHARS } from "./communication-file";
 export const ALLOWED_AI_MODELS = [
   "gpt-4.1-mini",
   "gpt-4.1",
@@ -49,7 +50,7 @@ export class MarkConversationsReadDto {
 export class OutboundAttachmentDto {
   @IsString() @Length(1, 120) path!: string;
   @IsString() @Length(1, 180) name!: string;
-  @IsString() @IsIn(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "text/plain"]) mimeType!: string;
+  @IsString() @IsIn(["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "application/pdf", "text/plain"]) mimeType!: string;
 }
 export class SendMessageDto {
   @ValidateIf((dto, value) => !dto.attachment || value !== undefined) @IsString() @Length(1, 5000) content?: string;
@@ -68,7 +69,7 @@ export class MessageReactionDto {
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;
   @IsString() @MaxLength(120) mimeType!: string;
-  @IsString() @MaxLength(7_200_000) data!: string;
+  @IsString() @MaxLength(COMMUNICATION_UPLOAD_MAX_DATA_CHARS) data!: string;
 }
 export class MessageTemplateDto {
   @IsString() @Length(1, 120) name!: string;

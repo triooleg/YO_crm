@@ -524,9 +524,12 @@ test("при открытии переписки лента показывает
   assert.match(component, /<video[^>]*onLoadedMetadata=\{scrollMessagesToLatest\}/);
 });
 
-test("к сообщению можно прикрепить изображение или файл и сохранить его как черновик", () => {
+test("к сообщению можно прикрепить изображение, короткое MP4-видео или файл и сохранить его как черновик", () => {
   assert.match(component, /type="file"/);
-  assert.match(component, /const attachmentAccept=activeChannel==="WHATSAPP"\?"image\/jpeg,image\/png,application\/pdf,text\/plain":"image\/jpeg,image\/png,image\/webp,image\/gif,application\/pdf,text\/plain"/);
+  assert.match(component, /video\/mp4/);
+  assert.match(component, /COMMUNICATION_VIDEO_MAX_BYTES/);
+  assert.match(component, /attachmentTooLarge/);
+  assert.match(component, /unsupportedAttachmentType/);
   assert.match(component, /accept=\{attachmentAccept\}/);
   assert.match(component, /\/communications\/attachments/);
   assert.match(component, /pendingSend/);
@@ -542,8 +545,12 @@ test("к сообщению можно прикрепить изображени
   assert.match(component, /sendOne\(attachmentContent, uploaded, requestId\)/);
   assert.match(component, /activeChannel!=="WHATSAPP"\|\|!uploaded/);
   assert.match(component, /communications-selected-attachment/);
+  assert.match(component, /attachment\?\.type\.startsWith\("video\/"\)\?<video src=\{attachmentPreview\}/);
+  assert.match(css, /\.communications-selected-attachment img,.communications-selected-attachment video\{[^}]*object-fit:cover/);
   assert.match(component, /message\.status === "FAILED"/);
   assert.match(css, /\.communications-attach/);
   for (const key of ["attachFile", "selectedAttachment", "removeAttachment", "fileReadError"])
     assert.match(locale, new RegExp(`${key}:`));
+  assert.match(locale, /attachmentTooLarge:/);
+  assert.match(locale, /unsupportedAttachmentType:/);
 });

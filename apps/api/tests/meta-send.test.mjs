@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { MetaDeliveryUncertainError, instagramReactionMessageParams, whatsappReactionMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { MetaDeliveryUncertainError, instagramReactionMessageParams, whatsappReactionMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -64,6 +64,7 @@ test("Meta send builds a reusable Messenger attachment payload", () => {
     message: JSON.stringify({ attachment: { type: "image", payload: { url: "https://crm.yoleotard.com/api/communications/files/example.jpg", is_reusable: true } } }),
   });
   assert.equal(JSON.stringify(params).includes("token"), false);
+  assert.equal(JSON.parse(metaAttachmentMessageParams("psid-7", "video", "https://crm.yoleotard.com/clip.mp4").message).attachment.type, "video");
 });
 
 test("WhatsApp send builds Cloud API text and attachment payloads without credentials", () => {
@@ -102,6 +103,13 @@ test("WhatsApp send builds Cloud API text and attachment payloads without creden
     type: "document",
     document: { link: "https://crm.yoleotard.com/model.pdf", filename: "model.pdf", caption: "Документ к заказу" },
   });
+  assert.deepEqual(JSON.parse(JSON.stringify(whatsappAttachmentMessageParams("380633582077", "video", "https://crm.yoleotard.com/clip.mp4", "clip.mp4", "Короткое видео"))), {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "380633582077",
+    type: "video",
+    video: { link: "https://crm.yoleotard.com/clip.mp4", caption: "Короткое видео" },
+  });
   const unicodeCaption = "😀".repeat(1024);
   assert.equal(whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg", unicodeCaption).image.caption, unicodeCaption);
   assert.throws(() => whatsappAttachmentMessageParams("380633582077", "image", "https://crm.yoleotard.com/media.jpg", "model.jpg", "😀".repeat(1025)), /1024/);
@@ -109,10 +117,13 @@ test("WhatsApp send builds Cloud API text and attachment payloads without creden
   assert.equal(whatsappImageMimeAllowed("image/png"), true);
   assert.equal(whatsappImageMimeAllowed("image/webp"), false);
   assert.equal(whatsappImageMimeAllowed("image/gif"), false);
+  assert.equal(whatsappVideoMimeAllowed("video/mp4"), true);
+  assert.equal(whatsappVideoMimeAllowed("video/quicktime"), false);
   assert.equal(whatsappAttachmentHistoryContent("image", "model.jpg", ""), "[Фото]");
   assert.equal(whatsappAttachmentHistoryContent("image", "model.jpg", " Подпись "), "Подпись");
   assert.equal(whatsappAttachmentHistoryContent("file", "model.pdf", ""), "model.pdf");
   assert.equal(whatsappAttachmentHistoryContent("file", "model.pdf", " Документ "), "Документ");
+  assert.equal(whatsappAttachmentHistoryContent("video", "clip.mp4", ""), "[Видео]");
   assert.equal(whatsappMessageId({ messages: [{ id: "wamid-1" }] }), "wamid-1");
   assert.equal(whatsappMessageId({ messages: [] }), "");
 });

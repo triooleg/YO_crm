@@ -158,8 +158,11 @@ export function normalizeChatwootWebhook(payload: unknown): ChatwootMessage[] {
   const value = payload as RecordLike;
   if (value.event !== "message_created" || !["incoming", "outgoing"].includes(value.message_type) || value.private === true) return [];
   const direction = value.message_type === "outgoing" ? "OUTBOUND" : "INBOUND";
-  const sender = value.conversation?.meta?.sender || (direction === "INBOUND" ? value.sender : {}) || {};
-  const sourceId = value.conversation?.contact_inbox?.source_id || sender.identifier || sender.id;
+  const conversationSender = value.conversation?.meta?.sender || {};
+  const messageSender = value.sender || {};
+  const sender = direction === "INBOUND" ? messageSender : conversationSender;
+  const fallbackSender = direction === "INBOUND" ? conversationSender : messageSender;
+  const sourceId = value.conversation?.contact_inbox?.source_id || sender.identifier || fallbackSender.identifier || sender.id || fallbackSender.id;
   const messageId = value.id;
   if (!sourceId || !messageId) return [];
   const attachments = (Array.isArray(value.attachments) ? value.attachments : []).filter((item: unknown): item is RecordLike => Boolean(item && typeof item === "object" && !Array.isArray(item))).map(normalizeAttachment);
@@ -175,9 +178,9 @@ export function normalizeChatwootWebhook(payload: unknown): ChatwootMessage[] {
     externalSenderId: String(sourceId),
     externalMessageId: `chatwoot:${String(value.account?.id || value.conversation?.account_id || "0")}:${String(messageId)}`,
     content,
-    displayName: String(sender.name || "").trim() || undefined,
-    email: String(sender.email || "").trim().toLowerCase() || undefined,
-    phone: String(sender.phone_number || sender.phone || "").trim() || undefined,
+    displayName: String(sender.name || fallbackSender.name || "").trim() || undefined,
+    email: String(sender.email || fallbackSender.email || "").trim().toLowerCase() || undefined,
+    phone: String(sender.phone_number || sender.phone || fallbackSender.phone_number || fallbackSender.phone || "").trim() || undefined,
     accountId: String(value.account?.id || value.conversation?.account_id || "") || undefined,
     inboxId: String(value.inbox?.id || value.conversation?.inbox_id || value.conversation?.inbox?.id || "") || undefined,
     receivedAt,

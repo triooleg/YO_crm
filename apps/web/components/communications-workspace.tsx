@@ -113,6 +113,10 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
   };
 const socialChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
 const sendableChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
+const COMMUNICATION_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const COMMUNICATION_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
+const commonAttachmentMimeTypes = ["image/jpeg","image/png","image/webp","image/gif","video/mp4","application/pdf","text/plain"];
+const whatsappAttachmentMimeTypes = ["image/jpeg","image/png","video/mp4","application/pdf","text/plain"];
 const standardEmojis = ["😀","😂","🥰","😍","😊","😉","😅","😢","😭","😮","🙏","👍","👎","👏","🙌","❤️","💜","🔥","✨","🎉","✅","💯"];
 const reactionEmojisByChannel:Record<string,string[]>={INSTAGRAM:["❤️"],WHATSAPP:["❤️","😂","😮","😢","😡","👍"]};
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
@@ -814,9 +818,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
   }
   function chooseAttachment(file?: File) {
     if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    if(file&&!attachmentMimeTypes.includes(file.type)){setError(ui.unsupportedAttachmentType);return}
+    const maxBytes=file?.type==="video/mp4"?COMMUNICATION_VIDEO_MAX_BYTES:COMMUNICATION_FILE_MAX_BYTES;
+    if(file&&file.size>maxBytes){setError(ui.attachmentTooLarge.replace("{size}",file.type==="video/mp4"?"16 МБ":"5 МБ"));return}
+    setError("");
     setAttachment(file);
     pendingSend.current = {};
-    setAttachmentPreview(file?.type.startsWith("image/") ? URL.createObjectURL(file) : "");
+    setAttachmentPreview(file&&(file.type.startsWith("image/")||file.type.startsWith("video/")) ? URL.createObjectURL(file) : "");
   }
   async function ai(action: string) {
     if (!client) return;
@@ -933,7 +941,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     activeOrders=client?.orders||[],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     grid = left + "px 6px minmax(380px,1fr) " + (contextCollapsed?"0px 46px":"6px "+right+"px");
-  const attachmentAccept=activeChannel==="WHATSAPP"?"image/jpeg,image/png,application/pdf,text/plain":"image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain";
+  const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
+  const attachmentAccept=attachmentMimeTypes.join(",");
   return (
     <div className="communications-page">
       <header className="phase2-header">
@@ -1210,7 +1219,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             {["INSTAGRAM","WHATSAPP"].includes(activeChannel)&&socialReplyTarget&&<div id="social-reply-target" role="status" className="communications-social-reply-target"><span><b>{ui.replyingToMessage}</b><small>{shortMessagePreview(socialReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelSocialReply} title={ui.cancelSocialReply} onClick={()=>{setSocialReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
             {attachment && (
               <div className="communications-selected-attachment">
-                {attachmentPreview && <img src={attachmentPreview} alt={ui.selectedAttachment} />}
+                {attachmentPreview && (attachment?.type.startsWith("video/")?<video src={attachmentPreview} aria-label={ui.selectedAttachment} preload="metadata" muted playsInline/>:<img src={attachmentPreview} alt={ui.selectedAttachment} />)}
                 <span><b>{attachment.name}</b><small>{formatBytes(attachment.size)}</small></span>
                 <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
               </div>

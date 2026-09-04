@@ -10,6 +10,7 @@ const app = await readFile(
   new URL("../src/app.module.ts", import.meta.url),
   "utf8",
 );
+const main = (await readFile(new URL("../src/main.ts", import.meta.url), "utf8")).replace(/\s+/g, "");
 const controller = await readFile(
   new URL(
     "../src/communications/communications.controller.ts",
@@ -303,7 +304,12 @@ test("chat attachments are validated, stored outside the web root and sent throu
   assert.match(dto, /classOutboundAttachmentDto/);
   assert.match(service, /COMMUNICATION_FILE/);
   assert.match(service, /validCommunicationFile/);
-  assert.match(service, /5\*1024\*1024/);
+  assert.match(dto, /COMMUNICATION_UPLOAD_MAX_DATA_CHARS/);
+  assert.match(service, /"video\/mp4":\s*"mp4"/);
+  assert.match(service, /COMMUNICATION_VIDEO_MAX_BYTES/);
+  assert.match(main, /app\.use\("\/api\/communications\/attachments",json\(\{limit:"24mb"\}\)\)/);
+  assert.match(main, /app\.use\(json\(\{limit:"8mb"/);
+  assert.match(service, /stored\.mimeType\.startsWith\("video\/"\)\?"video"/);
   assert.match(service, /communication-files/);
   assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl,metaReplyToMessageId\)/);
   assert.match(controller, /@Controller\("communications\/files"\)@UseGuards\(SessionGuard,RolesGuard\)/);

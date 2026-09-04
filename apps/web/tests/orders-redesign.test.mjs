@@ -50,6 +50,7 @@ test("Orders redesign has isolated responsive table and expanded layout", () => 
 });
 
 test("Orders summary keeps headers aligned and exposes the canonical order number", () => {
+  assert.match(dashboard, /<colgroup><col className="orders-controls"\s*\/?>\{visibleColumns\.map\(\(id\) => <col key=\{id\} className=\{`orders-col orders-col-\$\{id\}`\}\s*\/?>\)\}<\/colgroup>/);
   assert.match(css, /\.orders-dashboard-table\{[^}]*table-layout:fixed/);
   assert.match(css, /\.orders-dashboard-table thead\{[^}]*display:table-header-group!important/);
   assert.match(css, /\.orders-dashboard-table tbody\{[^}]*display:table-row-group!important/);
@@ -66,7 +67,9 @@ test("Orders summary retains editable deadlines, prefixed country flags, and rea
   assert.match(dashboard, /fi-\$\{code\.toLowerCase\(\)\}/);
   assert.match(layout, /flag-icons\/css\/flag-icons\.min\.css/);
   assert.match(css, /orders-deadline-button:focus-within/);
-  assert.doesNotMatch(css, /font-size:(?:8|9)px/);
+  const pixelSizes = [...css.matchAll(/font-size:(\d+)px/g)].map((match) => Number(match[1]));
+  assert.ok(pixelSizes.length > 0);
+  assert.ok(Math.min(...pixelSizes) >= 10, `minimum Orders font must be 10px, got ${Math.min(...pixelSizes)}px`);
 });
 
 test("New order button opens the existing order form through client selection", () => {

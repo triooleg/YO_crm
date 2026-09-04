@@ -44,7 +44,7 @@ test("Facebook sender profile is resolved and technical lead names are upgraded"
   assert.match(source,/"locale,timezone"/);
   assert.match(source,/"location,email"/);
   assert.match(service,/META_PROFILE_LOOKUP_FAILED/);
-  assert.match(service,/Facebook\|Instagram/);
+  assert.match(service,/shouldRefreshInboundDisplayName/);
 });
 
 test("Facebook identity survives an unavailable optional profile lookup",async()=>{

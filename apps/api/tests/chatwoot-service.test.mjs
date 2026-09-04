@@ -62,3 +62,11 @@ test("Chatwoot multipart includes text and one attachment in the same provider r
   assert.equal(file.size, 3);
   assert.equal(file.name, "photo.jpg");
 });
+
+test("Chatwoot multipart preserves an MP4 video attachment", async () => {
+  const form = chatwootMultipartBody("Короткое видео", { bytes: new Uint8Array([0, 0, 0, 24]), name: "clip.mp4", mimeType: "video/mp4" });
+  const file = form.get("attachments[]");
+  assert.ok(file instanceof Blob);
+  assert.equal(file.type, "video/mp4");
+  assert.equal(file.name, "clip.mp4");
+});

@@ -10,3 +10,11 @@ export function chatwootScopeMatches(
 export function uniqueCandidate<T>(items: readonly T[]): T | null {
   return items.length === 1 ? items[0]! : null;
 }
+
+export function shouldRefreshInboundDisplayName(current: string, incoming: string, provider: string, channel: string) {
+  const next = incoming.trim();
+  if (!next || next === current.trim()) return false;
+  if (provider === "META") return /^(Facebook|Instagram) \d+$/.test(current);
+  if (provider !== "CHATWOOT" || channel !== "CHATWOOT") return false;
+  return /^Chatwoot \S+$/.test(current) || /^[a-z][a-z0-9]*-[a-z][a-z0-9]*-\d{3,}$/.test(current);
+}
