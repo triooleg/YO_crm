@@ -35,6 +35,7 @@ export class CommunicationsListQueryDto {
   @IsOptional()
   @Transform(({ value }) => Array.isArray(value) ? value : String(value).split(",").filter(Boolean))
   @IsArray() @ArrayMaxSize(5) @IsEnum(ContactChannel, { each: true }) channels?: ContactChannel[];
+  @IsOptional() @IsIn(["WITH_ORDERS", "ACTIVE_ORDERS"] as const) orderScope?: "WITH_ORDERS" | "ACTIVE_ORDERS";
 }
 export class ReadConversationDto {
   @IsString() @Length(1, 80) id!: string;

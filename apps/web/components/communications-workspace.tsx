@@ -94,6 +94,7 @@ type Template = {
 };
 type Side = "left" | "right";
 type SocialChannel = "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "CHATWOOT" | "EMAIL";
+type OrderScope = "WITH_ORDERS" | "ACTIVE_ORDERS";
 const limits = { left: [200, 430], right: [260, 560] } as const,
   defaults = { left: 280, right: 360 },
   icons: Record<string, string> = {
@@ -230,6 +231,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     [reactionBusyIds,setReactionBusyIds]=useState<Set<string>>(()=>new Set()),
     [search, setSearch] = useState(""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
+    [orderScope,setOrderScope]=useState<OrderScope>(),
     [visibleClientCount,setVisibleClientCount]=useState(15),
     [clientsHasMore,setClientsHasMore]=useState(false),
     [busy, setBusy] = useState(false),
@@ -264,6 +266,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     taskRequestVersion = useRef(0),
     currentSearch = useRef(""),
     currentSocialFilters = useRef<SocialChannel[]>([]),
+    currentOrderScope = useRef<OrderScope | undefined>(undefined),
     currentClientCount = useRef(15),
     aiOperationSequence = useRef(0),
     detailVersion = useRef(0),
@@ -290,6 +293,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     emojiPicker=useRef<HTMLDivElement|null>(null);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
+  currentOrderScope.current=orderScope;
   currentClientCount.current=visibleClientCount;
   const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48}
@@ -317,7 +321,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     }
     return r.json();
   }
-  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = []) {
+  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope) {
     const items: Client[] = [];
     const seenIds = new Set<string>();
     let offset = 0;
@@ -326,7 +330,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     while (items.length < count && hasMore && requests++ < 100) {
       const limit = Math.min(60, Math.max(15, count - items.length));
       const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}`) as ClientPage;
+      const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}`) as ClientPage;
       offset += page.items.length;
       for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
       hasMore = page.hasMore;
@@ -550,13 +555,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
       }
     }
   }
-  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters) {
+  async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope) {
     const request=++listRequestSequence.current;
     listLoading.current=true;
     setLoading(true);
     setError("");
     try {
-      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels);
+      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope);
       if(request!==listRequestSequence.current)return;
       const data = sortClients(page.items);
       setClients(data);
@@ -582,7 +587,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     const listRequest=++listRequestSequence.current;
     const observedReadVersion = readVersion.current;
     try {
-      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current);
+      const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current);
       const data = sortClients(page.items).map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
@@ -678,9 +683,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     selectedClientId.current=undefined;
     setClient(undefined);
     setMessages([]);
-    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search,socialFilters)},250);
+    const timer=setTimeout(()=>{setVisibleClientCount(15);void loadClients(undefined,15,search,socialFilters,orderScope)},250);
     return()=>clearTimeout(timer);
-  },[search,socialFilters]);
+  },[search,socialFilters,orderScope]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,
@@ -961,6 +966,10 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           <div className="communications-social-filters" role="group" aria-label={ui.socialNetworkFilter}>
             {socialChannels.map(item=><button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={item==="EMAIL"?ui.gmail:ui.sources[item]} title={item==="EMAIL"?ui.gmail:ui.sources[item]} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}>{icons[item]}</button>)}
           </div>
+          <div className="communications-order-filters" role="group" aria-label={ui.orderFilter}>
+            <button type="button" aria-pressed={orderScope==="WITH_ORDERS"} onClick={()=>setOrderScope(current=>current==="WITH_ORDERS"?undefined:"WITH_ORDERS")}>{ui.clientsWithOrders}</button>
+            <button type="button" aria-pressed={orderScope==="ACTIVE_ORDERS"} onClick={()=>setOrderScope(current=>current==="ACTIVE_ORDERS"?undefined:"ACTIVE_ORDERS")}>{ui.clientsWithActiveOrders}</button>
+          </div>
           <div className="communications-client-list">
           {loading ? (
             <State text={ui.loading} />
@@ -1015,9 +1024,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               );
             })
           )}
-          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
+          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters,orderScope)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
           {!loading && !filteredClients.length && (
-            <State text={socialFilters.length ? ui.noSocialNetworkResults : search ? ui.noSearchResults : ui.noClients} />
+            <State text={orderScope ? ui.noOrderFilterResults : socialFilters.length ? ui.noSocialNetworkResults : search ? ui.noSearchResults : ui.noClients} />
           )}
           </div>
         </aside>
@@ -1330,7 +1339,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         </div>
       )}
       {noteOpen&&client&&<div className="phase2-overlay"><form className="phase2-modal communications-note-modal" role="dialog" aria-modal="true" aria-labelledby="communications-note-title" onSubmit={saveClientNote}><div><h2 id="communications-note-title">{ui.chatNote}</h2><button type="button" aria-label={ui.close} onClick={()=>setNoteOpen(false)}>×</button></div><label>{ui.note}<textarea autoFocus maxLength={2000} rows={6} value={noteText} onChange={event=>setNoteText(event.target.value)}/></label><footer><button type="button" onClick={()=>setNoteOpen(false)}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy?ui.saving:ui.save}</button></footer></form></div>}
-      {ordering&&client&&clientDetail&&<OrderPanel client={clientDetail} request={api} initialAthleteId={selectedAthleteId} onClose={()=>{setOrdering(false);orderTriggerRef.current?.focus()}} onSaved={async()=>{setOrdering(false);await Promise.all([loadClientDetail(client.id),loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current)])}}/>}
+      {ordering&&client&&clientDetail&&<OrderPanel client={clientDetail} request={api} initialAthleteId={selectedAthleteId} onClose={()=>{setOrdering(false);orderTriggerRef.current?.focus()}} onSaved={async()=>{setOrdering(false);await Promise.all([loadClientDetail(client.id),loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current)])}}/>}
       {tasking&&client&&taskBoard&&<TaskDialog
         task={{columnId:taskBoard.columns[0]?.id,type:"CLIENT",markerColor:"#7047eb",labels:[],client:{id:client.id,displayName:client.displayName}}}
         columns={taskBoard.columns}

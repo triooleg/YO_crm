@@ -62,6 +62,14 @@ test("inbox list can be narrowed to several validated social channels", () => {
   assert.match(service, /conversations:\{where:\{archivedAt:null,\.\.\.\(selectedChannels\?\{channel:\{in:selectedChannels\}\}:\{\}\)\}/);
 });
 
+test("inbox list can be narrowed by order history or active orders", () => {
+  assert.match(dto, /@IsIn\(\["WITH_ORDERS","ACTIVE_ORDERS"\]asconst\)orderScope\?:"WITH_ORDERS"\|"ACTIVE_ORDERS"/);
+  assert.match(service, /query\.orderScope==="WITH_ORDERS"/);
+  assert.match(service, /orders:\{some:\{archivedAt:null\}\}/);
+  assert.match(service, /query\.orderScope==="ACTIVE_ORDERS"/);
+  assert.match(service, /salesStatus:\{notIn:\["COMPLETED","CANCELLED"\]\}/);
+});
+
 test("Instagram profile identity keeps scoped ID immutable and persists username separately", () => {
   assert.match(schema, /instagramUsername\s+String\?/);
   assert.match(service, /instagramUsername:before\.instagramUsername/);

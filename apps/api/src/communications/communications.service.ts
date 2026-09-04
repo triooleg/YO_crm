@@ -153,6 +153,8 @@ export class CommunicationsService {
     const where: Prisma.ClientWhereInput = {
       archivedAt: null,
       ...(selectedChannels ? { conversations: { some: { channel: { in: selectedChannels }, archivedAt: null } } } : {}),
+      ...(query.orderScope === "WITH_ORDERS" ? { orders: { some: { archivedAt: null } } } : {}),
+      ...(query.orderScope === "ACTIVE_ORDERS" ? { orders: { some: { archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } } } } : {}),
       ...(search ? { OR: [
         { displayName: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },

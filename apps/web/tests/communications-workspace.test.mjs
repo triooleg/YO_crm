@@ -346,6 +346,20 @@ test("под поиском можно отфильтровать входящи
   assert.match(css, /\.communications-social-filter\.source-email/);
 });
 
+test("под каналами можно отфильтровать клиентов по заказам", () => {
+  assert.match(component, /type OrderScope = "WITH_ORDERS" \| "ACTIVE_ORDERS"/);
+  assert.match(component, /orderScope,setOrderScope/);
+  assert.match(component, /orderScope=\$\{encodeURIComponent\(selectedOrderScope\)\}/);
+  assert.match(component, /className="communications-order-filters"/);
+  assert.match(component, /ui\.clientsWithOrders/);
+  assert.match(component, /ui\.clientsWithActiveOrders/);
+  assert.match(component, /aria-pressed=\{orderScope==="WITH_ORDERS"\}/);
+  assert.match(component, /aria-pressed=\{orderScope==="ACTIVE_ORDERS"\}/);
+  assert.match(locale, /clientsWithOrders:\s*"Покупали"/);
+  assert.match(locale, /clientsWithActiveOrders:\s*"Активные заказы"/);
+  assert.match(css, /\.communications-order-filters\{/);
+});
+
 test("новые входящие автоматически поднимаются наверх и обновляются без перезагрузки", () => {
   assert.match(component, /conversationTimestamp/);
   assert.match(component, /sort\([\s\S]*conversationTimestamp\(b\)\s*-\s*conversationTimestamp\(a\)/);
