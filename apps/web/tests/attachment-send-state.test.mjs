@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient } from "../lib/attachment-send-state.ts";
+import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient } from "../lib/attachment-send-state.ts";
 
 test("network retry keeps the same uploaded file and request id", () => {
   const first = prepareAttachmentAttempt({ file: "photo", uploaded: "stored" }, () => "request-1");
@@ -26,4 +26,14 @@ test("switching from client A to client B resets the attachment composer", () =>
   assert.equal(shouldResetAttachmentForClient("client-a", "client-b"), true);
   assert.equal(shouldResetAttachmentForClient("client-a", "client-a"), false);
   assert.equal(shouldResetAttachmentForClient(undefined, "client-a"), false);
+});
+
+test("partial send keeps the newest delivered part available for immediate promotion", () => {
+  const attachment = { id: "attachment", status: "SENT" };
+  const failedText = { id: "text", status: "FAILED" };
+  assert.equal(latestSuccessfulMessage([attachment, failedText]), attachment);
+});
+
+test("failed-only send has nothing to promote", () => {
+  assert.equal(latestSuccessfulMessage([{ id: "text", status: "FAILED" }]), undefined);
 });

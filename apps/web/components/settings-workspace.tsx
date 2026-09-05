@@ -359,7 +359,7 @@ function CommunicationsSettings() {
   );
 }
 export function SettingsWorkspace({role}:{role:string}) {
-  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai" | "production">(
+  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai" | "production" | "interface">(
     role==="OWNER"?"account":"finance",
   );
   return (
@@ -408,7 +408,8 @@ export function SettingsWorkspace({role}:{role:string}) {
           {settingsUi.aiTab}
         </button>
         {(role==="OWNER"||role==="ADMIN")&&<button type="button" role="tab" aria-selected={section === "production"} aria-controls="settings-production-panel" className={section === "production" ? "active" : ""} onClick={() => setSection("production")}>{settingsUi.production}</button>}
-        {(["orders", "shipping", "interface"] as const).map(
+        {(role==="OWNER"||role==="ADMIN")&&<button type="button" role="tab" aria-selected={section === "interface"} aria-controls="settings-interface-panel" className={section === "interface" ? "active" : ""} onClick={() => setSection("interface")}>{settingsUi.interface}</button>}
+        {(["orders", "shipping"] as const).map(
           (key) => (
             <button
               type="button"
@@ -429,12 +430,27 @@ export function SettingsWorkspace({role}:{role:string}) {
         <CommunicationsSettings />
       ) : section === "production" ? (
         <ProductionSettings />
+      ) : section === "interface" ? (
+        <BrandingSettings />
       ) : (
         <AiSettings />
       )}
     </div>
   );
 }
+
+type BrandingData={logoUrl:string|null;useInHeader:boolean;useInMessages:boolean};
+function BrandingSettings(){
+  const[data,setData]=useState<BrandingData>(),[file,setFile]=useState<File>(),[preview,setPreview]=useState(""),[saving,setSaving]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
+  useEffect(()=>{fetch("/api/branding",{credentials:"include"}).then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.message||settingsUi.brandingLoadError);setData(body)}).catch(reason=>setError((reason as Error).message))},[]);
+  useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
+  function pick(next?:File){if(preview)URL.revokeObjectURL(preview);setFile(undefined);setPreview("");setError("");if(!next)return;if(!["image/jpeg","image/png","image/webp"].includes(next.type)){setError(settingsUi.brandingTypeError);return}if(next.size>3*1024*1024){setError(settingsUi.brandingSizeError);return}setFile(next);setPreview(URL.createObjectURL(next))}
+  async function persist(formElement:HTMLFormElement,removeLogo=false){if(!data)return;setSaving(true);setError("");setMessage("");try{const form=new FormData(formElement),body:Record<string,unknown>={useInHeader:Boolean(form.get("useInHeader")),useInMessages:Boolean(form.get("useInMessages")),removeLogo};if(file&&!removeLogo){body.name=file.name;body.mime=file.type;body.data=await brandingFileData(file)}const response=await fetch("/api/branding",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(Array.isArray(result.message)?result.message.join(", "):result.message||settingsUi.saveError);setData(result);pick(undefined);setMessage(settingsUi.brandingSaved);window.dispatchEvent(new Event("yoleotard-branding-changed"))}catch(reason){setError((reason as Error).message)}finally{setSaving(false)}}
+  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();await persist(event.currentTarget)}
+  if(!data)return <section id="settings-interface-panel" role="tabpanel" className="settings-card">{error?<div className="phase2-error" role="alert">{error}</div>:<p>{settingsUi.brandingLoading}</p>}</section>;
+  return <section id="settings-interface-panel" role="tabpanel" className="settings-card branding-settings"><h2>{settingsUi.brandingTitle}</h2><p>{settingsUi.brandingHint}</p><form onSubmit={event=>void save(event)}><div className="branding-logo-row"><div className="branding-logo-preview">{(preview||data.logoUrl)?<img src={preview||data.logoUrl||""} alt={settingsUi.brandingPreviewAlt}/>:<span>Y</span>}</div><div><label className="branding-file-button">{settingsUi.brandingChoose}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>pick(event.target.files?.[0])}/></label><small>{file?.name||settingsUi.brandingFileHint}</small>{(data.logoUrl||file)&&<button type="button" className="phase2-secondary" disabled={saving} onClick={event=>{const form=event.currentTarget.form;if(form)void persist(form,true)}}>{settingsUi.brandingRemove}</button>}</div></div><div className="branding-uses"><label><input type="checkbox" name="useInHeader" defaultChecked={data.useInHeader}/><span><strong>{settingsUi.brandingHeader}</strong><small>{settingsUi.brandingHeaderHint}</small></span></label><label><input type="checkbox" name="useInMessages" defaultChecked={data.useInMessages}/><span><strong>{settingsUi.brandingMessages}</strong><small>{settingsUi.brandingMessagesHint}</small></span></label></div>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<button className="phase2-primary" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.save}</button></form></section>
+}
+function brandingFileData(file:File){return new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error(settingsUi.brandingReadError));reader.readAsDataURL(file)})}
 
 function ProductionSettings() {
   const [settings,setSettings]=useState<Setting[]>([]),[loaded,setLoaded]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState(""),[saving,setSaving]=useState(false);

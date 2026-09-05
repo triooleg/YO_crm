@@ -5,3 +5,7 @@ export function isCurrentInboxDetailRequest(request:InboxDetailRequest,selectedC
 }
 
 export function canRefreshInbox(manualLoadInProgress:boolean,pollInProgress:boolean){return !manualLoadInProgress&&!pollInProgress}
+
+export function isCurrentInboxRefresh(requestVersion:number,currentVersion:number,observedReadVersion:number,currentReadVersion:number){
+ return requestVersion===currentVersion&&observedReadVersion===currentReadVersion;
+}

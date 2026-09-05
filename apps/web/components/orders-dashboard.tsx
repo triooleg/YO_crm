@@ -16,8 +16,9 @@ type OrderClientDetail = OrderClientBrief & { athletes: { id: string; firstName:
 
 const PAGE_SIZE = 20;
 const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
-const DEFAULT_COLUMNS: ColumnId[] = ["client", "quantity", "discipline", "designs", "deadline", "payment", "status", "nextAction", "delivery", "created", "problems", "menu"];
+const DEFAULT_COLUMNS: ColumnId[] = ["client", "quantity", "discipline", "designs", "deadline", "payment", "status", "nextAction", "delivery", "created", "menu"];
 const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
+const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
 
 export function OrdersDashboard({ onNavigate }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -171,6 +172,12 @@ export function OrdersDashboard({ onNavigate }: Props) {
     try { await request(`/orders/${order.id}/deadline`, { method: "PATCH", body: JSON.stringify({ requiredDeliveryAt: value }) }); await load(); }
     catch (reason) { setError((reason as Error).message); }
   }
+  async function changeDiscipline(order: Order, value: string) {
+    const previous=order.discipline;
+    setOrders(items=>items.map(item=>item.id===order.id?{...item,discipline:value}:item));
+    try{await request(`/orders/${order.id}/discipline`,{method:"PATCH",body:JSON.stringify({discipline:value})})}
+    catch(reason){setOrders(items=>items.map(item=>item.id===order.id?{...item,discipline:previous}:item));setError((reason as Error).message)}
+  }
   function showPreview(event: ReactMouseEvent<HTMLImageElement>) {
     const image = event.currentTarget, width = Math.min(520, window.innerWidth - 24), left = event.clientX + width + 24 < window.innerWidth ? event.clientX + 16 : Math.max(12, event.clientX - width - 16), top = Math.min(Math.max(12, event.clientY - 80), window.innerHeight - Math.min(700, width * 1.4));
     setPreview({ src: image.src, left, top, width });
@@ -250,7 +257,7 @@ export function OrdersDashboard({ onNavigate }: Props) {
           {!loading && shown.map((order) => <Fragment key={order.id}>
             <tr className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} onClick={() => setExpandedId((current) => current === order.id ? undefined : order.id)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
-              {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} onStatus={changeStatus} onDeadline={changeDeadline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onOpen={() => setWorkspaceId(order.id)} onClient={() => onNavigate("clients", { clientId: order.client.id })} />)}
+              {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} onStatus={changeStatus} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onOpen={() => setWorkspaceId(order.id)} onClient={() => onNavigate("clients", { clientId: order.client.id })} />)}
             </tr>
             {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><ExpandedOrder order={order} onOpen={() => setWorkspaceId(order.id)} onClient={() => onNavigate("clients", { clientId: order.client.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName })} onPayment={() => setPaymentOrderId(order.id)} onMeasurements={() => setMeasurementOrder(order)} /></td></tr>}
           </Fragment>)}
@@ -269,19 +276,18 @@ export function OrdersDashboard({ onNavigate }: Props) {
   </section>;
 }
 
-function OrderCell({ id, order, columnOrder, onStatus, onDeadline, onPreview, onPreviewLeave, onOpen, onClient }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onOpen: () => void; onClient: () => void }) {
+function OrderCell({ id, order, columnOrder, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onOpen, onClient }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onOpen: () => void; onClient: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
   if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onOpen}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient}><strong>{order.client.displayName}</strong><small><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
-  if (id === "discipline") { const value = discipline(order.discipline); return <td className="orders-col orders-col-discipline" style={style}><strong>{value.code}</strong><small>{value.label}</small></td>; }
+  if (id === "discipline") return <td className="orders-col orders-col-discipline" style={style}><select className="orders-discipline-select" value={order.discipline||""} onChange={event=>void onDiscipline(order,event.target.value)} aria-label={ui.changeDiscipline}>{!order.discipline&&<option value="" disabled>{ui.disciplines.missing}</option>}{DISCIPLINES.map(value=><option key={value} value={value}>{discipline(value).code} — {discipline(value).label}</option>)}</select></td>;
   if (id === "designs") return <td className="orders-col orders-col-designs" style={style}><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><small>{designCount(order) > 1 ? order.type === "GROUP_ORDER" ? `${ui.viewAll} (${designCount(order)})` : ui.viewAll : order.items[0]?.name || order.notes || ui.designMissing}</small></td>;
-  if (id === "deadline") return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button"><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>;
+  if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") return <td className="orders-col orders-col-payment" style={style}><strong>{money(order.priceMinor, order.currency)}</strong><small className="orders-paid-line">{ui.paidPrefix} {money(paid(order), order.currency)}</small><small className="orders-balance-line">{ui.balancePrefix} {money(balance(order), order.currency)}</small></td>;
   if (id === "status") return <td className="orders-col orders-col-status" style={style}><select className={`orders-inline-status orders-status--${statusTone(order.salesStatus)}`} value={order.salesStatus} onChange={(event) => void onStatus(order, event.target.value)} aria-label={ui.changeStatus}>{SALES_STATUSES.map((status) => <option key={status} value={status}>{orderLabel("sales", status)}</option>)}</select><small>{orderLabel("production", order.productionStatus)}</small></td>;
   if (id === "nextAction") { const action = nextOrderAction(order); return <td className="orders-col orders-col-nextAction" style={style}><span className={`orders-next-action tone-${action.tone}`}><UiIcon name={action.icon} /><b>{action.label}</b></span>{action.detail && <small>{action.detail}</small>}</td>; }
   if (id === "delivery") return <td className="orders-col orders-col-delivery" style={style}><strong><CountryFlag country={order.country || order.client.country} />{countryLabel(order.country || order.client.country) || ui.addressMissing}</strong><small>{order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : orderLabel("shipping", order.shippingStatus)}</small>{order.shipment?.trackingNumber && <small>{order.shipment.trackingNumber}</small>}</td>;
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><strong>{date(order.createdAt)}</strong><small>{ageText(order.createdAt)}</small></td>;
-  if (id === "problems") { const problems = orderProblems(order); return <td className="orders-col orders-col-problems" style={style}>{problems.length ? <span className="orders-problem-badge" title={problems.join("\n")}><UiIcon name="warning" />{problems.length === 1 ? problems[0] : problems.length}</span> : <span className="orders-no-problems">{ui.noProblems}</span>}</td>; }
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onOpen} aria-label={ui.openOrder} title={ui.openOrder}>•••</button></td>;
 }
 

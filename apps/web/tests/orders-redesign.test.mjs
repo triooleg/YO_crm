@@ -15,7 +15,7 @@ test("Orders redesign exposes the complete operational overview", () => {
   for (const label of ["Активные", "Нужна предоплата", "Срок ≤ 7 дней", "Просрочены", "Готовы к отправке", "Завершенные"]) {
     assert.match(ui, new RegExp(label));
   }
-  for (const column of ["№ / Клиент", "Кол-во", "Вид спорта", "Дизайны", "Следующее действие", "Создан", "Проблемы"]) {
+  for (const column of ["№ / Клиент", "Кол-во", "Вид спорта", "Дизайны", "Следующее действие", "Создан"]) {
     assert.match(ui, new RegExp(column));
   }
   assert.doesNotMatch(dashboard, /source:\s*"Источник"/);
@@ -61,6 +61,7 @@ test("Orders summary keeps headers aligned and exposes the canonical order numbe
 
 test("Orders summary retains editable deadlines, prefixed country flags, and readable type", () => {
   assert.match(dashboard, /orders-deadline-button[^\n]*type="date"[^\n]*aria-label=\{ui\.changeDeadline\}/);
+  assert.match(dashboard, /showPicker\(\)/);
   assert.match(dashboard, /prefixedCode = normalized\.toUpperCase\(\)\.match\(/);
   assert.match(dashboard, /function countryLabel\(country\?: string\)/);
   assert.match(dashboard, /function CountryFlag/);
@@ -70,6 +71,20 @@ test("Orders summary retains editable deadlines, prefixed country flags, and rea
   const pixelSizes = [...css.matchAll(/font-size:(\d+)px/g)].map((match) => Number(match[1]));
   assert.ok(pixelSizes.length > 0);
   assert.ok(Math.min(...pixelSizes) >= 10, `minimum Orders font must be 10px, got ${Math.min(...pixelSizes)}px`);
+});
+
+test("Orders summary omits the redundant problems column", () => {
+  const defaultColumns=dashboard.match(/const DEFAULT_COLUMNS[^=]*=\s*\[([^\]]+)\]/)?.[1]||"";
+  assert.match(defaultColumns,/"menu"/);
+  assert.doesNotMatch(defaultColumns,/"problems"/);
+  assert.doesNotMatch(dashboard, /id === "problems"/);
+  assert.doesNotMatch(i18n, /problems: "Проблемы"/);
+});
+
+test("Orders sport is editable and persisted through the audited API", () => {
+  assert.match(dashboard, /orders-discipline-select/);
+  assert.match(dashboard, /onDiscipline/);
+  assert.match(dashboard, /\/orders\/\$\{order\.id\}\/discipline/);
 });
 
 test("New order button opens the existing order form through client selection", () => {

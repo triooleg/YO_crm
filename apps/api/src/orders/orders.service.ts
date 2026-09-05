@@ -6,7 +6,7 @@ import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
@@ -133,6 +133,17 @@ export class OrdersService {
       }
       const updated = await tx.order.update({ where: { id: orderId }, data: { requiredDeliveryAt } });
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DEADLINE_UPDATED", summary: "Изменён срок отправки заказа", metadata: { requiredDeliveryAt } } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
+      return updated;
+    });
+  }
+  async updateDiscipline(orderId: string, dto: UpdateOrderDisciplineDto, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const updated = await tx.order.update({ where: { id: orderId }, data: { discipline: dto.discipline } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DISCIPLINE_UPDATED", summary: "Изменён вид спорта заказа", metadata: { discipline: dto.discipline } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
       return updated;
     });

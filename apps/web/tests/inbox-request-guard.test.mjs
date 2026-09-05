@@ -8,7 +8,7 @@ const workspace=await readFile(new URL("../components/communications-workspace.t
 const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}};
 new Function("exports","module",compiled)(module.exports,module);
-const {canRefreshInbox,isCurrentInboxDetailRequest}=module.exports;
+const {canRefreshInbox,isCurrentInboxDetailRequest,isCurrentInboxRefresh}=module.exports;
 
 test("устаревший ответ диалога не заменяет сообщения после выбора другого клиента",()=>{
  const requestA={clientId:"client-a",version:1};
@@ -33,4 +33,21 @@ test("polling не перехватывает ручную загрузку и �
  assert.equal(canRefreshInbox(true,false),false);
  assert.equal(canRefreshInbox(false,true),false);
  assert.equal(canRefreshInbox(false,false),true);
+});
+
+test("устаревший polling не отменяет локальное поднятие клиента после отправки",()=>{
+ const requestVersion=4,readVersion=2;
+ assert.equal(isCurrentInboxRefresh(requestVersion,requestVersion,readVersion,readVersion),true);
+ const versionAfterOutboundPromotion=requestVersion+1;
+ assert.equal(isCurrentInboxRefresh(requestVersion,versionAfterOutboundPromotion,readVersion,readVersion),false);
+ assert.match(workspace,/function promoteClient[\s\S]*?refreshRequestSequence\.current\+\+/);
+ for(const path of[/promoteClient\(operationClientId,delivered\)/,/promoteClient\(operationClientId,result\)/])assert.match(workspace,path);
+});
+
+test("ручной поиск или фильтр отменяет начатый ранее polling",()=>{
+ const pollingVersion=7,readVersion=3;
+ assert.equal(isCurrentInboxRefresh(pollingVersion,pollingVersion,readVersion,readVersion),true);
+ const versionAfterManualLoad=pollingVersion+1;
+ assert.equal(isCurrentInboxRefresh(pollingVersion,versionAfterManualLoad,readVersion,readVersion),false);
+ assert.match(workspace,/async function loadClients[\s\S]*?refreshRequestSequence\.current\+\+[\s\S]*?listRequestSequence\.current/);
 });

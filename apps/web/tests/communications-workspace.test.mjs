@@ -88,6 +88,9 @@ test("чекбоксы ответа появляются только в реж�
 });
 test("сохранённый черновик имеет собственную идемпотентную отправку из ленты",()=>{
   assert.match(component,/async function sendSavedDraft/);
+  assert.match(component,/function promoteClient/);
+  assert.match(component,/setClients\(current=>sortClients/);
+  assert.match(component,/promoteClient\(operationClientId/);
   assert.match(component,/draftMessageId:message\.id/);
   assert.match(component,/message\.status === "DRAFT" && <button[^>]*communications-send-saved-draft/s);
   assert.match(component,/pendingDraftSends\.current/);

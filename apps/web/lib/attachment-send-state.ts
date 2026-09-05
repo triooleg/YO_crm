@@ -25,3 +25,7 @@ export function settleAttachmentAttempt<TFile, TUploaded>(
 export function shouldResetAttachmentForClient(previousClientId: string | undefined, nextClientId: string) {
   return Boolean(previousClientId && previousClientId !== nextClientId);
 }
+
+export function latestSuccessfulMessage<T extends { status?: string }>(messages: T[]) {
+  return messages.findLast((message) => message.status !== "FAILED");
+}

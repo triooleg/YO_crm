@@ -22,10 +22,12 @@ import { BackupsModule } from "./backups/backups.module";
 import { IntelligenceModule } from "./intelligence/intelligence.module";
 import { EmailTransportService } from "./communications/email-transport.service";
 import { EmailSyncService } from "./communications/email-sync.service";
+import { BrandingController } from "./branding/branding.controller";
+import { BrandingService } from "./branding/branding.service";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
-  controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController],
-  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService],
+  controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController],
+  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService],
 })
 export class AppModule {}

@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
-import { OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
+import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
 
 export class UploadModelImageDto {
@@ -55,6 +55,9 @@ export class UpdateProductionSlotDto {
 }
 export class UpdateOrderDeadlineDto {
  @ApiProperty() @IsDateString() requiredDeliveryAt!: string;
+}
+export class UpdateOrderDisciplineDto {
+ @ApiProperty({ enum: Discipline }) @IsEnum(Discipline) discipline!: Discipline;
 }
 export class OrderMeasurementDto extends CreateMeasurementDto {
   @ApiPropertyOptional() @IsOptional() @IsString() expectedMeasurementId?: string;

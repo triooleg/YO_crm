@@ -15,3 +15,12 @@ test("карточка заказа получает историю и сохр�
   assert.match(service,/ORDER_STATUSES_UPDATED/);
   assert.match(service,/entityType:\s*"Order"/);
 });
+
+test("вид спорта заказа изменяется отдельной проверяемой мутацией",()=>{
+  assert.match(controller,/@Patch\(":id\/discipline"\)/);
+  assert.match(dto,/class UpdateOrderDisciplineDto/);
+  assert.match(dto,/@IsEnum\(Discipline\)/);
+  assert.match(service,/async updateDiscipline/);
+  assert.match(service,/ORDER_DISCIPLINE_UPDATED/);
+  assert.match(service,/entityType: "Order"/);
+});

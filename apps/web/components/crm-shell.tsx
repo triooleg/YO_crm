@@ -12,6 +12,7 @@ import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
 import { crmSectionHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
+import { useBranding, type Branding } from "../lib/branding";
 
 const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbox,"✉"],["clients",navigationUi.clients,"●"],["orders",navigationUi.orders,"▣"],["production",navigationUi.production,"⚙"],["finance",navigationUi.finance,"₴"],["shipping",navigationUi.shipping,"➜"],["tasks",navigationUi.tasks,"✓"],["settings",navigationUi.settings,"☰"]] as const;
 const topbarItems = [items[1], items[3], items[2], items[4], items[5], items[7]];
@@ -22,6 +23,7 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
   const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
   const [inboxSearch,setInboxSearch]=useState(""),[inboxUnreadRequest,setInboxUnreadRequest]=useState(0);
   const authSequence=useRef(0);
+  const branding=useBranding(Boolean(auth));
   const verifyAuth=()=>{const sequence=++authSequence.current;return fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(sequence!==authSequence.current)return;if(r.status===401||r.status===403){setAuth(false);setAuthError("");return}if(!r.ok)throw new Error();const x=await r.json();if(sequence!==authSequence.current)return;setAuth(x.user);setAuthError("")}).catch(()=>{if(sequence===authSequence.current)setAuthError(authUi.checkError)})};
   useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
   const navigate=(next:CrmSectionId,context?:Record<string,string>)=>{if(next===sectionId&&!context)return;setSectionId(next);const url=new URL(crmSectionHref(next,window.location.search),window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);for(const[key,value]of Object.entries(context||{}))url.searchParams.set(key,value);window.history.pushState(null,"",url)};
@@ -30,23 +32,30 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:authUi.loading}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
-  return <main className={sectionId==="inbox"?"crm-shell inbox-reference-shell":"crm-shell nav-collapsed"}>
-    {sectionId==="inbox"&&<header className="crm-topbar">
-      <div className="crm-topbar-brand"><svg viewBox="0 0 36 42" fill="none" aria-hidden="true"><circle cx="22" cy="7" r="3" fill="currentColor"/><path d="M5 6Q18 18 29 10M19 14L17 25 12 39M17 24L26 31M20 15L32 3" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="m16 13 8 2-4 12-6-3Z" fill="currentColor"/></svg><strong>Yoleotard CRM</strong></div>
+  const updateGlobalSearch=(value:string)=>{setInboxSearch(value);if(sectionId!=="inbox")navigate("inbox")};
+  const showUnread=()=>{if(sectionId!=="inbox")navigate("inbox");setInboxUnreadRequest(value=>value+1)};
+  return <main className="crm-shell inbox-reference-shell">
+    <header className="crm-topbar">
+      <div className="crm-topbar-brand"><BrandMark branding={branding}/><strong>Yoleotard CRM</strong></div>
       <nav className="crm-topbar-nav">{topbarItems.map(([id,name,icon])=><button type="button" key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} aria-current={sectionId===id?"page":undefined} title={name} aria-label={name}><i aria-hidden="true"><CrmNavIcon section={id}/></i><span>{name}</span></button>)}</nav>
-      <label className="crm-topbar-search"><span aria-hidden="true">⌕</span><input type="search" value={inboxSearch} onChange={event=>setInboxSearch(event.target.value)} placeholder={navigationUi.inboxSearch} aria-label={communicationsUi.search}/></label>
-      <button type="button" className="crm-topbar-notifications" aria-label={communicationsUi.unreadChats} title={communicationsUi.unreadChats} onClick={()=>setInboxUnreadRequest(value=>value+1)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Zm5 3h4"/></svg></button>
+      <label className="crm-topbar-search"><span aria-hidden="true">⌕</span><input type="search" value={inboxSearch} onChange={event=>updateGlobalSearch(event.target.value)} placeholder={navigationUi.inboxSearch} aria-label={communicationsUi.search}/></label>
+      <button type="button" className="crm-topbar-notifications" aria-label={communicationsUi.unreadChats} title={communicationsUi.unreadChats} onClick={showUnread}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Zm5 3h4"/></svg></button>
       <div className="crm-topbar-user"><span className="crm-topbar-avatar" aria-hidden="true">{initials(auth.displayName.trim())}</span><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{navigationUi.userRoles[auth.role as keyof typeof navigationUi.userRoles]||navigationUi.unknownRole}</small></div><details className="crm-profile-menu"><summary aria-label={navigationUi.profileMenu}>⌄</summary><div><button type="button" onClick={()=>navigate("settings")}>{navigationUi.settings}</button><button type="button" onClick={()=>setReleaseHistoryOpen(true)}>{navigationUi.version}</button></div></details></div>
-    </header>}
+    </header>
     <aside className="crm-nav">
-      <div className="crm-brand"><span>Y</span></div>
-      <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{sectionId==="inbox"?<CrmNavIcon section={id}/>:icon}</i>{sectionId==="inbox"&&<span className="crm-nav-label">{name}</span>}</button>)}</nav>
+      <div className="crm-brand"><span><BrandMark branding={branding}/></span></div>
+      <nav>{items.map(([id,name])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i><CrmNavIcon section={id}/></i><span className="crm-nav-label">{name}</span></button>)}</nav>
       <button type="button" className="crm-version" title={`${navigationUi.version} ${process.env.NEXT_PUBLIC_CRM_VERSION} · ${process.env.NEXT_PUBLIC_CRM_COMMIT}`} onClick={()=>setReleaseHistoryOpen(true)}>CRM v{process.env.NEXT_PUBLIC_CRM_VERSION}</button>
       <button className="crm-logout" type="button" title={authUi.logout} aria-label={authUi.logout} onClick={async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}}}>⇥</button>
     </aside>
-    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest}/>:sectionId==="orders"?<OrdersDashboard onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined}/>:sectionId==="orders"?<OrdersDashboard onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
     {releaseHistoryOpen&&<ReleaseHistoryDialog onClose={()=>setReleaseHistoryOpen(false)}/>}
   </main>
+}
+
+function BrandMark({branding}:{branding:Branding}){
+  if(branding.useInHeader&&branding.logoUrl)return <img className="crm-custom-logo" src={branding.logoUrl} alt="Логотип Yoleotard"/>;
+  return <svg viewBox="0 0 36 42" fill="none" aria-hidden="true"><circle cx="22" cy="7" r="3" fill="currentColor"/><path d="M5 6Q18 18 29 10M19 14L17 25 12 39M17 24L26 31M20 15L32 3" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="m16 13 8 2-4 12-6-3Z" fill="currentColor"/></svg>;
 }
 
 function ReleaseHistoryDialog({onClose}:{onClose:()=>void}){

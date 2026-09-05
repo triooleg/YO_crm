@@ -5,13 +5,14 @@ import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
   canRefreshInbox,
   isCurrentInboxDetailRequest,
+  isCurrentInboxRefresh,
 } from "../lib/inbox-request-guard";
 import { inboxMeasurements, type InboxMeasurement } from "../lib/inbox-measurements";
 import { ClientAvatar } from "./client-avatar";
 import { AddAthlete } from "./client-workspace";
 import { OrderPanel } from "./order-panel";
 import { TaskDialog } from "./tasks-workspace";
-import { prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
+import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
 type Order = {
   id: string;
@@ -77,7 +78,7 @@ type TaskBoard = {
   users: { id: string; displayName: string; role: string }[];
 };
 type ContextTarget = "clients" | "tasks" | "finance";
-type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
+type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
 type ClientPage = { items: Client[]; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
@@ -225,7 +226,7 @@ function optionalFormFields(data: Record<string, FormDataEntryValue>, names: str
     return [name, typeof value === "string" && value.trim()?value.trim():undefined];
   }));
 }
-export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,unreadRequest}:CommunicationsWorkspaceProps={}) {
+export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,unreadRequest,businessLogoUrl}:CommunicationsWorkspaceProps={}) {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
     [activeChannel,setActiveChannel]=useState("MANUAL"),
@@ -288,6 +289,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     initialClientId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined),
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
+    refreshRequestSequence = useRef(0),
     listLoading = useRef(false),
     clientDetailRequest = useRef(0),
     orderRequestVersion = useRef(0),
@@ -623,6 +625,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     }
   }
   async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope, requestedConversationScope=conversationScope) {
+    refreshRequestSequence.current++;
     const request=++listRequestSequence.current;
     listLoading.current=true;
     setLoading(true);
@@ -652,7 +655,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   async function refreshInbox() {
     if (listLoading.current||!canRefreshInbox(manualLoading.current, refreshing.current)) return;
     refreshing.current = true;
-    const listRequest=++listRequestSequence.current;
+    const refreshRequest=++refreshRequestSequence.current;
     const observedReadVersion = readVersion.current;
     try {
       const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current,currentConversationScope.current);
@@ -674,7 +677,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           };
         },
       );
-      if (observedReadVersion !== readVersion.current||listRequest!==listRequestSequence.current) return;
+      if (!isCurrentInboxRefresh(refreshRequest,refreshRequestSequence.current,observedReadVersion,readVersion.current)) return;
       setClients(data);
       setClientsHasMore(page.hasMore);
       setClientTotal(page.total);setChannelTotals(page.channelCounts);
@@ -786,6 +789,19 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     const d = e.key === "ArrowRight" ? 10 : -10;
     setWidth(side, widths.current[side] + d * (side === "left" ? 1 : -1), true);
   }
+  function promoteClient(clientId:string,message:Message){
+    refreshRequestSequence.current++;
+    setClients(current=>sortClients(current.map(item=>{
+      if(item.id!==clientId)return item;
+      let updated=false;
+      const conversations=item.conversations.map(conversation=>{
+        if(conversation.channel!==message.channel)return conversation;
+        updated=true;
+        return {...conversation,lastMessageAt:message.createdAt,messages:[{content:message.content,createdAt:message.createdAt}]};
+      });
+      return updated?{...item,conversations}:item;
+    })));
+  }
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
     if (!client || (!messageText && !attachment)) return false;
@@ -855,6 +871,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       }
       const failed = sent.find((message) => message.status === "FAILED");
       if(!isActive())return false;
+      const delivered=action==="SEND"?latestSuccessfulMessage(sent):undefined;
+      if(delivered)promoteClient(operationClientId,delivered);
       if (failed) {
         setError(sendFailureText(failed.metadata?.reason, activeChannel));
         return false;
@@ -922,7 +940,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     if(!client||message.status!=="DRAFT")return;
     const operationClientId=client.id,operationEpoch=composeEpoch.current,requestId=pendingDraftSends.current.get(message.id)||crypto.randomUUID();
     pendingDraftSends.current.set(message.id,requestId);setBusyDraftIds(current=>new Set(current).add(message.id));setError("");
-    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;if(result.status==="FAILED"){pendingDraftSends.current.delete(message.id);setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item))}
+    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;if(result.status==="FAILED"){pendingDraftSends.current.delete(message.id);setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item));promoteClient(operationClientId,result)}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{setBusyDraftIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
   }
   async function generateSelectedReply(){
@@ -944,7 +962,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     if(!client||!aiDraftText.trim())return;
     const operationClientId=client.id,operationEpoch=composeEpoch.current,content=aiDraftText.trim(),requestId=pendingAiSend.current.textContent===content&&pendingAiSend.current.textRequestId?pendingAiSend.current.textRequestId:crypto.randomUUID();
     pendingAiSend.current={textContent:content,textRequestId:requestId};setBusy(true);setError("");
-    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content,channel:activeChannel,action:"SEND",clientRequestId:requestId,aiRunId:aiReply.aiRunId})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;setMessages(current=>[...current,result]);if(result.status==="FAILED"){pendingAiSend.current={};setError(sendFailureText(result.metadata?.reason,activeChannel));return}pendingAiSend.current={};setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("")}
+    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content,channel:activeChannel,action:"SEND",clientRequestId:requestId,aiRunId:aiReply.aiRunId})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;setMessages(current=>[...current,result]);if(result.status==="FAILED"){pendingAiSend.current={};setError(sendFailureText(result.metadata?.reason,activeChannel));return}promoteClient(operationClientId,result);pendingAiSend.current={};setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("")}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setBusy(false)}
   }
   async function saveAsTemplate(content:string,channel:string,language="ru"){
@@ -1174,7 +1192,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                     className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}${hasVisualAttachment&&!message.content?" media-only":""}`}
                   >
                     {message.direction==="INBOUND"&&client&&<span className="communications-message-avatar" aria-hidden="true"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/></span>}
-                    {message.direction==="OUTBOUND"&&<span className="communications-message-avatar is-business" aria-hidden="true">Y</span>}
+                    {message.direction==="OUTBOUND"&&<span className="communications-message-avatar is-business" aria-hidden="true">{businessLogoUrl?<img className="communications-business-logo" src={businessLogoUrl} alt=""/>:"Y"}</span>}
                     <span className="communications-message-actions">
                       <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
                       <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}</span></details>
