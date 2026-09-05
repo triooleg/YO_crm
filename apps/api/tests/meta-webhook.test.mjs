@@ -108,9 +108,27 @@ test("Facebook Conversations fallback preserves the exact participant avatar",as
   );
   assert.equal(result.source,"CONVERSATIONS");
   assert.deepEqual(JSON.parse(JSON.stringify(result.profile)),{name:"Rachel Smith",profile_pic:"https://scontent.xx.fbcdn.net/rachel.jpg"});
-  assert.match(service,/fields:"id,participants\{id,name,picture\}"/);
+  assert.match(service,/fields:"id,participants\{id,name,email,picture\}"/);
   assert.match(service,/META_PROFILE_PICTURE_FIELD_UNAVAILABLE/);
   assert.match(service,/fields:"id,participants"/);
+});
+
+test("Facebook Conversations fallback preserves a valid e-mail from the exact participant",async()=>{
+  const unavailable=Object.assign(new Error("unavailable"),{failure:{code:100,subcode:33}});
+  const result=await resolveMetaFacebookProfileWithFallback(
+    async()=>{throw unavailable},
+    async()=>({data:[{participants:{data:[
+      {id:"page-1",name:"YOLeotard",email:"page@example.com"},
+      {id:"psid-1",name:"Rachel Smith",email:"Rachel@Example.com"},
+    ]}}]}),
+    error=>error===unavailable,
+    "psid-1","page-1",
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(result.profile)),{name:"Rachel Smith",email:"rachel@example.com"});
+});
+
+test("Facebook production backfill bounds each request to ten profiles",()=>{
+  assert.match(service,/const boundedLimit=Math\.max\(1,Math\.min\(10,limit\)\);/);
 });
 
 test("Facebook backfill targets only exact fallback clients and deduplicates clients",()=>{

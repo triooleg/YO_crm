@@ -1037,7 +1037,7 @@ export class CommunicationsService {
       fields=>this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,true),
       async()=>{
         const base={platform:"messenger",user_id:senderId,limit:"5"};
-        try{return await this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{...base,fields:"id,participants{id,name,picture}"},"GET",appSecret,true)}
+        try{return await this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{...base,fields:"id,participants{id,name,email,picture}"},"GET",appSecret,true)}
         catch(error){
           if(!(error instanceof MetaGraphRequestError)||error.failure.code!==100)throw error;
           this.logger.warn(JSON.stringify({event:"META_PROFILE_PICTURE_FIELD_UNAVAILABLE",senderRef:metaIdentityLogRef(senderId)}));
@@ -1075,7 +1075,7 @@ export class CommunicationsService {
   async backfillFacebookProfiles(dryRun:boolean,limit=50,cursor:string|undefined,u:User){
     const values=await this.sectionValues("integration.meta"),pageId=typeof values.pageId==="string"?values.pageId:"",pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted");
     if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
-    const boundedLimit=Math.max(1,Math.min(50,limit));
+    const boundedLimit=Math.max(1,Math.min(10,limit));
     const conversations=await this.p.conversation.findMany({
       where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}},{city:null},{email:null},{language:null},{timezone:null}]}},
       orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,

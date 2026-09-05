@@ -1,14 +1,16 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-05 — восстановление Facebook-аватаров и журнал версий (готово к deployment)
+## 2026-09-05 — Facebook-профили и журнал версий (deployed, доступ к аватарам ожидает Meta)
 
 - Подтверждена регрессия после обновления CRM: основной Meta User Profile API уже запрашивал аватар, но резервный Page Conversations fallback запрашивал только `id,participants` и сохранял имя без `picture`. В production перед исправлением 34 из 36 активных Facebook-клиентов не имели `avatarUrl`; два сохранённых Meta-аватара оставались доступными.
-- Fallback теперь запрашивает `participants{id,name,picture}`, выбирает только точный PSID клиента, исключает страницу и fail-closed отбрасывает неоднозначный результат. Массовое обновление отдельно считает аватары, полученные через User Profile API и Conversations API.
+- Fallback теперь запрашивает `participants{id,name,email,picture}`, выбирает только точный PSID клиента, исключает страницу и fail-closed отбрасывает неоднозначный результат. CRM сохраняет e-mail и аватар только когда соответствующее поле реально вернул Meta; пакет ограничен 10 профилями во избежание 30-секундного proxy timeout.
+- Live API probe без вывода ID, имён, URL или токенов подтвердил: Conversations API возвращает точного участника с `name/email`, но не возвращает `picture` при любом варианте размера; `/{PSID}` и `/{PSID}/picture` отвечают Graph `100/33`. В Meta Dashboard функция Business Asset User Profile Access имеет статус «Готово к тестированию», а не production Advanced Access. Поэтому кодовый путь исправлен, но восстановление 34 аватаров требует одобрения этой функции Meta и повторного backfill.
 - Введена версия CRM `0.1.1`: она постоянно видна внизу навигации, а по клику открывает русскоязычный журнал сборок `0.1.1` и базовой точки `0.1.0` с изменениями, совместимостью, откатом и точным Git commit. Журнал также хранится в `CHANGELOG.md`.
 - Docker web build получает `CRM_VERSION` и `CRM_COMMIT`. Тег `crm-vX.Y.Z` после успешного deployment запускает GitHub Actions, который проверяет совпадение с `package.json` и создаёт GitHub Release с русским разделом этой версии. Откат документирован без удаления PostgreSQL, uploads или истории.
-- Failing-first Meta regressions PASS 59/59; финальный полный `pnpm quality:check` PASS: API 326/326, web 214/214, database 7/7, все typecheck и production builds. Browser review подтвердил окно журнала на desktop и 390 px, Escape, мобильное выравнивание заголовка и отсутствие ошибок приложения в консоли; `git diff --check` PASS.
+- Первый release commit `5177b4743ece0b617fd98b7adfc5a5b190f4319c` прошёл GitHub Actions `Quality gates #163` и развёрнут: production показывает `CRM v0.1.1` с точным commit, root и `/api/health` возвращают 200, контейнеры healthy. Финальный follow-up с e-mail и короткими пакетами должен пройти quality gate и exact-SHA redeploy перед публикацией immutable тега.
+- Follow-up RED→GREEN: тесты отдельно воспроизвели потерю e-mail и слишком большой production batch; Meta tests PASS 61/61, web Meta settings PASS 10/10. Полный `pnpm quality:check` PASS: API 328/328, web 214/214, database 7/7, все typecheck и production builds; `git diff --check` PASS.
 - Reviews: compatibility PASS (fallback при неподдерживаемом `picture` сохраняет прежний импорт имени; DTO/Prisma/routes не менялись); regression PASS; business/security PASS (точный Page/PSID scope, без удаления и без PII в логах); UI/accessibility PASS; pre-deploy release gatekeeper PASS.
-- После deployment обязательны: FULL backup, exact-SHA доставка, HTTP 200 для CRM и `/api/health`, запуск OWNER/ADMIN backfill Facebook-профилей, повторный агрегат `avatarUrl` и проверка интерфейса. Только после успешного live smoke публикуется неизменяемый тег `crm-v0.1.1`.
+- После выдачи Meta Advanced Access обязательно повторить OWNER/ADMIN backfill и проверить прирост `avatarUrl`. Тег `crm-v0.1.1` публиковать после follow-up CI/redeploy; внешний Meta-блокер должен быть явно указан в GitHub Release.
 
 ## 2026-09-04 — корректировка страницы «Заказы» (готово локально)
 

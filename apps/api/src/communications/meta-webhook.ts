@@ -168,6 +168,7 @@ export type MetaConversationsResponse = {
   data?: Array<{ id?: unknown; participants?: { data?: Array<{
     id?: unknown;
     name?: unknown;
+    email?: unknown;
     picture?: { data?: { url?: unknown } };
   }> } }>;
 };
@@ -195,6 +196,7 @@ export async function resolveMetaFacebookProfileWithFallback(
   const conversations = await conversationsLookup();
   const names = new Set<string>();
   const avatars = new Set<string>();
+  const emails = new Set<string>();
   for (const conversation of records(conversations.data)) {
     for (const participant of records(conversation.participants?.data)) {
       if (String(participant.id || "") !== psid || String(participant.id || "") === pageId) continue;
@@ -202,10 +204,16 @@ export async function resolveMetaFacebookProfileWithFallback(
       if (name) names.add(name);
       const avatar = metaConversationParticipantAvatar(participant);
       if (avatar) avatars.add(avatar);
+      const email = cleanProfileEmail(participant.email);
+      if (email) emails.add(email);
     }
   }
-  if (names.size === 1 && avatars.size <= 1) return {
-    profile: { name: [...names][0], ...(avatars.size ? { profile_pic: [...avatars][0] } : {}) },
+  if (names.size <= 1 && avatars.size <= 1 && emails.size <= 1 && (names.size || avatars.size || emails.size)) return {
+    profile: {
+      ...(names.size ? { name: [...names][0] } : {}),
+      ...(avatars.size ? { profile_pic: [...avatars][0] } : {}),
+      ...(emails.size ? { email: [...emails][0] } : {}),
+    },
     source: "CONVERSATIONS" as const,
   };
   return { profile: {}, source: "CONVERSATIONS" as const };
