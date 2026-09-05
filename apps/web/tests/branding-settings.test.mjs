@@ -32,7 +32,7 @@ test("custom logos keep their aspect ratio inside every fixed avatar slot", () =
 });
 
 test("an invalid replacement clears the previously selected logo before validation", () => {
-  const pick = settings.match(/function pick\(next\?:File\)\{(.+?)\}\n  async function persist/s)?.[1] ?? "";
+  const pick = settings.match(/function pick\(next\?:File\)\{(.+?)\}\r?\n  async function persist/s)?.[1] ?? "";
   const clearFile = pick.indexOf("setFile(undefined)");
   const clearPreview = pick.indexOf('setPreview("")');
   const typeValidation = pick.indexOf('includes(next.type)');

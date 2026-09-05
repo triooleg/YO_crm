@@ -9,8 +9,8 @@ The supplied 2026-09-04 Orders reference image and the accompanying Russian prod
 1. Header: title, operational subtitle, existing new-order action.
 2. Six compact, clickable KPI cards: active, deposit required, due within seven days, overdue, ready to ship, completed.
 3. Search and controls: filters, quick filters, sort, columns, CSV export; active filters appear as removable chips.
-4. Dense order table: controls, order/client, quantity, discipline, designs, deadline, payment, sales status, next action, delivery, created date, problems, contextual action.
-5. Every order expands in place. Expanded content has an item/design workspace plus separate finance, delivery, customer-requirements and manager-notes summaries. The existing full order workspace remains available through an explicit action.
+4. Dense order table: controls, order/client, quantity, discipline, designs, deadline, payment, sales status, next action, delivery, created date and contextual action.
+5. Every order expands in place. This single expanded workspace contains all four status dimensions, every item and its detailed measurements, finance and payment history, invoices, delivery and contacts, customer requirements and the order activity history. There is no second full-page order card.
 
 ## Visual tokens
 
@@ -25,7 +25,9 @@ The supplied 2026-09-04 Orders reference image and the accompanying Russian prod
 
 - KPI and quick-filter controls update the same local filtered result set; filters compose with search and sort.
 - Column visibility/order persists in localStorage. The source channel is part of the client cell and is not a standalone column.
-- Row click does not navigate. Chevron expands/collapses; explicit buttons open the full order, client record, payment flow, or measurements.
+- Row click does not navigate. Chevron, canonical order number and contextual action expand/collapse the same row. Explicit buttons open the client record, payment flow or measurements.
+- Sales and production statuses remain editable through the audited order-status route. Payment and shipping statuses are visible but read-only; shipping changes remain owned by the shipping workflow.
+- The common measurement editor is available only for individual orders. Pair and group items expose their saved snapshots without calling the server route that intentionally rejects multi-item orders.
 - Deadline and status editing continue to use the existing audited API paths.
 - CSV export exports the currently filtered/sorted rows and contains no hidden API request.
 - Pagination is client-side over the existing bounded `GET /orders` response; changing filter/search resets to page one.

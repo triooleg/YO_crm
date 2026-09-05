@@ -6,9 +6,9 @@ const workspace=readFileSync(new URL("../components/orders-workspace.tsx",import
 const i18n=readFileSync(new URL("../lib/i18n.ts",import.meta.url),"utf8");
 const css=readFileSync(new URL("../app/orders-workspace.css",import.meta.url),"utf8");
 
-test("список открывает полноценную карточку заказа варианта A",()=>{
+test("устаревший список больше не открывает отдельную карточку заказа",()=>{
   assert.match(workspace,/OrderWorkspaceCard/);
-  assert.match(workspace,/workspaceId/);
+  assert.doesNotMatch(workspace,/workspaceId|setWorkspaceId/);
   assert.match(workspace,/orders-card-workspace/);
   assert.match(workspace,/onBack/);
 });

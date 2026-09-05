@@ -55,7 +55,9 @@ test("Orders summary keeps headers aligned and exposes the canonical order numbe
   assert.match(css, /\.orders-dashboard-table thead\{[^}]*display:table-header-group!important/);
   assert.match(css, /\.orders-dashboard-table tbody\{[^}]*display:table-row-group!important/);
   assert.match(css, /tbody>tr:not\(\.orders-expanded-row\)\{display:table-row!important;grid-template-columns:none!important/);
-  assert.match(dashboard, /orders-order-number[^>]*onClick=\{onOpen\}[^>]*>\{order\.number\}/);
+  assert.match(dashboard, /orders-order-number[^>]*onClick=\{onExpand\}[^>]*>\{order\.number\}/);
+  assert.match(dashboard, /orders-menu-button[^>]*onClick=\{onExpand\}/);
+  assert.doesNotMatch(dashboard, /workspaceId|setWorkspaceId|OrderWorkspaceCard/);
   assert.doesNotMatch(dashboard, /orderListNumber\(/);
 });
 
