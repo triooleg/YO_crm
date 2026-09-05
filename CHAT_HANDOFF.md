@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-05 — «Входящие» по референсу, 0.1.3 (подготовлено, production pending)
+## 2026-09-05 — «Входящие» по референсу, 0.1.3 (deployed, live smoke PASS)
 
 - Изолированная ветка `codex/inbox-reference` от актуального `origin/main`;
   посторонние изменения основного checkout сохранены.
@@ -13,7 +13,10 @@
   collapsed desktop→tablet прошли. `pnpm quality:check` прошёл: web 218, API 342, database 7 тестов, typecheck и build.
   Compatibility, regression, business и visual reviewer: PASS. Release gate: PASS; built-page smoke PASS (включая submit нового тестового клиента и очистку обоих поисков).
 - FULL backup `pre-inbox-reference-20260905-0147` проверен, source archive и
-  rollback web image 0.1.2 сохранены. Deployment/live smoke ещё pending.
+  rollback web image 0.1.2 сохранены.
+- Production: web-only commit `5507c64b137525cfcee242119e37135d20c80003`, GitHub tag `crm-v0.1.3`; API/БД/Redis не пересоздавались, миграций нет.
+- Все четыре контейнера healthy, restart count 0. Публичный `/api/health` вернул HTTP 200, PostgreSQL/Redis/uploads up. Проверены живой Inbox, галерея, отсутствие горизонтального переполнения, версия 0.1.3 и русский журнал с точным commit. Console errors: 0. Серверный запрос к публичному домену упёрся в сетевой timeout; проверка с рабочего компьютера и браузера успешна.
+- Последующий commit документации не меняет runtime: рабочая сборка и release tag остаются на `5507c64`.
 
 
 ## 2026-09-05 — социальные публикации и комментарии Meta (deployed, provider E2E ожидает нового события)
