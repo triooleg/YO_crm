@@ -21,6 +21,23 @@
   ошибок консоли. Отдельно проверены загрузка, независимые режимы, reload и
   удаление логотипа, а также поднятие двух клиентов после обычной отправки,
   сохранённого черновика и подтверждённого AI-ответа; polling порядок не отменяет.
+- Runtime commit `da7ab44cf41a4c17b688781cc6b0db9a288c3273` fast-forward pushed в
+  `origin/main`. Перед deployment создан и независимо проверен FULL backup
+  `20260905T162015Z-v014-da7ab44-predeploy`; release archive SHA-256
+  `84a23250b2f9a1770cdb760d85a356f12e9aab51921d90d19e40917a3cb623ea`
+  совпал на сервере. Source rollback сохранён как
+  `/home/trio/yoleotard-crm-backups/source-before-da7ab44cf41a-20260905T162015Z.tar.gz`.
+- В production пересозданы только API `f67e37b1213b` и web `4742f335b2ff`;
+  PostgreSQL `27e5b2cee481` и Redis `cc53be4b7f48` не заменялись. Все контейнеры
+  healthy, restart count 0; 19 миграций актуальны, internal `/api/health` и
+  публичные root/health с рабочего компьютера вернули HTTP 200 с
+  PostgreSQL/Redis/uploads `up`. Серверный loopback через публичный домен, как и
+  раньше, завершился сетевым timeout; внутренний и внешний probes успешны.
+- Авторизованный production smoke подтвердил `CRM v0.1.4` и точный commit,
+  единый shell и рабочую прокрутку Inbox, полные номера заказов, отсутствие
+  столбца «Проблемы», доступные date picker и выбор дисциплины, вкладку
+  `Настройки → Интерфейс` и русский журнал версии 0.1.4. Данные, логотип и
+  клиентские сообщения во время smoke не изменялись.
 
 ## 2026-09-05 — «Входящие» по референсу, 0.1.3 (deployed, live smoke PASS)
 
