@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-05 — логотип, вставка из буфера и удаление сообщений, 0.1.5 (готово к deployment)
+## 2026-09-05 — логотип, вставка из буфера и удаление сообщений, 0.1.5 (deployed)
 
 - Логотип во всех фиксированных местах использует `object-fit: contain`, сохраняет
   пропорции и полностью помещается в шапке, боковом меню, настройках и исходящих сообщениях.
@@ -19,6 +19,22 @@
 - Chromium PASS на 1920×1080, 1366×768 и 390×844: document overflow 0,
   console errors/warnings 0. Проверены фокус/Escape/возврат фокуса диалога удаления,
   реальная вставка русского текста и PNG из системного буфера.
+- Runtime commit `b2bd46015e15d0add4bce80b3703c9ba6fcaae5e` fast-forward pushed в
+  `origin/main`. Перед deployment создан и проверен FULL backup
+  `20260905T183659Z-v015-b2bd460-predeploy`; release archive SHA-256
+  `04660e50917495e962b3cdfd782b1430d87ff7f24f485de554a5427270b224e0`
+  совпал локально и на сервере. Source rollback сохранён как
+  `/home/trio/yoleotard-crm-backups/source-before-b2bd46015e15-20260905T183659Z.tar.gz`
+  с SHA-256 `0b57da3a210304bffcddc5aea5b1111311467cfb4247aa1044b87e7d4c7c1509`.
+- В production пересозданы только API `f1ddbaa6df12` и web `4e9534a75d48`;
+  PostgreSQL `27e5b2cee481` и Redis `cc53be4b7f48` сохранены. Все четыре
+  контейнера healthy, restart count 0; 19 миграций актуальны, internal и public
+  `/api/health`, а также public root вернули HTTP 200. Runtime web bundle содержит
+  точный commit 0.1.5; fresh API/web error scan пустой.
+- Авторизованный production UI smoke через открытый Edge не удалось повторить:
+  browser connector терял отладочное подключение. Визуальное и интерактивное UAT
+  выполнено локально на production build; production подтверждён контейнерными,
+  внешними и runtime-marker probes без изменения клиентских данных.
 
 ## 2026-09-05 — единая оболочка, логотип и быстрые правки заказов, 0.1.4
 
