@@ -22,6 +22,7 @@ import {
   ALLOWED_AI_MODELS,
   AiRequestDto,
   AiSettingsDto,
+  GenerateConversationSummaryDto,
   CommunicationsListQueryDto,
   ChatwootIntegrationDto,
   DeleteMessageDto,
@@ -50,6 +51,7 @@ import { uploadsRoot } from "../uploads";
 import { normalizeClientLanguageCode } from "./ai-language";
 import { requestOpenAiText } from "./ai-response";
 import { AiRunService } from "../intelligence/ai-run.service";
+import { AiControlService } from "../intelligence/ai-control.service";
 import { ContextBuilderService } from "../intelligence/context-builder.service";
 import { ToolService } from "../intelligence/tool.service";
 import { reserveAiFeedback } from "../intelligence/ai-feedback-reservation";
@@ -61,6 +63,7 @@ import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply"
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
 import { chatwootDeleteTarget, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
+import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, SUMMARY_PROMPT_VERSION, summaryPlanFingerprint, summarySourceDigest, type SummaryMessage } from "./conversation-summary";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -966,7 +969,7 @@ export class CommunicationsService {
       await tx.customerMemory.updateMany({where:{clientId},data:{type:"redacted",key:`redacted:${code}`,valueJson:{redacted:true},status:"REJECTED",sourceType:"DATA_DELETION",sourceId:code,sourceMessageId:null,extractor:null,extractorVersion:null}});
       await tx.conversationFact.updateMany({where:{clientId},data:{type:"redacted",subject:redacted,valueJson:{redacted:true},status:"REJECTED",confidence:null,extractor:null,extractorVersion:null}});
       await tx.agreement.updateMany({where:{clientId},data:{type:"redacted",subject:redacted,valueJson:{redacted:true},status:"REJECTED",confidence:null}});
-      await tx.conversationSummary.updateMany({where:{conversation:{clientId}},data:{summary:redacted,structuredSummary:Prisma.JsonNull}});
+      await tx.conversationSummary.updateMany({where:{conversation:{clientId}},data:{summary:redacted,structuredSummary:Prisma.JsonNull,processingState:Prisma.JsonNull,processingLeaseUntil:null,processingLeaseToken:null}});
       await tx.aiResponseFeedback.updateMany({where:{aiRun:{clientId}},data:{draftText:redacted,finalText:redacted,accepted:null,rejected:true,sentMessageId:null}});
       await tx.aiRun.updateMany({where:{clientId},data:{contextSnapshot:Prisma.JsonNull,generatedOutput:redacted,toolCalls:Prisma.JsonNull,retrievedKnowledgeIds:[],retrievedMemoryIds:[],retrievedMessageIds:[]}});
       await tx.message.updateMany({ where: { conversation: { clientId } }, data: { content: redacted, normalizedText:redacted, language:null, metadata: Prisma.JsonNull, rawPayload:Prisma.JsonNull, webhookEnvelopeId:null, externalId: null, aiProcessedAt:null, aiAnalysisVersion:null } });
@@ -2323,7 +2326,7 @@ export class CommunicationsService {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
-  constructor(private p: PrismaService, private contextBuilder: ContextBuilderService, private aiRuns: AiRunService, private tools: ToolService) {}
+  constructor(private p: PrismaService, private contextBuilder: ContextBuilderService, private aiRuns: AiRunService, private tools: ToolService, private aiControl: AiControlService) {}
   private async values() {
     const rows = await this.p.appSetting.findMany({ where: { section: "ai" } });
     return Object.fromEntries(rows.map((x) => [x.key, x.value])) as Record<
@@ -2616,6 +2619,165 @@ export class AiAssistantService {
       },
     });
     return { text: resultText, aiRunId: run.id };
+  }
+  private async summaryConversation(clientId:string,channel:ContactChannel){
+    const conversation=await this.p.conversation.findFirst({where:{clientId,channel,archivedAt:null,client:{archivedAt:null}},orderBy:{lastMessageAt:"desc"},select:{id:true,channel:true,clientId:true}});
+    if(!conversation)throw new NotFoundException("Переписка выбранного канала не найдена");
+    return conversation;
+  }
+  private summaryStart(fromDate:string){
+    try{return crmDateStart(fromDate)}catch{throw new BadRequestException("Некорректная дата начала сводки")}
+  }
+  private async summaryMessages(conversationId:string,fromDate:string){
+    const start=this.summaryStart(fromDate);
+    if(start.getTime()>Date.now())throw new BadRequestException("Дата начала сводки не может быть в будущем");
+    const base:Prisma.MessageWhereInput={conversationId,createdAt:{gte:start},messageType:{not:"reaction"},direction:{in:[MessageDirection.INBOUND,MessageDirection.OUTBOUND]},status:{in:[MessageStatus.RECEIVED,MessageStatus.SENT]}};
+    const watermark=await this.p.message.findFirst({where:base,orderBy:[{createdAt:"desc"},{id:"desc"}],select:{id:true,createdAt:true}});
+    if(!watermark)return{messages:[] as SummaryMessage[],through:undefined};
+    const messages:SummaryMessage[]=[];
+    let cursor:string|undefined;
+    while(true){
+      const batch=await this.p.message.findMany({
+        where:{AND:[base,{OR:[{createdAt:{lt:watermark.createdAt}},{createdAt:watermark.createdAt,id:{lte:watermark.id}}]}]},
+        orderBy:[{createdAt:"asc"},{id:"asc"}],take:250,...(cursor?{cursor:{id:cursor},skip:1}:{}),
+        select:{id:true,direction:true,status:true,content:true,createdAt:true,metadata:true},
+      });
+      messages.push(...batch.filter(message=>!isDeduplicatedDraft(message.metadata)&&!isSoftDeletedMessage(message.metadata)).map(({metadata:_metadata,...message})=>message));
+      if(batch.length<250)break;
+      cursor=batch.at(-1)?.id;
+      if(!cursor)break;
+    }
+    return{messages,through:messages.at(-1)};
+  }
+  private async summaryFirstMessageDate(conversationId:string){
+    const base:Prisma.MessageWhereInput={conversationId,messageType:{not:"reaction"},direction:{in:[MessageDirection.INBOUND,MessageDirection.OUTBOUND]},status:{in:[MessageStatus.RECEIVED,MessageStatus.SENT]}};
+    let cursor:string|undefined;
+    while(true){
+      const batch=await this.p.message.findMany({where:base,orderBy:[{createdAt:"asc"},{id:"asc"}],take:250,...(cursor?{cursor:{id:cursor},skip:1}:{}),select:{id:true,createdAt:true,metadata:true}});
+      const first=batch.find(message=>!isDeduplicatedDraft(message.metadata)&&!isSoftDeletedMessage(message.metadata));
+      if(first)return crmDateKey(first.createdAt);
+      if(batch.length<250)return null;
+      cursor=batch.at(-1)?.id;
+      if(!cursor)return null;
+    }
+  }
+  private async summaryContext(clientId:string){
+    const client=await this.p.client.findFirst({where:{id:clientId,archivedAt:null},select:{
+      displayName:true,country:true,city:true,language:true,timezone:true,
+      athletes:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{firstName:true,lastName:true,discipline:true,club:true,coach:true,measurements:{orderBy:{measuredAt:"desc"},take:1,select:{measuredAt:true,unit:true,height:true,chest:true,waist:true,hips:true,torso:true,values:true}}}},
+      orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{number:true,type:true,discipline:true,requiredDeliveryAt:true,promisedProductionAt:true,priceMinor:true,currency:true,depositRequiredMinor:true,deliveryMinor:true,discountMinor:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,payments:{orderBy:{receivedAt:"asc"},select:{amountMinor:true,currency:true,method:true,receivedAt:true}},shipment:{select:{carrier:true,trackingNumber:true,costMinor:true,currency:true,shippedAt:true,deliveredAt:true}}}},
+    }});
+    if(!client)throw new NotFoundException("Клиент не найден");
+    return{
+      client:{displayName:client.displayName,country:client.country,city:client.city,language:client.language,timezone:client.timezone},
+      athletes:client.athletes.map(athlete=>({firstName:athlete.firstName,lastName:athlete.lastName,discipline:athlete.discipline,club:athlete.club,coach:athlete.coach,measurements:athlete.measurements})),
+      orders:client.orders.map(order=>({number:order.number,type:order.type,discipline:order.discipline,requiredDeliveryAt:order.requiredDeliveryAt,promisedProductionAt:order.promisedProductionAt,salesStatus:order.salesStatus,productionStatus:order.productionStatus,paymentStatus:order.paymentStatus,shippingStatus:order.shippingStatus,price:{display:formatMinorMoney(order.priceMinor,order.currency)},depositRequired:{display:formatMinorMoney(order.depositRequiredMinor,order.currency)},delivery:{display:formatMinorMoney(order.deliveryMinor,order.currency)},discount:{display:formatMinorMoney(order.discountMinor,order.currency)},payments:order.payments.map(payment=>({display:formatMinorMoney(payment.amountMinor,payment.currency),method:payment.method,receivedAt:payment.receivedAt})),shipment:order.shipment?{carrier:order.shipment.carrier,trackingNumber:order.shipment.trackingNumber,cost:{display:formatMinorMoney(order.shipment.costMinor,order.shipment.currency)},shippedAt:order.shipment.shippedAt,deliveredAt:order.shipment.deliveredAt}:null})),
+    };
+  }
+  async listConversationSummaries(clientId:string,channel:ContactChannel){
+    const conversation=await this.summaryConversation(clientId,channel);
+    const [groups,firstMessageDate,operational]=await Promise.all([
+      this.p.conversationSummary.groupBy({by:["fromDate"],where:{conversationId:conversation.id,fromDate:{not:null},sourceDigest:{not:null},completedAt:{not:null}},_max:{createdAt:true}}),
+      this.summaryFirstMessageDate(conversation.id),
+      this.summaryContext(clientId),
+    ]);
+    const latestPairs=groups.flatMap(group=>group.fromDate&&group._max.createdAt?[{fromDate:group.fromDate,createdAt:group._max.createdAt}]:[]);
+    const stored=latestPairs.length?await this.p.conversationSummary.findMany({where:{conversationId:conversation.id,OR:latestPairs},orderBy:[{createdAt:"desc"},{id:"desc"}]}):[];
+    const latestByDate=selectLatestSummaryVersions(stored);
+    const dates=[...latestByDate.keys()].sort();
+    if(!dates.length)return{channel,timezone:CRM_SUMMARY_TIMEZONE,firstMessageDate,items:[]};
+    const source=await this.summaryMessages(conversation.id,dates[0]!);
+    const items=dates.map(fromDate=>{
+      const item=latestByDate.get(fromDate)!;
+      const start=this.summaryStart(fromDate),messages=source.messages.filter(message=>message.createdAt>=start),digest=summarySourceDigest(messages,operational),isCurrent=digest===item.sourceDigest;
+      return{id:item.id,fromDate,generatedAt:item.createdAt,throughMessageAt:item.throughMessageAt,messageCount:item.sourceMessageCount,isCurrent,summary:isCurrent?item.summary:null};
+    }).reverse();
+    return{channel,timezone:CRM_SUMMARY_TIMEZONE,firstMessageDate,items};
+  }
+  async generateConversationSummaryLimited(clientId:string,d:GenerateConversationSummaryDto,u:User){
+    const lease=await this.reserve(u);
+    try{return await this.generateConversationSummary(clientId,d,u)}finally{await this.release(lease.id)}
+  }
+  private async assertSummaryCurrent(conversationId:string,clientId:string,fromDate:string,digest:string){
+    const [current,currentOperational]=await Promise.all([this.summaryMessages(conversationId,fromDate),this.summaryContext(clientId)]);
+    if(summarySourceDigest(current.messages,currentOperational)!==digest)throw new ConflictException("Переписка или данные заказа изменились во время создания сводки. Повторите запрос");
+  }
+  private async generateConversationSummary(clientId:string,d:GenerateConversationSummaryDto,u:User){
+    const values=await this.values(),cfg=this.publicSettings(values);
+    if(!cfg.enabled)throw new BadRequestException("AI-помощник отключён");
+    if(!cfg.allowClientContext)throw new BadRequestException("Использование данных клиента для AI отключено");
+    const key=this.resolveApiKey(values);
+    if(!key)throw new BadRequestException("OpenAI API не подключён");
+    const conversation=await this.summaryConversation(clientId,d.channel);
+    const effective=await this.aiControl.effective({conversationId:conversation.id});
+    if(!effective.masterEnabled||effective.mode==="OFF"||effective.serverBlocked)throw new BadRequestException("AI отключён политикой сервера или выбранного диалога");
+    const [source,operational]=await Promise.all([this.summaryMessages(conversation.id,d.fromDate),this.summaryContext(clientId)]);
+    if(!source.messages.length||!source.through)throw new BadRequestException("С выбранной даты в переписке нет сообщений");
+    const operationalJson=JSON.stringify(operational),operationalSnapshot=JSON.parse(operationalJson) as Prisma.InputJsonValue;
+    const digest=summarySourceDigest(source.messages,operationalSnapshot),fromDateDb=new Date(`${d.fromDate}T00:00:00.000Z`);
+    let existing=await this.p.conversationSummary.findUnique({where:{conversationId_fromDate_sourceDigest:{conversationId:conversation.id,fromDate:fromDateDb,sourceDigest:digest}}});
+    if(existing?.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false}}
+    const maxInputCharacters=Number(effective.maxInputCharacters||12000);
+    if(operationalJson.length+3000>maxInputCharacters)throw new BadRequestException("Данные клиента превышают разрешённый объём AI-контекста");
+    const chunkCharacters=Math.max(1000,Math.min(32000,maxInputCharacters-operationalJson.length-3000));
+    const chunks=splitSummaryMessages(source.messages,chunkCharacters);
+    const throughDate=crmDateKey(source.through.createdAt),startedAt=Date.now(),outputTokens=Math.max(400,Math.min(2400,Number(effective.maxOutputTokens||1600)));
+    const planFingerprint=summaryPlanFingerprint({model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,maxInputCharacters,chunkCharacters,chunks});
+    const leaseToken=randomUUID(),leaseUntil=new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS);
+    let claimed=false;
+    if(!existing){
+      try{
+        existing=await this.p.conversationSummary.create({data:{conversationId:conversation.id,summary:"",structuredSummary:{kind:"OPERATOR_BRIEF_PROGRESS",fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt.toISOString()},throughMessageId:source.through.id,fromDate:fromDateDb,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt,model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,processingState:readSummaryProcessingState(undefined,chunks.length,planFingerprint) as unknown as Prisma.InputJsonValue,processingLeaseUntil:leaseUntil,processingLeaseToken:leaseToken}});
+        claimed=true;
+      }catch(error){
+        if((error as {code?:string}).code!=="P2002")throw error;
+        existing=await this.p.conversationSummary.findUnique({where:{conversationId_fromDate_sourceDigest:{conversationId:conversation.id,fromDate:fromDateDb,sourceDigest:digest}}});
+      }
+    }
+    if(!existing)throw new ConflictException("Не удалось начать создание сводки. Повторите запрос");
+    if(existing.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false}}
+    if(!claimed){
+      const claim=await this.p.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,OR:[{processingLeaseUntil:null},{processingLeaseUntil:{lt:new Date()}}]},data:{processingLeaseUntil:leaseUntil,processingLeaseToken:leaseToken}});
+      if(claim.count!==1)throw new ConflictException("Сводка уже обрабатывается. Подождите несколько секунд и повторите запрос");
+      existing=await this.p.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
+    }
+    const run=await this.aiRuns.start({clientId,conversationId:conversation.id,agent:"operator-summary",operation:"CONVERSATION_SUMMARY",provider:"openai",model:cfg.model,promptKey:"assist.operator-summary",promptVersion:1,contextSnapshot:{fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageId:source.through.id,operational:operationalSnapshot} as Prisma.InputJsonValue,retrievedMessageIds:source.messages.map(message=>message.id),availableTools:[]});
+    let resultText="",lastOutput="",state=readSummaryProcessingState(existing.processingState,chunks.length,planFingerprint);
+    try{
+      const ownedWhere={id:existing.id,completedAt:null,processingLeaseToken:leaseToken};
+      const renewOwnedLease=async()=>{const renewed=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingLeaseUntil:new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS)}});if(renewed.count!==1)throw new ConflictException("Обработка сводки была продолжена другим запросом. Повторите действие")};
+      const batch=await runSummaryProcessingBatch({state,chunks,maxCalls:MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH,maxInputCharacters,operationalJson,fromDate:d.fromDate,throughDate,outputTokens,request:async(input,tokens,stage)=>{
+        await renewOwnedLease();
+        return this.requestOpenAi(key,cfg.model,input,Math.min(tokens,outputTokens),stage);
+      },checkpoint:async checkpointState=>{
+        const checkpointed=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingState:checkpointState as unknown as Prisma.InputJsonValue,processingLeaseUntil:new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS),model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION}});
+        if(checkpointed.count!==1)throw new ConflictException("Прогресс сводки уже обновлён другим запросом");
+      }});
+      state=batch.state;resultText=batch.resultText;lastOutput=batch.lastOutput;
+      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);
+      await renewOwnedLease();
+      await this.aiRuns.complete(run.id,lastOutput||"Промежуточный этап завершён",Date.now()-startedAt);
+      if(!resultText){
+        const processed=state.stage==="MAP"?state.nextIndex:chunks.length;
+        const saved=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingState:state as unknown as Prisma.InputJsonValue,processingLeaseUntil:null,processingLeaseToken:null}});
+        if(saved.count!==1)throw new ConflictException("Прогресс сводки уже обновлён другим запросом");
+        const updated=await this.p.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
+        return{id:updated.id,fromDate:d.fromDate,generatedAt:updated.createdAt,throughMessageAt:updated.throughMessageAt,messageCount:updated.sourceMessageCount,isCurrent:true,summary:null,cached:false,pending:true,processedChunks:processed,totalChunks:chunks.length};
+      }
+      const completed=await this.p.$transaction(async tx=>{
+        const saved=await tx.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,processingLeaseToken:leaseToken},data:{summary:resultText,structuredSummary:{kind:"OPERATOR_BRIEF",fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through!.createdAt.toISOString()},processingState:Prisma.JsonNull,processingLeaseUntil:null,processingLeaseToken:null,completedAt:new Date()}});
+        if(saved.count!==1)throw new ConflictException("Итог сводки уже сохранён другим запросом");
+        const item=await tx.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
+        await tx.auditLog.create({data:{actorId:u.id,action:"GENERATE",entityType:"ConversationSummary",entityId:item.id,after:{clientId,conversationId:conversation.id,channel:d.channel,fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceMessageCount:source.messages.length,throughMessageId:source.through!.id,model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,outputCharacters:resultText.length}}});
+        return item;
+      });
+      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);
+      return{id:completed.id,fromDate:d.fromDate,generatedAt:completed.createdAt,throughMessageAt:completed.throughMessageAt,messageCount:completed.sourceMessageCount,isCurrent:true,summary:completed.summary,cached:false,pending:false};
+    }catch(error){
+      await Promise.allSettled([this.aiRuns.fail(run.id,error instanceof Error?error.constructor.name:"UNKNOWN",Date.now()-startedAt),this.p.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,processingLeaseToken:leaseToken},data:{processingLeaseUntil:null,processingLeaseToken:null}})]);
+      if(error instanceof Error&&error.message==="SUMMARY_CONTEXT_TOO_LARGE")throw new BadRequestException("Сводка превышает разрешённый объём AI-контекста");
+      throw error;
+    }
   }
   async translateMessage(id:string,u:User){
     const message=await this.p.message.findFirst({where:{id,direction:MessageDirection.INBOUND,conversation:{archivedAt:null,client:{archivedAt:null}}},select:{id:true,content:true,metadata:true,conversation:{select:{clientId:true}}}});

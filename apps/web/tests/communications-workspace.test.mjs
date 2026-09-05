@@ -15,6 +15,32 @@ test("входящие используют централизованные р�
     assert.match(locale, new RegExp(`${key}:`));
 });
 
+test("правая панель содержит вкладку Сводка рядом с Файлами и календарь сохранённых дат",()=>{
+  assert.match(component,/type ContextTab = "CLIENT" \| "ORDERS" \| "NOTES" \| "FILES" \| "SUMMARY"/);
+  assert.match(component,/key:"FILES",label:ui\.contextFiles\},\{key:"SUMMARY",label:ui\.contextSummary\}/);
+  assert.match(component,/\/ai-assistant\/clients\/\$\{encodeURIComponent\(operationClientId\)\}\/summaries/);
+  assert.match(component,/className="communications-summary-calendar"/);
+  assert.match(component,/is-generated/);
+  assert.match(component,/ui\.generateSummary/);
+  assert.match(component,/ui\.refreshSummary/);
+  assert.match(component,/ui\.continueSummary/);
+  assert.match(component,/summaryProgress/);
+  assert.match(component,/data-active-tab="SUMMARY"/);
+  assert.match(component,/event\.key==="ArrowRight"/);
+  assert.match(component,/event\.key==="Home"/);
+  assert.match(component,/role="row"/);
+  assert.match(component,/event\.key==="ArrowDown"/);
+  assert.match(component,/summaryDateButtonRef\.current\?\.focus/);
+  assert.match(component,/role="status" aria-live="polite"/);
+  assert.match(component,/result\.firstMessageDate/);
+  assert.match(component,/summaryFirstMessageDate\|\|localDateKey/);
+  assert.match(css,/communications-context-tabs\{[^}]*repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(css,/communications-summary-day\.is-generated/);
+  assert.match(css,/communications-summary-day\.is-selected\.is-generated/);
+  assert.match(css,/communications-orders article\.communications-summary-result\{display:block;grid-template-columns:none;width:100%/);
+  for(const key of["contextSummary","generateSummary","refreshSummary","continueSummary","summaryProgress","summaryFromDate","summaryStale","summaryEmpty","summaryCalendarLabel"])assert.match(locale,new RegExp(`${key}:`));
+});
+
 test("composer autosaves one draft and keeps a separate real send action", () => {
   assert.match(component, /async function save\(action: "DRAFT" \| "SEND",contentOverride\?:string\)/);
   assert.match(component, /JSON\.stringify\(\{[\s\S]*channel: activeChannel, action,/);

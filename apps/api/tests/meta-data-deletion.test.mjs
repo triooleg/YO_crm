@@ -58,4 +58,5 @@ test("commits anonymization before deleting files and completes only after file 
   assert.ok(unlinkFiles < completed, "completion must be recorded only after physical file deletion");
   assert.match(service, /запрос останется в обработке и может быть повторён/);
   assert.match(service, /value\.status === "PROCESSING"/);
+  assert.match(service, /conversationSummary\.updateMany\(\{where:\{conversation:\{clientId\}\},data:\{summary:redacted,structuredSummary:Prisma\.JsonNull,processingState:Prisma\.JsonNull,processingLeaseUntil:null,processingLeaseToken:null\}\}\)/);
 });

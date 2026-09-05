@@ -102,7 +102,8 @@ type Template = {
 type Side = "left" | "right";
 type SocialChannel = "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "CHATWOOT" | "EMAIL";
 type OrderScope = "WITH_ORDERS" | "ACTIVE_ORDERS";
-type ContextTab = "CLIENT" | "ORDERS" | "NOTES" | "FILES";
+type ContextTab = "CLIENT" | "ORDERS" | "NOTES" | "FILES" | "SUMMARY";
+type ConversationSummaryItem = { id:string; fromDate:string; generatedAt:string; throughMessageAt?:string; messageCount?:number; isCurrent:boolean; summary?:string|null; pending?:boolean; processedChunks?:number; totalChunks?:number };
 type ConversationScope = "ALL" | "UNREAD" | "CLIENTS";
 const limits = { left: [200, 430], right: [260, 560] } as const,
   defaults = { left: 365, right: 410 },
@@ -217,6 +218,7 @@ function formatMessageDateTime(value:string){
 }
 function orderPaidMinor(order:Order){return (order.payments||[]).filter(payment=>payment.currency===order.currency).reduce((total,payment)=>total+payment.amountMinor,0)}
 function messageDayKey(value:string){const date=new Date(value);return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+function localDateKey(value:string|Date){const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Kyiv",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(value)),part=(type:Intl.DateTimeFormatPartTypes)=>parts.find(item=>item.type===type)?.value||"";return `${part("year")}-${part("month")}-${part("day")}`}
 function formatMessageDay(value:string){return new Date(value).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
 function gmailConversationUrl(messages: Message[]) {
   const messageId = [...messages].reverse().find((message) => message.channel === "EMAIL" && typeof message.metadata?.messageId === "string")?.metadata?.messageId?.trim();
@@ -287,6 +289,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [contextCollapsed,setContextCollapsed]=useState(false),
     [mobileClientListOpen,setMobileClientListOpen]=useState(false),
     [contextTab,setContextTab]=useState<ContextTab>("CLIENT"),
+    [conversationSummaries,setConversationSummaries]=useState<ConversationSummaryItem[]>([]),
+    [summaryFirstMessageDate,setSummaryFirstMessageDate]=useState(""),
+    [summaryDate,setSummaryDate]=useState(""),
+    [summaryMonth,setSummaryMonth]=useState(()=>new Date(new Date().getFullYear(),new Date().getMonth(),1)),
+    [summaryCalendarOpen,setSummaryCalendarOpen]=useState(false),
+    [summaryLoading,setSummaryLoading]=useState(false),
+    [summaryGenerating,setSummaryGenerating]=useState(false),
+    [summaryProgress,setSummaryProgress]=useState<ConversationSummaryItem>(),
     [preview, setPreview] = useState<{url:string;type:"image"|"video"}>(),
     [left, setLeft] = useState(defaults.left),
     [right, setRight] = useState(defaults.right);
@@ -337,10 +347,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     emojiPicker=useRef<HTMLDivElement|null>(null),
     deleteTrigger=useRef<HTMLElement|null>(null),
     deleteDialog=useRef<HTMLElement|null>(null),
-    deleteClose=useRef<HTMLButtonElement|null>(null);
+    deleteClose=useRef<HTMLButtonElement|null>(null),
+    summaryRequestSequence=useRef(0),
+    summaryDateButtonRef=useRef<HTMLButtonElement|null>(null),
+    currentActiveChannel=useRef(activeChannel);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentOrderScope.current=orderScope;
+  currentActiveChannel.current=activeChannel;
   currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
   currentMessages.current=messages;
@@ -390,8 +404,35 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     }
     return r.json();
   }
+  async function loadConversationSummaries(operationClientId:string,operationChannel:string){
+    const request=++summaryRequestSequence.current;
+    setSummaryLoading(true);
+    try{
+      const result=await api(`/ai-assistant/clients/${encodeURIComponent(operationClientId)}/summaries?channel=${encodeURIComponent(operationChannel)}`) as {firstMessageDate?:string|null;items:ConversationSummaryItem[]};
+      if(request!==summaryRequestSequence.current||selectedClientId.current!==operationClientId||currentActiveChannel.current!==operationChannel)return;
+      setConversationSummaries(result.items||[]);
+      setSummaryFirstMessageDate(result.firstMessageDate||"");
+      const nextDate=summaryDate||result.items?.[0]?.fromDate||result.firstMessageDate||localDateKey(messages.find(message=>message.channel===operationChannel)?.createdAt||messages[0]?.createdAt||new Date());
+      setSummaryDate(nextDate);setSummaryMonth(new Date(`${nextDate}T12:00:00`));
+    }catch(reason){if(request===summaryRequestSequence.current&&selectedClientId.current===operationClientId&&currentActiveChannel.current===operationChannel)setError((reason as Error).message)}
+    finally{if(request===summaryRequestSequence.current&&selectedClientId.current===operationClientId&&currentActiveChannel.current===operationChannel)setSummaryLoading(false)}
+  }
+  async function generateConversationSummary(){
+    if(!client||!summaryDate||summaryGenerating)return;
+    const operationClientId=client.id,operationChannel=activeChannel,operationEpoch=composeEpoch.current;
+    setSummaryGenerating(true);setError("");
+    try{
+      const item=await api(`/ai-assistant/clients/${encodeURIComponent(operationClientId)}/summaries`,{method:"POST",body:JSON.stringify({channel:operationChannel,fromDate:summaryDate})}) as ConversationSummaryItem;
+      if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch||currentActiveChannel.current!==operationChannel)return;
+      if(item.pending)setSummaryProgress(item);
+      else{setSummaryProgress(undefined);setConversationSummaries(current=>[item,...current.filter(existing=>existing.fromDate!==item.fromDate)])}
+      setSummaryCalendarOpen(false);
+    }catch(reason){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&currentActiveChannel.current===operationChannel)setError((reason as Error).message)}
+    finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&currentActiveChannel.current===operationChannel)setSummaryGenerating(false)}
+  }
   useEffect(()=>{if(searchQuery!==undefined)setSearch(searchQuery)},[searchQuery]);
   useEffect(()=>{if(unreadRequest)setConversationScope("UNREAD")},[unreadRequest]);
+  useEffect(()=>{if(contextTab==="SUMMARY"&&client)void loadConversationSummaries(client.id,activeChannel)},[contextTab,client?.id,activeChannel]);
   async function autosaveDraft(content:string){
     const operationClientId=selectedClientId.current,operationChannel=activeChannel,operationEpoch=composeEpoch.current,sequence=++draftSequence.current;
     if(!operationClientId||!content.trim()||content.trim()===lastAutosavedText.current)return;
@@ -592,12 +633,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     clientDetailRequest.current++;
     orderRequestVersion.current++;
     taskRequestVersion.current++;
+    summaryRequestSequence.current++;
     setClientDetail(undefined);
     setSelectedAthleteId(undefined);
     setContextLoading(c.status !== "LEAD");
     setAddingAthlete(false);
     setOrdering(false);
     setTasking(false);
+    setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
     composeEpoch.current++;
     draftSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";setDraftStatus("IDLE");setText("");
     aiOperationSequence.current++;
@@ -623,8 +666,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           selectedClientId.current,
           detailVersion.current,
         )
-      )
-        setMessages(x.messages || []);
+      ){
+        const nextMessages=x.messages||[];
+        setMessages(nextMessages);
+        const firstForChannel=nextMessages.find((message:Message)=>message.channel===(latestConversation(c)?.channel||channel(c)))||nextMessages[0];
+        const initialDate=localDateKey(firstForChannel?.createdAt||new Date());
+        setSummaryDate(initialDate);setSummaryMonth(new Date(`${initialDate}T12:00:00`));
+      }
     } catch (e) {
       if (
         isCurrentInboxDetailRequest(
@@ -1088,6 +1136,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     channelCounts=Object.fromEntries(socialChannels.map(item=>[item,channelTotals[item]||0])) as Record<SocialChannel,number>,
     conversationFiles=messages.flatMap(message=>(message.metadata?.attachments||[]).map((attachment,index)=>({messageId:message.id,index,attachment}))),
+    activeSummary=conversationSummaries.find(item=>item.fromDate===summaryDate),
+    firstSummaryDate=summaryFirstMessageDate||localDateKey(messages.find(message=>message.channel===activeChannel)?.createdAt||messages[0]?.createdAt||new Date()),
     grid = `min(${left}px,23vw) 4px minmax(320px,1fr) ${contextCollapsed?"0px 46px":`4px min(${right}px,25vw)`}`;
   const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
   const attachmentAccept=attachmentMimeTypes.join(",");
@@ -1225,7 +1275,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
               </span>
             </span>
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
             ) : (
               <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
             ))}
@@ -1448,7 +1498,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           <button type="button" className="communications-context-close" aria-label={ui.closeClientCard} onClick={()=>setContextOpen(false)}>×</button>
           {client&&<>
           <ContextTabs active={contextTab} onChange={setContextTab}/>
-          <div className="communications-context-tabpanel" role="tabpanel" aria-labelledby={`communications-context-tab-${contextTab.toLowerCase()}`} data-active-tab={contextTab}>
+          <div id="communications-context-tabpanel" className="communications-context-tabpanel" role="tabpanel" aria-labelledby={`communications-context-tab-${contextTab.toLowerCase()}`} data-active-tab={contextTab}>
           <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><span className="communications-profile-channel">{active.icon} {active.label}</span>{accountUrl&&<a className="communications-profile-link" href={accountUrl} target="_blank" rel="noopener noreferrer">{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel]||ui.openInSocialNetwork} ↗</a>}<small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div><div className="communications-profile-facts">{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b><InboxCountryFlag country={client.country}/> {client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b title={client.timezone}>{clientLocalTime(client.timezone)}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}</div>{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}{athlete.measurements[0]&&<span className="communications-athlete-measurements">{inboxMeasurements(athlete.measurements[0]).map(({field,value,unit})=><span key={field}><small>{ui.measurementFields[field]}</small><b>{value} <small>{unit}</small></b></span>)}</span>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
@@ -1486,6 +1536,12 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b>{nextTask&&<button type="button" onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:nextTask.id})}>{ui.edit}</button>}</header>{nextTask?<p style={{borderLeftColor:nextTask.markerColor}}><b>{nextTask.title}</b>{nextTask.description&&<span>{nextTask.description}</span>}{nextTask.dueAt&&<small>{new Date(nextTask.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small>}{nextTask.assignee&&<small>{ui.responsible}: {nextTask.assignee.displayName}</small>}</p>:client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
           <section className="communications-context-section communications-context-files"><header><b>{ui.contextFiles}</b><small>{conversationFiles.length}</small></header>{conversationFiles.length?<div className="communications-context-file-grid">{conversationFiles.map(({messageId,index,attachment})=>{const url=safeAttachmentUrl(attachment.url),label=attachment.name||ui.attachmentTypes[attachment.type as keyof typeof ui.attachmentTypes]||ui.attachmentTypes.fallback,isMedia=["image","sticker","video"].includes(attachment.type);return url&&isMedia?<button type="button" className={`communications-context-file-preview${attachment.type==="video"?" is-video":""}`} key={`${messageId}-${index}`} aria-label={`${ui.openAttachment}: ${label}`} title={label} onClick={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:attachment.type==="video"?"video":"image"})}}>{attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label}/>}<span>{label}</span></button>:url?<a className="communications-context-file-card" key={`${messageId}-${index}`} href={url} target="_blank" rel="noopener noreferrer" title={label}><b aria-hidden="true">▧</b><span>{label}</span></a>:null})}</div>:<small>{ui.noContextFiles}</small>}</section>
+          <section className="communications-context-section communications-context-summary" data-active-tab="SUMMARY"><header><div><b>{ui.contextSummary}</b><small>{active.label}</small></div></header>
+            <div className="communications-summary-controls">
+              <span className="communications-summary-date-picker"><button ref={summaryDateButtonRef} type="button" aria-haspopup="grid" aria-expanded={summaryCalendarOpen} onClick={()=>setSummaryCalendarOpen(value=>!value)}>{ui.summaryFromDate}: <b>{new Date(`${summaryDate||firstSummaryDate}T12:00:00`).toLocaleDateString("ru-RU")}</b> ▾</button>{summaryCalendarOpen&&<SummaryCalendar month={summaryMonth} onMonth={setSummaryMonth} selected={summaryDate||firstSummaryDate} minimum={firstSummaryDate} maximum={localDateKey(new Date())} generated={new Set(conversationSummaries.map(item=>item.fromDate))} onSelect={date=>{setSummaryDate(date);setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}} onClose={()=>{setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}}/>}</span>
+              <button type="button" className="phase2-primary communications-summary-generate" disabled={summaryGenerating||summaryLoading||!summaryDate} onClick={()=>void generateConversationSummary()}>{summaryGenerating?ui.generatingSummary:summaryProgress?.fromDate===summaryDate?ui.continueSummary:activeSummary?ui.refreshSummary:ui.generateSummary}</button>
+            </div>
+            {summaryLoading?<State text={ui.loadingSummary}/>:summaryProgress?.fromDate===summaryDate?<div className="communications-summary-stale is-progress" role="status">{ui.summaryProgress} {summaryProgress.processedChunks||0}/{summaryProgress.totalChunks||0}. {ui.summaryContinueHint}</div>:activeSummary?.isCurrent&&activeSummary.summary?<article className="communications-summary-result"><SummaryText text={activeSummary.summary}/><footer>{ui.summaryGenerated}: {new Date(activeSummary.generatedAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}{activeSummary.messageCount?` · ${ui.summaryMessages}: ${activeSummary.messageCount}`:""}</footer></article>:activeSummary&&!activeSummary.isCurrent?<div className="communications-summary-stale" role="status">{ui.summaryStale}</div>:<State text={ui.summaryEmpty}/>}</section>
           </div>
           </>}
         </aside>
@@ -1604,12 +1660,18 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   );
 }
 function State({ text }: { text: string }) {
-  return <div className="communications-state">{text}</div>;
+  return <div className="communications-state" role="status" aria-live="polite">{text}</div>;
 }
 function InboxSkeleton({kind,rows}:{kind:"conversations"|"messages";rows:number}){return <div className={`communications-skeleton is-${kind}`} aria-label={kind==="conversations"?ui.loading:ui.loadingMessages}>{Array.from({length:rows},(_,index)=><span key={index}/>)}</div>}
 function ContextTabs({active,onChange}:{active:ContextTab;onChange:(tab:ContextTab)=>void}){
-  const tabs:{key:ContextTab;label:string}[]=[{key:"CLIENT",label:ui.contextClient},{key:"ORDERS",label:ui.contextOrders},{key:"NOTES",label:ui.contextNotes},{key:"FILES",label:ui.contextFiles}];
-  return <div className="communications-context-tabs" role="tablist" aria-label={ui.clientCard}>{tabs.map(tab=><button id={`communications-context-tab-${tab.key.toLowerCase()}`} type="button" role="tab" key={tab.key} aria-selected={active===tab.key} onClick={()=>onChange(tab.key)}>{tab.label}</button>)}</div>
+  const tabs:{key:ContextTab;label:string}[]=[{key:"CLIENT",label:ui.contextClient},{key:"ORDERS",label:ui.contextOrders},{key:"NOTES",label:ui.contextNotes},{key:"FILES",label:ui.contextFiles},{key:"SUMMARY",label:ui.contextSummary}];
+  return <div className="communications-context-tabs" role="tablist" aria-label={ui.clientCard}>{tabs.map((tab,index)=><button id={`communications-context-tab-${tab.key.toLowerCase()}`} type="button" role="tab" key={tab.key} aria-controls="communications-context-tabpanel" aria-selected={active===tab.key} tabIndex={active===tab.key?0:-1} onClick={()=>onChange(tab.key)} onKeyDown={event=>{let next=index;if(event.key==="ArrowRight")next=(index+1)%tabs.length;else if(event.key==="ArrowLeft")next=(index-1+tabs.length)%tabs.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=tabs.length-1;else return;event.preventDefault();onChange(tabs[next]!.key);const buttons=event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');queueMicrotask(()=>buttons?.[next]?.focus())}}>{tab.label}</button>)}</div>
+}
+function SummaryText({text}:{text:string}){return <div className="communications-summary-text">{text.split("\n").map((line,index)=>line.startsWith("### ")?<h4 key={index}>{line.slice(4)}</h4>:line.trim()?<p key={index}>{line}</p>:null)}</div>}
+function SummaryCalendar({month,onMonth,selected,minimum,maximum,generated,onSelect,onClose}:{month:Date;onMonth:(value:Date)=>void;selected:string;minimum:string;maximum:string;generated:Set<string>;onSelect:(value:string)=>void;onClose:()=>void}){
+  const year=month.getFullYear(),monthIndex=month.getMonth(),first=new Date(year,monthIndex,1),offset=(first.getDay()+6)%7,days=new Date(year,monthIndex+1,0).getDate(),cellCount=Math.ceil((offset+days)/7)*7,cells=Array.from({length:cellCount},(_,index)=>index<offset||index>=offset+days?null:index-offset+1),weeks=Array.from({length:cellCount/7},(_,index)=>cells.slice(index*7,index*7+7));
+  const moveFocus=(event:KeyboardEvent<HTMLButtonElement>)=>{const grid=event.currentTarget.closest('[role="grid"]'),buttons=[...(grid?.querySelectorAll<HTMLButtonElement>('[role="gridcell"]:not(:disabled)')||[])],index=buttons.indexOf(event.currentTarget);let next=index;if(event.key==="ArrowRight")next=index+1;else if(event.key==="ArrowLeft")next=index-1;else if(event.key==="ArrowDown")next=index+7;else if(event.key==="ArrowUp")next=index-7;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;event.preventDefault();buttons[Math.max(0,Math.min(buttons.length-1,next))]?.focus()};
+  return <div className="communications-summary-calendar" onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();onClose()}}}><header><button type="button" aria-label={ui.previousMonth} onClick={()=>onMonth(new Date(year,monthIndex-1,1))}>‹</button><b>{month.toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</b><button type="button" aria-label={ui.nextMonth} onClick={()=>onMonth(new Date(year,monthIndex+1,1))}>›</button></header><div className="communications-summary-weekdays" aria-hidden="true">{["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(day=><span key={day}>{day}</span>)}</div><div className="communications-summary-days" role="grid" aria-label={ui.summaryCalendarLabel}>{weeks.map((week,weekIndex)=><div role="row" key={`week-${weekIndex}`}>{week.map((day,index)=>{if(day===null)return <span key={`blank-${weekIndex}-${index}`} role="gridcell"/>;const value=`${year}-${String(monthIndex+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`,disabled=value<minimum||value>maximum;return <button type="button" role="gridcell" key={value} disabled={disabled} tabIndex={value===selected?0:-1} className={`communications-summary-day ${value===selected?"is-selected ":""}${generated.has(value)?"is-generated":""}`.trim()} aria-selected={value===selected} aria-label={new Date(`${value}T12:00:00`).toLocaleDateString("ru-RU",{dateStyle:"long"})} onKeyDown={moveFocus} onClick={()=>onSelect(value)}>{day}</button>})}</div>)}</div><small>{ui.summaryCalendarHint}</small></div>
 }
 function ReplyMedia({url,type,label,onOpen,onLoad}:{url:string;type?:"image"|"video";label:string;onOpen:(event:MouseEvent<HTMLButtonElement>,type:"image"|"video")=>void;onLoad:()=>void}){
   const[video,setVideo]=useState(type==="video");

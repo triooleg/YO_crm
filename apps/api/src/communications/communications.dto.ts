@@ -14,6 +14,7 @@ import {
   Length,
   Max,
   MaxLength,
+  Matches,
   Min,
   ValidateIf,
   ValidateNested,
@@ -150,6 +151,12 @@ export class AiRequestDto {
   @IsOptional() @IsString() clientId?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(80, { each: true }) messageIds?: string[];
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
+}
+export class ConversationSummaryQueryDto {
+  @IsEnum(ContactChannel) channel!: ContactChannel;
+}
+export class GenerateConversationSummaryDto extends ConversationSummaryQueryDto {
+  @IsString() @Matches(/^\d{4}-\d{2}-\d{2}$/) fromDate!: string;
 }
 export class AiSettingsDto {
   @IsOptional() @IsBoolean() enabled?: boolean;

@@ -2,21 +2,24 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const [shell, css, config, rootPackage, compose, changelog, releaseWorkflow, i18n] = await Promise.all([
+const [shell, css, config, rootPackage, compose, portainerCompose, changelog, releaseWorkflow, i18n] = await Promise.all([
   readFile(new URL("../components/crm-shell.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/crm-shell.css", import.meta.url), "utf8"),
   readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../package.json", import.meta.url), "utf8"),
   readFile(new URL("../../../docker-compose.yml", import.meta.url), "utf8"),
+  readFile(new URL("../../../docker-compose.portainer.yml", import.meta.url), "utf8"),
   readFile(new URL("../../../CHANGELOG.md", import.meta.url), "utf8"),
   readFile(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8"),
   readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
 ]);
 
-test("текущая версия CRM всегда видна внизу интерфейса", () => {
+test("текущая версия CRM находится под названием в верхней панели", () => {
   assert.match(shell, /className="crm-version"/);
   assert.match(shell, /navigationUi\.version/);
-  assert.match(css, /\.crm-version\{[^}]*position:fixed[^}]*bottom:8px/);
+  assert.match(shell, /crm-topbar-brand-copy[\s\S]*Yoleotard CRM[\s\S]*className="crm-version"/);
+  assert.doesNotMatch(css, /\.crm-version\{[^}]*position:fixed/);
+  assert.match(css, /\.crm-topbar-brand-copy/);
   assert.match(config, /NEXT_PUBLIC_CRM_VERSION/);
 });
 
@@ -45,8 +48,9 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.6");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.7");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.7\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.7\}"/);
   assert.match(compose, /CRM_COMMIT:/);
 });

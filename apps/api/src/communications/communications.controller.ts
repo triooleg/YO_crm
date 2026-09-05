@@ -5,7 +5,7 @@ import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,DeleteMessageDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageReactionDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UpdateMessageDraftDto,UploadCommunicationAttachmentDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,ConversationSummaryQueryDto,DeleteMessageDto,GenerateConversationSummaryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageReactionDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UpdateMessageDraftDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
@@ -85,4 +85,10 @@ export class ChatwootWebhookController{constructor(private c:CommunicationsServi
 @Post("webhook")@HttpCode(200)receive(@Headers("x-chatwoot-signature")signature:string|undefined,@Query("token")token:string|undefined,@Req()request:Request&{rawBody?:Buffer},@Body()body:unknown){return this.c.receiveChatwootWebhook(request.rawBody??Buffer.from(JSON.stringify(body)),signature,token,body)}}
 
 @Controller("ai-assistant")@UseGuards(SessionGuard,RolesGuard)
-export class AiAssistantController{constructor(private a:AiAssistantService){}@Get("settings")@Roles("OWNER","ADMIN")settings(){return this.a.settings()}@Patch("settings")@Roles("OWNER","ADMIN")save(@Body()d:AiSettingsDto,@Req()r:Request&{user:User}){return this.a.save(d,r.user)}@Post("generate")@Roles("OWNER","ADMIN","MANAGER")generate(@Body()d:AiRequestDto,@Req()r:Request&{user:User}){return this.a.generateLimited(d,r.user)}@Post("messages/:id/translate")@Roles("OWNER","ADMIN","MANAGER")translateMessage(@Param("id")id:string,@Req()r:Request&{user:User}){return this.a.translateMessage(id,r.user)}}
+export class AiAssistantController{constructor(private a:AiAssistantService){}
+@Get("settings")@Roles("OWNER","ADMIN")settings(){return this.a.settings()}
+@Patch("settings")@Roles("OWNER","ADMIN")save(@Body()d:AiSettingsDto,@Req()r:Request&{user:User}){return this.a.save(d,r.user)}
+@Post("generate")@Roles("OWNER","ADMIN","MANAGER")generate(@Body()d:AiRequestDto,@Req()r:Request&{user:User}){return this.a.generateLimited(d,r.user)}
+@Get("clients/:clientId/summaries")@Roles("OWNER","ADMIN","MANAGER")summaries(@Param("clientId")clientId:string,@Query()d:ConversationSummaryQueryDto){return this.a.listConversationSummaries(clientId,d.channel)}
+@Post("clients/:clientId/summaries")@Roles("OWNER","ADMIN","MANAGER")generateSummary(@Param("clientId")clientId:string,@Body()d:GenerateConversationSummaryDto,@Req()r:Request&{user:User}){return this.a.generateConversationSummaryLimited(clientId,d,r.user)}
+@Post("messages/:id/translate")@Roles("OWNER","ADMIN","MANAGER")translateMessage(@Param("id")id:string,@Req()r:Request&{user:User}){return this.a.translateMessage(id,r.user)}}
