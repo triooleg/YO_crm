@@ -16,7 +16,7 @@ const [shell, css, config, rootPackage, compose, changelog, releaseWorkflow, i18
 test("текущая версия CRM всегда видна внизу интерфейса", () => {
   assert.match(shell, /className="crm-version"/);
   assert.match(shell, /navigationUi\.version/);
-  assert.match(css, /\.crm-version\{[^}]*margin-top:auto/);
+  assert.match(css, /\.crm-version\{[^}]*position:fixed[^}]*bottom:8px/);
   assert.match(config, /NEXT_PUBLIC_CRM_VERSION/);
 });
 

@@ -1,15 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
+import { presentClientContact } from "../communications/inbound-routing";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto } from "./clients.dto";
 
 @Injectable()
 export class ClientsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(search?: string) {
+  async list(search?: string) {
     const query = search?.trim();
-    return this.prisma.client.findMany({
+    const clients = await this.prisma.client.findMany({
       where: {
         archivedAt: null,
         ...(query ? {
@@ -25,6 +26,7 @@ export class ClientsService {
       include: { _count: { select: { athletes: true, orders: true } } },
       take: 100
     });
+    return clients.map(presentClientContact);
   }
 
   async detail(id: string) {
@@ -48,7 +50,7 @@ export class ClientsService {
       }
     });
     if (!client) throw new NotFoundException("Клиент не найден");
-    return client;
+    return presentClientContact(client);
   }
 
   create(dto: CreateClientDto, actor: User) {

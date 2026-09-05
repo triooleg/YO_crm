@@ -6,3 +6,5 @@
 @media(max-width:720px){.crm-nav{flex-direction:row;align-items:stretch;gap:4px}.crm-nav nav{flex:1;min-width:max-content}.crm-version{display:grid;place-items:center;flex:0 0 48px;margin:0;padding:0;font-size:8px;white-space:normal}.crm-logout{flex:0 0 44px;width:44px;height:62px;margin:0}}
 @media(max-width:720px){.crm-nav{box-sizing:border-box}}
 @media(max-width:720px){.crm-release-overlay{padding:10px}.crm-release-dialog{max-height:calc(100vh - 20px)}.crm-release-dialog>header{padding:17px}.crm-release-list{max-height:calc(100vh - 115px);padding:13px 17px 18px}.crm-release-heading{align-items:flex-start;flex-wrap:wrap}.crm-release-heading span{margin-left:0}}
+.crm-version{position:fixed;z-index:20;left:10px;bottom:8px;width:auto;margin:0;padding:4px 7px;border-radius:6px;background:#ffffffd9}
+@media(max-width:720px){.crm-version{left:6px;bottom:5px;width:auto;height:auto;padding:3px 5px}}

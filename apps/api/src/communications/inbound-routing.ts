@@ -22,6 +22,11 @@ export function customerEmail(value: unknown, channel: string) {
   return email;
 }
 
+export function presentClientContact<T extends { email?: string | null; facebook?: string | null; source?: string | null }>(client: T): T {
+  const isFacebook = Boolean(client.facebook) || client.source === "FACEBOOK";
+  return isFacebook && isSyntheticFacebookEmail(client.email) ? { ...client, email: null } : client;
+}
+
 export function shouldRefreshInboundDisplayName(current: string, incoming: string, provider: string, channel: string) {
   const next = incoming.trim();
   if (!next || next === current.trim()) return false;

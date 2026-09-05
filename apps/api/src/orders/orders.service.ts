@@ -5,6 +5,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
+import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
@@ -49,7 +50,7 @@ export class OrdersService {
 
   async list(search?: string) {
     const query = search?.trim();
-    return this.prisma.order.findMany({
+    const orders = await this.prisma.order.findMany({
       where: { archivedAt: null, ...(query ? { OR: [
         { number: { contains: query, mode: "insensitive" as const } },
         { client: { displayName: { contains: query, mode: "insensitive" as const } } },
@@ -71,6 +72,10 @@ export class OrdersService {
         payments: { select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
     });
+    return orders.map((order) => ({
+      ...order,
+      client: presentClientContact(order.client),
+    }));
   }
 
   async productionList() {

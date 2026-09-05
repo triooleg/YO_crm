@@ -16,6 +16,11 @@ test("client detail exposes only active next-action tasks",()=>{
   assert.match(service,/orderBy:\s*\[\{ dueAt: "asc" \}, \{ createdAt: "desc" \}\]/);
   assert.match(service,/take: 5/);
 });
+
+test("списки и карточка клиента скрывают технический Facebook SID из e-mail", () => {
+  assert.match(service, /clients\.map\(presentClientContact\)/);
+  assert.match(service, /return presentClientContact\(client\)/);
+});
 const dto = await readFile(new URL("../src/clients/clients.dto.ts", import.meta.url), "utf8");
 const require = createRequire(import.meta.url);
 const compiledDto = ts.transpileModule(dto, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true } }).outputText;

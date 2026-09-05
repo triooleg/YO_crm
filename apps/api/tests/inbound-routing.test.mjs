@@ -44,3 +44,13 @@ test("Facebook SID aliases are never treated as customer e-mail",()=>{
   assert.equal(customerEmail("real.customer@example.com","FACEBOOK"),"real.customer@example.com");
   assert.equal(customerEmail("28487285184292491@facebook.com","EMAIL"),"28487285184292491@facebook.com");
 });
+
+test("client presentation hides only a synthetic Facebook e-mail and preserves the response",()=>{
+  const {presentClientContact}=load();
+  const technical={id:"client-1",displayName:"Yolanda Yao",source:"FACEBOOK",facebook:"28487285184292491",email:"28487285184292491@facebook.com",country:"Ukraine"};
+  assert.deepEqual(JSON.parse(JSON.stringify(presentClientContact(technical))),{...technical,email:null});
+  const real={...technical,email:"Real.Customer@Example.com"};
+  assert.deepEqual(JSON.parse(JSON.stringify(presentClientContact(real))),real);
+  const emailChannel={...technical,source:"EMAIL",facebook:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(presentClientContact(emailChannel))),emailChannel);
+});
