@@ -68,7 +68,7 @@ test("message storage preserves replayable source and normalized attachments", (
 
 test("webhook commits an outbox job and never calls a provider", () => {
   assert.match(communications, /tx\.aiJob\.create/);
-  assert.doesNotMatch(communications.slice(communications.indexOf("private async persistInbound"), communications.indexOf("async markRead")), /requestOpenAi|fetch\(/);
+  assert.doesNotMatch(communications.slice(communications.indexOf("private async persistInbound"), communications.indexOf("async deleteMessage")), /requestOpenAi|fetch\(/);
   assert.match(worker, /FOR UPDATE SKIP LOCKED/);
 });
 

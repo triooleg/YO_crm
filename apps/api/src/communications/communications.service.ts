@@ -24,6 +24,7 @@ import {
   AiSettingsDto,
   CommunicationsListQueryDto,
   ChatwootIntegrationDto,
+  DeleteMessageDto,
   EmailIntegrationDto,
   MarkConversationsReadDto,
   MessageReactionDto,
@@ -59,6 +60,7 @@ import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSent
 import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
+import { chatwootDeleteTarget, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
 const AI_RATE_LIMIT_PER_HOUR = 20,
   AI_CONCURRENCY_LIMIT = 2,
   AI_LEASE_MS = 30_000;
@@ -183,6 +185,14 @@ export class CommunicationsService {
       skip: query.offset ?? 0,
       take: limit,
     }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>this.p.client.count({where:{...baseWhere,conversations:{some:{channel,archivedAt:null,...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {})}}}})))]);
+    const hiddenPreviewConversations = clients.flatMap(client => client.conversations.filter(conversation => {
+      const preview = conversation.messages[0];
+      return Boolean(preview && (isSoftDeletedMessage(preview.metadata) || isDeduplicatedDraft(preview.metadata)));
+    }));
+    const fallbackPreviewByConversation = new Map(await Promise.all(hiddenPreviewConversations.map(async conversation => {
+      const visible = await this.latestVisibleMessages({ conversationId: conversation.id });
+      return [conversation.id, visible.at(-1)] as const;
+    })));
     const clientIds = clients.map(client => client.id);
     const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
     const [orderCounts, activeOrders, payments, chatwootIdentityMessages] = clientIds.length ? await Promise.all([
@@ -217,6 +227,7 @@ export class CommunicationsService {
       },
       conversations: client.conversations.map(conversation => ({
         ...conversation,
+        messages: conversation.messages.filter(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)).slice(0, 1).concat(conversation.messages.some(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)) ? [] : fallbackPreviewByConversation.get(conversation.id) ? [fallbackPreviewByConversation.get(conversation.id)!] : []),
         connectedAccountLabel: metaConnectedAccountLabel(conversation.channel, metaSettings),
         connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, {
           ...metaSettings,
@@ -1527,6 +1538,72 @@ export class CommunicationsService {
       return true;
     });
   }
+  async deleteMessage(messageId: string, d: DeleteMessageDto, u: User) {
+    const selected = await this.p.message.findFirst({
+      where: { id: messageId, conversation: { archivedAt: null, client: { archivedAt: null } } },
+      include: { conversation: { select: { id: true, clientId: true, channel: true } } },
+    });
+    if (!selected) throw new NotFoundException("Сообщение не найдено");
+    if (selected.direction !== MessageDirection.OUTBOUND)
+      throw new BadRequestException("Можно удалить только исходящее сообщение");
+    const previousDeletion = selected.metadata && typeof selected.metadata === "object" && !Array.isArray(selected.metadata)
+      ? selected.metadata.deletion
+      : undefined;
+    if (isSoftDeletedMessage(selected.metadata) && previousDeletion && typeof previousDeletion === "object" && !Array.isArray(previousDeletion) && (d.mode === "CRM" || previousDeletion.mode === "CLIENT"))
+      return { id: selected.id, deleted: true, mode: d.mode, deletedAt: previousDeletion.deletedAt };
+
+    let providerDeletedAt: Date | undefined;
+    if (d.mode === "CLIENT") {
+      if (selected.conversation.channel !== ContactChannel.CHATWOOT)
+        throw new BadRequestException("Удаление у клиента поддерживается только для сообщений Chatwoot");
+      if (selected.direction !== MessageDirection.OUTBOUND)
+        throw new BadRequestException("У клиента можно удалить только исходящее сообщение Chatwoot");
+      const values = await this.sectionValues("integration.chatwoot");
+      const baseUrl = configuredHttpsOrigin(values.baseUrl), accountId = typeof values.accountId === "string" ? values.accountId.trim() : "", token = this.secretValue(values, "accessTokenEncrypted");
+      if (values.enabled !== true || !baseUrl || !token || !/^\d+$/.test(accountId))
+        throw new BadRequestException("Канал Chatwoot не подключён для удаления сообщения");
+      const target = chatwootDeleteTarget(selected.externalId, accountId), conversationId = chatwootConversationId([selected]);
+      if (!target || !conversationId)
+        throw new ConflictException("Сообщение не содержит подтверждённой связи с Chatwoot");
+      const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(target.accountId)}/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(target.messageId)}`;
+      const response = await fetch(url, { method: "DELETE", headers: { api_access_token: token, Accept: "application/json" }, signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+      if (!response || (!response.ok && response.status !== 404)) throw new ConflictException("Chatwoot не подтвердил удаление сообщения. Сообщение осталось в CRM");
+      providerDeletedAt = new Date();
+    }
+
+    return this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + selected.conversationId}, 0))`;
+      const current = await tx.message.findFirst({
+        where: { id: messageId, conversationId: selected.conversationId, conversation: { archivedAt: null, client: { archivedAt: null } } },
+        include: { conversation: { select: { clientId: true, channel: true } } },
+      });
+      if (!current) throw new NotFoundException("Сообщение не найдено");
+      if (current.direction !== MessageDirection.OUTBOUND || current.status !== selected.status || current.externalId !== selected.externalId)
+        throw new ConflictException("Сообщение изменилось во время удаления. Обновите диалог");
+      if (d.mode === "CLIENT" && current.conversation.channel !== ContactChannel.CHATWOOT)
+        throw new ConflictException("Сообщение изменилось во время удаления. Обновите диалог");
+      const currentDeletion = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata.deletion : undefined;
+      if (isSoftDeletedMessage(current.metadata) && currentDeletion && typeof currentDeletion === "object" && !Array.isArray(currentDeletion) && (d.mode === "CRM" || currentDeletion.mode === "CLIENT"))
+        return { id: current.id, deleted: true, mode: d.mode, deletedAt: currentDeletion.deletedAt };
+      if ((current.status === MessageStatus.DRAFT || current.status === MessageStatus.FAILED) && await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: current.conversationId, status: { in: ["PENDING", "UNCERTAIN"] } }, select: { id: true } }))
+        throw new ConflictException("Результат отправки ещё проверяется. Сначала завершите проверку доставки, чтобы избежать дубликата");
+
+      const deletedAt = new Date();
+      const metadata = softDeleteMetadata(current.metadata, { mode: d.mode, actorId: u.id, deletedAt, providerDeletedAt }) as Prisma.InputJsonValue;
+      const updated = await tx.message.update({ where: { id: current.id }, data: { metadata } });
+      const latest = await tx.message.findMany({
+        where: { conversationId: current.conversationId, messageType: { not: "reaction" } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 300,
+        select: { createdAt: true, metadata: true },
+      });
+      const lastMessageAt = latest.find(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata))?.createdAt ?? null;
+      await tx.conversation.update({ where: { id: current.conversationId }, data: { lastMessageAt } });
+      await tx.activity.create({ data: { clientId: current.conversation.clientId, type: "MESSAGE_DELETED", summary: d.mode === "CLIENT" ? "Сообщение удалено в CRM и Chatwoot" : "Сообщение скрыто в CRM", metadata: { messageId: current.id, channel: current.conversation.channel, mode: d.mode } } });
+      await tx.auditLog.create({ data: { actorId: u.id, action: "DELETE", entityType: "Message", entityId: current.id, before: { status: current.status, channel: current.conversation.channel }, after: { mode: d.mode, softDeleted: true, providerDeleted: Boolean(providerDeletedAt) } } });
+      return { id: updated.id, deleted: true, mode: d.mode, deletedAt: deletedAt.toISOString() };
+    });
+  }
   async markRead(clientId: string, d: MarkConversationsReadDto, u: User) {
     const client = await this.p.client.findFirst({
       where: { id: clientId, archivedAt: null },
@@ -1573,12 +1650,17 @@ export class CommunicationsService {
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         include: { conversation: { select: { channel: true } }, replyToMessage: { select: { id: true, content: true, metadata: true } } },
       });
-      visible.push(...batch.filter(message => !isDeduplicatedDraft(message.metadata)));
+      visible.push(...batch.filter(message => !isDeduplicatedDraft(message.metadata) && !isSoftDeletedMessage(message.metadata)));
       if (batch.length < 300) break;
       cursor = batch.at(-1)?.id;
       if (!cursor) break;
     }
-    return visible.slice(0, 300).reverse().map(({ conversation, ...message }) => ({ ...message, metadata: messageMetadataForClient(message.id, message.metadata), channel: conversation.channel }));
+    return visible.slice(0,300).reverse().map(({conversation,...message})=>{
+      const replyToMessage=message.replyToMessage&&!isSoftDeletedMessage(message.replyToMessage.metadata)
+        ?{...message.replyToMessage,metadata:messageMetadataForClient(message.replyToMessage.id,message.replyToMessage.metadata)}
+        :null;
+      return{...message,replyToMessage,metadata:messageMetadataForClient(message.id,message.metadata),channel:conversation.channel};
+    });
   }
   async detail(clientId: string, channel?: ContactChannel) {
     const client = await this.p.client.findFirst({
@@ -1647,7 +1729,8 @@ export class CommunicationsService {
       this.sectionValues("integration.chatwoot"),
       this.sectionValues("integration.meta"),
     ]);
-    const attachment = messageAttachments(message?.metadata ?? null)[index];
+    if (!message || isSoftDeletedMessage(message.metadata)) throw new NotFoundException("Вложение не найдено");
+    const attachment = messageAttachments(message.metadata)[index];
     if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) throw new NotFoundException("Вложение не найдено");
     const type = String((attachment as { type?: unknown }).type || "");
     const rawUrl = (attachment as { url?: unknown }).url;
@@ -1825,7 +1908,9 @@ export class CommunicationsService {
     return this.p.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"composer-draft:"+clientId+":"+draftKey},0))`;
       const conversation=await tx.conversation.upsert({where:{clientId_channel:{clientId,channel:d.channel}},create:{clientId,channel:d.channel},update:{}});
-      const existing=await tx.message.findFirst({where:{conversationId:conversation.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,metadata:{path:["composerDraftKey"],equals:draftKey}}});
+      const candidates=await tx.message.findMany({where:{conversationId:conversation.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,metadata:{path:["composerDraftKey"],equals:draftKey}},orderBy:[{createdAt:"desc"},{id:"desc"}]});
+      if(candidates.some(candidate=>isSoftDeletedMessage(candidate.metadata)))throw new ConflictException("Черновик уже удалён");
+      const existing=candidates.find(candidate=>!isSoftDeletedMessage(candidate.metadata))||null;
       const message=existing?await tx.message.update({where:{id:existing.id},data:{content}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT,content,authorId:u.id,metadata:{composerDraftKey:draftKey}}});
       await tx.conversation.update({where:{id:conversation.id},data:{lastMessageAt:message.createdAt}});
       if(!existing)await tx.activity.create({data:{clientId,type:"MESSAGE_DRAFTED",summary:"Автоматически сохранён исходящий черновик",metadata:{messageId:message.id,channel:conversation.channel}}});
@@ -1868,7 +1953,8 @@ export class CommunicationsService {
         }
       }
     }
-    const draft=d.draftMessageId?await this.p.message.findFirst({where:{id:d.draftMessageId,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversation:{clientId,channel,archivedAt:null}},select:{id:true,content:true,metadata:true}}):null;
+    const draftCandidate=d.draftMessageId?await this.p.message.findFirst({where:{id:d.draftMessageId,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversation:{clientId,channel,archivedAt:null}},select:{id:true,content:true,metadata:true}}):null;
+    const draft=draftCandidate&&!isSoftDeletedMessage(draftCandidate.metadata)?draftCandidate:null;
     if(d.draftMessageId&&!draft)throw new NotFoundException("Черновик не найден");
     if(draft&&d.attachment)throw new BadRequestException("Вложение сохранённого черновика отправляется отдельно");
     const content = draft?.content.trim() || d.content?.trim() || "";
@@ -1896,7 +1982,7 @@ export class CommunicationsService {
         if(d.replyToMessageId&&typeof latest.messageId!=="string")throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
         const {subject,parent,references}=emailReplyHeaders(latest,selected.displayName),replyToMessageId=replyMessage?.id;
         return runMetaSendOnce({
-          reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true}});if(!claimedDraft)throw new ConflictException("Черновик уже отправляется или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING"}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING"}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}return{kind:"NEW" as const}}),
+          reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true,metadata:true}});if(!claimedDraft||isSoftDeletedMessage(claimedDraft.metadata))throw new ConflictException("Черновик уже отправляется, удалён или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING"}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING"}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}return{kind:"NEW" as const}}),
           deliver:()=>this.emailTransport.send({to:recipient,subject,text:content,inReplyTo:parent,references,attachment}),
           pendingError:()=>new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
           persistFailure:async error=>{if(error instanceof EmailDeliveryUncertainError){await this.recordEmailUncertain(d.clientRequestId!,clientId,u.id);throw new ConflictException("Gmail не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат")}return this.p.$transaction(async tx=>{const metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,to:recipient,failureType:error instanceof Error?error.constructor.name:"UnknownError"} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}});if(attachment)await tx.communicationAttachment.update({where:{path:attachment.path},data:{messageId:message.id,claimedAt:new Date(),clientRequestId:null}});await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"FAILED",messageId:message.id}});await tx.activity.create({data:{clientId,type:"MESSAGE_SEND_FAILED",summary:"Gmail не принял исходящее письмо",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND_FAILED",entityType:"Message",entityId:message.id,after:{channel,status:MessageStatus.FAILED}}});return{...message,channel}})},
@@ -1926,8 +2012,8 @@ export class CommunicationsService {
               return { kind: "PENDING" as const };
             }
             if (draft) {
-              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
-              if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
+              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true, metadata: true } });
+              if (!currentDraft || isSoftDeletedMessage(currentDraft.metadata)) throw new ConflictException("Черновик уже отправляется, удалён или был отправлен");
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return { kind: "PENDING" as const };
@@ -2037,8 +2123,8 @@ export class CommunicationsService {
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
             if (existing) return existing;
             if (draft) {
-              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true } });
-              if (!currentDraft) throw new ConflictException("Черновик уже отправляется или был отправлен");
+              const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true, metadata: true } });
+              if (!currentDraft || isSoftDeletedMessage(currentDraft.metadata)) throw new ConflictException("Черновик уже отправляется, удалён или был отправлен");
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return pending;
@@ -2432,15 +2518,16 @@ export class AiAssistantService {
       if(!d.clientId||!selectedIds.length)throw new BadRequestException("Выберите входящие сообщения клиента");
       const selected=await this.p.message.findMany({
         where:{id:{in:selectedIds},OR:[{direction:MessageDirection.INBOUND},{status:MessageStatus.DRAFT}],conversation:{clientId:d.clientId,archivedAt:null,client:{archivedAt:null}}},
-        orderBy:{createdAt:"asc"},select:{id:true,content:true,direction:true,status:true,conversationId:true},
+        orderBy:{createdAt:"asc"},select:{id:true,content:true,direction:true,status:true,conversationId:true,metadata:true},
       });
-      if(selected.length!==selectedIds.length)throw new BadRequestException("Выбранные сообщения недоступны для ответа");
-      const conversationIds=[...new Set(selected.map(message=>message.conversationId))];
+      const visibleSelected=selected.filter(message=>!isSoftDeletedMessage(message.metadata));
+      if(visibleSelected.length!==selectedIds.length)throw new BadRequestException("Выбранные сообщения недоступны для ответа");
+      const conversationIds=[...new Set(visibleSelected.map(message=>message.conversationId))];
       if(conversationIds.length!==1)throw new BadRequestException("Выбранные сообщения должны относиться к одному диалогу");
       selectedConversationId=conversationIds[0];
-      if(d.action==="REPLY")selectedMessages=selected.map((message,index)=>`${index+1}. [${message.status===MessageStatus.DRAFT?"Предыдущий черновик":"Входящее"}] ${message.content}`).join("\n").slice(0,12000);
+      if(d.action==="REPLY")selectedMessages=visibleSelected.map((message,index)=>`${index+1}. [${message.status===MessageStatus.DRAFT?"Предыдущий черновик":"Входящее"}] ${message.content}`).join("\n").slice(0,12000);
       else {
-        const inbound=selected.filter(message=>message.direction===MessageDirection.INBOUND);
+        const inbound=visibleSelected.filter(message=>message.direction===MessageDirection.INBOUND);
         if(!inbound.length)throw new BadRequestException("Для определения языка выберите хотя бы одно входящее сообщение");
         languageSample=inbound.map(message=>message.content).join("\n").slice(0,8000);
       }

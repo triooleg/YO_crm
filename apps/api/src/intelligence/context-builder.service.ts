@@ -1,10 +1,29 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { AiRecordStatus, KnowledgeStatus } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
+import { isSoftDeletedMessage } from "../communications/message-deletion";
 
 @Injectable()
 export class ContextBuilderService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async visibleMessages(conversationId: string, messageIds?: string[]) {
+    const visible: Array<{ id: string; direction: string; content: string; language: string | null; messageType: string; createdAt: Date }> = [];
+    let cursor: string | undefined;
+    while (visible.length < 30) {
+      const batch = await this.prisma.message.findMany({
+        where: { conversationId, ...(messageIds?.length ? { id: { in: messageIds } } : {}) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 30,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: { id: true, direction: true, content: true, language: true, messageType: true, createdAt: true, metadata: true },
+      });
+      visible.push(...batch.filter(message => !isSoftDeletedMessage(message.metadata)).map(({ metadata: _metadata, ...message }) => message));
+      if (batch.length < 30 || messageIds?.length) break;
+      cursor = batch.at(-1)?.id;
+    }
+    return visible.slice(0, 30);
+  }
 
   async build(input: { clientId: string; conversationId?: string; messageIds?: string[] }) {
     const client = await this.prisma.client.findFirst({
@@ -26,7 +45,7 @@ export class ContextBuilderService {
       : await this.prisma.conversation.findFirst({ where: { clientId: client.id, archivedAt: null }, orderBy: { lastMessageAt: "desc" }, select: { id: true, channel: true, subject: true } });
     const conversationId = conversation?.id;
     const [messages, memories, facts, agreements, knowledge] = await Promise.all([
-      conversationId ? this.prisma.message.findMany({ where: { conversationId, ...(input.messageIds?.length ? { id: { in: input.messageIds } } : {}) }, orderBy: { createdAt: "desc" }, take: 30, select: { id: true, direction: true, content: true, language: true, messageType: true, createdAt: true } }) : Promise.resolve([]),
+      conversationId ? this.visibleMessages(conversationId, input.messageIds) : Promise.resolve([]),
       this.prisma.customerMemory.findMany({ where: { clientId: client.id, status: { in: [AiRecordStatus.ACTIVE, AiRecordStatus.VERIFIED] } }, select: { id: true, type: true, key: true, valueJson: true, status: true, sourceType: true, sourceId: true } }),
       this.prisma.conversationFact.findMany({ where: { clientId: client.id, ...(conversationId ? { conversationId } : {}), status: { in: [AiRecordStatus.ACTIVE, AiRecordStatus.VERIFIED] } }, take: 30, select: { id: true, type: true, subject: true, valueJson: true, status: true, sourceMessageId: true } }),
       this.prisma.agreement.findMany({ where: { clientId: client.id, ...(conversationId ? { conversationId } : {}), status: AiRecordStatus.VERIFIED, staffConfirmationMessageId: { not: null } }, take: 30, select: { id: true, orderId: true, type: true, subject: true, valueJson: true, status: true, customerMessageId: true, staffConfirmationMessageId: true } }),

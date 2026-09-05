@@ -151,6 +151,52 @@ test("иконки действий появляются при наведени
   assert.match(css,/\.communications-media-attachment:hover \.communications-media-save/);
   assert.match(css,/@media\(hover:none\),\(pointer:coarse\)\{[^}]*\.communications-message-translate/);
 });
+
+test("composer сохраняет штатную вставку текста и превращает изображение из буфера во вложение",()=>{
+  assert.match(component,/function handleComposerPaste\(event:ClipboardEvent<HTMLTextAreaElement>\)/);
+  assert.match(component,/event\.clipboardData\.items/);
+  assert.match(component,/item\.kind==="file"&&item\.type\.startsWith\("image\/"\)/);
+  assert.match(component,/if\(!imageItem\)return/);
+  assert.match(component,/event\.preventDefault\(\)/);
+  assert.match(component,/new File\(\[blob\],clipboardImageName\(blob\.type\),\{type:blob\.type\}\)/);
+  assert.match(component,/onPaste=\{handleComposerPaste\}/);
+  assert.match(component,/function clipboardImageName\(mimeType:string/);
+  assert.match(component,/clipboard-image-/);
+  assert.match(component,/chooseAttachment\(file\)/);
+  const pasteHandler=component.slice(component.indexOf("function handleComposerPaste"),component.indexOf("async function setReaction"));
+  assert.ok(pasteHandler.indexOf("if(!imageItem)return")<pasteHandler.indexOf("event.preventDefault()"));
+});
+
+test("меню исходящего сообщения открывает безопасный диалог удаления",()=>{
+  assert.match(component,/message\.direction==="OUTBOUND"&&<button type="button" role="menuitem"[\s\S]*?onClick=\{event=>\{[\s\S]*?setDeleteTarget\(message\)/);
+  assert.match(component,/deleteTarget&&<div className="phase2-overlay communications-delete-overlay"/);
+  assert.match(component,/role="dialog" aria-modal="true" aria-labelledby="communications-delete-title"/);
+  assert.match(component,/deleteClose\.current\?\.focus\(\)/);
+  assert.match(component,/deleteTrigger\.current=details\?\.querySelector\("summary"\)\|\|event\.currentTarget/);
+  assert.match(component,/setSelectedMessageIds\(current=>current\.filter\(id=>id!==target\.id\)\)/);
+  assert.match(component,/targetWasSelected=selectedMessageIds\.includes\(deleteTarget\.id\)/);
+  assert.match(component,/if\(targetWasSelected\|\|aiReply\?\.messageIds\.includes\(target\.id\)\)\{invalidateAiOperation\(\);setAiReply\(null\);setAiDraftText\(""\)\}/);
+  assert.match(component,/event\.key==="Escape"/);
+  assert.match(component,/event\.key!=="Tab"/);
+  assert.match(component,/className="phase2-primary communications-delete-from-crm"/);
+  assert.match(component,/ui\.deleteMessageFromCrm/);
+  assert.match(component,/deleteTarget\.channel==="CHATWOOT"&&deleteTarget\.status==="SENT"&&Boolean\(deleteTarget\.externalId\)/);
+  assert.match(component,/ui\.deleteMessageForClient/);
+  for(const key of["deleteMessage","deleteMessageTitle","deleteMessageFromCrm","deleteMessageForClient","clearLocalMessage","clearLocalMessageHint","deleteMessageError"])
+    assert.match(locale,new RegExp(`${key}:`));
+});
+
+test("удаление сообщения вызывает API и перечитывает detail и list",()=>{
+  assert.match(component,/async function deleteMessage\(mode:"CRM"\|"CLIENT"\)/);
+  assert.match(component,/`\/communications\/messages\/\$\{encodeURIComponent\(target\.id\)\}\/delete`/);
+  assert.match(component,/method:"POST",body:JSON\.stringify\(\{mode\}\)/);
+  assert.match(component,/fetchClientWindow\(currentClientCount\.current,currentSearch\.current,currentSocialFilters\.current,currentOrderScope\.current,currentConversationScope\.current\)/);
+  assert.match(component,/conversationDetailPath\(operationClientId,currentSocialFilters\.current\.length\?target\.channel:undefined\)/);
+  assert.match(component,/setClients\(sortClients\(page\.items\)\)/);
+  assert.match(component,/setMessages\(detail\.messages\|\|\[\]\)/);
+  assert.match(component,/target\.id===composerDraftId\.current/);
+  assert.match(component,/composerDraftId\.current=undefined;composerDraftKey\.current=undefined/);
+});
 test("ссылка на соцсеть содержит только видимое действие без строки аккаунта",()=>{
   assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><\/a>/);
   assert.doesNotMatch(component,/<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);

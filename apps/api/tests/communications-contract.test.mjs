@@ -160,7 +160,7 @@ test("conversation detail returns the latest messages in chronological order", (
   assert.match(window, /orderBy:\[\{createdAt:"desc"\},\{id:"desc"\}\]/);
   assert.match(window, /while\(visible\.length<300\)/);
   assert.match(window, /cursor:\{id:cursor\},skip:1/);
-  assert.match(window, /batch\.filter\(message=>!isDeduplicatedDraft\(message\.metadata\)\)/);
+  assert.match(window, /batch\.filter\(message=>!isDeduplicatedDraft\(message\.metadata\)&&!isSoftDeletedMessage\(message\.metadata\)\)/);
   assert.match(window, /visible\.slice\(0,300\)\.reverse\(\)/);
   assert.match(x, /this\.latestVisibleMessages\(\{conversation:/);
   assert.match(x, /this\.latestVisibleMessages\(\{conversationId:c\.id\}\)/);
@@ -169,6 +169,8 @@ test("legacy Meta reaction control records stay out of conversation previews and
   const list = service.slice(service.indexOf("asynclist"), service.indexOf("templates()"));
   const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));
   assert.match(list, /messages:\{where:\{messageType:\{not:"reaction"\}\},orderBy:\{createdAt:"desc"\},take:1\}/);
+  assert.match(list, /hiddenPreviewConversations/);
+  assert.match(list, /fallbackPreviewByConversation/);
   assert.match(window, /where:\{AND:\[where,\{messageType:\{not:"reaction"\}\}\]\}/);
 });
 test("AI requires opt in and separate context consent", () => {
@@ -198,7 +200,7 @@ test("AI selected reply is server scoped, Russian first, and translates only aft
   assert.match(service,/id:\{in:selectedIds\}.*OR:\[\{direction:MessageDirection\.INBOUND\},\{status:MessageStatus\.DRAFT\}\].*conversation:\{clientId:d\.clientId/s);
   assert.match(service,/d\.action==="REPLY"\?"Русский"/);
   assert.match(service,/if\(d\.action==="FINALIZE_REPLY"\)/);
-  assert.match(service,/inbound=selected\.filter\(message=>message\.direction===MessageDirection\.INBOUND\)/);
+  assert.match(service,/inbound=visibleSelected\.filter\(message=>message\.direction===MessageDirection\.INBOUND\)/);
   assert.match(service,/JSON\.parse\(detected\)/);
   assert.match(service,/normalizeClientLanguageCode\(parsed\.language\)/);
   assert.match(service,/двухбуквенныйкодISO639-1/);
@@ -264,10 +266,12 @@ test("a saved draft is sent in place without creating a duplicate message",()=>{
   assert.match(dto,/@IsString\(\)@Length\(20,80\)draftMessageId/);
   assert.doesNotMatch(dto,/@IsUUID\("4"\)draftMessageId/);
   assert.match(service,/draftMessageId&&d\.action!=="SEND"/);
-  assert.ok(service.indexOf("messageDeliveryAttempt.findUnique")<service.indexOf("constdraft=d.draftMessageId"),"a completed retry must resolve before the draft status check");
+  assert.ok(service.indexOf("messageDeliveryAttempt.findUnique")<service.indexOf("constdraftCandidate=d.draftMessageId"),"a completed retry must resolve before the draft status check");
   assert.match(service,/result\.id!==d\.draftMessageId&&mergedInto!==result\.id/);
   assert.match(service,/draftMessageId.*status:MessageStatus\.DRAFT.*conversation:\{clientId,channel,archivedAt:null\}/s);
+  assert.match(service,/draftCandidate&&!isSoftDeletedMessage\(draftCandidate\.metadata\)/);
   assert.match(service,/currentDraft.*status:MessageStatus\.DRAFT.*conversationId:conversation\.id/s);
+  assert.match(service,/isSoftDeletedMessage\((?:claimedDraft|currentDraft)\.metadata\)/);
   assert.match(service,/draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT/s);
   assert.match(service,/where:\{id:draft\.id\},data:\{status:MessageStatus\.SENT,sentAt,metadata:/s);
   assert.match(service,/"meta-echo:"\+conversation\.id\+":"\+result\.message_id/);
@@ -294,6 +298,8 @@ test("composer autosave updates one owned draft instead of appending duplicates"
   assert.match(service,/asyncupdateDraft\(clientId:string,draftKey:string,d:UpdateMessageDraftDto,u:User\)/);
   assert.match(service,/pg_advisory_xact_lock/);
   assert.match(service,/composerDraftKey/);
+  assert.match(service,/orderBy:\[\{createdAt:"desc"\},\{id:"desc"\}\]/);
+  assert.match(service,/candidates\.find\(candidate=>!isSoftDeletedMessage\(candidate\.metadata\)\)/);
   assert.match(service,/status:MessageStatus\.DRAFT/);
   assert.match(service,/direction:MessageDirection\.OUTBOUND/);
   assert.match(service,/conversation:\{clientId,archivedAt:null\}/);

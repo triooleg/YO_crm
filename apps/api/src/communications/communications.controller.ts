@@ -5,7 +5,7 @@ import{createHash,createHmac,timingSafeEqual}from"node:crypto";
 import{Roles}from"../auth/roles.decorator";
 import{RolesGuard}from"../auth/roles.guard";
 import{SessionGuard}from"../auth/session.guard";
-import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageReactionDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UpdateMessageDraftDto,UploadCommunicationAttachmentDto}from"./communications.dto";
+import{AiRequestDto,AiSettingsDto,CommunicationsListQueryDto,ConversationQueryDto,DeleteMessageDto,IntegrationSettingsDto,MarkConversationsReadDto,MessageReactionDto,MessageTemplateDto,MetaDataDeletionCompleteDto,MetaIntegrationDto,MetaOauthConnectDto,MetaProfileBackfillDto,SendMessageDto,UpdateMessageDraftDto,UploadCommunicationAttachmentDto}from"./communications.dto";
 import{AiAssistantService,CommunicationsService}from"./communications.service";
 import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
@@ -52,6 +52,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}
 @Get("messages/:messageId/attachments/:index/download")@Roles("OWNER","ADMIN","MANAGER")async downloadAttachment(@Param("messageId")messageId:string,@Param("index")indexRaw:string,@Query("inline")inline:string|undefined,@Res()res:Response){const download=await this.c.downloadMessageAttachment(messageId,Number(indexRaw));res.setHeader("Content-Type",download.contentType);res.setHeader("Content-Disposition",`${inline==="1"?"inline":"attachment"}; filename="${download.filename}"`);res.setHeader("Content-Length",String(download.contentLength));return res.send(download.body)}
 @Post("messages/:messageId/reaction")@Roles("OWNER","ADMIN","MANAGER")react(@Param("messageId")messageId:string,@Body()d:MessageReactionDto,@Req()r:Request&{user:User}){return this.c.reactToMessage(messageId,d,r.user)}
+@Post("messages/:messageId/delete")@Roles("OWNER","ADMIN","MANAGER")deleteMessage(@Param("messageId")messageId:string,@Body()d:DeleteMessageDto,@Req()r:Request&{user:User}){return this.c.deleteMessage(messageId,d,r.user)}
 @Patch(":clientId/read")@Roles("OWNER","ADMIN","MANAGER")markRead(@Param("clientId")id:string,@Body()d:MarkConversationsReadDto,@Req()r:Request&{user:User}){return this.c.markRead(id,d,r.user)}
 @Put(":clientId/drafts/:draftKey")@Roles("OWNER","ADMIN","MANAGER")updateDraft(@Param("clientId")clientId:string,@Param("draftKey")draftKey:string,@Body()d:UpdateMessageDraftDto,@Req()r:Request&{user:User}){return this.c.updateDraft(clientId,draftKey,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}

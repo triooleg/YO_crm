@@ -24,6 +24,13 @@ test("saved branding updates shell and outbound message avatars", () => {
   assert.match(inbox, /communications-business-logo/);
 });
 
+test("custom logos keep their aspect ratio inside every fixed avatar slot", () => {
+  assert.match(styles, /\.crm-custom-logo,.communications-business-logo\{[^}]*object-fit:contain/);
+  assert.match(styles, /\.crm-brand>span:has\(\.crm-custom-logo\)\{[^}]*width:38px[^}]*min-width:38px[^}]*overflow:hidden/);
+  assert.match(styles, /\.crm-topbar-brand>\.crm-custom-logo\{[^}]*flex:0 0 34px[^}]*max-width:34px/);
+  assert.match(styles, /\.communications-business-logo\{[^}]*max-width:100%[^}]*max-height:100%/);
+});
+
 test("an invalid replacement clears the previously selected logo before validation", () => {
   const pick = settings.match(/function pick\(next\?:File\)\{(.+?)\}\n  async function persist/s)?.[1] ?? "";
   const clearFile = pick.indexOf("setFile(undefined)");

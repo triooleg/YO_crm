@@ -1,5 +1,5 @@
 "use client";
-import type { FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
@@ -208,6 +208,10 @@ function readFile(file: File) {
 function formatBytes(size: number) {
   return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} КБ` : `${(size / 1024 / 1024).toFixed(1)} МБ`;
 }
+function clipboardImageName(mimeType:string,now=Date.now()){
+  const extension:Record<string,string>={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif"};
+  return `clipboard-image-${now}.${extension[mimeType]||"png"}`;
+}
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
@@ -251,6 +255,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
     [reactionBusyIds,setReactionBusyIds]=useState<Set<string>>(()=>new Set()),
     [reactionPickerMessageId,setReactionPickerMessageId]=useState<string>(),
+    [deleteTarget,setDeleteTarget]=useState<Message>(),
+    [deleteBusy,setDeleteBusy]=useState(false),
     [search, setSearch] = useState(()=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get("clientName")||""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
@@ -328,7 +334,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     composerTextarea=useRef<HTMLTextAreaElement|null>(null),
     attachmentInput=useRef<HTMLInputElement|null>(null),
     emojiTrigger=useRef<HTMLButtonElement|null>(null),
-    emojiPicker=useRef<HTMLDivElement|null>(null);
+    emojiPicker=useRef<HTMLDivElement|null>(null),
+    deleteTrigger=useRef<HTMLElement|null>(null),
+    deleteDialog=useRef<HTMLElement|null>(null),
+    deleteClose=useRef<HTMLButtonElement|null>(null);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentOrderScope.current=orderScope;
@@ -342,6 +351,20 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     if(event.key!=="Enter"||!(event.ctrlKey||event.metaKey)||event.nativeEvent.isComposing)return;
     if(busy||!client||(!text.trim()&&!attachment)||!sendableChannels.includes(activeChannel as SocialChannel))return;
     event.preventDefault();void save("SEND");
+  }
+  function handleComposerPaste(event:ClipboardEvent<HTMLTextAreaElement>){
+    const imageItem=Array.from(event.clipboardData.items).find(item=>item.kind==="file"&&item.type.startsWith("image/"));
+    if(!imageItem)return;
+    const blob=imageItem.getAsFile();
+    if(!blob)return;
+    event.preventDefault();
+    const file=new File([blob],clipboardImageName(blob.type),{type:blob.type});
+    chooseAttachment(file);
+  }
+  function closeDeleteDialog(){
+    if(deleteBusy)return;
+    setDeleteTarget(undefined);
+    requestAnimationFrame(()=>deleteTrigger.current?.focus());
   }
   async function setReaction(message:Message,emoji?:string){
     if(!reactionEmojisByChannel[message.channel]||message.direction!=="INBOUND"||!message.externalId||reactionBusyIds.has(message.id))return;
@@ -578,7 +601,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     composeEpoch.current++;
     draftSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";setDraftStatus("IDLE");setText("");
     aiOperationSequence.current++;
-    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
+    setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setDeleteTarget(undefined);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setBusy(false);
     const request = { clientId: c.id, version: ++detailVersion.current };
     manualLoading.current = true;
     setClient(c);
@@ -753,6 +776,21 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   }, [preview]);
   useEffect(()=>{if(aiReply){aiDraftEditor.current?.scrollIntoView({block:"nearest"});aiDraftEditor.current?.focus()}},[aiReply?.phase]);
   useEffect(()=>{if(emojiOpen)requestAnimationFrame(()=>emojiPicker.current?.querySelector<HTMLButtonElement>("button")?.focus())},[emojiOpen]);
+  useEffect(()=>{
+    if(!deleteTarget)return;
+    requestAnimationFrame(()=>deleteClose.current?.focus());
+    const handleKey=(event:globalThis.KeyboardEvent)=>{
+      if(event.key==="Escape"){event.preventDefault();closeDeleteDialog();return}
+      if(event.key!=="Tab"||!deleteDialog.current)return;
+      const focusable=Array.from(deleteDialog.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      if(!focusable.length){event.preventDefault();deleteDialog.current.focus();return}
+      const first=focusable[0],last=focusable.at(-1);
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}
+    };
+    window.addEventListener("keydown",handleKey);
+    return()=>window.removeEventListener("keydown",handleKey);
+  },[deleteTarget?.id,deleteBusy]);
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
   useEffect(()=>{
     const content=text.trim();
@@ -942,6 +980,31 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     pendingDraftSends.current.set(message.id,requestId);setBusyDraftIds(current=>new Set(current).add(message.id));setError("");
     try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;if(result.status==="FAILED"){pendingDraftSends.current.delete(message.id);setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item));promoteClient(operationClientId,result)}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{setBusyDraftIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
+  }
+  async function deleteMessage(mode:"CRM"|"CLIENT"){
+    if(!client||!deleteTarget||deleteBusy)return;
+    const target=deleteTarget,operationClientId=client.id,operationEpoch=composeEpoch.current,targetWasSelected=selectedMessageIds.includes(deleteTarget.id);
+    if(mode==="CLIENT"&&!(target.channel==="CHATWOOT"&&target.status==="SENT"&&Boolean(target.externalId)))return;
+    setDeleteBusy(true);setError("");
+    try{
+      await api(`/communications/messages/${encodeURIComponent(target.id)}/delete`,{method:"POST",body:JSON.stringify({mode})});
+      if(target.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setText("")}
+      setSelectedMessageIds(current=>current.filter(id=>id!==target.id));
+      if(targetWasSelected||aiReply?.messageIds.includes(target.id)){invalidateAiOperation();setAiReply(null);setAiDraftText("")}
+      const [page,detail]=await Promise.all([
+        fetchClientWindow(currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current,currentConversationScope.current),
+        api(conversationDetailPath(operationClientId,currentSocialFilters.current.length?target.channel:undefined)),
+      ]) as [ClientPage,{messages?:Message[]}];
+      if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;
+      setClients(sortClients(page.items));setClientsHasMore(page.hasMore);setClientTotal(page.total);setChannelTotals(page.channelCounts);
+      const updatedClient=page.items.find(item=>item.id===operationClientId);if(updatedClient)setClient(updatedClient);
+      setMessages(detail.messages||[]);
+      setDeleteTarget(undefined);requestAnimationFrame(()=>deleteTrigger.current?.focus());
+    }catch(reason){
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((reason as Error).message||ui.deleteMessageError);
+    }finally{
+      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setDeleteBusy(false);
+    }
   }
   async function generateSelectedReply(){
     if(!client||!selectedMessageIds.length)return;
@@ -1195,7 +1258,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                     {message.direction==="OUTBOUND"&&<span className="communications-message-avatar is-business" aria-hidden="true">{businessLogoUrl?<img className="communications-business-logo" src={businessLogoUrl} alt=""/>:"Y"}</span>}
                     <span className="communications-message-actions">
                       <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
-                      <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}</span></details>
+                      <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}{message.direction==="OUTBOUND"&&<button type="button" role="menuitem" className="communications-message-delete" onClick={event=>{const details=event.currentTarget.closest("details");deleteTrigger.current=details?.querySelector("summary")||event.currentTarget;details?.removeAttribute("open");setDeleteTarget(message)}}>{ui.deleteMessage}</button>}</span></details>
                     </span>
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
@@ -1346,6 +1409,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                 aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":socialReplyTarget&&["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)?"social-reply-target":undefined}
                 value={text}
                 onChange={(e) => {invalidateAiOperation();setText(e.target.value);e.currentTarget.style.height="auto";e.currentTarget.style.height=`${Math.min(e.currentTarget.scrollHeight,140)}px`}}
+                onPaste={handleComposerPaste}
                 onKeyDown={handleComposerKeyDown}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 title={ui.sendShortcut}
@@ -1495,6 +1559,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         </div>
       )}
       {noteOpen&&client&&<div className="phase2-overlay"><form className="phase2-modal communications-note-modal" role="dialog" aria-modal="true" aria-labelledby="communications-note-title" onSubmit={saveClientNote}><div><h2 id="communications-note-title">{ui.chatNote}</h2><button type="button" aria-label={ui.close} onClick={()=>setNoteOpen(false)}>×</button></div><label>{ui.note}<textarea autoFocus maxLength={2000} rows={6} value={noteText} onChange={event=>setNoteText(event.target.value)}/></label><footer><button type="button" onClick={()=>setNoteOpen(false)}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy?ui.saving:ui.save}</button></footer></form></div>}
+      {deleteTarget&&<div className="phase2-overlay communications-delete-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)closeDeleteDialog()}}><section ref={deleteDialog} tabIndex={-1} className="phase2-modal communications-delete-modal" role="dialog" aria-modal="true" aria-labelledby="communications-delete-title"><div><h2 id="communications-delete-title">{deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessage:ui.deleteMessageTitle}</h2><button ref={deleteClose} type="button" aria-label={ui.close} disabled={deleteBusy} onClick={closeDeleteDialog}>×</button></div><p>{deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessageHint:ui.deleteMessageHint}</p><footer><button type="button" disabled={deleteBusy} onClick={closeDeleteDialog}>{ui.cancel}</button><button type="button" className="phase2-primary communications-delete-from-crm" disabled={deleteBusy} onClick={()=>void deleteMessage("CRM")}>{deleteBusy?ui.deleting:deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessage:ui.deleteMessageFromCrm}</button>{deleteTarget.channel==="CHATWOOT"&&deleteTarget.status==="SENT"&&Boolean(deleteTarget.externalId)&&<button type="button" className="phase2-primary communications-delete-for-client" disabled={deleteBusy} onClick={()=>void deleteMessage("CLIENT")}>{deleteBusy?ui.deleting:ui.deleteMessageForClient}</button>}</footer></section></div>}
       {ordering&&client&&clientDetail&&<OrderPanel client={clientDetail} request={api} initialAthleteId={selectedAthleteId} onClose={()=>{setOrdering(false);orderTriggerRef.current?.focus()}} onSaved={async()=>{setOrdering(false);await Promise.all([loadClientDetail(client.id),loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current)])}}/>}
       {tasking&&client&&taskBoard&&<TaskDialog
         task={{columnId:taskBoard.columns[0]?.id,type:"CLIENT",markerColor:"#7047eb",labels:[],client:{id:client.id,displayName:client.displayName}}}

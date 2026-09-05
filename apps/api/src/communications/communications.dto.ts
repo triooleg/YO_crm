@@ -71,6 +71,9 @@ export class MessageReactionDto {
   @IsIn(["react", "unreact"] as const) action!: "react" | "unreact";
   @IsOptional() @IsString() @IsIn(["❤️", "😂", "😮", "😢", "😡", "👍"] as const) emoji?: string;
 }
+export class DeleteMessageDto {
+  @IsIn(["CRM", "CLIENT"] as const) mode!: "CRM" | "CLIENT";
+}
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;
   @IsString() @MaxLength(120) mimeType!: string;
