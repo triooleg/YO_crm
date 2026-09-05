@@ -16,6 +16,16 @@ test("Chatwoot normalizes Facebook, Instagram, WhatsApp, e-mail and native inbox
   assert.deepEqual(JSON.parse(JSON.stringify(values)),["FACEBOOK","INSTAGRAM","WHATSAPP","EMAIL","CHATWOOT"]);
 });
 
+test("Chatwoot drops a synthetic Facebook SID e-mail but keeps a real address",()=>{
+  const base={event:"message_created",message_type:"incoming",id:17,content:"Hello",created_at:1700000000,inbox:{channel_type:"Channel::FacebookPage"},conversation:{contact_inbox:{source_id:"28487285184292491"},account_id:2,meta:{sender:{email:"fallback@example.com"}}}};
+  const [synthetic]=normalizeChatwootWebhook({...base,sender:{id:9,name:"Yolanda Yao",email:"28487285184292491@facebook.com"}});
+  const [real]=normalizeChatwootWebhook({...base,id:18,sender:{id:9,name:"Yolanda Yao",email:"yolanda@example.com"}});
+  assert.equal(synthetic.email,"fallback@example.com");
+  assert.equal(real.email,"yolanda@example.com");
+  const [onlySynthetic]=normalizeChatwootWebhook({...base,id:19,sender:{id:9,name:"Yolanda Yao",email:"28487285184292491@facebook.com"},conversation:{...base.conversation,meta:{sender:{email:"28487285184292491@facebook.com"}}}});
+  assert.equal(onlySynthetic.email,undefined);
+});
+
 test("Chatwoot ignores unsupported and duplicate-unsafe events",()=>{
   assert.equal(normalizeChatwootWebhook({event:"message_updated",message_type:"incoming",id:1}).length,0);
 });

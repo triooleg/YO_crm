@@ -12,6 +12,11 @@ const channelFor = (value: unknown): MetaInboundMessage["channel"] | "CHATWOOT" 
   return "CHATWOOT";
 };
 
+const chatwootCustomerEmail = (value: unknown, channel: MetaInboundMessage["channel"] | "CHATWOOT" | "EMAIL") => {
+  const email = String(value || "").trim().toLowerCase();
+  return email && !(channel === "FACEBOOK" && /^\d+@facebook\.com$/i.test(email)) ? email : undefined;
+};
+
 export type ChatwootAttachment = {
   type: string;
   url?: string;
@@ -172,14 +177,15 @@ export function normalizeChatwootWebhook(payload: unknown): ChatwootMessage[] {
   if (!content) return [];
   const channelType = value.inbox?.channel_type || value.conversation?.inbox?.channel_type || value.conversation?.channel;
   const rawDate = Number(value.created_at), receivedAt = Number.isFinite(rawDate) && rawDate > 0 ? new Date(rawDate * 1000) : new Date();
+  const channel = channelFor(channelType);
   return [{
-    channel: channelFor(channelType),
+    channel,
     direction,
     externalSenderId: String(sourceId),
     externalMessageId: `chatwoot:${String(value.account?.id || value.conversation?.account_id || "0")}:${String(messageId)}`,
     content,
     displayName: String(sender.name || fallbackSender.name || "").trim() || undefined,
-    email: String(sender.email || fallbackSender.email || "").trim().toLowerCase() || undefined,
+    email: chatwootCustomerEmail(sender.email, channel) || chatwootCustomerEmail(fallbackSender.email, channel),
     phone: String(sender.phone_number || sender.phone || fallbackSender.phone_number || fallbackSender.phone || "").trim() || undefined,
     accountId: String(value.account?.id || value.conversation?.account_id || "") || undefined,
     inboxId: String(value.inbox?.id || value.conversation?.inbox_id || value.conversation?.inbox?.id || "") || undefined,

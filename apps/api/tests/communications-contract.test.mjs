@@ -613,6 +613,13 @@ test("inbound routing reuses contacts, reopens history and validates configured 
   assert.ok(inbound.indexOf("if(duplicate)returnfalse") < inbound.indexOf("CLIENT_REACTIVATED_BY_INBOUND"));
 });
 
+test("inbox does not expose or persist synthetic Facebook SID e-mail",()=>{
+  assert.match(service,/email:customerEmail\(client\.email,client\.facebook\?"FACEBOOK":client\.source\)\?\?null/);
+  assert.match(service,/constemail=customerEmail\(event\.email,event\.channel\)/);
+  assert.match(service,/email,\.\.\.\(phone\?/);
+  assert.doesNotMatch(service,/email:event\.email/);
+});
+
 test("social comments and engagement replies stay scoped to their provider object",()=>{
   assert.match(service,/metaCommentReplyParams/);
   assert.match(service,/engagement\?\.kind==="comment"/);

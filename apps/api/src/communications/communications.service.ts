@@ -37,7 +37,7 @@ import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMe
 import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
-import { chatwootScopeMatches, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
+import { chatwootScopeMatches, customerEmail, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
@@ -206,6 +206,7 @@ export class CommunicationsService {
     const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
     const items = clients.map(client => ({
       ...client,
+      email: customerEmail(client.email, client.facebook ? "FACEBOOK" : client.source) ?? null,
       orders: activeOrders.filter(order => order.clientId === client.id),
       buyerSummary: {
         purchaseCount: orderCounts.find(count => count.clientId === client.id)?._count._all || 0,
@@ -1093,7 +1094,7 @@ export class CommunicationsService {
     if(!/^\d+$/.test(pageId)||!pageToken||!appSecret)throw new BadRequestException("Сначала подключите страницу Facebook");
     const boundedLimit=Math.max(1,Math.min(10,limit));
     const conversations=await this.p.conversation.findMany({
-      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}},{city:null},{email:null},{language:null},{timezone:null}]}},
+      where:{channel:ContactChannel.FACEBOOK,archivedAt:null,externalId:{startsWith:pageId+":"},...(cursor?{clientId:{gt:cursor}}:{}),client:{archivedAt:null,OR:[{displayName:{startsWith:"Facebook "}},{avatarUrl:null},{avatarUrl:{contains:"fbcdn.net"}},{avatarUrl:{contains:"cdninstagram.com"}},{avatarUrl:{contains:"fbsbx.com"}},{city:null},{email:null},{email:{endsWith:"@facebook.com",mode:"insensitive"}},{language:null},{timezone:null}]}},
       orderBy:[{clientId:"asc"},{id:"asc"}],distinct:["clientId"],take:boundedLimit+1,
       select:{externalId:true,client:{select:{id:true,displayName:true,avatarUrl:true,city:true,email:true,language:true,timezone:true}}},
     });
@@ -1447,7 +1448,8 @@ export class CommunicationsService {
       let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } }) : null;
       let ambiguousMatches = 0;
       const match: Prisma.ClientWhereInput[] = [];
-      if (event.email) match.push({ email: { equals: event.email, mode: "insensitive" } });
+      const email=customerEmail(event.email,event.channel);
+      if (email) match.push({ email: { equals: email, mode: "insensitive" } });
       const phone = event.phone || (channel === ContactChannel.WHATSAPP ? event.externalSenderId : undefined);
       const instagramIdentity=channel===ContactChannel.INSTAGRAM&&event.externalSenderId.startsWith("instagram-username:")?event.externalSenderId.slice("instagram-username:".length):event.externalSenderId;
       if (phone) match.push({ phone: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } }, { whatsapp: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } });
@@ -1475,7 +1477,7 @@ export class CommunicationsService {
       }
       if (!clientId) {
         const fallback = event.channel === "WHATSAPP" ? "WhatsApp" : event.channel === "INSTAGRAM" ? "Instagram" : event.channel === "FACEBOOK" ? "Facebook" : event.channel === "EMAIL" ? "E-mail" : "Chatwoot", displayName = event.displayName?.trim() || fallback + " " + event.externalSenderId.slice(-6);
-        const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email: event.email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: instagramIdentity } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
+        const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: instagramIdentity } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
         clientId = created.id;
         client = { id: created.id, archivedAt: null, lastContactAt: created.lastContactAt,displayName:created.displayName };
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Client", entityId: created.id, after: { source: event.channel, createdFromInbound: true } } });
@@ -1486,7 +1488,7 @@ export class CommunicationsService {
       if (!conversation) {
         conversation = await tx.conversation.upsert({ where: { clientId_channel: { clientId, channel } }, create: { clientId, channel, externalId: externalConversationId }, update: { externalId: externalConversationId, archivedAt: null } });
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, createdFromInbound: true } } });
-        if (linkedByContact) await tx.auditLog.create({ data: { action: "LINK", entityType: "InboundIdentity", entityId: conversation.id, after: { clientId, channel, matchedBy: event.email ? "email" : event.phone ? "phone" : "channelIdentifier" } } });
+        if (linkedByContact) await tx.auditLog.create({ data: { action: "LINK", entityType: "InboundIdentity", entityId: conversation.id, after: { clientId, channel, matchedBy: email ? "email" : event.phone ? "phone" : "channelIdentifier" } } });
         if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CONVERSATION_CREATED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), conversationId: conversation.id }));
       } else if (conversation.archivedAt) {
         conversation = await tx.conversation.update({ where: { id: conversation.id }, data: { archivedAt: null } });

@@ -11,6 +11,17 @@ export function uniqueCandidate<T>(items: readonly T[]): T | null {
   return items.length === 1 ? items[0]! : null;
 }
 
+export function isSyntheticFacebookEmail(value: unknown) {
+  return typeof value === "string" && /^\s*\d+@facebook\.com\s*$/i.test(value);
+}
+
+export function customerEmail(value: unknown, channel: string) {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim().toLowerCase();
+  if (!email || (channel === "FACEBOOK" && isSyntheticFacebookEmail(email))) return undefined;
+  return email;
+}
+
 export function shouldRefreshInboundDisplayName(current: string, incoming: string, provider: string, channel: string) {
   const next = incoming.trim();
   if (!next || next === current.trim()) return false;

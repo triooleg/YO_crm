@@ -697,6 +697,21 @@ test("verifies the exact raw body with X-Hub-Signature-256", () => {
   assert.equal(verifyMetaSignature(raw, "sha256=bad", secret), false);
 });
 
+test("Facebook backfill treats a SID alias as a missing e-mail",()=>{
+  const targets=facebookFallbackProfileTargets([
+    {externalId:"page-1:106",client:{id:"c6",displayName:"Yolanda Yao",avatarUrl:"https://assets.yoleotard.com/manual.jpg",city:"Kyiv",email:"28487285184292491@facebook.com",language:"uk",timezone:"UTC+03:00"}},
+  ],"page-1");
+  assert.equal(targets.length,1);
+  assert.equal(targets[0].needsDetails,true);
+  const before={firstName:"Yolanda",lastName:"Yao",displayName:"Yolanda Yao",avatarUrl:null,country:null,city:null,email:"28487285184292491@facebook.com",phone:null,language:null,timezone:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(metaFacebookProfilePatch(before,{email:"yolanda@example.com"}))),{email:"yolanda@example.com"});
+});
+
+test("Facebook profile normalization rejects SID aliases as e-mail",()=>{
+  assert.equal(normalizeMetaFacebookProfile({email:"28487285184292491@facebook.com"}).email,undefined);
+  assert.equal(normalizeMetaFacebookProfile({email:"real.customer@example.com"}).email,"real.customer@example.com");
+});
+
 test("marks shared posts and story mentions as replyable chat context",()=>{
   const events=normalizeMetaWebhook({object:"instagram",entry:[{id:"ig-business",messaging:[
     {sender:{id:"igsid-1"},timestamp:1000,message:{mid:"share-1",attachments:[{type:"share",payload:{url:"https://cdninstagram.com/post.jpg"}}]}},

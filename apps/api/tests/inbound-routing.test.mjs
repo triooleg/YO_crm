@@ -35,3 +35,12 @@ test("only technical inbound names may be replaced by a better provider name",()
   assert.equal(shouldRefreshInboundDisplayName("Имя исправлено вручную","Nicola.Faccioli","CHATWOOT","CHATWOOT"),false);
   assert.equal(shouldRefreshInboundDisplayName("delicate-pond-188","delicate-pond-188","CHATWOOT","CHATWOOT"),false);
 });
+
+test("Facebook SID aliases are never treated as customer e-mail",()=>{
+  const {customerEmail,isSyntheticFacebookEmail}=load();
+  assert.equal(isSyntheticFacebookEmail("28487285184292491@facebook.com"),true);
+  assert.equal(isSyntheticFacebookEmail(" 28487285184292491@FACEBOOK.COM "),true);
+  assert.equal(customerEmail("28487285184292491@facebook.com","FACEBOOK"),undefined);
+  assert.equal(customerEmail("real.customer@example.com","FACEBOOK"),"real.customer@example.com");
+  assert.equal(customerEmail("28487285184292491@facebook.com","EMAIL"),"28487285184292491@facebook.com");
+});

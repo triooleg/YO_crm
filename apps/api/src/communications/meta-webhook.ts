@@ -346,7 +346,9 @@ export function facebookFallbackProfileTargets(
   for (const conversation of conversations) {
     const needsName = /^Facebook \d+$/.test(conversation.client.displayName);
     const needsAvatar = conversation.client.avatarUrl === null || isMetaManagedAvatarUrl(conversation.client.avatarUrl);
-    const needsDetails = [conversation.client.city, conversation.client.email, conversation.client.language, conversation.client.timezone].some(value => value === null);
+    const needsDetails = [conversation.client.city, conversation.client.language, conversation.client.timezone].some(value => value === null)
+      || conversation.client.email === null
+      || /^\d+@facebook\.com$/i.test(conversation.client.email || "");
     if ((!needsName && !needsAvatar && !needsDetails) || targets.has(conversation.client.id)) continue;
     const externalId = conversation.externalId || "";
     const psid = externalId.startsWith(prefix) ? externalId.slice(prefix.length) : "";
@@ -419,7 +421,7 @@ const cleanProfileText = (value: unknown, max = 160) =>
 
 const cleanProfileEmail = (value: unknown) => {
   const email = cleanProfileText(value, 254).toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !/^\d+@facebook\.com$/i.test(email) ? email : "";
 };
 
 export function normalizeMetaFacebookProfile(profile: MetaFacebookProfile): NormalizedMetaFacebookProfile {
@@ -483,7 +485,8 @@ export function metaFacebookProfilePatch(before: ExistingMetaClientProfile, prof
     (!before.avatarUrl || (isMetaManagedAvatarUrl(before.avatarUrl) && isMetaManagedAvatarUrl(profile.avatarUrl)))
   ) patch.avatarUrl = profile.avatarUrl;
   for (const key of ["city", "email", "language", "timezone"] as const) {
-    if (!before[key] && profile[key]) patch[key] = profile[key];
+    const missing = !before[key] || (key === "email" && /^\d+@facebook\.com$/i.test(before.email || ""));
+    if (missing && profile[key]) patch[key] = profile[key];
   }
   if (profile.instagramUsername && profile.instagramUsername !== before.instagramUsername) patch.instagramUsername = profile.instagramUsername;
   return patch;
