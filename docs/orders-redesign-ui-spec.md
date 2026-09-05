@@ -27,6 +27,7 @@ The supplied 2026-09-04 Orders reference image and the accompanying Russian prod
 - Column visibility/order persists in localStorage. The source channel is part of the client cell and is not a standalone column.
 - Row click does not navigate. Chevron, canonical order number and contextual action expand/collapse the same row. Explicit buttons open the client record, payment flow or measurements.
 - Sales and production statuses remain editable through the audited order-status route. Payment and shipping statuses are visible but read-only; shipping changes remain owned by the shipping workflow.
+- Status controls are disabled per order until the audited mutation and canonical order refresh complete. The expanded finance section explicitly shows the required deposit threshold.
 - The common measurement editor is available only for individual orders. Pair and group items expose their saved snapshots without calling the server route that intentionally rejects multi-item orders.
 - Deadline and status editing continue to use the existing audited API paths.
 - CSV export exports the currently filtered/sorted rows and contains no hidden API request.

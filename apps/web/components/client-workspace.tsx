@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
-import { OrdersWorkspace } from "./orders-workspace";
 import { clientAthleteUi } from "../lib/i18n";
 import { ClientAvatar } from "./client-avatar";
 
@@ -41,7 +40,7 @@ type Order = {
 };
 type Activity = { id: string; summary: string; createdAt: string };
 
-export function ClientWorkspace() {
+export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>void}={}) {
   const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
   const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
   const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
@@ -55,8 +54,7 @@ export function ClientWorkspace() {
     [addingAthlete, setAddingAthlete] = useState(false),
     [measuring, setMeasuring] = useState(false),
     [ordering, setOrdering] = useState(false),
-    [error, setError] = useState(""),
-    [section, setSection] = useState<"clients" | "orders">("clients");
+    [error, setError] = useState("");
   async function request(path: string, init?: RequestInit) {
     const r = await fetch(`/api${path}`, {
       credentials: "include",
@@ -113,8 +111,6 @@ export function ClientWorkspace() {
         }}
       />
     );
-  if (section === "orders")
-    return <OrdersWorkspace onClients={() => setSection("clients")} />;
   return (
     <main className={`phase2-shell ${collapsed ? "is-collapsed" : ""}`}>
       <aside className="phase2-nav">
@@ -137,7 +133,7 @@ export function ClientWorkspace() {
         ].map((x) => (
           <button
             className={x === "Клиенты" ? "active" : ""}
-            onClick={() => x === "Заказы" && setSection("orders")}
+            onClick={() => x === "Заказы" && onNavigate?.("orders")}
             key={x}
           >
             {x}

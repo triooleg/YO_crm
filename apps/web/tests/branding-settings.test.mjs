@@ -26,7 +26,8 @@ test("saved branding updates shell and outbound message avatars", () => {
 
 test("custom logos keep their aspect ratio inside every fixed avatar slot", () => {
   assert.match(styles, /\.crm-custom-logo,.communications-business-logo\{[^}]*object-fit:contain/);
-  assert.match(styles, /\.crm-brand>span:has\(\.crm-custom-logo\)\{[^}]*width:38px[^}]*min-width:38px[^}]*overflow:hidden/);
+  assert.doesNotMatch(shell, /className="crm-brand"/);
+  assert.match(shell, /className="crm-topbar-brand"/);
   assert.match(styles, /\.crm-topbar-brand>\.crm-custom-logo\{[^}]*flex:0 0 34px[^}]*max-width:34px/);
   assert.match(styles, /\.communications-business-logo\{[^}]*max-width:100%[^}]*max-height:100%/);
 });

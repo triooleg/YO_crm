@@ -42,12 +42,15 @@ test("expanded order exposes every numbered measurement for every real or legacy
   assert.match(expanded, /measurement:\s*order\.measurement/);
   assert.match(expanded, /item\.measurement/);
   assert.match(expanded, /values=\{item\.measurement\.values\}/);
+  assert.match(expanded, /aria-controls=\{measurementDetailsId\}/);
+  assert.match(dashboard, /role="region" aria-label=\{ui\.allMeasurements\}/);
   assert.match(dashboard, /orders-expanded-measurements/);
   assert.match(dashboard, /Array\.from\(\{\s*length:\s*17\s*\}/);
   assert.match(dashboard, /values\?\.\[`m\$\{number\}`\]/);
 });
 
 test("expanded order retains payment history, payment action, and invoice documents", () => {
+  assert.match(expanded, /order\.depositRequiredMinor/);
   assert.match(expanded, /onPayment/);
   assert.match(expanded, /order\.payments\.map/);
   for (const field of ["amountMinor", "currency", "method", "receivedAt", "reference", "notes"]) {
@@ -57,6 +60,14 @@ test("expanded order retains payment history, payment action, and invoice docume
   assert.match(expanded, /invoice\.number/, "invoice number must remain visible");
   assert.match(expanded, /\/api\/finance\/invoices\/\$\{invoice\.id\}\/document/);
   assert.match(expanded, /download=1/);
+});
+
+test("status updates are serialized and refresh canonical order activity", () => {
+  assert.match(dashboard, /statusRequests\.current\.has\(order\.id\)/);
+  assert.match(dashboard, /statusRequests\.current\.add\(order\.id\)/);
+  assert.match(dashboard, /await request\(`\/orders\/\$\{order\.id\}\/statuses`/);
+  assert.match(dashboard, /await load\(\)/);
+  assert.match(expanded, /disabled=\{statusPending\}/);
 });
 
 test("expanded order retains delivery, complete contact context, and activity history", () => {

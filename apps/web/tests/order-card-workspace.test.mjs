@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const workspace=readFileSync(new URL("../components/orders-workspace.tsx",import.meta.url),"utf8");
+const client=readFileSync(new URL("../components/client-workspace.tsx",import.meta.url),"utf8");
 const i18n=readFileSync(new URL("../lib/i18n.ts",import.meta.url),"utf8");
 const css=readFileSync(new URL("../app/orders-workspace.css",import.meta.url),"utf8");
 
 test("устаревший список больше не открывает отдельную карточку заказа",()=>{
   assert.match(workspace,/OrderWorkspaceCard/);
   assert.doesNotMatch(workspace,/workspaceId|setWorkspaceId/);
+  assert.doesNotMatch(client,/OrdersWorkspace|setSection\("orders"\)/);
   assert.match(workspace,/orders-card-workspace/);
   assert.match(workspace,/onBack/);
 });
