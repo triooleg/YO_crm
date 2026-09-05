@@ -13,6 +13,7 @@ import { TasksWorkspace } from "./tasks-workspace";
 import { crmSectionHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
 
 const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbox,"✉"],["clients",navigationUi.clients,"●"],["orders",navigationUi.orders,"▣"],["production",navigationUi.production,"⚙"],["finance",navigationUi.finance,"₴"],["shipping",navigationUi.shipping,"➜"],["tasks",navigationUi.tasks,"✓"],["settings",navigationUi.settings,"☰"]] as const;
+const topbarItems = [items[1], items[3], items[2], items[4], items[5], items[7]];
 
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 
@@ -27,10 +28,15 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:authUi.loading}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
-  return <main className="crm-shell nav-collapsed">
+  return <main className={sectionId==="inbox"?"crm-shell inbox-reference-shell":"crm-shell nav-collapsed"}>
+    {sectionId==="inbox"&&<header className="crm-topbar">
+      <div className="crm-topbar-brand"><span aria-hidden="true">Y</span><strong>Yoleotard CRM</strong></div>
+      <nav className="crm-topbar-nav">{topbarItems.map(([id,name,icon])=><button type="button" key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} aria-current={sectionId===id?"page":undefined} title={name} aria-label={name}><i aria-hidden="true">{icon}</i><span>{name}</span></button>)}</nav>
+      <div className="crm-topbar-user"><span className="crm-topbar-avatar" aria-hidden="true">{initials(auth.displayName.trim())}</span><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{auth.role}</small></div></div>
+    </header>}
     <aside className="crm-nav">
       <div className="crm-brand"><span>Y</span></div>
-      <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{icon}</i></button>)}</nav>
+      <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{icon}</i>{sectionId==="inbox"&&<span className="crm-nav-label">{name}</span>}</button>)}</nav>
       <button type="button" className="crm-version" title={`${navigationUi.version} ${process.env.NEXT_PUBLIC_CRM_VERSION} · ${process.env.NEXT_PUBLIC_CRM_COMMIT}`} onClick={()=>setReleaseHistoryOpen(true)}>CRM v{process.env.NEXT_PUBLIC_CRM_VERSION}</button>
       <button className="crm-logout" type="button" title={authUi.logout} aria-label={authUi.logout} onClick={async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}}}>⇥</button>
     </aside>
