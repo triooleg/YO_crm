@@ -689,3 +689,15 @@ test("к сообщению можно прикрепить изображени
   assert.match(locale, /attachmentTooLarge:/);
   assert.match(locale, /unsupportedAttachmentType:/);
 });
+
+test("post, story and comment engagement is visible and replyable in CRM",()=>{
+  assert.match(component,/metadata\?\.engagement/);
+  assert.match(component,/communications-engagement-context/);
+  assert.match(component,/commentOnPost/);
+  assert.match(component,/commentOnStory/);
+  assert.match(component,/reactionOnContent/);
+  assert.match(component,/message\.channel==="FACEBOOK"&&Boolean\(engagement\)/);
+  assert.match(css,/\.communications-engagement-context/);
+  assert.match(locale,/replyingToComment:/);
+  assert.match(locale,/openSocialContent:/);
+});

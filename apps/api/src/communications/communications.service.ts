@@ -34,7 +34,7 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
+import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
@@ -509,6 +509,21 @@ export class CommunicationsService {
     });
     return { event: { ...event, metadata: { ...event.metadata, attachments: result.attachments } } as T, paths: result.paths };
   }
+  private async enrichMetaEngagementContext(event:MetaInboundMessage,token:string|undefined,appSecret?:string){
+    const engagement=event.metadata.engagement;
+    if(!engagement?.mediaId||engagement.mediaUrl||engagement.permalinkUrl||!token)return event;
+    try{
+      const media=event.channel==="INSTAGRAM"
+        ? await this.instagramGraph<{media_url?:string;thumbnail_url?:string;permalink?:string}>(engagement.mediaId,token,{fields:"media_url,thumbnail_url,permalink"},"GET",true)
+        : await this.metaGraph<{full_picture?:string;permalink_url?:string}>(engagement.mediaId,token,{fields:"full_picture,permalink_url"},"GET",appSecret,true);
+      const mediaUrl=event.channel==="INSTAGRAM"?(media as {thumbnail_url?:string;media_url?:string}).thumbnail_url||(media as {media_url?:string}).media_url:(media as {full_picture?:string}).full_picture;
+      const permalinkUrl=event.channel==="INSTAGRAM"?(media as {permalink?:string}).permalink:(media as {permalink_url?:string}).permalink_url;
+      return{...event,metadata:{...event.metadata,engagement:{...engagement,...(typeof mediaUrl==="string"?{mediaUrl}:{}),...(typeof permalinkUrl==="string"?{permalinkUrl}:{})}}};
+    }catch(error){
+      this.logger.warn(JSON.stringify({event:"META_ENGAGEMENT_CONTEXT_UNAVAILABLE",channel:event.channel,objectRef:metaIdentityLogRef(engagement.mediaId),errorType:error instanceof Error?error.constructor.name:"UnknownError"}));
+      return event;
+    }
+  }
   private async metaTokenExchange(params: Record<string,string>) {
     const response = await fetch("https://graph.facebook.com/" + this.metaGraphVersion() + "/oauth/access_token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params), signal: AbortSignal.timeout(15_000) });
     const body = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error?: { message?: string } };
@@ -585,7 +600,7 @@ export class CommunicationsService {
     const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
     const url = new URL("https://www.facebook.com/" + this.metaGraphVersion() + "/dialog/oauth");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.metaOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope",["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement"].join(","));
+    url.searchParams.set("scope",["pages_show_list","pages_manage_metadata","pages_messaging","pages_read_engagement","pages_read_user_content","pages_manage_engagement"].join(","));
     return { url: url.toString() };
   }
   async metaOauthCallback(code: string, signedState: string, u: User, sessionHash: string) {
@@ -645,14 +660,14 @@ export class CommunicationsService {
   async metaOauthConnect(flowId:string,pageId: string, u: User,sessionHash:string) {
     const pending=await this.metaOauthPending(flowId,u,sessionHash),page=pending.pages.find(item=>item.id===pageId);
     if (!page) throw new BadRequestException("Выбранная страница отсутствует в авторизации Facebook");
-    const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging", "pages_read_engagement"];
+    const requiredPagePermissions = ["pages_manage_metadata", "pages_messaging", "pages_read_engagement", "pages_read_user_content", "pages_manage_engagement"];
     const missingPagePermissions = requiredPagePermissions.filter(permission => !pending.permissions.includes(permission));
     if (missingPagePermissions.length) throw new ForbiddenException("Facebook не предоставил обязательные разрешения для входящих сообщений: " + missingPagePermissions.join(", "));
     await this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-config"},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth-session:"+sessionHash},0))`;await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-oauth:"+flowId},0))`;const config=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.config",key:"facebook"}}});if((typeof config?.value === "number" ? config.value : 0)!==pending.configRevision)throw new ForbiddenException("Настройки Facebook изменились; подключитесь повторно");const pointer=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth.pointer",key:sessionHash}}});if(!pointer||pointer.value!==flowId)throw new NotFoundException("Подключение Facebook уже заменено новой попыткой");const row=await tx.appSetting.findUnique({where:{section_key:{section:"integration.meta.oauth",key:flowId}}});if(!row||typeof row.value!=="string")throw new NotFoundException("Подключение Facebook уже обработано");});
     const values=await this.sectionValues("integration.meta"),appSecret=this.secretValue(values,"appSecretEncrypted");
     const section = "integration.meta";
     try {
-      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
+      await this.metaGraph(page.id + "/subscribed_apps", page.access_token, { subscribed_fields: "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions,feed" }, "POST", appSecret, false, "FACEBOOK_SUBSCRIBE");
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(page.id + "/subscribed_apps", page.access_token, { fields: "id,subscribed_fields" }, "GET", appSecret, false, "FACEBOOK_VERIFY");
       const confirmed = confirmMetaPageSubscription({ pageId: page.id, appId: typeof values.appId === "string" ? values.appId : "", page, subscriptions: subscriptions.data || [], verifiedAt: new Date().toISOString() });
       await this.p.$transaction(async tx => {
@@ -696,7 +711,7 @@ export class CommunicationsService {
     const state = signMetaOauthState({ userId: u.id, sessionHash, expiresAt: Date.now() + 10 * 60_000, nonce }, this.metaOauthSecret());
     const url = new URL("https://www.instagram.com/oauth/authorize");
     url.searchParams.set("client_id", appId); url.searchParams.set("redirect_uri", this.instagramOauthRedirect()); url.searchParams.set("state", state); url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "instagram_business_basic,instagram_business_manage_messages");
+    url.searchParams.set("scope", "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments");
     url.searchParams.set("force_reauth", "true"); url.searchParams.set("enable_fb_login", "false");
     return { url: url.toString() };
   }
@@ -726,7 +741,7 @@ export class CommunicationsService {
     // Direct messages and reactions are separate webhook fields. Verify both so
     // the CRM never reports reaction support while only text delivery is active.
     stage = "SUBSCRIBE";
-    const subscribeResult = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages,message_reactions" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+    const subscribeResult = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", token.accessToken, { subscribed_fields: "messages,message_reactions,comments,live_comments" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
     if (subscribeResult.success !== true) throw new BadGatewayException("Instagram не подтвердил запрос подписки на входящие сообщения");
     stage = "VERIFY";
     const subscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", token.accessToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
@@ -823,7 +838,7 @@ export class CommunicationsService {
     try {
       const page = await this.metaGraph<MetaPageIdentity>(pageId, pageToken, { fields: "id,name" }, "GET", appSecret);
       if (page.id !== pageId) throw new BadRequestException("Токен доступа принадлежит другой странице Facebook");
-      const fields = "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions";
+      const fields = "messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions,feed";
       await this.metaGraph(pageId + "/subscribed_apps", pageToken, { subscribed_fields: fields }, "POST", appSecret);
       const subscriptions = await this.metaGraph<{ data: Array<{ id: string; subscribed_fields?: string[] }> }>(pageId + "/subscribed_apps", pageToken, { fields: "id,subscribed_fields" }, "GET", appSecret);
       const verifiedAt = new Date().toISOString();
@@ -832,7 +847,7 @@ export class CommunicationsService {
       let instagramSubscriptionOutcome: "VERIFIED" | "NOT_CONFIGURED" | "UNAVAILABLE" = "NOT_CONFIGURED";
       if (instagramAccountId && instagramAppId && instagramToken) {
         try {
-          const result = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", instagramToken, { subscribed_fields: "messages,message_reactions" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
+          const result = await this.instagramGraph<{ success?: boolean }>(instagramAccountId + "/subscribed_apps", instagramToken, { subscribed_fields: "messages,message_reactions,comments,live_comments" }, "POST", false, "INSTAGRAM_SUBSCRIBE");
           if (result.success !== true) throw new Error("Instagram subscription was not confirmed");
           const instagramSubscriptions = await this.instagramGraph<{ data: Array<{ id?: string; application?: { id?: string }; subscribed_fields?: string[] }> }>(instagramAccountId + "/subscribed_apps", instagramToken, { fields: "id,subscribed_fields" }, "GET", false, "INSTAGRAM_VERIFY");
           instagramSubscription = findInstagramMessagesSubscription(instagramSubscriptions.data || [], instagramAccountId, instagramAppId);
@@ -996,7 +1011,8 @@ export class CommunicationsService {
       });
       const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),whatsappToken=this.secretValue(values,"whatsappAccessTokenEncrypted"),events=scopedEvents;
       const persisted = await Promise.all(events.map(async originalEvent => {
-        const materialized = await this.materializeWhatsappMedia(originalEvent, whatsappToken), event = materialized.event;
+        const enriched=await this.enrichMetaEngagementContext(originalEvent,originalEvent.channel==="INSTAGRAM"?instagramToken:originalEvent.channel==="FACEBOOK"?pageToken:undefined,originalEvent.channel==="FACEBOOK"?appSecret:undefined);
+        const materialized = await this.materializeWhatsappMedia(enriched, whatsappToken), event = materialized.event;
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
         return persistMaterializedWhatsapp(materialized.paths, () => this.persistInbound(event, "META", replayFragment(event,"META")), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
       }));
@@ -1433,10 +1449,11 @@ export class CommunicationsService {
       const match: Prisma.ClientWhereInput[] = [];
       if (event.email) match.push({ email: { equals: event.email, mode: "insensitive" } });
       const phone = event.phone || (channel === ContactChannel.WHATSAPP ? event.externalSenderId : undefined);
+      const instagramIdentity=channel===ContactChannel.INSTAGRAM&&event.externalSenderId.startsWith("instagram-username:")?event.externalSenderId.slice("instagram-username:".length):event.externalSenderId;
       if (phone) match.push({ phone: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } }, { whatsapp: { in: [phone, phone.replace(/^\+/, ""), "+" + phone.replace(/^\+/, "")] } });
       const sameChannelIdentity = provider === "META" && !conversation ? await tx.conversation.findFirst({ where: { channel, OR: [{ externalId: event.externalSenderId }, { externalId: { endsWith: ":" + event.externalSenderId } }] }, select: { id: true } }) : null;
       if (channel === ContactChannel.FACEBOOK && !sameChannelIdentity) match.push({ facebook: event.externalSenderId });
-      if (channel === ContactChannel.INSTAGRAM && !sameChannelIdentity) match.push({ instagram: event.externalSenderId });
+      if (channel === ContactChannel.INSTAGRAM && !sameChannelIdentity) match.push({ instagram: instagramIdentity });
       if (!client && match.length) {
         const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
         const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
@@ -1458,7 +1475,7 @@ export class CommunicationsService {
       }
       if (!clientId) {
         const fallback = event.channel === "WHATSAPP" ? "WhatsApp" : event.channel === "INSTAGRAM" ? "Instagram" : event.channel === "FACEBOOK" ? "Facebook" : event.channel === "EMAIL" ? "E-mail" : "Chatwoot", displayName = event.displayName?.trim() || fallback + " " + event.externalSenderId.slice(-6);
-        const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email: event.email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: event.externalSenderId } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
+        const created = await tx.client.create({ data: { firstName: displayName, displayName, source: channel, preferredChannel: channel, status: "LEAD", firstContactAt: event.receivedAt, lastContactAt: event.receivedAt, email: event.email, ...(phone ? { phone } : {}), ...(channel === ContactChannel.WHATSAPP ? { whatsapp: phone || event.externalSenderId } : channel === ContactChannel.INSTAGRAM ? { instagram: instagramIdentity } : channel === ContactChannel.FACEBOOK ? { facebook: event.externalSenderId } : {}) } });
         clientId = created.id;
         client = { id: created.id, archivedAt: null, lastContactAt: created.lastContactAt,displayName:created.displayName };
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Client", entityId: created.id, after: { source: event.channel, createdFromInbound: true } } });
@@ -1990,19 +2007,25 @@ export class CommunicationsService {
       const channelName = channel === ContactChannel.WHATSAPP ? "WhatsApp" : channel === ContactChannel.INSTAGRAM ? "Instagram" : "Facebook";
       if (values.enabled !== true || !receiverId || !pageToken)
         throw new BadRequestException(`Канал ${channelName} не подключён`);
-      if (!conversation || !recipientId)
+      if (!conversation)
         throw new BadRequestException(`Для этого клиента нет активного диалога ${channelName}`);
-      if (d.replyToMessageId && channel !== ContactChannel.INSTAGRAM && channel !== ContactChannel.WHATSAPP)
-        throw new BadRequestException("Ответ на конкретное сообщение доступен только для Instagram и WhatsApp");
+      if (d.replyToMessageId && ![ContactChannel.FACEBOOK,ContactChannel.INSTAGRAM,ContactChannel.WHATSAPP].includes(channel))
+        throw new BadRequestException("Ответ на конкретное сообщение доступен только для Facebook, Instagram и WhatsApp");
       const metaReplyToMessage = d.replyToMessageId ? await this.p.message.findFirst({
         where: { id: d.replyToMessageId, conversationId: conversation.id, direction: MessageDirection.INBOUND },
-        select: { id: true, externalId: true },
+        select: { id: true, externalId: true, metadata:true },
       }) : undefined;
       if (d.replyToMessageId && !metaReplyToMessage)
         throw new BadRequestException("Выбранное сообщение не относится к этой переписке");
       if (d.replyToMessageId && !metaReplyToMessage?.externalId)
         throw new BadRequestException("У выбранного сообщения нет идентификатора для ответа");
+      const replyMetadata=metaReplyToMessage?.metadata&&typeof metaReplyToMessage.metadata==="object"&&!Array.isArray(metaReplyToMessage.metadata)?metaReplyToMessage.metadata as Prisma.JsonObject:undefined;
+      const engagement=replyMetadata?.engagement&&typeof replyMetadata.engagement==="object"&&!Array.isArray(replyMetadata.engagement)?replyMetadata.engagement as Prisma.JsonObject:undefined;
+      const isPublicCommentReply=engagement?.kind==="comment"&&engagement.replyMode==="PUBLIC_COMMENT";
+      if(!recipientId&&!isPublicCommentReply)throw new BadRequestException(`Для этого клиента нет активного диалога ${channelName}`);
+      if(isPublicCommentReply&&attachment)throw new BadRequestException("Ответ на комментарий поддерживает только текст");
       const metaReplyToMessageId = metaReplyToMessage?.externalId || undefined;
+      const directReplyToMessageId = engagement?.kind==="reaction"||replyMetadata?.messageType==="social_mention" ? undefined : metaReplyToMessageId;
       if(d.aiRunId){const scopedFeedback=await this.p.aiResponseFeedback.findFirst({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется")}
       const messageContent=channel===ContactChannel.WHATSAPP&&attachment?whatsappAttachmentHistoryContent(attachment.type,attachment.name,content):content||attachment?.name||"[Вложение]";
       return runMetaSendOnce({
@@ -2035,29 +2058,36 @@ export class CommunicationsService {
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
         deliver: async () => {
+          const commentReply=isPublicCommentReply&&metaReplyToMessageId
+            ? metaCommentReplyParams(channel===ContactChannel.INSTAGRAM?"INSTAGRAM":"FACEBOOK",metaReplyToMessageId,content)
+            : undefined;
           const params = channel === ContactChannel.WHATSAPP
             ? attachment
-              ? whatsappAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, attachment.name, content, metaReplyToMessageId)
-              : whatsappTextMessageParams(recipientId, content, metaReplyToMessageId)
+              ? whatsappAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, attachment.name, content, directReplyToMessageId)
+              : whatsappTextMessageParams(recipientId, content, directReplyToMessageId)
             : attachment
-              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, metaReplyToMessageId)
-              : metaTextMessageParams(recipientId, content, metaReplyToMessageId);
-          const send = () => channel === ContactChannel.WHATSAPP
+              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl, directReplyToMessageId)
+              : metaTextMessageParams(recipientId, content, directReplyToMessageId);
+          const send = () => commentReply
+            ? channel===ContactChannel.INSTAGRAM
+              ? this.instagramGraph<{id?:string}>(commentReply.path,pageToken,commentReply.params,"POST",true)
+              : this.metaGraph<{id?:string}>(commentReply.path,pageToken,commentReply.params,"POST",appSecret,true)
+            : channel === ContactChannel.WHATSAPP
             ? this.whatsappGraph<{ messages?: Array<{ id?: string }> }>(receiverId + "/messages", pageToken, params)
             : channel === ContactChannel.INSTAGRAM
               ? this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", true)
               : this.metaGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", appSecret, true);
           const result = await deliverMetaMessage(metaChannel, {
             send,
-            takeControl: () => channel === ContactChannel.FACEBOOK
+            takeControl: () => channel === ContactChannel.FACEBOOK&&!commentReply
               ? this.metaGraph("me/take_thread_control", pageToken, metaThreadControlParams(recipientId), "POST", appSecret, true)
               : Promise.resolve(),
             isThreadControlError: error => error instanceof MetaGraphRequestError && error.failure.reason === "THREAD_CONTROL_REQUIRED",
             onTakeControlSuccess: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_TAKEN"),
             onTakeControlFailure: () => this.metaThreadControlHistory(conversation.id, clientId, receiverId, u.id, "THREAD_CONTROL_FAILED"),
           });
-          const providerMessageId = "message_id" in result && typeof result.message_id === "string" ? result.message_id : "";
-          const messageId = channel === ContactChannel.WHATSAPP ? whatsappMessageId(result) : providerMessageId;
+          const providerMessageId = "message_id" in result && typeof result.message_id === "string" ? result.message_id : "id" in result&&typeof result.id==="string"?result.id:"";
+          const messageId = channel === ContactChannel.WHATSAPP ? whatsappMessageId(result as {messages?:Array<{id?:string}>}) : providerMessageId;
           if (!messageId)
             throw channel === ContactChannel.WHATSAPP ? new MetaDeliveryUncertainError() : new BadGatewayException("Meta не вернула идентификатор сообщения");
           return {
@@ -2097,7 +2127,7 @@ export class CommunicationsService {
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
         const sentAt=new Date();
         const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-        const successMetadata={...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+        const successMetadata={...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(isPublicCommentReply?{engagementReply:{mode:"PUBLIC_COMMENT",targetExternalId:metaReplyToMessageId}}:{}),...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + result.message_id}, 0))`;
         const existingEcho = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } } });
         const existingEchoMetadata=existingEcho?.metadata&&typeof existingEcho.metadata==="object"&&!Array.isArray(existingEcho.metadata)?existingEcho.metadata as Prisma.JsonObject:{};

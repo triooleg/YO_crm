@@ -1,5 +1,18 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-05 — социальные публикации и комментарии Meta (готово к проверке релиза 0.1.2)
+
+- Facebook Page webhook расширен подпиской `feed`: комментарии и реакции клиентов на публикации и комментарии нормализуются в существующий диалог по точной области Page ID + PSID. Собственные события страницы не импортируются повторно.
+- Instagram webhook принимает `comments`, `live_comments`, упоминания и существующие Messenger-события историй/отправленных публикаций. Если webhook передал только username, используется изолированная резервная identity без записи технического префикса в профиль клиента.
+- В ленте CRM отображается контекст публикации, истории, reel, live, комментария или реакции. Доступные через Graph API превью и permalink подгружаются best-effort; сбой обогащения не блокирует сохранение сообщения.
+- Ответ на комментарий из CRM публикуется в той же ветке через Facebook `/{comment-id}/comments` или Instagram `/{comment-id}/replies`. Для реакций, упоминаний, историй и отправленных публикаций используется личный канал сообщений в рамках разрешённого Meta окна.
+- Подключение Facebook требует подтверждённый `feed`; Instagram — `comments` и `live_comments` вместе с `messages` и `message_reactions`. Существующие реакции, прочтения, вложения, idempotency и thread-control сохранены.
+- Facebook OAuth дополнен `pages_read_user_content` и `pages_manage_engagement`; Instagram OAuth — `instagram_business_manage_comments`. После deployment оба канала нужно переподключить, чтобы Meta выдала новые permissions существующей CRM-интеграции.
+- Схема Prisma и production-данные не меняются. Версия подготовленной сборки — `0.1.2`; production остаётся на `0.1.1` до отдельного deployment.
+- Failing-first OAuth permissions contract был красным 1/18 до добавления новых scopes. После реализации Meta targeted suite PASS 164/164; финальный `pnpm quality:check` PASS: API 337/337, database 7/7, полный web-suite, все typecheck и production builds. `git diff --check` PASS.
+- Compatibility PASS: изменён только communications Meta ingest/send/UI и release metadata, публичные DTO/маршруты/Prisma schema не менялись; существующие direct messages, read receipts, message reactions, WhatsApp, Chatwoot и e-mail покрыты полным suite. Regression PASS. Business/security PASS: webhook остаётся подписанным и receiver-scoped, IDs публичных комментариев валидируются, текст комментариев и provider URLs не попадают в safe logs, durable message/audit/idempotency сохранены.
+- UI contract покрыт web-тестом карточки engagement, публичного ответа и доступных подписей. Реальный browser visual-review локальной сборки остаётся UNVERIFIED: file URL был отклонён политикой browser tool, а на хосте нет Docker/local PostgreSQL для запуска немокированного CRM-стека. Согласно release gatekeeper это блокирует deployment до browser-smoke на desktop/mobile.
+
 ## 2026-09-05 — Facebook-профили и журнал версий (deployed, доступ к аватарам ожидает Meta)
 
 - Подтверждена регрессия после обновления CRM: основной Meta User Profile API уже запрашивал аватар, но резервный Page Conversations fallback запрашивал только `id,participants` и сохранял имя без `picture`. В production перед исправлением 34 из 36 активных Facebook-клиентов не имели `avatarUrl`; два сохранённых Meta-аватара оставались доступными.

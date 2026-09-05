@@ -21,6 +21,11 @@ export function metaTextMessageParams(recipientId: string, content: string, repl
   };
 }
 
+export function metaCommentReplyParams(channel: "FACEBOOK" | "INSTAGRAM", commentId: string, content: string) {
+  if (!/^[A-Za-z0-9_:-]{1,300}$/.test(commentId)) throw new RangeError("Invalid Meta comment id");
+  return { path: commentId + (channel === "INSTAGRAM" ? "/replies" : "/comments"), params: { message: content } };
+}
+
 export function instagramReactionMessageParams(recipientId: string, externalMessageId: string, action: "react" | "unreact") {
   return {
     recipient: JSON.stringify({ id: recipientId }),

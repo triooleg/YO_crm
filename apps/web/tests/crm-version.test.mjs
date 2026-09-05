@@ -32,6 +32,7 @@ test("клик по версии открывает русский журнал 
 });
 
 test("каждая сборка имеет журнал изменений и GitHub Release", () => {
+  assert.match(changelog, /## \[0\.1\.2\]/);
   assert.match(changelog, /## \[0\.1\.1\]/);
   assert.match(changelog, /## \[0\.1\.0\]/);
   assert.match(changelog, /Facebook/);
@@ -41,7 +42,7 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.1");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.2");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
   assert.match(compose, /CRM_VERSION:/);
   assert.match(compose, /CRM_COMMIT:/);

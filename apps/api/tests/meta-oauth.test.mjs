@@ -45,9 +45,9 @@ test("Meta connection follows the KeyCRM-style OAuth wizard", () => {
 test("Facebook and Instagram use isolated OAuth applications and credentials", () => {
   assert.match(controller, /meta\/instagram\/oauth\/start/);
   assert.match(controller, /meta\/instagram\/oauth\/callback/);
-  assert.match(service, /pages_show_list[\s\S]*pages_manage_metadata[\s\S]*pages_messaging[\s\S]*pages_read_engagement/);
+  assert.match(service, /pages_show_list[\s\S]*pages_manage_metadata[\s\S]*pages_messaging[\s\S]*pages_read_engagement[\s\S]*pages_read_user_content[\s\S]*pages_manage_engagement/);
   assert.match(service, /https:\/\/www\.instagram\.com\/oauth\/authorize/);
-  assert.match(service, /instagram_business_basic,instagram_business_manage_messages/);
+  assert.match(service, /instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments/);
   assert.match(service, /instagramAppId/);
   assert.match(service, /instagramAppSecretEncrypted/);
   assert.match(service, /instagramAccessTokenEncrypted/);
@@ -63,9 +63,9 @@ test("Facebook and Instagram use isolated OAuth applications and credentials", (
   assert.match(service, /enrichMetaProfiles\(instagramEvents,instagramToken,undefined,"instagram"\)/);
 });
 
-test("Instagram connection subscribes to messages and message reactions", () => {
+test("Instagram connection subscribes to messages, reactions and comments", () => {
   const callback = service.slice(service.indexOf("async instagramOauthCallback"), service.indexOf("instagramOauthResultHtml"));
-  assert.match(callback, /subscribed_fields:\s*"messages,message_reactions"/);
+  assert.match(callback, /subscribed_fields:\s*"messages,message_reactions,comments,live_comments"/);
   assert.match(callback, /subscribeResult\.success !== true/);
   assert.doesNotMatch(callback, /subscribed_fields:\s*"messages,messaging_postbacks"/);
   assert.match(callback, /findInstagramMessagesSubscription\(subscriptions\.data \|\| \[\], instagramAccountId, appId\)/);
@@ -118,11 +118,11 @@ test("Instagram subscription verification accepts the Instagram Login account re
   assert.equal(typeof diagnostics.findInstagramMessagesSubscription, "function");
   const accountId = "17841407931852361", appId = "1053522647652200";
   assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
-    { id: accountId, subscribed_fields: ["messages", "message_reactions"] },
-  ], accountId, appId))), { id: accountId, subscribed_fields: ["messages", "message_reactions"] });
+    { id: accountId, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
+  ], accountId, appId))), { id: accountId, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] });
   assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
-    { id: "subscription", application: { id: appId }, subscribed_fields: ["messages", "message_reactions"] },
-  ], accountId, appId))), { id: "subscription", application: { id: appId }, subscribed_fields: ["messages", "message_reactions"] });
+    { id: "subscription", application: { id: appId }, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
+  ], accountId, appId))), { id: "subscription", application: { id: appId }, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] });
   assert.equal(diagnostics.findInstagramMessagesSubscription([
     { id: accountId, subscribed_fields: ["comments"] },
   ], accountId, appId), undefined);
@@ -130,17 +130,20 @@ test("Instagram subscription verification accepts the Instagram Login account re
     { id: accountId, subscribed_fields: ["messages"] },
   ], accountId, appId), undefined);
   assert.equal(diagnostics.findInstagramMessagesSubscription([
-    { id: accountId, application: { id: "other-app" }, subscribed_fields: ["messages", "message_reactions"] },
+    { id: accountId, subscribed_fields: ["messages", "message_reactions"] },
   ], accountId, appId), undefined);
   assert.equal(diagnostics.findInstagramMessagesSubscription([
-    { id: appId, application: { id: "other-app" }, subscribed_fields: ["messages", "message_reactions"] },
+    { id: accountId, application: { id: "other-app" }, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
+  ], accountId, appId), undefined);
+  assert.equal(diagnostics.findInstagramMessagesSubscription([
+    { id: appId, application: { id: "other-app" }, subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
   ], accountId, appId), undefined);
   assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.findInstagramMessagesSubscription([
-    { id: "provider-subscription-id", subscribed_fields: ["messages", "message_reactions"] },
-  ], accountId, appId))), { id: "provider-subscription-id", subscribed_fields: ["messages", "message_reactions"] });
+    { id: "provider-subscription-id", subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
+  ], accountId, appId))), { id: "provider-subscription-id", subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] });
   assert.equal(diagnostics.findInstagramMessagesSubscription([
-    { id: "provider-subscription-1", subscribed_fields: ["messages", "message_reactions"] },
-    { id: "provider-subscription-2", subscribed_fields: ["messages", "message_reactions"] },
+    { id: "provider-subscription-1", subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
+    { id: "provider-subscription-2", subscribed_fields: ["messages", "message_reactions", "comments", "live_comments"] },
   ], accountId, appId), undefined);
 });
 

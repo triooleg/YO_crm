@@ -87,7 +87,7 @@ type Message = {
   channel: string;
   status?: string;
   language?: string;
-  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string }; emailHtml?: string; subject?: string; messageId?: string };
+  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; engagement?: { kind:"comment"|"reaction"|"mention"|"share"; surface:"post"|"story"|"reel"|"live"|"comment"; objectExternalId:string; mediaId?:string; mediaUrl?:string; permalinkUrl?:string; reactionType?:string; action?:string; replyMode:"PUBLIC_COMMENT"|"DIRECT_MESSAGE" }; engagementReply?:{mode?:"PUBLIC_COMMENT";targetExternalId?:string}; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string }; emailHtml?: string; subject?: string; messageId?: string };
   replyToMessage?: { id: string; content: string; metadata?: { attachments?: Attachment[] } } | null;
 };
 type Template = {
@@ -809,9 +809,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         const draftId=action==="SEND"&&content?composerDraftId.current:undefined;
         const result = await api("/communications/" + client.id + "/messages", {
           method: "POST",
-          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) }),
+          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) }),
         });
-        if(isActive())setMessages((current) => {const next=socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result;return draftId&&current.some(message=>message.id===draftId)?current.map(message=>message.id===draftId?next:message):[...current,next]});
+        if(isActive())setMessages((current) => {const next=socialReplyTarget&&["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result;return draftId&&current.some(message=>message.id===draftId)?current.map(message=>message.id===draftId?next:message):[...current,next]});
         return result as Message;
       };
       const sent: Message[] = [];
@@ -1159,11 +1159,12 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
                 const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO","CHATWOOT","GMAIL"].includes(message.metadata?.source || "");
                 const replyContext=message.metadata?.replyTo;
+                const engagement=message.metadata?.engagement;
                 const customerReaction=message.metadata?.reactions?.customer,businessReaction=message.metadata?.reactions?.business;
                 const reactionEmojis=reactionEmojisByChannel[message.channel]||[],canReact=message.direction==="INBOUND"&&Boolean(message.externalId)&&reactionEmojis.length>0;
-                const canSocialReply=message.direction==="INBOUND"&&Boolean(message.externalId)&&["INSTAGRAM","WHATSAPP"].includes(message.channel);
+                const canSocialReply=message.direction==="INBOUND"&&Boolean(message.externalId)&&(["INSTAGRAM","WHATSAPP"].includes(message.channel)||(message.channel==="FACEBOOK"&&Boolean(engagement)));
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
-                const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url);
+                const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url),engagementMediaUrl=safeAttachmentUrl(engagement?.mediaUrl),engagementPermalink=safeAttachmentUrl(engagement?.permalinkUrl);
                 const previousCreatedAt=messages[messageIndex-1]?.createdAt,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(message.createdAt);
                 return (<Fragment key={message.id}>
                   {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(message.createdAt)}</span></div>}
@@ -1176,6 +1177,11 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                     </span>
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
+                    {engagement&&<div className="communications-engagement-context">
+                      <b>{engagement.kind==="comment"?(engagement.surface==="story"?ui.commentOnStory:engagement.surface==="reel"?ui.commentOnReel:engagement.surface==="live"?ui.commentOnLive:engagement.surface==="comment"?ui.replyToComment:ui.commentOnPost):engagement.kind==="mention"?ui.mentionInContent:engagement.kind==="share"?ui.sharedSocialContent:(engagement.action==="remove"?ui.removedReaction:ui.reactionOnContent)}</b>
+                      {engagementMediaUrl&&<ReplyMedia url={engagementMediaUrl} label={ui.socialContentMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:engagementMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>}
+                      {engagementPermalink&&<a href={engagementPermalink} target="_blank" rel="noreferrer">{ui.openSocialContent} ↗</a>}
+                    </div>}
                     {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
                     {message.channel==="EMAIL"&&message.metadata?.emailHtml?<div className="communications-message-content email-rich-content" dangerouslySetInnerHTML={{__html:message.metadata.emailHtml}}/>:<span className="communications-message-content">{message.content}</span>}
                     {attachments.length > 0 && (
@@ -1296,7 +1302,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             </div>
             {replyMode&&selectedMessageIds.length>0&&<div className="communications-reply-task"><label>{ui.replyTask}<textarea value={replyInstruction} onChange={event=>setReplyInstruction(event.target.value)} placeholder={ui.replyTaskPlaceholder}/></label><button type="button" disabled={aiPreparing} onClick={()=>void generateSelectedReply()}>{aiPreparing?ui.aiPreparing:ui.prepareRussianDraft}</button></div>}
             {activeChannel==="EMAIL"&&emailReplyTarget&&<div id="email-reply-target" role="status" className="communications-email-reply-target"><span><b>{ui.replyingToEmail}: {emailReplyTarget.metadata?.subject||ui.emailWithoutSubject}</b><small>{shortMessagePreview(emailReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelEmailReply} title={ui.cancelEmailReply} onClick={()=>{setEmailReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
-            {["INSTAGRAM","WHATSAPP"].includes(activeChannel)&&socialReplyTarget&&<div id="social-reply-target" role="status" className="communications-social-reply-target"><span><b>{ui.replyingToMessage}</b><small>{shortMessagePreview(socialReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelSocialReply} title={ui.cancelSocialReply} onClick={()=>{setSocialReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
+            {["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)&&socialReplyTarget&&<div id="social-reply-target" role="status" className="communications-social-reply-target"><span><b>{socialReplyTarget.metadata?.engagement?.kind==="comment"?ui.replyingToComment:ui.replyingToMessage}</b><small>{shortMessagePreview(socialReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelSocialReply} title={ui.cancelSocialReply} onClick={()=>{setSocialReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
             {attachment && (
               <div className="communications-selected-attachment">
                 {attachmentPreview && (attachment?.type.startsWith("video/")?<video src={attachmentPreview} aria-label={ui.selectedAttachment} preload="metadata" muted playsInline/>:<img src={attachmentPreview} alt={ui.selectedAttachment} />)}
@@ -1320,7 +1326,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               <textarea
                 ref={composerTextarea}
                 rows={1}
-                aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":socialReplyTarget&&["INSTAGRAM","WHATSAPP"].includes(activeChannel)?"social-reply-target":undefined}
+                aria-describedby={activeChannel==="EMAIL"&&emailReplyTarget?"email-reply-target":socialReplyTarget&&["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)?"social-reply-target":undefined}
                 value={text}
                 onChange={(e) => {invalidateAiOperation();setText(e.target.value);e.currentTarget.style.height="auto";e.currentTarget.style.height=`${Math.min(e.currentTarget.scrollHeight,140)}px`}}
                 onKeyDown={handleComposerKeyDown}

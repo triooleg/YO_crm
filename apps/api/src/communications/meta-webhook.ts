@@ -16,6 +16,18 @@ export type MetaInboundMessage = {
     attachmentTypes?: string[];
     attachments?: Array<{ type: string; url?: string; stickerId?: string }>;
     replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string };
+    engagement?: {
+      kind: "comment" | "reaction" | "mention" | "share";
+      surface: "post" | "story" | "reel" | "live" | "comment";
+      objectExternalId: string;
+      parentExternalId?: string;
+      mediaId?: string;
+      mediaUrl?: string;
+      permalinkUrl?: string;
+      reactionType?: string;
+      action?: string;
+      replyMode: "PUBLIC_COMMENT" | "DIRECT_MESSAGE";
+    };
   };
 };
 
@@ -100,6 +112,100 @@ const reactionEmojiByName: Record<string, string> = {
   angry: "😡",
 };
 
+const socialSurface = (value: unknown, fallback: "post" | "comment" = "post"): "post" | "story" | "reel" | "live" | "comment" => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("story")) return "story";
+  if (normalized.includes("reel")) return "reel";
+  if (normalized.includes("live")) return "live";
+  if (normalized.includes("comment")) return "comment";
+  return fallback;
+};
+
+const metaEntryChanges = (entry: AnyRecord) => [
+  ...(entry.field && entry.value && typeof entry.value === "object" ? [{ field: entry.field, value: entry.value }] : []),
+  ...records(entry.changes),
+];
+
+function facebookFeedMessages(payload: AnyRecord) {
+  const output: MetaInboundMessage[] = [];
+  for (const entry of records(payload.entry)) for (const change of metaEntryChanges(entry)) {
+    if (String(change.field || "") !== "feed") continue;
+    const value = change.value && typeof change.value === "object" ? change.value as AnyRecord : {};
+    const sender = value.from && typeof value.from === "object" ? value.from as AnyRecord : {};
+    const senderId = String(sender.id || value.sender_id || "");
+    if (!senderId || senderId === String(entry.id || "")) continue;
+    const item = String(value.item || "").toLowerCase(), action = String(value.verb || value.action || "add").toLowerCase();
+    const rawTime=value.created_time||entry.time;
+    const receivedAt = asDate(rawTime, Boolean(rawTime&&Number(rawTime)<10_000_000_000));
+    if (item === "comment") {
+      const commentId = String(value.comment_id || value.id || "");
+      if (!commentId || action === "remove") continue;
+      const postId = String(value.post_id || ""), parentId = String(value.parent_id || postId);
+      const message = String(value.message || "").trim().slice(0, 5000) || "[Комментарий]";
+      output.push({
+        channel: "FACEBOOK", externalSenderId: senderId, externalMessageId: commentId, content: message,
+        displayName: String(sender.name || value.sender_name || "").trim().slice(0, 160) || undefined,
+        receiverId: String(entry.id || "") || undefined, receivedAt,
+        metadata: { messageType: "social_comment", engagement: {
+          kind: "comment", surface: parentId && postId && parentId !== postId ? "comment" : "post",
+          objectExternalId: commentId, ...(parentId ? { parentExternalId: parentId } : {}),
+          ...(postId ? { mediaId: postId } : {}), action, replyMode: "PUBLIC_COMMENT",
+        } },
+      });
+      continue;
+    }
+    if (item === "reaction") {
+      const objectId = String(value.comment_id || value.post_id || value.parent_id || "");
+      if (!objectId) continue;
+      const reactionType = String(value.reaction_type || value.reaction || "like").toLowerCase();
+      const emoji = reactionEmojiByName[reactionType] || "👍";
+      output.push({
+        channel: "FACEBOOK", externalSenderId: senderId,
+        externalMessageId: ["engagement","reaction",senderId,objectId,action,String(value.created_time || entry.time || "")].join(":"),
+        content: action === "remove" ? "[" + emoji + " снята]" : emoji,
+        displayName: String(sender.name || value.sender_name || "").trim().slice(0, 160) || undefined,
+        receiverId: String(entry.id || "") || undefined, receivedAt,
+        metadata: { messageType: "social_reaction", engagement: {
+          kind: "reaction", surface: value.comment_id ? "comment" : "post", objectExternalId: objectId,
+          ...(value.post_id ? { mediaId: String(value.post_id) } : {}), reactionType, action,
+          replyMode: "DIRECT_MESSAGE",
+        } },
+      });
+    }
+  }
+  return output;
+}
+
+function instagramEngagementMessages(payload: AnyRecord) {
+  const output: MetaInboundMessage[] = [];
+  for (const entry of records(payload.entry)) for (const change of metaEntryChanges(entry)) {
+    const field = String(change.field || ""), value = change.value && typeof change.value === "object" ? change.value as AnyRecord : {};
+    if (field !== "comments" && field !== "live_comments" && field !== "mentions") continue;
+    const from = value.from && typeof value.from === "object" ? value.from as AnyRecord : {};
+    const username = String(from.username || value.username || "").trim().replace(/^@/, "").slice(0, 160);
+    const senderId = String(from.id || value.sender_id || (username ? "instagram-username:" + username : ""));
+    const objectId = String(value.id || value.comment_id || value.media_id || "");
+    if (!senderId || !objectId || senderId === String(entry.id || "")) continue;
+    const media = value.media && typeof value.media === "object" ? value.media as AnyRecord : {};
+    const mediaId = String(media.id || value.media_id || "");
+    const isComment = field === "comments" || field === "live_comments";
+    const surface = field === "live_comments" ? "live" : socialSurface(media.media_product_type || value.media_product_type, "post");
+    output.push({
+      channel: "INSTAGRAM", externalSenderId: senderId, externalMessageId: objectId,
+      content: String(value.text || value.message || (isComment ? "[Комментарий]" : "[Упоминание]")).trim().slice(0, 5000),
+      displayName: username || undefined, receiverId: String(entry.id || "") || undefined,
+      receivedAt: asDate(value.created_time || entry.time, Boolean(value.created_time && Number(value.created_time) < 10_000_000_000)),
+      metadata: { messageType: isComment ? "social_comment" : "social_mention", engagement: {
+        kind: isComment ? "comment" : "mention", surface, objectExternalId: objectId,
+        ...(mediaId ? { mediaId } : {}), ...(typeof media.media_url === "string" ? { mediaUrl: media.media_url } : {}),
+        ...(typeof value.permalink === "string" ? { permalinkUrl: value.permalink } : {}),
+        replyMode: isComment ? "PUBLIC_COMMENT" : "DIRECT_MESSAGE",
+      } },
+    });
+  }
+  return output;
+}
+
 export function mergeMetaReactionMetadata(existing: unknown, event: MetaControlEvent) {
   const prior = existing && typeof existing === "object" && !Array.isArray(existing) ? existing as AnyRecord : {};
   const priorReactions = prior.reactions && typeof prior.reactions === "object" && !Array.isArray(prior.reactions) ? prior.reactions as AnyRecord : {};
@@ -124,7 +230,7 @@ export function metaConversationExternalId(receiverId: string | undefined, sende
 
 export function metaProfileTargets(events:MetaInboundMessage[]){
   const unique=new Map<string,{channel:"FACEBOOK"|"INSTAGRAM";receiverId:string;senderId:string}>();
-  for(const event of events)if((event.channel==="FACEBOOK"||event.channel==="INSTAGRAM")&&event.receiverId){const target={channel:event.channel,receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(event.channel+":"+metaConversationExternalId(target.receiverId,target.senderId),target)}
+  for(const event of events)if((event.channel==="FACEBOOK"||event.channel==="INSTAGRAM")&&event.receiverId&&!event.externalSenderId.startsWith("instagram-username:")){const target={channel:event.channel,receiverId:event.receiverId,senderId:event.externalSenderId};unique.set(event.channel+":"+metaConversationExternalId(target.receiverId,target.senderId),target)}
   return [...unique.values()];
 }
 
@@ -489,10 +595,18 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
     const replyTo = reply?.story && (typeof reply.story.url === "string" || typeof reply.story.id === "string")
       ? { kind: "story" as const, ...(typeof reply.story.id === "string" ? { storyId: reply.story.id } : {}), ...(typeof reply.story.url === "string" ? { storyUrl: reply.story.url } : {}) }
       : typeof reply?.mid === "string" ? { kind: "message" as const, externalMessageId: reply.mid } : undefined;
+    const sharedAttachment=attachments.find(attachment=>["share","story_mention","media_share"].includes(attachment.type));
+    const engagement=sharedAttachment?{
+      kind:sharedAttachment.type==="story_mention"?"mention" as const:"share" as const,
+      surface:sharedAttachment.type==="story_mention"?"story" as const:"post" as const,
+      objectExternalId:String(message.mid),
+      ...(sharedAttachment.url?{mediaUrl:sharedAttachment.url}:{}),
+      replyMode:"DIRECT_MESSAGE" as const,
+    }:undefined;
     const attachmentLabel: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
     const content = String(message.text || attachments.map(x => attachmentLabel[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
-    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}), ...(replyTo ? { replyTo } : {}) } });
+    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}), ...(replyTo ? { replyTo } : {}), ...(engagement?{engagement}:{}) } });
   }
   return output;
 }
@@ -578,6 +692,21 @@ export function summarizeMetaWebhook(payload: unknown): MetaWebhookEventSummary[
         isTest: String(event.message?.mid || event.postback?.mid || "").includes("test_message"),
       });
     }
+    if (object === "page" || object === "instagram") for (const change of metaEntryChanges(entry)) {
+      const field=String(change.field||""),changeValue=change.value&&typeof change.value==="object"?change.value as AnyRecord:{};
+      if(!["feed","comments","live_comments","mentions"].includes(field))continue;
+      const sender=changeValue.from&&typeof changeValue.from==="object"?changeValue.from as AnyRecord:{};
+      output.push({
+        object,
+        ...(entry.id!==undefined?{entryId:String(entry.id)}:{}),
+        eventType:field==="feed"?String(changeValue.item||field):field,
+        ...(sender.id!==undefined?{senderId:String(sender.id)}:changeValue.sender_id!==undefined?{senderId:String(changeValue.sender_id)}:{}),
+        ...(entry.id!==undefined?{recipientId:String(entry.id)}:{}),
+        ...(changeValue.comment_id!==undefined?{mid:String(changeValue.comment_id)}:changeValue.id!==undefined?{mid:String(changeValue.id)}:{}),
+        hasText:typeof (changeValue.message||changeValue.text)==="string"&&String(changeValue.message||changeValue.text).length>0,
+        attachmentCount:0,attachmentTypes:[],isEcho:false,isTest:false,
+      });
+    }
     if (object === "whatsapp_business_account") for (const change of records(entry.changes)) {
       const messages = records(change.value?.messages), echoes = records(change.value?.message_echoes);
       if (!messages.length && !echoes.length) output.push({ object, ...(entry.id !== undefined ? { entryId: String(entry.id) } : {}), eventType: records(change.value?.statuses).length ? "status" : String(change.field || "change"), hasText: false, attachmentCount: 0, attachmentTypes: [], isEcho: false, isTest: false });
@@ -661,8 +790,8 @@ function whatsappMessages(payload: AnyRecord) {
 export function normalizeMetaWebhook(payload: unknown): MetaInboundMessage[] {
   if (!payload || typeof payload !== "object") return [];
   const value = payload as AnyRecord;
-  if (value.object === "page") return messengerMessages(value, "FACEBOOK");
-  if (value.object === "instagram") return messengerMessages(value, "INSTAGRAM");
+  if (value.object === "page") return [...messengerMessages(value, "FACEBOOK"), ...facebookFeedMessages(value)];
+  if (value.object === "instagram") return [...messengerMessages(value, "INSTAGRAM"), ...instagramEngagementMessages(value)];
   if (value.object === "whatsapp_business_account") return whatsappMessages(value);
   return [];
 }

@@ -26,6 +26,37 @@ test("normalizes Facebook, Instagram and WhatsApp into one inbound contract", ()
   assert.deepEqual(JSON.parse(JSON.stringify(whatsapp.map(x => [x.channel, x.externalSenderId, x.externalMessageId, x.displayName, x.content]))), [["WHATSAPP", "3801", "wa-mid", "Anna", "WhatsApp text"]]);
 });
 
+test("normalizes Facebook Page comments and post reactions with reply context", () => {
+  const events = normalizeMetaWebhook({ object:"page", entry:[{ id:"page-1", time:1700000000, changes:[
+    { field:"feed", value:{ item:"comment", verb:"add", comment_id:"comment-1", post_id:"page-1_post-1", parent_id:"page-1_post-1", message:"Beautiful leotard", from:{id:"psid-7",name:"Anna"}, created_time:1700000000 } },
+    { field:"feed", value:{ item:"reaction", verb:"add", reaction_type:"love", post_id:"page-1_post-1", from:{id:"psid-7",name:"Anna"}, created_time:1700000001 } },
+  ]}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [
+    { channel:"FACEBOOK", externalSenderId:"psid-7", externalMessageId:"comment-1", content:"Beautiful leotard", displayName:"Anna", receiverId:"page-1", receivedAt:"2023-11-14T22:13:20.000Z", metadata:{ messageType:"social_comment", engagement:{ kind:"comment", surface:"post", objectExternalId:"comment-1", parentExternalId:"page-1_post-1", mediaId:"page-1_post-1", action:"add", replyMode:"PUBLIC_COMMENT" } } },
+    { channel:"FACEBOOK", externalSenderId:"psid-7", externalMessageId:"engagement:reaction:psid-7:page-1_post-1:add:1700000001", content:"❤️", displayName:"Anna", receiverId:"page-1", receivedAt:"2023-11-14T22:13:21.000Z", metadata:{ messageType:"social_reaction", engagement:{ kind:"reaction", surface:"post", objectExternalId:"page-1_post-1", mediaId:"page-1_post-1", reactionType:"love", action:"add", replyMode:"DIRECT_MESSAGE" } } },
+  ]);
+});
+
+test("normalizes Instagram comments from both documented entry shapes", () => {
+  const direct = normalizeMetaWebhook({ object:"instagram", entry:[{ id:"ig-business", time:1700000000000, field:"comments", value:{ id:"ig-comment-1", from:{id:"igsid-1",username:"gymnast"}, text:"Price?", media:{id:"media-1",media_product_type:"REELS"} } }]});
+  const changed = normalizeMetaWebhook({ object:"instagram", entry:[{ id:"ig-business", time:1700000000000, changes:[{ field:"comments", value:{ id:"ig-comment-2", from:{username:"second.user"}, text:"Available?", media:{id:"media-2",media_product_type:"STORY"} } }] }]});
+  assert.deepEqual(JSON.parse(JSON.stringify(direct[0])), { channel:"INSTAGRAM", externalSenderId:"igsid-1", externalMessageId:"ig-comment-1", content:"Price?", displayName:"gymnast", receiverId:"ig-business", receivedAt:"2023-11-14T22:13:20.000Z", metadata:{ messageType:"social_comment", engagement:{ kind:"comment", surface:"reel", objectExternalId:"ig-comment-1", mediaId:"media-1", replyMode:"PUBLIC_COMMENT" } } });
+  assert.equal(changed[0].externalSenderId,"instagram-username:second.user");
+  assert.equal(changed[0].metadata.engagement.surface,"story");
+  assert.equal(changed[0].metadata.engagement.replyMode,"PUBLIC_COMMENT");
+});
+
+test("ignores business-authored Page feed events", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeMetaWebhook({object:"page",entry:[{id:"page-1",changes:[{field:"feed",value:{item:"comment",comment_id:"c",message:"own",from:{id:"page-1"}}}]}]}))),[]);
+});
+
+test("summarizes social engagement without logging comment text",()=>{
+  const [summary]=summarizeMetaWebhook({object:"instagram",entry:[{id:"ig-business",field:"comments",value:{id:"comment-1",from:{id:"igsid-1"},text:"private words"}}]});
+  assert.equal(summary.eventType,"comments");
+  assert.equal(summary.hasText,true);
+  assert.equal(JSON.stringify(summary).includes("private words"),false);
+});
+
 test("normalizes Messenger standby messages while another app controls the thread", () => {
   const [message] = normalizeMetaWebhook({ object: "page", entry: [{ id: "page-1", standby: [{ sender: { id: "psid-standby" }, recipient: { id: "page-1" }, timestamp: 1000, message: { mid: "standby-mid", text: "Standby text" } }] }] });
   assert.deepEqual(JSON.parse(JSON.stringify(message)), {
@@ -300,8 +331,8 @@ test("profile enrichment guards archived clients and logs only pseudonymous Meta
   assert.notEqual(metaIdentityLogRef("psid-123"),"psid-123");
 });
 
-test("Meta subscription and persistence include outbound message echoes", () => {
-  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions"/);
+test("Meta subscription and persistence include outbound message echoes and Page feed events", () => {
+  assert.match(service, /subscribed_fields:\s*"messages,message_echoes,standby,messaging_postbacks,message_reads,messaging_optins,message_reactions,feed"/);
   assert.match(service, /normalizeMetaEchoMessages\(payload\)/);
   assert.match(service, /direction:\s*MessageDirection\.OUTBOUND/);
   assert.match(service, /status:\s*MessageStatus\.SENT/);
@@ -664,4 +695,15 @@ test("verifies the exact raw body with X-Hub-Signature-256", () => {
   assert.equal(verifyMetaSignature(raw, signature, secret), true);
   assert.equal(verifyMetaSignature(Buffer.from("changed"), signature, secret), false);
   assert.equal(verifyMetaSignature(raw, "sha256=bad", secret), false);
+});
+
+test("marks shared posts and story mentions as replyable chat context",()=>{
+  const events=normalizeMetaWebhook({object:"instagram",entry:[{id:"ig-business",messaging:[
+    {sender:{id:"igsid-1"},timestamp:1000,message:{mid:"share-1",attachments:[{type:"share",payload:{url:"https://cdninstagram.com/post.jpg"}}]}},
+    {sender:{id:"igsid-1"},timestamp:2000,message:{mid:"story-1",attachments:[{type:"story_mention",payload:{url:"https://cdninstagram.com/story.jpg"}}]}},
+  ]}]});
+  assert.equal(events[0].metadata.engagement.kind,"share");
+  assert.equal(events[0].metadata.engagement.surface,"post");
+  assert.equal(events[1].metadata.engagement.kind,"mention");
+  assert.equal(events[1].metadata.engagement.surface,"story");
 });

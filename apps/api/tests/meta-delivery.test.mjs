@@ -12,9 +12,9 @@ vm.runInNewContext(javascript, { module, exports: module.exports, require });
 const { confirmMetaPageSubscription, isMetaAccessToken, metaDeliveryStatus, metaChannelDeliveryStatus, resolveInstagramWebhookReceiver } = module.exports;
 
 test("successful Meta Page subscription produces verified state and safe audit", () => {
-  const result = confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1", name: "YOLeotard" }, subscriptions: [{ id: "app-1", subscribed_fields: ["messages", "message_echoes", "standby", "message_reads", "message_reactions"] }], verifiedAt: "2026-08-21T12:00:00.000Z" });
+  const result = confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1", name: "YOLeotard" }, subscriptions: [{ id: "app-1", subscribed_fields: ["messages", "message_echoes", "standby", "message_reads", "message_reactions", "feed"] }], verifiedAt: "2026-08-21T12:00:00.000Z" });
   assert.deepEqual(JSON.parse(JSON.stringify(result.settings)), { subscriptionVerifiedAt: "2026-08-21T12:00:00.000Z", pageName: "YOLeotard" });
-  assert.deepEqual(JSON.parse(JSON.stringify(result.auditAfter)), { deliveryVerified: true, pageId: "page-1", subscribedFields: ["messages", "message_echoes", "standby", "message_reads", "message_reactions"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.auditAfter)), { deliveryVerified: true, pageId: "page-1", subscribedFields: ["messages", "message_echoes", "standby", "message_reads", "message_reactions", "feed"] });
   assert.equal(JSON.stringify(result).includes("token"), false);
 });
 
@@ -29,6 +29,10 @@ test("missing standby or message echoes subscription cannot claim full Messenger
 
 test("missing message reactions subscription cannot claim full Messenger delivery", () => {
   assert.throws(() => confirmMetaPageSubscription({ pageId: "page-1", appId: "app-1", page: { id: "page-1" }, subscriptions: [{ id: "app-1", subscribed_fields: ["messages", "standby", "message_echoes"] }], verifiedAt: "now" }), /MESSAGE_REACTIONS_NOT_SUBSCRIBED/);
+});
+
+test("missing Page feed subscription cannot claim engagement delivery",()=>{
+  assert.throws(()=>confirmMetaPageSubscription({pageId:"page-1",appId:"app-1",page:{id:"page-1"},subscriptions:[{id:"app-1",subscribed_fields:["messages","standby","message_echoes","message_reactions"]}],verifiedAt:"now"}),/FEED_NOT_SUBSCRIBED/);
 });
 
 test("unsafe or disabled Meta delivery is never reported ready", () => {

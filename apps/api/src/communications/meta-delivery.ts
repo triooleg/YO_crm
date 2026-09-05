@@ -61,6 +61,8 @@ export function confirmMetaPageSubscription(input: {
     throw new Error("MESSAGE_ECHOES_NOT_SUBSCRIBED");
   if (!own.subscribed_fields.includes("message_reactions"))
     throw new Error("MESSAGE_REACTIONS_NOT_SUBSCRIBED");
+  if (!own.subscribed_fields.includes("feed"))
+    throw new Error("FEED_NOT_SUBSCRIBED");
   return {
     settings: { subscriptionVerifiedAt: input.verifiedAt, pageName: input.page.name || "" },
     auditAfter: { deliveryVerified: true, pageId: input.pageId, subscribedFields: own.subscribed_fields },

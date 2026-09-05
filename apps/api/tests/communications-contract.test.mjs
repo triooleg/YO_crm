@@ -244,7 +244,7 @@ test("outbound Facebook, Instagram and WhatsApp messages distinguish drafts from
   assert.match(x, /whatsappAttachmentMessageParams/);
   assert.match(x, /whatsappMessageId/);
   assert.match(x, /deliverMetaMessage\(metaChannel/);
-  assert.match(x, /metaTextMessageParams\(recipientId,content,metaReplyToMessageId\)/);
+  assert.match(x, /metaTextMessageParams\(recipientId,content,directReplyToMessageId\)/);
   assert.match(x, /metaRecipientIdForReceivers\(\[receiverId,instagramWebhookReceiverId\],conversation\?\.externalId\)/);
   assert.match(x, /MessageStatus\.SENT/);
   assert.match(x, /MessageStatus\.FAILED/);
@@ -338,7 +338,7 @@ test("chat attachments are validated, stored outside the web root and sent throu
   assert.match(main, /app\.use\(json\(\{limit:"8mb"/);
   assert.match(service, /stored\.mimeType\.startsWith\("video\/"\)\?"video"/);
   assert.match(service, /communication-files/);
-  assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl,metaReplyToMessageId\)/);
+  assert.match(service, /metaAttachmentMessageParams\(recipientId,attachment\.type,attachment\.providerUrl,directReplyToMessageId\)/);
   assert.match(controller, /@Controller\("communications\/files"\)@UseGuards\(SessionGuard,RolesGuard\)/);
   assert.match(controller, /@Controller\("communications\/meta-files"\)/);
   assert.match(controller, /timingSafeEqual/);
@@ -611,4 +611,18 @@ test("inbound routing reuses contacts, reopens history and validates configured 
   assert.match(service,/candidateCount:ambiguousMatches/);
   const inbound=service.slice(service.indexOf("privateasyncpersistInbound"),service.indexOf("asyncdetail"));
   assert.ok(inbound.indexOf("if(duplicate)returnfalse") < inbound.indexOf("CLIENT_REACTIVATED_BY_INBOUND"));
+});
+
+test("social comments and engagement replies stay scoped to their provider object",()=>{
+  assert.match(service,/metaCommentReplyParams/);
+  assert.match(service,/engagement\?\.kind==="comment"/);
+  assert.match(service,/commentReply\.path,pageToken,commentReply\.params/);
+  assert.match(service,/isPublicCommentReply&&attachment/);
+  assert.match(service,/instagram-username:/);
+  assert.match(service,/instagram:instagramIdentity/);
+});
+
+test("post reactions never reuse their synthetic event id as a Messenger reply id",()=>{
+  assert.match(service,/directReplyToMessageId=engagement\?\.kind===\"reaction\"\|\|replyMetadata\?\.messageType===\"social_mention\"\?undefined:metaReplyToMessageId/);
+  assert.match(service,/metaTextMessageParams\(recipientId,content,directReplyToMessageId\)/);
 });
