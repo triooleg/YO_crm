@@ -42,7 +42,7 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.2");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.3");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
   assert.match(compose, /CRM_VERSION:/);
   assert.match(compose, /CRM_COMMIT:/);

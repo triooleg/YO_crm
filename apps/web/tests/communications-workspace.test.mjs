@@ -360,8 +360,8 @@ test("под каналами можно отфильтровать клиент
   assert.match(component, /className="communications-order-filters communications-secondary-filters"/);
   assert.match(component, /ui\.clientsWithOrders/);
   assert.match(component, /ui\.clientsWithActiveOrders/);
-  assert.match(component, /aria-pressed=\{orderScope==="WITH_ORDERS"\}/);
-  assert.match(component, /aria-pressed=\{orderScope==="ACTIVE_ORDERS"\}/);
+  assert.match(component, /<option value="WITH_ORDERS">/);
+  assert.match(component, /<option value="ACTIVE_ORDERS">/);
   assert.match(locale, /clientsWithOrders:\s*"Покупали"/);
   assert.match(locale, /clientsWithActiveOrders:\s*"Активные заказы"/);
   assert.match(css, /\.communications-order-filters\{/);

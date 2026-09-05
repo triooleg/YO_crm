@@ -1,5 +1,21 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-05 — «Входящие» по референсу, 0.1.3 (подготовлено, production pending)
+
+- Изолированная ветка `codex/inbox-reference` от актуального `origin/main`;
+  посторонние изменения основного checkout сохранены.
+- Новый Inbox-only shell, три панели, верхний поиск/непрочитанные/профиль,
+  компактные фильтры, аватары сообщений, галереи, composer и context cards.
+- Бизнес-логика API и база не менялись. Настоящие данные сохранены; недоступные
+  функции из макета не имитируются. Подробности: `docs/ui/inbox-reference-0.1.3.md`.
+- GUI-проверки на 390–1920 px, фильтры с проверкой API query, Ctrl+Enter на
+  перехваченном API, длинный текст, gallery/Escape, мобильные панели и
+  collapsed desktop→tablet прошли. `pnpm quality:check` прошёл: web 218, API 342, database 7 тестов, typecheck и build.
+  Compatibility, regression, business и visual reviewer: PASS. Release gate: PASS; built-page smoke PASS (включая submit нового тестового клиента и очистку обоих поисков).
+- FULL backup `pre-inbox-reference-20260905-0147` проверен, source archive и
+  rollback web image 0.1.2 сохранены. Deployment/live smoke ещё pending.
+
+
 ## 2026-09-05 — социальные публикации и комментарии Meta (deployed, provider E2E ожидает нового события)
 
 - Facebook Page webhook расширен подпиской `feed`: комментарии и реакции клиентов на публикации и комментарии нормализуются в существующий диалог по точной области Page ID + PSID. Собственные события страницы не импортируются повторно.

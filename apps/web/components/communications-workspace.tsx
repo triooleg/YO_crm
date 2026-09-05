@@ -6,6 +6,7 @@ import {
   canRefreshInbox,
   isCurrentInboxDetailRequest,
 } from "../lib/inbox-request-guard";
+import { inboxMeasurements, type InboxMeasurement } from "../lib/inbox-measurements";
 import { ClientAvatar } from "./client-avatar";
 import { AddAthlete } from "./client-workspace";
 import { OrderPanel } from "./order-panel";
@@ -63,7 +64,7 @@ type ClientAthlete = {
   firstName: string;
   lastName?: string;
   discipline?: string;
-  measurements: { id: string; measuredAt: string }[];
+  measurements: InboxMeasurement[];
 };
 type ClientDetail = {
   id: string;
@@ -76,7 +77,7 @@ type TaskBoard = {
   users: { id: string; displayName: string; role: string }[];
 };
 type ContextTarget = "clients" | "tasks" | "finance";
-type CommunicationsWorkspaceProps = { onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
+type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
 type ClientPage = { items: Client[]; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
@@ -103,7 +104,7 @@ type OrderScope = "WITH_ORDERS" | "ACTIVE_ORDERS";
 type ContextTab = "CLIENT" | "ORDERS" | "NOTES" | "FILES";
 type ConversationScope = "ALL" | "UNREAD" | "CLIENTS";
 const limits = { left: [200, 430], right: [260, 560] } as const,
-  defaults = { left: 340, right: 390 },
+  defaults = { left: 365, right: 410 },
   icons: Record<string, string> = {
     INSTAGRAM: "◎",
     FACEBOOK: "f",
@@ -224,7 +225,7 @@ function optionalFormFields(data: Record<string, FormDataEntryValue>, names: str
     return [name, typeof value === "string" && value.trim()?value.trim():undefined];
   }));
 }
-export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProps={}) {
+export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,unreadRequest}:CommunicationsWorkspaceProps={}) {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
     [activeChannel,setActiveChannel]=useState("MANUAL"),
@@ -364,6 +365,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     }
     return r.json();
   }
+  useEffect(()=>{if(searchQuery!==undefined)setSearch(searchQuery)},[searchQuery]);
+  useEffect(()=>{if(unreadRequest)setConversationScope("UNREAD")},[unreadRequest]);
   async function autosaveDraft(content:string){
     const operationClientId=selectedClientId.current,operationChannel=activeChannel,operationEpoch=composeEpoch.current,sequence=++draftSequence.current;
     if(!operationClientId||!content.trim()||content.trim()===lastAutosavedText.current)return;
@@ -985,7 +988,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
         },
       );
       setCreating(false);
-      setSearch("");
+      setSearch("");onSearchChange?.("");
       const existingClient=client?.id===created.id?client:undefined;
       const exactCreated={...created,orders:existingClient?.orders||[],conversations:existingClient?.conversations||[]} as Client;
       await open(exactCreated);
@@ -1004,14 +1007,28 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     channelCounts=Object.fromEntries(socialChannels.map(item=>[item,channelTotals[item]||0])) as Record<SocialChannel,number>,
     conversationFiles=messages.flatMap(message=>(message.metadata?.attachments||[]).map((attachment,index)=>({messageId:message.id,index,attachment}))),
-    grid = left + "px 6px minmax(380px,1fr) " + (contextCollapsed?"0px 46px":"6px "+right+"px");
+    grid = `min(${left}px,23vw) 4px minmax(320px,1fr) ${contextCollapsed?"0px 46px":`4px min(${right}px,25vw)`}`;
   const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
   const attachmentAccept=attachmentMimeTypes.join(",");
   return (
     <div className="communications-page">
-      <header className="phase2-header">
+      {error && (
+        <div className="phase2-error" role="alert">
+          {error}
+          <button onClick={() => setError("")}>{ui.close}</button>
+        </div>
+      )}
+      {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
+      {templateNotice && <div className="communications-template-notice" role="status">{templateNotice}<button type="button" onClick={()=>setTemplateNotice("")}>{ui.close}</button></div>}
+      <section
+        className="communications-grid"
+        style={{ gridTemplateColumns: grid }}
+        aria-label={ui.workspace}
+      >
+        {mobileClientListOpen&&<button type="button" className="communications-mobile-clients-backdrop" aria-label={ui.close} onClick={()=>setMobileClientListOpen(false)}/>}
+        <aside className={`communications-clients${mobileClientListOpen?" mobile-open":""}`} aria-label={ui.clientsList}>
+      <header className="communications-list-header">
         <div className="communications-inbox-heading">
-          <p>{ui.eyebrow}</p>
           <h1>{ui.title}</h1>
           <span>{ui.subtitle}</span>
         </div>
@@ -1032,24 +1049,9 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           </details>
         </div>
       </header>
-      {error && (
-        <div className="phase2-error" role="alert">
-          {error}
-          <button onClick={() => setError("")}>{ui.close}</button>
-        </div>
-      )}
-      {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
-      {templateNotice && <div className="communications-template-notice" role="status">{templateNotice}<button type="button" onClick={()=>setTemplateNotice("")}>{ui.close}</button></div>}
-      <section
-        className="communications-grid"
-        style={{ gridTemplateColumns: grid }}
-        aria-label={ui.workspace}
-      >
-        {mobileClientListOpen&&<button type="button" className="communications-mobile-clients-backdrop" aria-label={ui.close} onClick={()=>setMobileClientListOpen(false)}/>}
-        <aside className={`communications-clients${mobileClientListOpen?" mobile-open":""}`} aria-label={ui.clientsList}>
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {setSearch(e.target.value);onSearchChange?.(e.target.value)}}
             placeholder={ui.search}
             aria-label={ui.search}
           />
@@ -1061,8 +1063,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
             <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope} onClick={()=>{setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels}</button>
             <button type="button" aria-pressed={conversationScope==="UNREAD"} onClick={()=>setConversationScope(current=>current==="UNREAD"?"ALL":"UNREAD")}>{ui.unreadChats}</button>
             <button type="button" aria-pressed={conversationScope==="CLIENTS"} onClick={()=>setConversationScope(current=>current==="CLIENTS"?"ALL":"CLIENTS")}>{ui.clientFilter}</button>
-            <button type="button" aria-pressed={orderScope==="WITH_ORDERS"} onClick={()=>setOrderScope(current=>current==="WITH_ORDERS"?undefined:"WITH_ORDERS")}>{ui.clientsWithOrders}</button>
-            <button type="button" aria-pressed={orderScope==="ACTIVE_ORDERS"} onClick={()=>setOrderScope(current=>current==="ACTIVE_ORDERS"?undefined:"ACTIVE_ORDERS")}>{ui.clientsWithActiveOrders}</button>
+            <select className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)}><option value="">{ui.orderScopeMenu}</option><option value="WITH_ORDERS">{ui.clientsWithOrders}</option><option value="ACTIVE_ORDERS">{ui.clientsWithActiveOrders}</option></select>
           </div>
           <div className="communications-client-list">
           {loading ? (
@@ -1098,6 +1099,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                     <small className="communications-client-preview">
                       {last?.content || badges.map((b) => b.label).join(" · ")}
                     </small>
+                    <span className="communications-client-tags">{c.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrderCount>0&&<span className="has-order">{ui.activeOrdersShort} {activeOrderCount}</span>}</span>
                   </div>
                   <span className="communications-client-side">
                     {last && (
@@ -1137,7 +1139,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {client&&<span className="communications-chat-badges"><span>{active.icon} {active.label}</span>{client.country&&<span>⌖ {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}</span>}
+                {client&&<span className="communications-chat-badges"><span>{active.icon} {active.label}</span>{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
@@ -1169,8 +1171,10 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 return (<Fragment key={message.id}>
                   {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(message.createdAt)}</span></div>}
                   <article
-                    className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}`}
+                    className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}${hasVisualAttachment&&!message.content?" media-only":""}`}
                   >
+                    {message.direction==="INBOUND"&&client&&<span className="communications-message-avatar" aria-hidden="true"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/></span>}
+                    {message.direction==="OUTBOUND"&&<span className="communications-message-avatar is-business" aria-hidden="true">Y</span>}
                     <span className="communications-message-actions">
                       <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
                       <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}</span></details>
@@ -1266,11 +1270,13 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           </div>
           <footer>
             <div className="communications-ai">
-              <b>{ui.ai}</b>
-              <button type="button" disabled={busy||!client} onClick={()=>{if(replyMode){invalidateAiOperation();setSelectedMessageIds([]);setReplyInstruction("");setAiReply(null);setAiDraftText("")}setReplyMode(!replyMode)}}>{replyMode?ui.cancelReplySelection:ui.reply}{selectedMessageIds.length?` (${selectedMessageIds.length})`:""}</button>
+              <button type="button" className="communications-request-measurements" disabled={!client||!templates.some(template=>/мерк|measure/i.test(template.name))} onClick={()=>{const template=templates.find(item=>/мерк|measure/i.test(item.name));if(template)chooseTemplate(template)}}>{ui.requestMeasurements}</button>
+              <details className="communications-composer-more"><summary aria-label={ui.moreActions}>⋯</summary><button type="button" disabled={busy||aiPreparing||!client} onClick={()=>void ai("IMPROVE")}>{ui.improve}</button></details>
+
+              <button type="button" className="communications-ai-reply" disabled={busy||!client} onClick={()=>{if(replyMode){invalidateAiOperation();setSelectedMessageIds([]);setReplyInstruction("");setAiReply(null);setAiDraftText("")}setReplyMode(!replyMode)}}>{replyMode?ui.cancelReplySelection:ui.replyAi}{selectedMessageIds.length?` (${selectedMessageIds.length})`:""}</button>
               {(
                 [
-                  ["IMPROVE", ui.improve],
+                  ["TRANSLATE", ui.translate],
                 ] as const
               ).map(([a, l]) => (
                 <button
@@ -1288,7 +1294,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                   aria-expanded={templatesOpen}
                   onClick={() => setTemplatesOpen((x) => !x)}
                 >
-                  {ui.template}
+                  {ui.templatesButton}
                 </button>
                 {templatesOpen && (
                   <div role="menu" aria-label={ui.templatesList}>
@@ -1310,13 +1316,6 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
               </div>
             )}
-            <div className="communications-compose-shortcuts" aria-label={ui.composerShortcuts}>
-              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
-              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
-              <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
-              <button type="button" disabled={!client||client.status==="LEAD"} onClick={()=>client&&onNavigate?.("clients",{clientId:client.id})}>⌁ {ui.measurementsShortcut}</button>
-              <button type="button" disabled={!templates.length} onClick={()=>setTemplatesOpen(true)}>▣ {ui.quickReply}</button>
-            </div>
             <div className="communications-compose">
               <label className="communications-attach" aria-label={ui.attachFile}>
                 <span aria-hidden>＋</span>
@@ -1332,7 +1331,7 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                 onKeyDown={handleComposerKeyDown}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 title={ui.sendShortcut}
-                placeholder={ui.messagePlaceholder}
+                placeholder={client?ui.writeToClient.replace("{name}",client.displayName):ui.messagePlaceholder}
                 disabled={!client}
               />
               <span className={`communications-draft-status is-${draftStatus.toLowerCase()}`} role="status">{draftStatus==="SAVING"?ui.draftAutosaving:draftStatus==="SAVED"?ui.draftAutosaved:draftStatus==="ERROR"?ui.draftAutosaveFailed:""}</span>
@@ -1344,6 +1343,14 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
                   {busy ? ui.sending : ui.sendMessage}
                 </button>
               )}
+              <details className="communications-send-options"><summary aria-label={ui.sendOptions}>⌄</summary><button type="button" disabled={templateBusy||!client||!text.trim()} onClick={()=>void saveAsTemplate(text,activeChannel)}>{ui.saveAsTemplate}</button></details>
+            </div>
+            <div className="communications-compose-shortcuts" aria-label={ui.composerShortcuts}>
+              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
+              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
+              <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
+              <button type="button" disabled={!client||client.status==="LEAD"} onClick={()=>client&&onNavigate?.("clients",{clientId:client.id})}>⌁ {ui.measurementsShortcut}</button>
+              <button type="button" disabled={!templates.length} onClick={()=>setTemplatesOpen(true)}>▣ {ui.quickReply}</button>
             </div>
           </footer>
         </main>
@@ -1360,8 +1367,8 @@ export function CommunicationsWorkspace({onNavigate}:CommunicationsWorkspaceProp
           {client&&<>
           <ContextTabs active={contextTab} onChange={setContextTab}/>
           <div className="communications-context-tabpanel" role="tabpanel" aria-labelledby={`communications-context-tab-${contextTab.toLowerCase()}`} data-active-tab={contextTab}>
-          <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div>{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b>{client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b>{client.timezone}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
+          <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><span className="communications-profile-channel">{active.icon} {active.label}</span>{accountUrl&&<a className="communications-profile-link" href={accountUrl} target="_blank" rel="noopener noreferrer">{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel]||ui.openInSocialNetwork} ↗</a>}<small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div><div className="communications-profile-facts">{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b><InboxCountryFlag country={client.country}/> {client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b title={client.timezone}>{clientLocalTime(client.timezone)}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}</div>{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}{athlete.measurements[0]&&<span className="communications-athlete-measurements">{inboxMeasurements(athlete.measurements[0]).map(({field,value,unit})=><span key={field}><small>{ui.measurementFields[field]}</small><b>{value} <small>{unit}</small></b></span>)}</span>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
@@ -1551,3 +1558,10 @@ function Resizer({
     />
   );
 }
+
+function InboxCountryFlag({country}:{country:string}){
+  const aliases:Record<string,string>={netherlands:"nl",нидерланды:"nl",ukraine:"ua",украина:"ua",україна:"ua",france:"fr",франция:"fr",italy:"it",италия:"it",spain:"es",испания:"es",germany:"de",германия:"de",poland:"pl",польша:"pl","united kingdom":"gb","united states":"us",usa:"us"};
+  const normalized=country.trim().toLowerCase(),code=aliases[normalized]||(/^[a-z]{2}(?:\s|$)/.test(normalized)?normalized.slice(0,2):"");
+  return code?<span className={`fi fi-${code}`} aria-hidden="true"/>:null;
+}
+function clientLocalTime(timezone:string){try{return new Intl.DateTimeFormat("ru-RU",{timeZone:timezone,hour:"2-digit",minute:"2-digit",timeZoneName:"shortOffset"}).format(new Date())}catch{return timezone}}

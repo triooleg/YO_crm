@@ -546,6 +546,10 @@ export const shippingUi = {
 } as const;
 
 export const navigationUi = {
+  inboxSearch: "Поиск CRM…",
+  profileMenu: "Меню профиля",
+  userRoles: {OWNER:"Владелец",ADMIN:"Администратор",MANAGER:"Менеджер",PRODUCTION:"Производство",ACCOUNTANT:"Бухгалтер",VIEWER:"Наблюдатель"},
+  unknownRole: "Сотрудник",
   version: "Версия CRM",
   overview: "Обзор",
   inbox: "Входящие",
@@ -573,6 +577,19 @@ export const releaseHistoryUi = {
   compatibility: "Совместимость и откат",
   commit: "Git commit",
   releases: [
+    {
+      version: "0.1.3",
+      date: "05.09.2026",
+      changes: [
+        "Раздел «Входящие» переработан по согласованному референсу: верхняя навигация, меню с подписями и три рабочие панели.",
+        "Над диалогами сохранены значки каналов со счётчиками; фильтры заказов объединены в компактное меню.",
+        "Обновлены аватары возле сообщений, пузырьки, галереи вложений, карточки клиента, задач, заказов и мерок.",
+        "Поиск в верхней панели работает по входящим, значок уведомлений открывает непрочитанные диалоги.",
+        "Панель ответа содержит Ответ AI, перевод, шаблоны, запрос мерок из существующего шаблона и меню сохранения текста как шаблона.",
+        "Проверены независимая прокрутка чата, мобильные панели и отправка по Ctrl+Enter; ростовой стандарт отделён от измеренного роста.",
+      ],
+      compatibility: "Изменения относятся к веб-интерфейсу. Миграций базы данных нет. Откат приложения: crm-v0.1.2; сообщения, файлы, заказы и платежи сохраняются.",
+    },
     {
       version: "0.1.2",
       date: "05.09.2026",
@@ -674,6 +691,12 @@ export const tasksUi = {
 } as const;
 
 export const communicationsUi = {
+  measurementFields: {height:"Рост",standardHeight:"Ростовой стандарт",chest:"Грудь",waist:"Талия",hips:"Бёдра",torso:"Обхват"},
+  orderScopeMenu:"С заказом",
+  replyAi:"Ответ AI",
+  templatesButton:"Шаблоны",
+  requestMeasurements:"Запросить мерки",
+  sendOptions:"Варианты отправки",
     replyChannel: "Канал ответа",
     connectedAccount: "Аккаунт",
     openInSocialNetwork: "Открыть этот диалог в социальной сети",
@@ -786,6 +809,7 @@ export const communicationsUi = {
   confirmTranslationAndSend: "Подтвердить перевод и отправить",
   improve: "Улучшить",
   template: "Шаблон",
+  writeToClient: "Написать {name}…",
   messagePlaceholder: "Введите сообщение клиенту…",
   attachFile: "Прикрепить файл, изображение или короткое видео",
   composerShortcuts: "Быстрые действия сообщения",
