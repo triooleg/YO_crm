@@ -165,8 +165,20 @@ export async function resolveMetaFacebookProfile(
 }
 
 export type MetaConversationsResponse = {
-  data?: Array<{ id?: unknown; participants?: { data?: Array<{ id?: unknown; name?: unknown }> } }>;
+  data?: Array<{ id?: unknown; participants?: { data?: Array<{
+    id?: unknown;
+    name?: unknown;
+    picture?: { data?: { url?: unknown } };
+  }> } }>;
 };
+
+function metaConversationParticipantAvatar(participant: AnyRecord) {
+  const picture = participant.picture;
+  if (!picture || typeof picture !== "object" || Array.isArray(picture)) return "";
+  const data = (picture as AnyRecord).data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  return cleanProfileText((data as AnyRecord).url, 2048);
+}
 
 export async function resolveMetaFacebookProfileWithFallback(
   profileLookup: (fields: string) => Promise<MetaFacebookProfile>,
@@ -182,14 +194,20 @@ export async function resolveMetaFacebookProfileWithFallback(
   }
   const conversations = await conversationsLookup();
   const names = new Set<string>();
+  const avatars = new Set<string>();
   for (const conversation of records(conversations.data)) {
     for (const participant of records(conversation.participants?.data)) {
       if (String(participant.id || "") !== psid || String(participant.id || "") === pageId) continue;
       const name = cleanProfileText(participant.name);
       if (name) names.add(name);
+      const avatar = metaConversationParticipantAvatar(participant);
+      if (avatar) avatars.add(avatar);
     }
   }
-  if (names.size === 1) return { profile: { name: [...names][0] }, source: "CONVERSATIONS" as const };
+  if (names.size === 1 && avatars.size <= 1) return {
+    profile: { name: [...names][0], ...(avatars.size ? { profile_pic: [...avatars][0] } : {}) },
+    source: "CONVERSATIONS" as const,
+  };
   return { profile: {}, source: "CONVERSATIONS" as const };
 }
 
@@ -235,7 +253,7 @@ export async function runFacebookProfileBackfillBatch(
 ) {
   const page = conversations.slice(0, limit);
   const targets = facebookFallbackProfileTargets(page, pageId);
-  let resolvedViaUserProfile = 0, resolvedViaConversations = 0, unresolved = 0, updated = 0, avatarsResolvedViaUserProfile = 0, avatarsUnavailable = 0;
+  let resolvedViaUserProfile = 0, resolvedViaConversations = 0, unresolved = 0, updated = 0, avatarsResolvedViaUserProfile = 0, avatarsResolvedViaConversations = 0, avatarsUnavailable = 0;
   for (const target of targets) try {
     const result = await resolve(target.psid);
     if (target.needsName && result.profile.displayName) {
@@ -243,7 +261,8 @@ export async function runFacebookProfileBackfillBatch(
       else resolvedViaConversations++;
     } else if (target.needsName) unresolved++;
     if (target.needsAvatar) {
-      if (result.source === "USER_PROFILE" && result.profile.avatarUrl) avatarsResolvedViaUserProfile++;
+      if (result.profile.avatarUrl && result.source === "USER_PROFILE") avatarsResolvedViaUserProfile++;
+      else if (result.profile.avatarUrl) avatarsResolvedViaConversations++;
       else avatarsUnavailable++;
     }
     if (!dryRun && Object.keys(result.profile).length && await persist(target.psid, result.profile)) updated++;
@@ -259,6 +278,7 @@ export async function runFacebookProfileBackfillBatch(
     resolvedViaUserProfile,
     resolvedViaConversations,
     avatarsResolvedViaUserProfile,
+    avatarsResolvedViaConversations,
     avatarsUnavailable,
     unresolved,
     updated: dryRun ? 0 : updated,

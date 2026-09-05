@@ -95,6 +95,24 @@ test("Facebook code 100 subcode 33 falls back to the exact conversation particip
   assert.deepEqual(JSON.parse(JSON.stringify(ambiguous.profile)),{});
 });
 
+test("Facebook Conversations fallback preserves the exact participant avatar",async()=>{
+  const unavailable=Object.assign(new Error("unavailable"),{failure:{code:100,subcode:33}});
+  const result=await resolveMetaFacebookProfileWithFallback(
+    async()=>{throw unavailable},
+    async()=>({data:[{id:"thread",participants:{data:[
+      {id:"page-1",name:"YOLeotard",picture:{data:{url:"https://scontent.xx.fbcdn.net/page.jpg"}}},
+      {id:"psid-1",name:"Rachel Smith",picture:{data:{url:"https://scontent.xx.fbcdn.net/rachel.jpg"}}},
+    ]}}]}),
+    error=>error===unavailable,
+    "psid-1","page-1",
+  );
+  assert.equal(result.source,"CONVERSATIONS");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.profile)),{name:"Rachel Smith",profile_pic:"https://scontent.xx.fbcdn.net/rachel.jpg"});
+  assert.match(service,/fields:"id,participants\{id,name,picture\}"/);
+  assert.match(service,/META_PROFILE_PICTURE_FIELD_UNAVAILABLE/);
+  assert.match(service,/fields:"id,participants"/);
+});
+
 test("Facebook backfill targets only exact fallback clients and deduplicates clients",()=>{
   const targets=facebookFallbackProfileTargets([
     {externalId:"page-1:101",client:{id:"c1",displayName:"Facebook 101"}},
@@ -130,6 +148,13 @@ test("Facebook backfill retries a missing avatar without changing a real name", 
   assert.deepEqual(writes,[["101",{displayName:"Nastasya Ty",avatarUrl:"https://example.com/avatar.jpg"}]]);
 });
 
+test("Facebook backfill counts an avatar restored through Conversations fallback", async()=>{
+  const rows=[{externalId:"page-1:101",client:{id:"client-1",displayName:"Rachel Smith",avatarUrl:null}}];
+  const result=await runFacebookProfileBackfillBatch(rows,"page-1",50,true,async()=>({source:"CONVERSATIONS",profile:{displayName:"Rachel Smith",avatarUrl:"https://scontent.xx.fbcdn.net/rachel.jpg"}}),async()=>true);
+  assert.equal(result.avatarsResolvedViaConversations,1);
+  assert.equal(result.avatarsUnavailable,0);
+});
+
 test("Facebook backfill dry-run is write-free and cursor advances across ineligible rows",async()=>{
   const rows=[
     {externalId:"page-1:bad",client:{id:"c1",displayName:"Facebook test"}},
@@ -137,7 +162,7 @@ test("Facebook backfill dry-run is write-free and cursor advances across ineligi
   ];
   let resolves=0,writes=0;
   const first=await runFacebookProfileBackfillBatch(rows,"page-1",1,true,async()=>{resolves++;return{source:"USER_PROFILE",profile:{displayName:"Ignored"}}},async()=>{writes++;return true});
-  assert.deepEqual(JSON.parse(JSON.stringify(first)),{dryRun:true,fallbackClientsFound:0,avatarClientsFound:0,resolvedViaUserProfile:0,resolvedViaConversations:0,avatarsResolvedViaUserProfile:0,avatarsUnavailable:0,unresolved:0,updated:0,nextCursor:"c1"});
+  assert.deepEqual(JSON.parse(JSON.stringify(first)),{dryRun:true,fallbackClientsFound:0,avatarClientsFound:0,resolvedViaUserProfile:0,resolvedViaConversations:0,avatarsResolvedViaUserProfile:0,avatarsResolvedViaConversations:0,avatarsUnavailable:0,unresolved:0,updated:0,nextCursor:"c1"});
   assert.equal(resolves,0);assert.equal(writes,0);
   const second=await runFacebookProfileBackfillBatch(rows.slice(1),"page-1",1,true,async()=>({source:"CONVERSATIONS",profile:{displayName:"Rachel Smith",firstName:"Rachel Smith"}}),async()=>{writes++;return true});
   assert.equal(second.fallbackClientsFound,1);assert.equal(second.resolvedViaConversations,1);assert.equal(second.nextCursor,null);assert.equal(writes,0);

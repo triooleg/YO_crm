@@ -6,7 +6,7 @@ import { OrdersDashboard } from "./orders-dashboard";
 import { ProductionWorkspace } from "./production-workspace";
 import { FinanceWorkspace } from "./finance-workspace";
 import { SettingsWorkspace } from "./settings-workspace";
-import { authUi, navigationUi } from "../lib/i18n";
+import { authUi, navigationUi, releaseHistoryUi } from "../lib/i18n";
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
@@ -17,12 +17,13 @@ const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbo
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 
 export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSectionId}){
-  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState("");
+  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
   const authSequence=useRef(0);
   const verifyAuth=()=>{const sequence=++authSequence.current;return fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(sequence!==authSequence.current)return;if(r.status===401||r.status===403){setAuth(false);setAuthError("");return}if(!r.ok)throw new Error();const x=await r.json();if(sequence!==authSequence.current)return;setAuth(x.user);setAuthError("")}).catch(()=>{if(sequence===authSequence.current)setAuthError(authUi.checkError)})};
   useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
   const navigate=(next:CrmSectionId,context?:Record<string,string>)=>{if(next===sectionId&&!context)return;setSectionId(next);const url=new URL(crmSectionHref(next,window.location.search),window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);for(const[key,value]of Object.entries(context||{}))url.searchParams.set(key,value);window.history.pushState(null,"",url)};
   useEffect(()=>{const sync=()=>setSectionId(parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined));window.addEventListener("popstate",sync);return()=>window.removeEventListener("popstate",sync)},[]);
+  useEffect(()=>{if(!releaseHistoryOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setReleaseHistoryOpen(false)};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close)},[releaseHistoryOpen]);
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:authUi.loading}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
@@ -30,10 +31,18 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
     <aside className="crm-nav">
       <div className="crm-brand"><span>Y</span></div>
       <nav>{items.map(([id,name,icon])=><button key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} title={name} aria-label={name} data-tooltip={name}><i>{icon}</i></button>)}</nav>
+      <button type="button" className="crm-version" title={`${navigationUi.version} ${process.env.NEXT_PUBLIC_CRM_VERSION} · ${process.env.NEXT_PUBLIC_CRM_COMMIT}`} onClick={()=>setReleaseHistoryOpen(true)}>CRM v{process.env.NEXT_PUBLIC_CRM_VERSION}</button>
       <button className="crm-logout" type="button" title={authUi.logout} aria-label={authUi.logout} onClick={async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}}}>⇥</button>
     </aside>
     <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate}/>:sectionId==="orders"?<OrdersDashboard onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
+    {releaseHistoryOpen&&<ReleaseHistoryDialog onClose={()=>setReleaseHistoryOpen(false)}/>}
   </main>
+}
+
+function ReleaseHistoryDialog({onClose}:{onClose:()=>void}){
+  const currentVersion=process.env.NEXT_PUBLIC_CRM_VERSION||"development";
+  const commit=process.env.NEXT_PUBLIC_CRM_COMMIT||"development";
+  return <div className="crm-release-overlay" onMouseDown={event=>event.target===event.currentTarget&&onClose()}><section className="crm-release-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-release-title"><header><div><p>{releaseHistoryUi.subtitle}</p><h2 id="crm-release-title">{releaseHistoryUi.title}</h2></div><button type="button" onClick={onClose} aria-label={releaseHistoryUi.close}>×</button></header><div className="crm-release-list">{releaseHistoryUi.releases.map(release=><article className={release.version===currentVersion?"current":""} key={release.version}><div className="crm-release-heading"><h3>CRM v{release.version}</h3><time>{release.date}</time>{release.version===currentVersion&&<span>{releaseHistoryUi.current}</span>}</div><h4>{releaseHistoryUi.changes}</h4><ul>{release.changes.map(change=><li key={change}>{change}</li>)}</ul><h4>{releaseHistoryUi.compatibility}</h4><p>{release.compatibility}</p>{release.version===currentVersion&&<small>{releaseHistoryUi.commit}: <code>{commit}</code></small>}</article>)}</div></section></div>;
 }
 
 function CrmLogin({onSuccess}:{onSuccess:(user:{email:string;displayName:string;role:string})=>void}){

@@ -1,5 +1,15 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-05 — восстановление Facebook-аватаров и журнал версий (готово к deployment)
+
+- Подтверждена регрессия после обновления CRM: основной Meta User Profile API уже запрашивал аватар, но резервный Page Conversations fallback запрашивал только `id,participants` и сохранял имя без `picture`. В production перед исправлением 34 из 36 активных Facebook-клиентов не имели `avatarUrl`; два сохранённых Meta-аватара оставались доступными.
+- Fallback теперь запрашивает `participants{id,name,picture}`, выбирает только точный PSID клиента, исключает страницу и fail-closed отбрасывает неоднозначный результат. Массовое обновление отдельно считает аватары, полученные через User Profile API и Conversations API.
+- Введена версия CRM `0.1.1`: она постоянно видна внизу навигации, а по клику открывает русскоязычный журнал сборок `0.1.1` и базовой точки `0.1.0` с изменениями, совместимостью, откатом и точным Git commit. Журнал также хранится в `CHANGELOG.md`.
+- Docker web build получает `CRM_VERSION` и `CRM_COMMIT`. Тег `crm-vX.Y.Z` после успешного deployment запускает GitHub Actions, который проверяет совпадение с `package.json` и создаёт GitHub Release с русским разделом этой версии. Откат документирован без удаления PostgreSQL, uploads или истории.
+- Failing-first Meta regressions PASS 59/59; финальный полный `pnpm quality:check` PASS: API 326/326, web 214/214, database 7/7, все typecheck и production builds. Browser review подтвердил окно журнала на desktop и 390 px, Escape, мобильное выравнивание заголовка и отсутствие ошибок приложения в консоли; `git diff --check` PASS.
+- Reviews: compatibility PASS (fallback при неподдерживаемом `picture` сохраняет прежний импорт имени; DTO/Prisma/routes не менялись); regression PASS; business/security PASS (точный Page/PSID scope, без удаления и без PII в логах); UI/accessibility PASS; pre-deploy release gatekeeper PASS.
+- После deployment обязательны: FULL backup, exact-SHA доставка, HTTP 200 для CRM и `/api/health`, запуск OWNER/ADMIN backfill Facebook-профилей, повторный агрегат `avatarUrl` и проверка интерфейса. Только после успешного live smoke публикуется неизменяемый тег `crm-v0.1.1`.
+
 ## 2026-09-04 — корректировка страницы «Заказы» (готово локально)
 
 - В сводной таблице восстановлен единый нативный table-layout: заголовки и значения используют одни размеры колонок, полное каноническое обозначение заказа (`YO-YY-NNNN`) снова видно и открывает карточку заказа, имя клиента не скрывается старыми flex/grid-правилами.

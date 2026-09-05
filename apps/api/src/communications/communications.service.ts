@@ -1035,7 +1035,15 @@ export class CommunicationsService {
     if(!/^\d+$/.test(pageId)||!/^\d+$/.test(senderId))throw new BadRequestException("Некорректная область профиля Facebook");
     const result=await resolveMetaFacebookProfileWithFallback(
       fields=>this.metaGraph<MetaFacebookProfile>(senderId,accessToken,{fields},"GET",appSecret,true),
-      ()=>this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{platform:"messenger",user_id:senderId,fields:"id,participants",limit:"5"},"GET",appSecret,true),
+      async()=>{
+        const base={platform:"messenger",user_id:senderId,limit:"5"};
+        try{return await this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{...base,fields:"id,participants{id,name,picture}"},"GET",appSecret,true)}
+        catch(error){
+          if(!(error instanceof MetaGraphRequestError)||error.failure.code!==100)throw error;
+          this.logger.warn(JSON.stringify({event:"META_PROFILE_PICTURE_FIELD_UNAVAILABLE",senderRef:metaIdentityLogRef(senderId)}));
+          return this.metaGraph<MetaConversationsResponse>(pageId+"/conversations",accessToken,{...base,fields:"id,participants"},"GET",appSecret,true);
+        }
+      },
       error=>error instanceof MetaGraphRequestError&&error.failure.code===100&&error.failure.subcode===33,
       senderId,
       pageId,

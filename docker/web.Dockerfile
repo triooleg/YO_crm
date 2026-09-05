@@ -6,7 +6,11 @@ COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile=false
 COPY apps/web apps/web
 ARG NEXT_PUBLIC_API_BASE_URL
+ARG CRM_VERSION
+ARG CRM_COMMIT
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV CRM_VERSION=$CRM_VERSION
+ENV CRM_COMMIT=$CRM_COMMIT
 RUN pnpm --filter @yoleotard-crm/web build
 FROM node:22-alpine
 WORKDIR /app
