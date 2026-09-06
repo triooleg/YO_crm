@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-06 — ручная AI-сводка при отключённой автоматизации, 0.1.8 (готово к выпуску)
+## 2026-09-06 — ручная AI-сводка при отключённой автоматизации, 0.1.8 (deployed)
 
 - Исправлена ошибочная зависимость ручной кнопки «Сформировать сводку» от
   режима автоматического AI конкретного диалога. Сводка теперь работает как
@@ -16,6 +16,31 @@
   обновлена до 0.1.8, журнал сборки добавлен; откат приложения — `crm-v0.1.7`.
 - Финальный `pnpm quality:check` в отдельной проверочной копии прошёл: database
   7/7, web 239/239, API 369/369, typecheck и production build — PASS.
+- Runtime commit `e8e13871079b679dc9280e21eb49275f155a3d0b` fast-forward
+  pushed в `origin/main` и отмечен тегом `crm-v0.1.8`. Release archive SHA-256
+  `6B74050249BD3089443EC209845C5FCFEF6C46DE898170BE8EA8D54B656EE6A3`
+  совпал локально и на сервере.
+- Перед deployment создан и проверен FULL backup
+  `20260906T084713Z-v018-e8e1387-predeploy`: checksums `postgres.dump`,
+  `uploads.tar.gz` и `manifest.json` совпали, PostgreSQL dump и uploads archive
+  читаются. Source rollback сохранён как
+  `/home/trio/yoleotard-crm-backups/source-20260906T084713Z-pre-e8e1387.tar.gz`
+  с SHA-256
+  `17c0be20071d86db2ec2d6a223132ed781c6478042ca9a1453b72997cfae3f17`;
+  прежний каталог — `/home/trio/yoleotard-crm-previous-20260906T084713Z`.
+- В production пересозданы только API
+  `fe6d5b33796caca7f44eaa4314d41a110d60d0f362da73f12d6dd4fa74c5d88f`
+  и web
+  `1273a2f4c5bc7d9d7350058f63973b23265e44a4178d983afc13e77e2b28ad2f`;
+  PostgreSQL `27e5b2cee481` и Redis `cc53be4b7f48` сохранены. Все контейнеры
+  healthy, restart count API/web равен 0, 20 миграций сохранены, internal и
+  public `/api/health` и `/` возвращают HTTP 200, runtime bundle содержит 0.1.8,
+  fresh error scan пустой.
+- Живой запуск сводки по реальной переписке Roberta Massaro не выполнялся:
+  автоматическая проверка безопасности отклонила извлечение production OWNER
+  credentials и отправку этой переписки OpenAI без отдельного явного разрешения
+  на конкретный payload и получателя. Поэтому provider-зависимый production-путь
+  остаётся unverified; код, тесты, сборка и read-only production smoke — PASS.
 
 ## 2026-09-06 — AI-сводка переписки и версия в шапке, 0.1.7 (deployed)
 
