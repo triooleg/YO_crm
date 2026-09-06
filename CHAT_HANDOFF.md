@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-06 — AI-сводка переписки и версия в шапке, 0.1.7 (готовится)
+## 2026-09-06 — AI-сводка переписки и версия в шапке, 0.1.7 (deployed)
 
 - Во вкладках правой панели «Входящих» после «Файлы» добавлена «Сводка».
   Оператор выбирает дату начала в календаре и вручную формирует короткую
@@ -39,7 +39,31 @@
   business/security и UI/accessibility reviews — PASS. Изолированный серверный
   migration preflight последовательно применил 19 миграций из `0922d1f`, затем
   новую миграцию из `b461cfe`: `base=19 head=20 new=1`, production-база не
-  использовалась. До deployment остаются финальный release review и FULL backup.
+  использовалась. Финальный release review также завершён с PASS.
+- Runtime commit `9eb3b57443f040e7a0c08872a30b1a55ba8e3095` fast-forward pushed в
+  `origin/main`. Перед deployment создан и независимо проверен FULL backup
+  `20260905T235312Z-v017-9eb3b57-predeploy`: checksums совпали, PostgreSQL
+  custom dump читается через `pg_restore --list`, uploads archive валиден.
+  Release archive SHA-256
+  `9DB0203555A3DFCE023730446BBAE91D89E27C70CCE22567AF52FC4EAD2DC5C7`
+  совпал локально и на сервере.
+- Source rollback сохранён как
+  `/home/trio/yoleotard-crm-backups/source-20260905T235312Z-pre-9eb3b57.tar.gz`
+  с SHA-256
+  `741d932d5479e46084f68a8a0d2ab916a6211cba3466f44ea68382af44fa3607`;
+  прежний рабочий каталог сохранён как
+  `/home/trio/yoleotard-crm-previous-20260905T235312Z`.
+- В production пересозданы только API `973147fa7bf1` и web `cb693549c355`;
+  PostgreSQL `27e5b2cee481` и Redis `cc53be4b7f48` сохранены. Все четыре
+  контейнера healthy, restart count API/web равен 0. В production завершены 20
+  миграций, новая `20260906090000_conversation_summary_calendar` присутствует.
+  Internal health и web smoke прошли, публичные `/api/health` и `/` возвращают
+  HTTP 200, fresh API/web error scan пустой, runtime web bundle содержит 0.1.7.
+- Автоматизированный доступ к существующей авторизованной Windows-сессии браузера
+  во время выпуска был недоступен из-за неактивной службы Computer Use. Поэтому
+  production-проверка не запускала AI по реальной переписке клиента и не меняла
+  клиентские данные; визуальный desktop/mobile UAT выполнен ранее на точной
+  release-сборке.
 
 ## 2026-09-05 — единый разворот заказа и верхняя навигация, 0.1.6 (deployed)
 
