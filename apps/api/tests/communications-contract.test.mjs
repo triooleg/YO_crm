@@ -37,6 +37,9 @@ const chatwootDelivery = (
 const aiResponse = (
   await readFile(new URL("../src/communications/ai-response.ts", import.meta.url), "utf8")
 ).replace(/\s+/g, "");
+const aiGenerationLease = (
+  await readFile(new URL("../src/communications/ai-generation-lease.ts", import.meta.url), "utf8")
+).replace(/\s+/g, "");
 const contextBuilder = (
   await readFile(new URL("../src/intelligence/context-builder.service.ts", import.meta.url), "utf8")
 ).replace(/\s+/g, "");
@@ -409,8 +412,9 @@ test("uncertain WhatsApp sends remain blocked from retries", () => {
   assert.match(service, /WHATSAPP_DELIVERY_RECONCILED/);
 });
 test("AI requests are rate limited and concurrency bounded per user", () => {
-  assert.match(service, /AI_RATE_LIMIT_PER_HOUR=20/);
-  assert.match(service, /AI_CONCURRENCY_LIMIT=2/);
+  assert.match(aiGenerationLease, /AI_RATE_LIMIT_PER_HOUR=20/);
+  assert.match(aiGenerationLease, /AI_CONCURRENCY_LIMIT=2/);
+  assert.match(aiGenerationLease, /AI_LEASE_MS=600_000/);
   const x = service.slice(
     service.indexOf("@Injectable()exportclassAiAssistantService"),
   );

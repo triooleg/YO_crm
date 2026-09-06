@@ -64,9 +64,7 @@ import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWha
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
 import { chatwootDeleteTarget, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
 import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, SUMMARY_PROMPT_VERSION, summaryPlanFingerprint, summarySourceDigest, type SummaryMessage } from "./conversation-summary";
-const AI_RATE_LIMIT_PER_HOUR = 20,
-  AI_CONCURRENCY_LIMIT = 2,
-  AI_LEASE_MS = 30_000;
+import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -2382,24 +2380,10 @@ export class AiAssistantService {
         "SELECT pg_advisory_xact_lock(hashtext($1))",
         "ai:" + u.id,
       );
-      const now = new Date(),
-        hourAgo = new Date(now.getTime() - 3_600_000),
-        leaseAgo = new Date(now.getTime() - AI_LEASE_MS),
-        used = await tx.auditLog.count({
-          where: {
-            actorId: u.id,
-            entityType: "AI_GENERATION_ATTEMPT",
-            createdAt: { gte: hourAgo },
-          },
-        }),
-        active = await tx.auditLog.count({
-          where: {
-            actorId: u.id,
-            entityType: "AI_GENERATION_ATTEMPT",
-            action: "START",
-            createdAt: { gte: leaseAgo },
-          },
-        });
+      const { used, active } = await inspectAiGenerationAdmission(
+        where => tx.auditLog.count({ where: where as Prisma.AuditLogWhereInput }),
+        u.id,
+      );
       if (used >= AI_RATE_LIMIT_PER_HOUR)
         throw new TooManyRequestsException(
           "Лимит AI-запросов исчерпан. Повторите позже",
@@ -2709,19 +2693,20 @@ export class AiAssistantService {
     const key=this.resolveApiKey(values);
     if(!key)throw new BadRequestException("OpenAI API не подключён");
     const conversation=await this.summaryConversation(clientId,d.channel);
-    const effective=await this.aiControl.effective({conversationId:conversation.id});
-    if(!effective.masterEnabled||effective.mode==="OFF"||effective.serverBlocked)throw new BadRequestException("AI отключён политикой сервера или выбранного диалога");
+    // Operator-requested summaries are a text utility, like TRANSLATE. Conversation
+    // automation policy controls analysis and reply generation, not this manual action.
+    const utilityLimits=await this.aiControl.effective();
     const [source,operational]=await Promise.all([this.summaryMessages(conversation.id,d.fromDate),this.summaryContext(clientId)]);
     if(!source.messages.length||!source.through)throw new BadRequestException("С выбранной даты в переписке нет сообщений");
     const operationalJson=JSON.stringify(operational),operationalSnapshot=JSON.parse(operationalJson) as Prisma.InputJsonValue;
     const digest=summarySourceDigest(source.messages,operationalSnapshot),fromDateDb=new Date(`${d.fromDate}T00:00:00.000Z`);
     let existing=await this.p.conversationSummary.findUnique({where:{conversationId_fromDate_sourceDigest:{conversationId:conversation.id,fromDate:fromDateDb,sourceDigest:digest}}});
     if(existing?.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false}}
-    const maxInputCharacters=Number(effective.maxInputCharacters||12000);
+    const maxInputCharacters=Number(utilityLimits.maxInputCharacters||12000);
     if(operationalJson.length+3000>maxInputCharacters)throw new BadRequestException("Данные клиента превышают разрешённый объём AI-контекста");
     const chunkCharacters=Math.max(1000,Math.min(32000,maxInputCharacters-operationalJson.length-3000));
     const chunks=splitSummaryMessages(source.messages,chunkCharacters);
-    const throughDate=crmDateKey(source.through.createdAt),startedAt=Date.now(),outputTokens=Math.max(400,Math.min(2400,Number(effective.maxOutputTokens||1600)));
+    const throughDate=crmDateKey(source.through.createdAt),startedAt=Date.now(),outputTokens=Math.max(400,Math.min(2400,Number(utilityLimits.maxOutputTokens||1600)));
     const planFingerprint=summaryPlanFingerprint({model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,maxInputCharacters,chunkCharacters,chunks});
     const leaseToken=randomUUID(),leaseUntil=new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS);
     let claimed=false;

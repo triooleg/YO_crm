@@ -13,6 +13,11 @@ import {
   summaryPlanFingerprint,
   summarySourceDigest,
 } from "../src/communications/conversation-summary.ts";
+import {
+  AI_CONCURRENCY_LIMIT,
+  AI_LEASE_MS,
+  inspectAiGenerationAdmission,
+} from "../src/communications/ai-generation-lease.ts";
 
 const read = path => readFile(new URL(path, import.meta.url), "utf8");
 const [schema, migration, controller, dto, service] = await Promise.all([
@@ -74,6 +79,28 @@ test("последняя версия даты выбирается детерм
   assert.equal(MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, 8);
   assert.deepEqual(readSummaryProcessingState(undefined, 20, "plan-a"), { stage: "MAP", nextIndex: 0, partials: [], reduced: [], level: 1, planFingerprint: "plan-a" });
   assert.deepEqual(readSummaryProcessingState(undefined, 1, "plan-a"), { stage: "DIRECT", nextIndex: 0, partials: [], reduced: [], level: 1, planFingerprint: "plan-a" });
+});
+
+test("длительные AI-запросы сохраняют оба concurrency-слота без изменения времени аудита", async () => {
+  const now = new Date("2026-09-06T12:00:00.000Z");
+  const rows = [
+    { id: "a", actorId: "operator", entityType: "AI_GENERATION_ATTEMPT", action: "START", createdAt: new Date(now.getTime() - 31_000) },
+    { id: "b", actorId: "operator", entityType: "AI_GENERATION_ATTEMPT", action: "START", createdAt: new Date(now.getTime() - 31_000) },
+    { id: "done", actorId: "operator", entityType: "AI_GENERATION_ATTEMPT", action: "COMPLETE", createdAt: new Date(now.getTime() - 1_000) },
+    { id: "foreign", actorId: "operator", entityType: "OTHER_EVENT", action: "START", createdAt: new Date(now.getTime() - 1_000) },
+  ];
+  const matches = (row, where) => Object.entries(where).every(([key, value]) => {
+    if (key === "createdAt") return row.createdAt >= value.gte;
+    return row[key] === value;
+  });
+  const auditLog = {
+    async count({ where }) { return rows.filter(row => matches(row, where)).length; },
+  };
+  const admission = await inspectAiGenerationAdmission(where => auditLog.count({ where }), "operator", now);
+  assert.equal(AI_LEASE_MS, 600_000);
+  assert.equal(admission.active, AI_CONCURRENCY_LIMIT);
+  assert.equal(admission.used, 3);
+  assert.equal(rows[0].createdAt.toISOString(), new Date(now.getTime() - 31_000).toISOString());
 });
 
 test("возобновление принимает только тот же план разбиения и сбрасывается при смене модели или лимита", () => {
@@ -150,12 +177,14 @@ test("сводки имеют расширяющую миграцию, уник�
   assert.doesNotMatch(service, /take:180/);
   assert.match(service, /summarySourceDigest\(source\.messages,operationalSnapshot\)/);
   assert.match(service, /summarySourceDigest\(current\.messages,currentOperational\)/);
-  assert.match(service, /this\.aiControl\.effective\(\{conversationId:conversation\.id\}\)/);
-  assert.match(service, /effective\.mode==="OFF"/);
+  assert.match(service, /this\.aiControl\.effective\(\)/);
+  assert.doesNotMatch(service, /this\.aiControl\.effective\(\{conversationId:conversation\.id\}\)/);
+  assert.doesNotMatch(service, /AI отключён политикой сервера или выбранного диалога/);
   assert.doesNotMatch(service, /chunks\.length>MAX_SUMMARY_SOURCE_CHUNKS/);
   assert.match(service, /maxCalls:MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH/);
   assert.match(service, /processingLeaseUntil/);
   assert.match(service, /processingLeaseToken:leaseToken/);
+  assert.match(service, /await renewOwnedLease\(\)/);
   assert.match(service, /renewed\.count!==1/);
   assert.match(service, /saved\.count!==1/);
   assert.match(service, /processingState/);
