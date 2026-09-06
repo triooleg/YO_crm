@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "task": {
+    "id": "orders-context-smoke",
+    "title": "Analyze Orders payment calculation without modifying code",
+    "description": "Read-only smoke workflow for context routing, compact dependency summaries, repository mapping, telemetry and safe tool fallbacks.",
+    "base_ref": "HEAD",
+    "max_fix_cycles": 3,
+    "fix_cycles": 0,
+    "max_parallel": 3,
+    "local_only": true,
+    "context_budget": { "global_rules": 8000, "role": 3500, "task": 5000, "dependencies": 7500, "repository_map": 9000, "total": 26000 }
+  },
+  "nodes": [
+    {
+      "id": "plan-payment-analysis", "title": "Plan the payment calculation analysis", "description": "Locate the existing Orders payment calculation boundaries and split read-only investigation without proposing code changes.",
+      "agent": "PLANNER", "kind": "analysis", "depends_on": [], "status": "PENDING", "priority": 100,
+      "affected_paths": ["apps/api/src/orders", "apps/web/components/orders-workspace.tsx", "packages/database/prisma/schema.prisma"],
+      "acceptance_criteria": ["Identify exact frontend backend and database boundaries", "Use a compact repository map", "Do not edit files"],
+      "validation_commands": [], "required": true, "human_approval": false, "context_strategy": ["repomix", "repository_map", "targeted_search"]
+    },
+    {
+      "id": "inspect-payment-frontend", "title": "Inspect frontend payment projection", "description": "Use targeted symbols and references to explain how Orders renders payment totals and status.",
+      "agent": "FRONTEND", "kind": "analysis", "depends_on": ["plan-payment-analysis"], "status": "PENDING", "priority": 80,
+      "affected_paths": ["apps/web/components/orders-workspace.tsx"], "acceptance_criteria": ["Report exact symbols and interfaces", "Do not read unrelated backend history", "Do not edit files"],
+      "validation_commands": [], "required": true, "human_approval": false, "context_strategy": ["serena_symbols", "serena_references", "targeted_search"]
+    },
+    {
+      "id": "inspect-payment-backend", "title": "Inspect backend payment calculation", "description": "Use targeted symbols and references to trace payment totals deposit threshold and production-slot effects.",
+      "agent": "BACKEND", "kind": "analysis", "depends_on": ["plan-payment-analysis"], "status": "PENDING", "priority": 80,
+      "affected_paths": ["apps/api/src/orders", "apps/api/tests/order-payments-contract.test.mjs"], "acceptance_criteria": ["Report exact methods and callers", "Preserve business rules", "Do not edit files"],
+      "validation_commands": [], "required": true, "human_approval": false, "context_strategy": ["serena_symbols", "serena_references", "targeted_search"]
+    },
+    {
+      "id": "inspect-payment-database", "title": "Inspect payment persistence", "description": "Use targeted model lookup to map Order Payment and ProductionSlot relations relevant to payment calculation.",
+      "agent": "DATABASE", "kind": "analysis", "depends_on": ["plan-payment-analysis"], "status": "PENDING", "priority": 80,
+      "affected_paths": ["packages/database/prisma/schema.prisma"], "acceptance_criteria": ["Report only relevant models and invariants", "Do not inspect customer data", "Do not edit files"],
+      "validation_commands": [], "required": true, "human_approval": false, "context_strategy": ["serena_symbols", "targeted_search"]
+    },
+    {
+      "id": "payment-analysis-summary", "title": "Consolidate payment calculation analysis", "description": "Produce a compact report from dependency summaries and distinguish verified source facts from remaining runtime evidence gaps.",
+      "agent": "REVIEWER", "kind": "review", "depends_on": ["inspect-payment-frontend", "inspect-payment-backend", "inspect-payment-database"], "status": "PENDING", "priority": 50,
+      "affected_paths": [], "acceptance_criteria": ["Use dependency summaries rather than transcripts", "Report context and fallback metrics", "Do not claim production verification", "Do not edit files"],
+      "validation_commands": [], "required": true, "human_approval": false, "context_strategy": ["repository", "targeted_search"], "review_verdict_required": true
+    }
+  ]
+}

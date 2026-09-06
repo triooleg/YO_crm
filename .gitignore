@@ -19,3 +19,9 @@ backups/
 apps/web/.next-*/
 output/
 tmp/
+.worktrees/
+.codex/dags/current.json
+.codex/dags/history/*
+!.codex/dags/history/.gitkeep
+.codex/cache/
+.codex/benchmarks/

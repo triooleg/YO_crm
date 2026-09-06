@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-09-04",
+  "samples": 5,
+  "task": "dag-tooling-review",
+  "codex_process_startup_ms": 41.0,
+  "dag_status_ms": 732.9,
+  "task_planning_ms": 757.5,
+  "repository_scan_ms": 24.5,
+  "average_node_context_chars": 4299,
+  "average_node_approximate_tokens": 1075,
+  "dag_test_runtime_ms": 3350,
+  "notes": "Codex startup measures local CLI process startup with codex --version, not remote model latency. Context tokens are estimated as characters divided by four because exact provider usage was unavailable."
+}

@@ -92,3 +92,35 @@ consumer rules are in `docs/agents/domain.md`.
   is absent, review the complete staged, unstaged and untracked diff directly
   against the chosen base on both Standards and Spec axes, then run all roles in
   `.agents/README.md`.
+## Repository map and commands
+
+- `apps/web`: Next.js user interface. `apps/api`: NestJS REST API.
+- `packages/database`: Prisma schema and migrations. `packages/shared`: shared contracts.
+- `tools/dag`: development-only DAG orchestrator. `.codex/agents`: DAG role contracts.
+- Install with `pnpm install --frozen-lockfile`; use Node 22+ and the pinned pnpm version.
+- Run local apps with `pnpm dev`; use `pnpm test`, `pnpm typecheck`, `pnpm build`, and
+  `pnpm quality:check`. There is no separate root lint script; do not invent one.
+- Run DAG tooling tests separately with `pnpm dag:test`.
+- Codex context routing, budgets, cache, optional MCP tools, and rollback are documented in
+  `docs/codex/tooling.md`; these are development-only and must not enter CRM runtime images.
+- Database commands are `pnpm db:generate`, `pnpm db:migrate`, `pnpm db:deploy`, and
+  `pnpm db:seed`. Never run deploy/seed against production without explicit scope and approval.
+- Validate local Compose with `docker compose config`; deployment variants are
+  `docker-compose.yml`, `docker-compose.portainer.yml`, and `docker-compose.backup-test.yml`.
+- NEVER replace production logic or production data with mock implementations unless explicitly requested.
+
+Before changing code, inspect the owning module, its tests, shared contracts, current Git status,
+and the continuity documents. Preserve unrelated dirty changes and production compatibility.
+Keep REST DTOs, shared types, frontend consumers, Prisma writes, authorization, audit history,
+and documented provider/webhook contracts backward compatible unless an approved migration says otherwise.
+
+## Git and DAG workflow
+
+- Never use `git add .`; stage only explicit files belonging to the assigned task.
+- Implementation DAG nodes work in isolated Git worktrees and commit only their assigned paths.
+- Only the `INTEGRATOR` role may combine commits. Agents must not merge directly to `main`.
+- DAG definitions and runtime state live under `.codex/dags`; execution history is local and ignored.
+- DAG nodes should declare the narrowest useful `context_strategy`; search symbols and references
+  before broad reads, and pass compact dependency summaries instead of complete transcripts.
+- Human approval is mandatory before destructive migrations/deletions, auth or payment changes,
+  credential handling, production infrastructure changes, or large public API changes.
