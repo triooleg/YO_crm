@@ -1,5 +1,27 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-06 — project-local engineering skills (prepared, not committed)
+
+- В отдельном worktree `codex/matt-skills-integration` от актуального
+  `origin/main` установлены 23 выбранных skills из `mattpocock/skills` для Codex
+  в `.agents/skills/`; источник и upstream baseline hashes сохранены в
+  `skills-lock.json`, локальные адаптации версионируются самими файлами skills.
+- Один раз выполнена prompt-driven настройка: GitHub Issues как tracker без
+  автоматического создания issues, стандартный словарь triage labels, один
+  корневой `CONTEXT.md` и ADR-каталог `docs/decisions/`.
+- Добавлены русская инструкция `docs/CODEX_SKILLS.md` и шесть model-invoked
+  skills, привязанных к реальным моделям и модулям YO_crm: orders,
+  measurements, production, payments, messaging и CRM UI.
+- `AGENTS.md` сохранён и дополнен короткой политикой выбора процесса. Правила
+  проекта имеют приоритет над vendored defaults; issue/commit/push/merge/deploy
+  и production mutations выполняются только при разрешении текущей задачи.
+- Runtime, API, Prisma, Docker, package manifests и production не изменялись.
+  Версия CRM остаётся 0.1.8. Автоматический commit не создавался.
+- Проверки: официальный `skills` CLI обнаруживает 29 project-local skills;
+  `pnpm quality:check` прошёл tests и typecheck, отдельный `pnpm build` прошёл
+  после разрешения сетевой загрузки Google Fonts; `git diff --check` прошёл.
+  Compatibility, regression, business/security и UI/N/A review-роли дали PASS.
+
 ## 2026-09-06 — ручная AI-сводка при отключённой автоматизации, 0.1.8 (deployed)
 
 - Исправлена ошибочная зависимость ручной кнопки «Сформировать сводку» от

@@ -55,3 +55,40 @@ Regression, business-rule, visual, and release reviews are mandatory. A release
 must not be deployed while any reviewer reports a blocking finding or while
 `pnpm quality:check` fails. Existing working behavior is a compatibility
 contract unless the user explicitly approves its replacement.
+
+## Engineering Skills Workflow
+
+Use the project-local Matt Pocock skills for substantial engineering work, with
+`CONTEXT.md` and relevant records in `docs/decisions/` as domain sources.
+
+GitHub Issues is the configured tracker (`docs/agents/issue-tracker.md`), the
+canonical triage labels are in `docs/agents/triage-labels.md`, and domain-doc
+consumer rules are in `docs/agents/domain.md`.
+
+- Use `grill-with-docs` before an ambiguous complex feature and `to-spec` after
+  a feature has already been discussed enough to formalize.
+- Use `to-tickets` for independently executable work with dependencies,
+  `implement` for an approved spec or ticket, and `wayfinder` for initiatives
+  too large for one session.
+- Use `tdd` at a testable seam, `diagnosing-bugs` for difficult regressions,
+  `code-review` before completing substantial code changes, and
+  `improve-codebase-architecture` for surveys that stop before refactoring.
+- Matt's `code-review` is supplemental. It never replaces the compatibility,
+  regression, business/security, visual and release roles in `.agents/README.md`.
+- The existing DAG remains the execution orchestrator for parallel substantial
+  work. Matt skills clarify, specify and guide work; they do not replace DAG
+  worktrees, role contracts or the INTEGRATOR-only merge boundary.
+- Keep `CONTEXT.md` synchronized when canonical domain language changes and add
+  an ADR only for a durable, cross-module decision.
+- Apply the lightest workflow that fits the task. Handle trivial copy, icon and
+  isolated CSS edits directly.
+- Project instructions override vendored skill defaults. Any vendored step that
+  says to commit means prepare and report an uncommitted diff until the current
+  user request explicitly authorizes a commit. The same explicit authorization
+  rule applies to issues, push, merge, deploy and production mutations.
+- A temporary file produced by `handoff` supplements continuity; update the
+  canonical `CHAT_HANDOFF.md` after meaningful implementation or deployment.
+- Vendored `code-review` compares committed history. When commit authorization
+  is absent, review the complete staged, unstaged and untracked diff directly
+  against the chosen base on both Standards and Spec axes, then run all roles in
+  `.agents/README.md`.
