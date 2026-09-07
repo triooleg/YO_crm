@@ -19,8 +19,12 @@ backups/
 apps/web/.next-*/
 output/
 tmp/
+.local/
+.pnpm-store/
+node_modules.corrupt-*/
 .worktrees/
 .codex/dags/current.json
+.codex/dags/current.json.*.tmp
 .codex/dags/history/*
 !.codex/dags/history/.gitkeep
 .codex/cache/
