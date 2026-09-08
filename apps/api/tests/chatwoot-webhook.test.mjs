@@ -7,8 +7,8 @@ import { createRequire } from "node:module";
 
 const source=await readFile(new URL("../src/communications/chatwoot-webhook.ts",import.meta.url),"utf8");
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
-const require=createRequire(import.meta.url),module={exports:{}};vm.runInNewContext(js,{module,exports:module.exports,require,Buffer,Date,URL,Response,ReadableStream,RangeError,TypeError});
-const {boundedChatwootResponseJson,chatwootReadReceiptFromApi,normalizeChatwootMessageUpdate,normalizeChatwootReadReceipt,normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
+const require=createRequire(import.meta.url),module={exports:{}};vm.runInNewContext(js,{module,exports:module.exports,require,Buffer,Date,URL,Response,ReadableStream,AbortSignal,RangeError,TypeError});
+const {boundedChatwootResponseJson,chatwootBackfillBatch,chatwootContactProfile,chatwootContactRecords,chatwootReadReceiptFromApi,fetchChatwootContactProfile,normalizeChatwootMessageUpdate,normalizeChatwootReadReceipt,normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
 
 test("Chatwoot normalizes Facebook, Instagram, WhatsApp, e-mail and native inboxes",()=>{
   const base={event:"message_created",message_type:"incoming",id:17,content:"Здравствуйте",created_at:1700000000,sender:{id:9,name:"Анна"},conversation:{contact_inbox:{source_id:"contact-9"},account_id:2}};
@@ -111,6 +111,48 @@ test("Chatwoot prefers the incoming message sender name over an obsolete generat
   });
   assert.equal(event.displayName,"Nicola.Faccioli");
   assert.equal(event.email,"nicola@example.com");
+});
+
+test("Chatwoot keeps the contact id and normalizes contact details fetched from the account API",()=>{
+  const [event]=normalizeChatwootWebhook({
+    event:"message_created",message_type:"incoming",id:21,content:"Hello",created_at:1700000003,
+    account:{id:2},inbox:{id:2,channel_type:"Channel::Api"},
+    sender:{id:91,name:"Website visitor"},
+    conversation:{id:118,account_id:2,contact_inbox:{source_id:"contact-91"}},
+  });
+  assert.equal(event.metadata.chatwootContactId,"91");
+  assert.deepEqual(JSON.parse(JSON.stringify(chatwootContactProfile({payload:{
+    id:91,name:"Nicola Faccioli",email:" Nicola@Example.COM ",phone_number:" +390123456789 ",thumbnail:"https://chatwoot.example/avatar.jpg",
+    additional_attributes:{city:"Milan",country:"Italy",country_code:"IT"},
+  }}))),{
+    displayName:"Nicola Faccioli",email:"nicola@example.com",phone:"+390123456789",avatarUrl:"https://chatwoot.example/avatar.jpg",city:"Milan",country:"Italy",
+  });
+});
+
+test("Chatwoot contact backfill keeps only the configured inbox and usable e-mail",()=>{
+  const records=chatwootContactRecords({meta:{count:2,current_page:1},payload:[
+    {id:91,name:"Nicola",identifier:"visitor-91",email:"nicola@example.com",contact_inboxes:[
+      {source_id:"contact-91",inbox:{id:2,channel_type:"Channel::Api"}},
+      {source_id:"other-91",inbox:{id:3,channel_type:"Channel::Email"}},
+    ]},
+    {id:92,name:"Anonymous",email:null,contact_inboxes:[{source_id:"contact-92",inbox:{id:2,channel_type:"Channel::Api"}}]},
+  ]},"2");
+  assert.deepEqual(JSON.parse(JSON.stringify(records)),[{contactId:"91",sourceId:"contact-91",candidateExternalIds:["contact-91","visitor-91","91"],channel:"CHATWOOT",displayName:"Nicola",email:"nicola@example.com"}]);
+});
+
+test("Chatwoot backfill cursor never skips the remainder of a provider page",()=>{
+  const records=Array.from({length:15},(_,index)=>({contactId:String(index+1),sourceId:`contact-${index+1}`,candidateExternalIds:[`contact-${index+1}`],channel:"CHATWOOT",email:`c${index+1}@example.com`}));
+  const first=chatwootBackfillBatch(records,1,0,4,16),second=chatwootBackfillBatch(records,1,4,4,16),last=chatwootBackfillBatch(records,1,12,4,16);
+  assert.deepEqual(first.records.map(item=>item.contactId),["1","2","3","4"]);assert.equal(first.nextCursor,"1:4");
+  assert.deepEqual(second.records.map(item=>item.contactId),["5","6","7","8"]);assert.equal(second.nextCursor,"1:8");
+  assert.deepEqual(last.records.map(item=>item.contactId),["13","14","15"]);assert.equal(last.nextCursor,"2:0");
+});
+
+test("Chatwoot contact lookup is fail-open when the provider rejects or times out",async()=>{
+  const ok=await fetchChatwootContactProfile("https://chatwoot.example/api/v1/accounts/2/contacts/91","secret",async()=>new Response(JSON.stringify({payload:{id:91,email:"client@example.com"}})));
+  assert.equal(ok.email,"client@example.com");
+  assert.equal(await fetchChatwootContactProfile("https://chatwoot.example/api/v1/accounts/2/contacts/91","secret",async()=>new Response("",{status:404})),undefined);
+  assert.equal(await fetchChatwootContactProfile("https://chatwoot.example/api/v1/accounts/2/contacts/91","secret",async()=>{throw new Error("timeout")}),undefined);
 });
 
 test("Chatwoot signature uses raw request body",()=>{

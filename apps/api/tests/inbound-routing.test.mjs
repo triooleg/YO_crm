@@ -102,3 +102,25 @@ test("client presentation hides only a synthetic Facebook e-mail and preserves t
   const emailChannel={...technical,source:"EMAIL",facebook:null};
   assert.deepEqual(JSON.parse(JSON.stringify(presentClientContact(emailChannel))),emailChannel);
 });
+
+test("inbound contact details fill only empty client fields",()=>{
+  const {inboundClientProfilePatch}=load();
+  const empty={email:null,phone:"",avatarUrl:null,city:null,country:null};
+  assert.deepEqual(JSON.parse(JSON.stringify(inboundClientProfilePatch(empty,{
+    email:" Customer@Example.COM ",phone:"+390123",avatarUrl:"https://example.com/a.jpg",city:"Milan",country:"Italy",
+  },"CHATWOOT"))),{
+    email:"customer@example.com",phone:"+390123",avatarUrl:"https://example.com/a.jpg",city:"Milan",country:"Italy",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(inboundClientProfilePatch({
+    email:"manual@example.com",phone:"+3801",avatarUrl:"https://example.com/manual.jpg",city:"Kyiv",country:"Ukraine",
+  },{
+    email:"provider@example.com",phone:"+3901",avatarUrl:"https://example.com/provider.jpg",city:"Milan",country:"Italy",
+  },"CHATWOOT"))),{});
+});
+
+test("real provider e-mail replaces a synthetic Facebook alias but invalid input does not",()=>{
+  const {inboundClientProfilePatch}=load();
+  assert.deepEqual(JSON.parse(JSON.stringify(inboundClientProfilePatch({email:"28487285184292491@facebook.com"},{email:"real@example.com"},"FACEBOOK"))),{email:"real@example.com"});
+  assert.deepEqual(JSON.parse(JSON.stringify(inboundClientProfilePatch({email:null},{email:"not-an-email"},"CHATWOOT"))),{});
+  assert.deepEqual(JSON.parse(JSON.stringify(inboundClientProfilePatch({email:null},{email:"28487285184292491@facebook.com"},"CHATWOOT"))),{});
+});

@@ -489,7 +489,7 @@ test("Meta synchronization scopes dedupe to the connected account and persists e
 });
 
 test("Chatwoot is a bidirectional idempotent channel with media and audited delivery", () => {
-  assert.match(service, /event\.direction==="OUTBOUND"\?awaitthis\.persistChatwootOutbound/);
+  assert.match(service, /enrichedEvent\.direction==="OUTBOUND"\?awaitthis\.persistChatwootOutbound/);
   assert.match(service, /chatwoot-echo:/);
   assert.match(service, /CHATWOOT_OUTBOUND_IGNORED/);
   assert.match(service, /OUTBOUND_MESSAGE_SYNCED/);
@@ -511,6 +511,9 @@ test("Chatwoot is a bidirectional idempotent channel with media and audited deli
   assert.match(service, /metadata:\s*\{\s*path:\s*\["chatwootConversationId"\],\s*not:\s*Prisma\.JsonNull\s*\}/);
   assert.match(service, /distinct:\s*\["conversationId"\]/);
   assert.match(service, /chatwootIdentityByConversation/);
+  assert.match(controller, /@Post\("chatwoot\/profiles\/backfill"\)@Roles\("OWNER","ADMIN"\)/);
+  assert.match(service, /CHATWOOT_CONTACT_BACKFILL/);
+  assert.match(service, /CLIENT_PROFILE_IMPORTED/);
 });
 
 test("Chatwoot read updates mark only the exact sent outbound message",()=>{

@@ -73,6 +73,7 @@ function CommunicationsSettings() {
     [saved, setSaved] = useState<"meta" | "chatwoot" | "email" | null>(null),
     [saving, setSaving] = useState(false),
     [profileRefresh,setProfileRefresh]=useState(""),
+    [chatwootProfileRefresh,setChatwootProfileRefresh]=useState(""),
     [oauthLoading,setOauthLoading]=useState(false),
     [metaFlowId,setMetaFlowId]=useState(""),
     [metaPages,setMetaPages]=useState<Array<{id:string;name:string;instagramAccountId:string;instagramUsername:string}>>([]);
@@ -151,6 +152,7 @@ function CommunicationsSettings() {
   async function selectMetaPage(pageId:string){setSaving(true);setError("");try{const r=await fetch("/api/communications/meta/oauth/connect",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({flowId:metaFlowId,pageId})});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.channelsSaveError)}await load();setMetaFlowId("");setMetaPages([]);setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   async function verifyMetaDelivery(){setSaving(true);setSaved(null);setError("");try{const r=await fetch("/api/communications/meta/delivery/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.metaVerifyDeliveryError)}await load();setSaved("meta")}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   async function refreshFacebookProfiles(){setSaving(true);setError("");setProfileRefresh("");let cursor:string|undefined,batches=0,updated=0,avatarsUpdated=0,avatarsUnavailable=0;try{do{const r=await fetch("/api/communications/meta/profiles/backfill",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({dryRun:false,limit:10,cursor})});const result=await r.json().catch(()=>({}));if(!r.ok)throw new Error(result.message||settingsUi.metaProfilesRefreshError);updated+=Number(result.updated||0);avatarsUpdated+=Number(result.avatarsResolvedViaUserProfile||0)+Number(result.avatarsResolvedViaConversations||0);avatarsUnavailable+=Number(result.avatarsUnavailable||0);cursor=typeof result.nextCursor==="string"?result.nextCursor:undefined;batches++}while(cursor&&batches<20);setProfileRefresh(`${settingsUi.metaProfilesUpdated}: ${updated}. ${settingsUi.metaAvatarsUpdated}: ${avatarsUpdated}. ${settingsUi.metaAvatarsUnavailable}: ${avatarsUnavailable}.`)}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
+  async function refreshChatwootProfiles(){setSaving(true);setError("");setChatwootProfileRefresh("");let cursor:string|undefined,batches=0,scanned=0,matched=0,updated=0;try{do{const r=await fetch("/api/communications/chatwoot/profiles/backfill",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({dryRun:false,limit:15,cursor})});const result=await r.json().catch(()=>({}));if(!r.ok)throw new Error(result.message||settingsUi.chatwootProfilesRefreshError);scanned+=Number(result.scanned||0);matched+=Number(result.matched||0);updated+=Number(result.updated||0);cursor=typeof result.nextCursor==="string"?result.nextCursor:undefined;batches++}while(cursor&&batches<500);if(cursor)throw new Error(settingsUi.chatwootProfilesRefreshIncomplete);setChatwootProfileRefresh(`${settingsUi.chatwootProfilesScanned}: ${scanned}. ${settingsUi.chatwootProfilesMatched}: ${matched}. ${settingsUi.chatwootProfilesUpdated}: ${updated}.`)}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   async function verifyEmail(){setSaving(true);setError("");try{const r=await fetch("/api/communications/email/verify",{method:"POST",credentials:"include"});if(!r.ok){const x=await r.json().catch(()=>({}));throw new Error(x.message||settingsUi.emailVerifyError)}setSaved("email");await load()}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
   if (!data)
     return (
@@ -272,9 +274,8 @@ function CommunicationsSettings() {
         </div>
         <p>{settingsUi.chatwootEmailHint}</p>
         {saved==="chatwoot"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
-        <button className="phase2-primary" disabled={saving}>
-          {settingsUi.save}
-        </button>
+        {chatwootProfileRefresh&&<div className="settings-success" role="status">{chatwootProfileRefresh}</div>}
+        <div className="settings-actions"><button className="phase2-primary" disabled={saving}>{settingsUi.save}</button><button className="settings-secondary" type="button" disabled={saving||!data.chatwoot.accessTokenConfigured} onClick={()=>void refreshChatwootProfiles()}>{settingsUi.chatwootRefreshProfiles}</button></div>
       </form>
       <form className="settings-card" onSubmit={(e) => submit("email", e)}>
         <h2>

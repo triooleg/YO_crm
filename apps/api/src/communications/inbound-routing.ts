@@ -47,7 +47,7 @@ export function isSyntheticFacebookEmail(value: unknown) {
 export function customerEmail(value: unknown, channel: string) {
   if (typeof value !== "string") return undefined;
   const email = value.trim().toLowerCase();
-  if (!email || (channel === "FACEBOOK" && isSyntheticFacebookEmail(email))) return undefined;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || (channel === "FACEBOOK" && isSyntheticFacebookEmail(email))) return undefined;
   return email;
 }
 
@@ -62,4 +62,23 @@ export function shouldRefreshInboundDisplayName(current: string, incoming: strin
   if (provider === "META") return /^(Facebook|Instagram) \d+$/.test(current);
   if (provider !== "CHATWOOT" || channel !== "CHATWOOT") return false;
   return /^Chatwoot \S+$/.test(current) || /^[a-z][a-z0-9]*-[a-z][a-z0-9]*-\d{3,}$/.test(current);
+}
+
+type InboundProfile = {
+  email?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  city?: string | null;
+  country?: string | null;
+};
+
+export function inboundClientProfilePatch(current: InboundProfile, incoming: InboundProfile, channel: string) {
+  const patch: InboundProfile = {};
+  const email = customerEmail(incoming.email, channel);
+  if (email && !isSyntheticFacebookEmail(email) && (!current.email?.trim() || isSyntheticFacebookEmail(current.email))) patch.email = email;
+  for (const field of ["phone", "avatarUrl", "city", "country"] as const) {
+    const value = typeof incoming[field] === "string" ? incoming[field]!.trim() : "";
+    if (value && !current[field]?.trim()) patch[field] = value;
+  }
+  return patch;
 }

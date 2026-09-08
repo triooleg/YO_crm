@@ -47,6 +47,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("meta/delivery/verify")@Roles("OWNER","ADMIN")verifyMetaDelivery(@Req()r:Request&{user:User}){return this.c.verifyMetaDelivery(r.user)}
 @Post("meta/profiles/backfill")@Roles("OWNER","ADMIN")backfillMetaProfiles(@Body()d:MetaProfileBackfillDto,@Req()r:Request&{user:User}){return this.c.backfillFacebookProfiles(d.dryRun,d.limit,d.cursor,r.user)}
 @Post("meta/instagram/profiles/backfill")@Roles("OWNER","ADMIN")backfillInstagramProfiles(@Body()d:MetaProfileBackfillDto,@Req()r:Request&{user:User}){return this.c.backfillInstagramProfiles(d.dryRun,d.limit,d.cursor,r.user)}
+@Post("chatwoot/profiles/backfill")@Roles("OWNER","ADMIN")backfillChatwootProfiles(@Body()d:MetaProfileBackfillDto,@Req()r:Request&{user:User}){return this.c.backfillChatwootProfiles(d.dryRun,d.limit,d.cursor,r.user)}
 @Get("meta/data-deletion-requests")@Roles("OWNER","ADMIN")metaDataDeletionRequests(){return this.c.listMetaDataDeletionRequests()}
 @Post("meta/data-deletion-requests/:code/complete")@Roles("OWNER","ADMIN")completeMetaDataDeletion(@Param("code")code:string,@Body()d:MetaDataDeletionCompleteDto,@Req()r:Request&{user:User}){return this.c.completeMetaDataDeletion(code,d.clientId,d.retentionNote,r.user)}
 @Post("attachments")@Roles("OWNER","ADMIN","MANAGER")uploadAttachment(@Body()d:UploadCommunicationAttachmentDto,@Req()r:Request&{user:User}){return this.c.uploadAttachment(d,r.user)}

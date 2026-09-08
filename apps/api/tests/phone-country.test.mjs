@@ -97,7 +97,7 @@ test("provider payload without a valid WhatsApp phone creates no country audit",
 test("Meta and Chatwoot WhatsApp inbound routes converge on the tested enrichment seam", async () => {
   const service = await readFile(new URL("../src/communications/communications.service.ts", import.meta.url), "utf8");
   assert.match(service, /persistMaterializedWhatsapp[\s\S]*this\.persistInbound\(event, "META"/);
-  assert.match(service, /this\.persistInbound\(event, "CHATWOOT"/);
+  assert.match(service, /this\.persistInbound\(enrichedEvent, "CHATWOOT"/);
   assert.match(service, /enrichWhatsappClientCountry\(\{ channel, clientId, phone \}/);
   assert.match(service, /OR:\s*\[\{\s*country:\s*null\s*\},\s*\{\s*country:\s*""\s*\}\]/);
   assert.match(service, /countryAutoDetected/);

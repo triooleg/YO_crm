@@ -14,8 +14,90 @@ const channelFor = (value: unknown): MetaInboundMessage["channel"] | "CHATWOOT" 
 
 const chatwootCustomerEmail = (value: unknown, channel: MetaInboundMessage["channel"] | "CHATWOOT" | "EMAIL") => {
   const email = String(value || "").trim().toLowerCase();
-  return email && !(channel === "FACEBOOK" && /^\d+@facebook\.com$/i.test(email)) ? email : undefined;
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !/^\d+@facebook\.com$/i.test(email) ? email : undefined;
 };
+
+const profileText = (value: unknown, maxLength: number) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? text.slice(0, maxLength) : undefined;
+};
+
+export type ChatwootContactProfile = {
+  displayName?: string;
+  email?: string;
+  phone?: string;
+  avatarUrl?: string;
+  city?: string;
+  country?: string;
+};
+
+export type ChatwootContactRecord = ChatwootContactProfile & {
+  contactId: string;
+  sourceId: string;
+  candidateExternalIds: string[];
+  channel: MetaInboundMessage["channel"] | "CHATWOOT" | "EMAIL";
+};
+
+export function chatwootContactProfile(payload: unknown): ChatwootContactProfile | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const wrapper = payload as RecordLike;
+  const contact = wrapper.payload && typeof wrapper.payload === "object" && !Array.isArray(wrapper.payload)
+    ? wrapper.payload as RecordLike
+    : wrapper;
+  const attributes = contact.additional_attributes && typeof contact.additional_attributes === "object" && !Array.isArray(contact.additional_attributes)
+    ? contact.additional_attributes as RecordLike
+    : {};
+  const profile: ChatwootContactProfile = {
+    displayName: profileText(contact.name, 240),
+    email: chatwootCustomerEmail(contact.email, "CHATWOOT"),
+    phone: profileText(contact.phone_number || contact.phone, 80),
+    avatarUrl: safeUrl(contact.thumbnail || contact.avatar_url),
+    city: profileText(attributes.city, 160),
+    country: profileText(attributes.country || attributes.country_code, 120),
+  };
+  return Object.values(profile).some(Boolean) ? profile : undefined;
+}
+
+export function chatwootContactRecords(payload: unknown, inboxId: string): ChatwootContactRecord[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const rows = Array.isArray((payload as RecordLike).payload) ? (payload as RecordLike).payload as unknown[] : [];
+  const records: ChatwootContactRecord[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const contact = row as RecordLike, contactId = String(contact.id || "");
+    if (!/^\d+$/.test(contactId) || Number(contactId) <= 0) continue;
+    const profile = chatwootContactProfile(contact);
+    if (!profile?.email) continue;
+    const inboxes = Array.isArray(contact.contact_inboxes) ? contact.contact_inboxes : [];
+    for (const entry of inboxes) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const item = entry as RecordLike, itemInbox = item.inbox && typeof item.inbox === "object" ? item.inbox as RecordLike : {};
+      const sourceId = profileText(item.source_id, 500);
+      if (String(itemInbox.id || "") !== inboxId || !sourceId) continue;
+      const identifier = profileText(contact.identifier, 500);
+      records.push({ ...profile, contactId, sourceId, candidateExternalIds: [...new Set([sourceId, identifier, contactId].filter((value): value is string => Boolean(value)))], channel: channelFor(itemInbox.channel_type) });
+    }
+  }
+  return records;
+}
+
+export function chatwootBackfillBatch(records: ChatwootContactRecord[], page: number, offset: number, limit: number, totalContacts: number) {
+  const batchLimit = Math.max(1, Math.min(50, Math.floor(limit) || 15));
+  const selected = records.slice(offset, offset + batchLimit);
+  const nextCursor = offset + selected.length < records.length
+    ? `${page}:${offset + selected.length}`
+    : page * 15 < totalContacts ? `${page + 1}:0` : undefined;
+  return { records: selected, nextCursor };
+}
+
+export async function fetchChatwootContactProfile(url: string, token: string, fetchImpl: typeof fetch = fetch) {
+  try {
+    const response = await fetchImpl(url, { headers: { api_access_token: token, Accept: "application/json" }, signal: AbortSignal.timeout(8000), redirect: "error" });
+    return response.ok ? chatwootContactProfile(await boundedChatwootResponseJson(response)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type ChatwootAttachment = {
   type: string;
@@ -33,8 +115,12 @@ export type ChatwootMessage = Omit<MetaInboundMessage, "channel" | "metadata"> &
   direction: "INBOUND" | "OUTBOUND";
   accountId?: string;
   inboxId?: string;
+  avatarUrl?: string;
+  city?: string;
+  country?: string;
   metadata: MetaInboundMessage["metadata"] & {
     chatwootConversationId?: string;
+    chatwootContactId?: string;
     attachments?: ChatwootAttachment[];
   };
 };
@@ -167,6 +253,8 @@ export function normalizeChatwootWebhook(payload: unknown): ChatwootMessage[] {
   const messageSender = value.sender || {};
   const sender = direction === "INBOUND" ? messageSender : conversationSender;
   const fallbackSender = direction === "INBOUND" ? conversationSender : messageSender;
+  const contactIdCandidate = String(sender.id || fallbackSender.id || "");
+  const chatwootContactId = /^\d+$/.test(contactIdCandidate) && Number(contactIdCandidate) > 0 ? contactIdCandidate : undefined;
   const sourceId = value.conversation?.contact_inbox?.source_id || sender.identifier || fallbackSender.identifier || sender.id || fallbackSender.id;
   const messageId = value.id;
   if (!sourceId || !messageId) return [];
@@ -193,6 +281,7 @@ export function normalizeChatwootWebhook(payload: unknown): ChatwootMessage[] {
     metadata: {
       messageType: value.content_type || types[0] || "text",
       chatwootConversationId: String(value.conversation?.id || value.conversation_id || "") || undefined,
+      chatwootContactId,
       ...(types.length ? { attachmentTypes: types, attachments } : {}),
     },
   }];

@@ -37,9 +37,9 @@ import {
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
 import { deliverInstagramReplyWithFallback, deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
-import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
+import { boundedChatwootResponseJson, chatwootBackfillBatch, chatwootContactRecords, chatwootReadReceiptFromApi, fetchChatwootContactProfile, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
-import { chatwootScopeMatches, customerEmail, inboundClientCandidates, resolveCanonicalInboundClient, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
+import { chatwootScopeMatches, customerEmail, inboundClientCandidates, inboundClientProfilePatch, resolveCanonicalInboundClient, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
@@ -1309,13 +1309,77 @@ export class CommunicationsService {
     const scopedReadReceipt = readReceipt && chatwootScopeMatches(values, readReceipt) ? readReceipt : undefined;
     let accepted = 0;
     for (const event of events) {
-      const persisted = event.direction === "OUTBOUND"
-        ? await this.persistChatwootOutbound(event, replayFragment(event, "CHATWOOT"))
-        : await this.persistInbound(event, "CHATWOOT", replayFragment(event, "CHATWOOT"));
+      const enrichedEvent = event.direction === "INBOUND" ? await this.enrichChatwootContact(event, values) : event;
+      const persisted = enrichedEvent.direction === "OUTBOUND"
+        ? await this.persistChatwootOutbound(enrichedEvent, replayFragment(enrichedEvent, "CHATWOOT"))
+        : await this.persistInbound(enrichedEvent, "CHATWOOT", replayFragment(enrichedEvent, "CHATWOOT"));
       if (persisted) accepted++;
     }
     if (scopedReadReceipt && await this.applyChatwootReadReceipt(scopedReadReceipt)) accepted++;
     return { received: true, accepted, ignored: normalizedEvents.length + (messageUpdate ? 1 : 0) - accepted };
+  }
+  private async enrichChatwootContact(event: ChatwootMessage, values: Record<string, any>): Promise<ChatwootMessage> {
+    if (event.email) return event;
+    const existing = await this.p.conversation.findUnique({
+      where: { externalId_channel: { externalId: event.externalSenderId, channel: event.channel as ContactChannel } },
+      select: { client: { select: { email: true } } },
+    });
+    if (customerEmail(existing?.client.email, event.channel)) return event;
+    const baseUrl = configuredHttpsOrigin(values.baseUrl), token = this.secretValue(values, "accessTokenEncrypted");
+    const accountId = event.accountId, contactId = event.metadata.chatwootContactId;
+    if (!baseUrl || !token || !accountId || !/^\d+$/.test(accountId) || !contactId || !/^\d+$/.test(contactId)) return event;
+    const url = `${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}/contacts/${encodeURIComponent(contactId)}`;
+    try {
+      const profile = await fetchChatwootContactProfile(url, token);
+      if (!profile) { this.logger.warn(JSON.stringify({ event: "CHATWOOT_CONTACT_LOOKUP_SKIPPED", reason: "unavailable" })); return event; }
+      return {
+        ...event,
+        displayName: profile.displayName || event.displayName,
+        email: profile.email || event.email,
+        phone: profile.phone || event.phone,
+        avatarUrl: profile.avatarUrl,
+        city: profile.city,
+        country: profile.country,
+      };
+    } catch {
+      this.logger.warn(JSON.stringify({ event: "CHATWOOT_CONTACT_LOOKUP_SKIPPED", reason: "unavailable" }));
+      return event;
+    }
+  }
+  async backfillChatwootProfiles(dryRun: boolean, limit = 15, cursor: string | undefined, u: User) {
+    const values = await this.sectionValues("integration.chatwoot"), baseUrl = configuredHttpsOrigin(values.baseUrl);
+    const token = this.secretValue(values, "accessTokenEncrypted"), accountId = typeof values.accountId === "string" ? values.accountId.trim() : "";
+    const inboxId = typeof values.inboxId === "string" ? values.inboxId.trim() : "";
+    if (values.enabled !== true || !baseUrl || !token || !/^\d+$/.test(accountId) || !/^\d+$/.test(inboxId)) throw new BadRequestException("Канал Chatwoot не подключён для синхронизации клиентов");
+    const cursorMatch = /^(\d+)(?::(\d+))?$/.exec(cursor || ""), page = cursorMatch ? Math.max(1, Number(cursorMatch[1])) : 1;
+    const offset = cursorMatch ? Math.max(0, Number(cursorMatch[2] || 0)) : 0;
+    const response = await fetch(`${baseUrl}/api/v1/accounts/${encodeURIComponent(accountId)}/contacts?page=${page}`, { headers: { api_access_token: token, Accept: "application/json" }, signal: AbortSignal.timeout(15_000), redirect: "error" }).catch(() => undefined);
+    if (!response?.ok) throw new BadGatewayException("Chatwoot не вернул список клиентов");
+    let body: unknown;
+    try { body = await boundedChatwootResponseJson(response); }
+    catch { throw new BadGatewayException("Chatwoot вернул некорректный список клиентов"); }
+    const pageRecords = chatwootContactRecords(body, inboxId);
+    const meta = body && typeof body === "object" && !Array.isArray(body) && (body as Record<string, any>).meta && typeof (body as Record<string, any>).meta === "object" ? (body as Record<string, any>).meta : {};
+    const count = Number(meta.count || 0), batch = chatwootBackfillBatch(pageRecords, page, offset, limit, count), records = batch.records;
+    let matched = 0, updated = 0;
+    for (const record of records) {
+      const conversation = await this.p.conversation.findFirst({ where: { channel: record.channel as ContactChannel, externalId: { in: record.candidateExternalIds } }, select: { clientId: true } });
+      if (!conversation) continue;
+      matched++;
+      const before = await this.p.client.findUnique({ where: { id: conversation.clientId }, select: { email: true, phone: true, avatarUrl: true, city: true, country: true } });
+      if (!before) continue;
+      const patch = inboundClientProfilePatch(before, record, record.channel), importedFields = Object.keys(patch);
+      if (!importedFields.length || dryRun) continue;
+      const changed = await this.p.$transaction(async tx => {
+        const result = await tx.client.updateMany({ where: { id: conversation.clientId, email: before.email, phone: before.phone, avatarUrl: before.avatarUrl, city: before.city, country: before.country }, data: patch });
+        if (result.count !== 1) return false;
+        await tx.auditLog.create({ data: { actorId: u.id, action: "UPDATE", entityType: "Client", entityId: conversation.clientId, after: { importedFields, source: "CHATWOOT_CONTACT_BACKFILL" } } });
+        await tx.activity.create({ data: { clientId: conversation.clientId, type: "CLIENT_PROFILE_IMPORTED", summary: "Профиль клиента дополнен из Chatwoot", metadata: { importedFields, source: "CHATWOOT_CONTACT_BACKFILL" } } });
+        return true;
+      });
+      if (changed) updated++;
+    }
+    return { dryRun, page, scanned: records.length, matched, updated, nextCursor: batch.nextCursor };
   }
   private async resolveChatwootReadReceipt(values: Record<string, any>, candidate: ChatwootMessageUpdate) {
     const baseUrl = configuredHttpsOrigin(values.baseUrl), token = this.secretValue(values, "accessTokenEncrypted"), messageId = Number(candidate.externalMessageId.split(":").at(-1));
@@ -1538,6 +1602,25 @@ export class CommunicationsService {
         if (ambiguousMatches) await tx.auditLog.create({ data: { action: "AMBIGUOUS", entityType: "InboundIdentity", entityId: created.id, after: { channel: event.channel, candidateCount: ambiguousMatches, resolution: "newLead" } } });
         await tx.activity.create({ data: { clientId: created.id, type: "CLIENT_CREATED_FROM_INBOUND", summary: "Клиент создан из входящего сообщения", metadata: { channel: event.channel } } });
         if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_CREATED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), clientId: created.id }));
+      }
+      const currentProfile = await tx.client.findUnique({ where: { id: clientId }, select: { email: true, phone: true, avatarUrl: true, city: true, country: true } });
+      if (currentProfile) {
+        const profilePatch = inboundClientProfilePatch(currentProfile, {
+          email,
+          phone: event.phone,
+          avatarUrl: "avatarUrl" in event ? event.avatarUrl : undefined,
+          city: "city" in event ? event.city : undefined,
+          country: "country" in event ? event.country : undefined,
+        }, event.channel);
+        const importedFields = Object.keys(profilePatch);
+        if (importedFields.length) {
+          const updated = await tx.client.updateMany({
+            where: { id: clientId, email: currentProfile.email, phone: currentProfile.phone, avatarUrl: currentProfile.avatarUrl, city: currentProfile.city, country: currentProfile.country },
+            data: profilePatch,
+          });
+          if (updated.count === 1) await tx.auditLog.create({ data: { action: "UPDATE", entityType: "Client", entityId: clientId, after: { importedFields, source: provider + "_CONTACT" } } });
+          if (updated.count === 1) await tx.activity.create({ data: { clientId, type: "CLIENT_PROFILE_IMPORTED", summary: "Профиль клиента дополнен из канала сообщений", metadata: { importedFields, source: provider + "_CONTACT" } } });
+        }
       }
       await enrichWhatsappClientCountry({ channel, clientId, phone }, {
         updateEmptyCountry: async (id, country) => (await tx.client.updateMany({

@@ -417,6 +417,12 @@ export const settingsUi = {
   emailTitle: "E-mail",
   chatwootWebhook: "Адрес webhook Chatwoot",
   chatwootWebhookSecret: "Секрет webhook Chatwoot",
+  chatwootRefreshProfiles: "Синхронизировать клиентов Chatwoot",
+  chatwootProfilesRefreshError: "Не удалось синхронизировать клиентов Chatwoot",
+  chatwootProfilesRefreshIncomplete: "Синхронизация Chatwoot остановлена по безопасному лимиту. Запустите её повторно.",
+  chatwootProfilesScanned: "Получено контактов",
+  chatwootProfilesMatched: "Найдено клиентов CRM",
+  chatwootProfilesUpdated: "Обновлено профилей",
   chatwootEmailHint:
     "В Chatwoot добавьте webhook события message_created. Для защиты добавьте к адресу ?token=ВАШ_СЕКРЕТ. Сообщения из Email Inbox будут отмечены как E-mail.",
   metaHint:
@@ -641,6 +647,17 @@ export const releaseHistoryUi = {
   compatibility: "Совместимость и откат",
   commit: "Git commit",
   releases: [
+    {
+      version: "0.1.13",
+      date: "09.09.2026",
+      changes: [
+        "CRM получает email и доступные контактные данные клиента из карточки Chatwoot, даже когда их нет в вебхуке сообщения.",
+        "Пустые поля существующего клиента дополняются без перезаписи данных, введённых оператором; изменение сохраняется в истории и аудите.",
+        "В настройках Chatwoot добавлена постраничная синхронизация ранее созданных клиентов с понятным итогом операции.",
+        "Некорректный email и технический адрес вида Facebook SID больше не сохраняются как контакт клиента.",
+      ],
+      compatibility: "Миграций базы данных нет. Вебхук продолжает принимать сообщения при временной недоступности Contacts API. Откат приложения: crm-v0.1.12; уже корректно импортированные контактные данные и история сохраняются.",
+    },
     {
       version: "0.1.12",
       date: "09.09.2026",
