@@ -49,6 +49,7 @@ import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadsRoot } from "../uploads";
 import { normalizeClientLanguageCode } from "./ai-language";
+import { enrichWhatsappClientCountry } from "./phone-country";
 import { requestOpenAiText } from "./ai-response";
 import { AiRunService } from "../intelligence/ai-run.service";
 import { AiControlService } from "../intelligence/ai-control.service";
@@ -63,7 +64,7 @@ import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply"
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
 import { chatwootDeleteTarget, classifyDraftDeliveryRecovery, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
-import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, SUMMARY_PROMPT_VERSION, summaryPlanFingerprint, summarySourceDigest, type SummaryMessage } from "./conversation-summary";
+import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, normalizeSummaryDetailLevel, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, summaryDigestProfile, summaryPlanFingerprint, summaryPromptVersion, summarySourceDigest, type SummaryDetailLevel, type SummaryMessage } from "./conversation-summary";
 import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
@@ -1519,6 +1520,15 @@ export class CommunicationsService {
         await tx.activity.create({ data: { clientId: created.id, type: "CLIENT_CREATED_FROM_INBOUND", summary: "Клиент создан из входящего сообщения", metadata: { channel: event.channel } } });
         if (provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_CREATED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), clientId: created.id }));
       }
+      await enrichWhatsappClientCountry({ channel, clientId, phone }, {
+        updateEmptyCountry: async (id, country) => (await tx.client.updateMany({
+          where: { id, OR: [{ country: null }, { country: "" }] },
+          data: { country },
+        })).count === 1,
+        recordAudit: async (id, country) => { await tx.auditLog.create({
+          data: { action: "UPDATE", entityType: "Client", entityId: id, after: { country, countryAutoDetected: true, source: "WHATSAPP_PHONE" } },
+        }); },
+      });
       if (!conversation) {
         conversation = await tx.conversation.upsert({ where: { clientId_channel: { clientId, channel } }, create: { clientId, channel, externalId: externalConversationId }, update: { externalId: externalConversationId, archivedAt: null } });
         await tx.auditLog.create({ data: { action: "CREATE", entityType: "Conversation", entityId: conversation.id, after: { clientId, channel, createdFromInbound: true } } });
@@ -2724,20 +2734,23 @@ export class AiAssistantService {
   }
   async listConversationSummaries(clientId:string,channel:ContactChannel){
     const conversation=await this.summaryConversation(clientId,channel);
-    const [groups,firstMessageDate,operational]=await Promise.all([
+    const [groups,firstMessageDate,operational,utilityLimits]=await Promise.all([
       this.p.conversationSummary.groupBy({by:["fromDate"],where:{conversationId:conversation.id,fromDate:{not:null},sourceDigest:{not:null},completedAt:{not:null}},_max:{createdAt:true}}),
       this.summaryFirstMessageDate(conversation.id),
       this.summaryContext(clientId),
+      this.aiControl.effective(),
     ]);
-    const latestPairs=groups.flatMap(group=>group.fromDate&&group._max.createdAt?[{fromDate:group.fromDate,createdAt:group._max.createdAt}]:[]);
-    const stored=latestPairs.length?await this.p.conversationSummary.findMany({where:{conversationId:conversation.id,OR:latestPairs},orderBy:[{createdAt:"desc"},{id:"desc"}]}):[];
+    const storedDates=groups.flatMap(group=>group.fromDate?[group.fromDate]:[]);
+    const stored=storedDates.length?await this.p.conversationSummary.findMany({where:{conversationId:conversation.id,fromDate:{in:storedDates},sourceDigest:{not:null},completedAt:{not:null}},orderBy:[{createdAt:"desc"},{id:"desc"}]}):[];
     const latestByDate=selectLatestSummaryVersions(stored);
     const dates=[...latestByDate.keys()].sort();
     if(!dates.length)return{channel,timezone:CRM_SUMMARY_TIMEZONE,firstMessageDate,items:[]};
     const source=await this.summaryMessages(conversation.id,dates[0]!);
+    const detailLevel=normalizeSummaryDetailLevel(utilityLimits.summaryDetailLevel),digestProfile=summaryDigestProfile(detailLevel);
     const items=dates.map(fromDate=>{
-      const item=latestByDate.get(fromDate)!;
-      const start=this.summaryStart(fromDate),messages=source.messages.filter(message=>message.createdAt>=start),digest=summarySourceDigest(messages,operational),isCurrent=digest===item.sourceDigest;
+      const start=this.summaryStart(fromDate),messages=source.messages.filter(message=>message.createdAt>=start),digest=summarySourceDigest(messages,operational,digestProfile);
+      const item=stored.find(candidate=>candidate.fromDate?.toISOString().slice(0,10)===fromDate&&candidate.sourceDigest===digest)||latestByDate.get(fromDate)!;
+      const isCurrent=digest===item.sourceDigest;
       return{id:item.id,fromDate,generatedAt:item.createdAt,throughMessageAt:item.throughMessageAt,messageCount:item.sourceMessageCount,isCurrent,summary:item.summary};
     }).reverse();
     return{channel,timezone:CRM_SUMMARY_TIMEZONE,firstMessageDate,items};
@@ -2746,9 +2759,10 @@ export class AiAssistantService {
     const lease=await this.reserve(u);
     try{return await this.generateConversationSummary(clientId,d,u)}finally{await this.release(lease.id)}
   }
-  private async assertSummaryCurrent(conversationId:string,clientId:string,fromDate:string,digest:string){
-    const [current,currentOperational]=await Promise.all([this.summaryMessages(conversationId,fromDate),this.summaryContext(clientId)]);
-    if(summarySourceDigest(current.messages,currentOperational)!==digest)throw new ConflictException("Переписка или данные заказа изменились во время создания сводки. Повторите запрос");
+  private async assertSummaryCurrent(conversationId:string,clientId:string,fromDate:string,digest:string,detailLevel:SummaryDetailLevel){
+    const [current,currentOperational,currentLimits]=await Promise.all([this.summaryMessages(conversationId,fromDate),this.summaryContext(clientId),this.aiControl.effective()]);
+    const currentDetailLevel=normalizeSummaryDetailLevel(currentLimits.summaryDetailLevel);
+    if(currentDetailLevel!==detailLevel||summarySourceDigest(current.messages,currentOperational,summaryDigestProfile(currentDetailLevel))!==digest)throw new ConflictException("Переписка, данные заказа или формат сводки изменились во время создания. Повторите запрос");
   }
   private async generateConversationSummary(clientId:string,d:GenerateConversationSummaryDto,u:User){
     const values=await this.values(),cfg=this.publicSettings(values);
@@ -2759,24 +2773,24 @@ export class AiAssistantService {
     const conversation=await this.summaryConversation(clientId,d.channel);
     // Operator-requested summaries are a text utility, like TRANSLATE. Conversation
     // automation policy controls analysis and reply generation, not this manual action.
-    const utilityLimits=await this.aiControl.effective();
+    const utilityLimits=await this.aiControl.effective(),detailLevel=normalizeSummaryDetailLevel(utilityLimits.summaryDetailLevel),promptVersion=summaryPromptVersion(detailLevel);
     const [source,operational]=await Promise.all([this.summaryMessages(conversation.id,d.fromDate),this.summaryContext(clientId)]);
     if(!source.messages.length||!source.through)throw new BadRequestException("С выбранной даты в переписке нет сообщений");
     const operationalJson=JSON.stringify(operational),operationalSnapshot=JSON.parse(operationalJson) as Prisma.InputJsonValue;
-    const digest=summarySourceDigest(source.messages,operationalSnapshot),fromDateDb=new Date(`${d.fromDate}T00:00:00.000Z`);
+    const digest=summarySourceDigest(source.messages,operationalSnapshot,summaryDigestProfile(detailLevel)),fromDateDb=new Date(`${d.fromDate}T00:00:00.000Z`);
     let existing=await this.p.conversationSummary.findUnique({where:{conversationId_fromDate_sourceDigest:{conversationId:conversation.id,fromDate:fromDateDb,sourceDigest:digest}}});
-    if(existing?.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false}}
+    if(existing?.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest,detailLevel);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false,detailLevel}}
     const maxInputCharacters=Number(utilityLimits.maxInputCharacters||12000);
     if(operationalJson.length+3000>maxInputCharacters)throw new BadRequestException("Данные клиента превышают разрешённый объём AI-контекста");
     const chunkCharacters=Math.max(1000,Math.min(32000,maxInputCharacters-operationalJson.length-3000));
     const chunks=splitSummaryMessages(source.messages,chunkCharacters);
     const throughDate=crmDateKey(source.through.createdAt),startedAt=Date.now(),outputTokens=Math.max(400,Math.min(2400,Number(utilityLimits.maxOutputTokens||1600)));
-    const planFingerprint=summaryPlanFingerprint({model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,maxInputCharacters,chunkCharacters,chunks});
+    const planFingerprint=summaryPlanFingerprint({model:cfg.model,promptVersion,maxInputCharacters,chunkCharacters,chunks});
     const leaseToken=randomUUID(),leaseUntil=new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS);
     let claimed=false;
     if(!existing){
       try{
-        existing=await this.p.conversationSummary.create({data:{conversationId:conversation.id,summary:"",structuredSummary:{kind:"OPERATOR_BRIEF_PROGRESS",fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt.toISOString()},throughMessageId:source.through.id,fromDate:fromDateDb,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt,model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,processingState:readSummaryProcessingState(undefined,chunks.length,planFingerprint) as unknown as Prisma.InputJsonValue,processingLeaseUntil:leaseUntil,processingLeaseToken:leaseToken}});
+        existing=await this.p.conversationSummary.create({data:{conversationId:conversation.id,summary:"",structuredSummary:{kind:"OPERATOR_BRIEF_PROGRESS",detailLevel,fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt.toISOString()},throughMessageId:source.through.id,fromDate:fromDateDb,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through.createdAt,model:cfg.model,promptVersion,processingState:readSummaryProcessingState(undefined,chunks.length,planFingerprint) as unknown as Prisma.InputJsonValue,processingLeaseUntil:leaseUntil,processingLeaseToken:leaseToken}});
         claimed=true;
       }catch(error){
         if((error as {code?:string}).code!=="P2002")throw error;
@@ -2784,26 +2798,26 @@ export class AiAssistantService {
       }
     }
     if(!existing)throw new ConflictException("Не удалось начать создание сводки. Повторите запрос");
-    if(existing.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false}}
+    if(existing.completedAt){await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest,detailLevel);return{id:existing.id,fromDate:d.fromDate,generatedAt:existing.createdAt,throughMessageAt:existing.throughMessageAt,messageCount:existing.sourceMessageCount,isCurrent:true,summary:existing.summary,cached:true,pending:false,detailLevel}}
     if(!claimed){
       const claim=await this.p.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,OR:[{processingLeaseUntil:null},{processingLeaseUntil:{lt:new Date()}}]},data:{processingLeaseUntil:leaseUntil,processingLeaseToken:leaseToken}});
       if(claim.count!==1)throw new ConflictException("Сводка уже обрабатывается. Подождите несколько секунд и повторите запрос");
       existing=await this.p.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
     }
-    const run=await this.aiRuns.start({clientId,conversationId:conversation.id,agent:"operator-summary",operation:"CONVERSATION_SUMMARY",provider:"openai",model:cfg.model,promptKey:"assist.operator-summary",promptVersion:1,contextSnapshot:{fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageId:source.through.id,operational:operationalSnapshot} as Prisma.InputJsonValue,retrievedMessageIds:source.messages.map(message=>message.id),availableTools:[]});
+    const run=await this.aiRuns.start({clientId,conversationId:conversation.id,agent:"operator-summary",operation:"CONVERSATION_SUMMARY",provider:"openai",model:cfg.model,promptKey:"assist.operator-summary",promptVersion:detailLevel==="COMPACT"?2:1,contextSnapshot:{fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,detailLevel,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageId:source.through.id,operational:operationalSnapshot} as Prisma.InputJsonValue,retrievedMessageIds:source.messages.map(message=>message.id),availableTools:[]});
     let resultText="",lastOutput="",state=readSummaryProcessingState(existing.processingState,chunks.length,planFingerprint);
     try{
       const ownedWhere={id:existing.id,completedAt:null,processingLeaseToken:leaseToken};
       const renewOwnedLease=async()=>{const renewed=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingLeaseUntil:new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS)}});if(renewed.count!==1)throw new ConflictException("Обработка сводки была продолжена другим запросом. Повторите действие")};
-      const batch=await runSummaryProcessingBatch({state,chunks,maxCalls:MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH,maxInputCharacters,operationalJson,fromDate:d.fromDate,throughDate,outputTokens,request:async(input,tokens,stage)=>{
+      const batch=await runSummaryProcessingBatch({state,chunks,maxCalls:MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH,maxInputCharacters,operationalJson,fromDate:d.fromDate,throughDate,outputTokens,detailLevel,request:async(input,tokens,stage)=>{
         await renewOwnedLease();
         return this.requestOpenAi(key,cfg.model,input,Math.min(tokens,outputTokens),stage);
       },checkpoint:async checkpointState=>{
-        const checkpointed=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingState:checkpointState as unknown as Prisma.InputJsonValue,processingLeaseUntil:new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS),model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION}});
+        const checkpointed=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingState:checkpointState as unknown as Prisma.InputJsonValue,processingLeaseUntil:new Date(Date.now()+SUMMARY_PROCESSING_LEASE_MS),model:cfg.model,promptVersion}});
         if(checkpointed.count!==1)throw new ConflictException("Прогресс сводки уже обновлён другим запросом");
       }});
       state=batch.state;resultText=batch.resultText;lastOutput=batch.lastOutput;
-      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);
+      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest,detailLevel);
       await renewOwnedLease();
       await this.aiRuns.complete(run.id,lastOutput||"Промежуточный этап завершён",Date.now()-startedAt);
       if(!resultText){
@@ -2811,17 +2825,17 @@ export class AiAssistantService {
         const saved=await this.p.conversationSummary.updateMany({where:ownedWhere,data:{processingState:state as unknown as Prisma.InputJsonValue,processingLeaseUntil:null,processingLeaseToken:null}});
         if(saved.count!==1)throw new ConflictException("Прогресс сводки уже обновлён другим запросом");
         const updated=await this.p.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
-        return{id:updated.id,fromDate:d.fromDate,generatedAt:updated.createdAt,throughMessageAt:updated.throughMessageAt,messageCount:updated.sourceMessageCount,isCurrent:true,summary:null,cached:false,pending:true,processedChunks:processed,totalChunks:chunks.length};
+        return{id:updated.id,fromDate:d.fromDate,generatedAt:updated.createdAt,throughMessageAt:updated.throughMessageAt,messageCount:updated.sourceMessageCount,isCurrent:true,summary:null,cached:false,pending:true,processedChunks:processed,totalChunks:chunks.length,detailLevel};
       }
       const completed=await this.p.$transaction(async tx=>{
-        const saved=await tx.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,processingLeaseToken:leaseToken},data:{summary:resultText,structuredSummary:{kind:"OPERATOR_BRIEF",fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through!.createdAt.toISOString()},processingState:Prisma.JsonNull,processingLeaseUntil:null,processingLeaseToken:null,completedAt:new Date()}});
+        const saved=await tx.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,processingLeaseToken:leaseToken},data:{summary:resultText,structuredSummary:{kind:"OPERATOR_BRIEF",detailLevel,fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceDigest:digest,sourceMessageCount:source.messages.length,throughMessageAt:source.through!.createdAt.toISOString()},processingState:Prisma.JsonNull,processingLeaseUntil:null,processingLeaseToken:null,completedAt:new Date()}});
         if(saved.count!==1)throw new ConflictException("Итог сводки уже сохранён другим запросом");
         const item=await tx.conversationSummary.findUniqueOrThrow({where:{id:existing.id}});
-        await tx.auditLog.create({data:{actorId:u.id,action:"GENERATE",entityType:"ConversationSummary",entityId:item.id,after:{clientId,conversationId:conversation.id,channel:d.channel,fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,sourceMessageCount:source.messages.length,throughMessageId:source.through!.id,model:cfg.model,promptVersion:SUMMARY_PROMPT_VERSION,outputCharacters:resultText.length}}});
+        await tx.auditLog.create({data:{actorId:u.id,action:"GENERATE",entityType:"ConversationSummary",entityId:item.id,after:{clientId,conversationId:conversation.id,channel:d.channel,fromDate:d.fromDate,timezone:CRM_SUMMARY_TIMEZONE,detailLevel,sourceMessageCount:source.messages.length,throughMessageId:source.through!.id,model:cfg.model,promptVersion,outputCharacters:resultText.length}}});
         return item;
       });
-      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest);
-      return{id:completed.id,fromDate:d.fromDate,generatedAt:completed.createdAt,throughMessageAt:completed.throughMessageAt,messageCount:completed.sourceMessageCount,isCurrent:true,summary:completed.summary,cached:false,pending:false};
+      await this.assertSummaryCurrent(conversation.id,clientId,d.fromDate,digest,detailLevel);
+      return{id:completed.id,fromDate:d.fromDate,generatedAt:completed.createdAt,throughMessageAt:completed.throughMessageAt,messageCount:completed.sourceMessageCount,isCurrent:true,summary:completed.summary,cached:false,pending:false,detailLevel};
     }catch(error){
       await Promise.allSettled([this.aiRuns.fail(run.id,error instanceof Error?error.constructor.name:"UNKNOWN",Date.now()-startedAt),this.p.conversationSummary.updateMany({where:{id:existing.id,completedAt:null,processingLeaseToken:leaseToken},data:{processingLeaseUntil:null,processingLeaseToken:null}})]);
       if(error instanceof Error&&error.message==="SUMMARY_CONTEXT_TOO_LARGE")throw new BadRequestException("Сводка превышает разрешённый объём AI-контекста");

@@ -13,5 +13,13 @@ test("settings contains a localized AI control center and no secret input",async
   assert.match(i18n,/channelLabels:\{INSTAGRAM:"Instagram",FACEBOOK:"Facebook",WHATSAPP:"WhatsApp",EMAIL:"Электронная почта"/);
   assert.match(view,/settingsUi\.aiControl\.modeLabels\[value\]/);
   assert.match(view,/settingsUi\.aiControl\.channelLabels\[value\]/);
+  assert.match(view,/summaryDetailLevel/);
+  assert.match(view,/summaryFormatUi\.title/);
+  assert.match(view,/summaryFormatUi\.compact/);
+  assert.match(view,/summaryFormatUi\.detailed/);
+  assert.match(view,/update\("summaryDetailLevel",event\.target\.value,true\)/);
+  assert.match(i18n,/Формат сводки/);
+  assert.match(i18n,/Сжато/);
+  assert.match(i18n,/Подробно/);
   assert.doesNotMatch(view,/AI Control Center[\s\S]*apiKey/i);
 });

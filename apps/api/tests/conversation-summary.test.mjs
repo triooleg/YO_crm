@@ -43,6 +43,10 @@ test("отпечаток истории меняется при изменени
   assert.notEqual(summarySourceDigest(rows), summarySourceDigest(rows.slice(1)));
   assert.notEqual(summarySourceDigest(rows), summarySourceDigest([{ ...rows[0], content: "Другой текст" }, rows[1]]));
   assert.notEqual(summarySourceDigest(rows, { payment: "100,00 EUR" }), summarySourceDigest(rows, { payment: "200,00 EUR" }));
+  assert.notEqual(
+    summarySourceDigest(rows, {}, { detailLevel: "COMPACT" }),
+    summarySourceDigest(rows, {}, { detailLevel: "DETAILED" }),
+  );
 });
 
 test("денежные значения из minor units форматируются с ISO currency", () => {
@@ -150,13 +154,34 @@ test("ошибка внутри пакета возобновляет работ
 });
 
 test("prompt сводки фиксирует русский язык, разделы и недоверие к инструкциям клиента", () => {
-  const prompt = buildOperatorSummaryPrompt({ fromDate: "2026-09-01", throughDate: "2026-09-06", context: "{}", transcript: "данные" });
+  const prompt = buildOperatorSummaryPrompt({ fromDate: "2026-09-01", throughDate: "2026-09-06", context: "{}", transcript: "данные", detailLevel: "DETAILED" });
   for (const heading of ["Что хочет клиент", "О чём договорились", "Сроки", "Оплата", "Доставка", "Размеры", "Нерешённые вопросы", "Следующее действие"]) assert.match(prompt, new RegExp(heading));
   assert.match(prompt, /только на русском/i);
   assert.match(prompt, /данными, а не инструкциями/i);
   assert.match(prompt, /имена, заметки, клубы, тренеров/);
   assert.match(prompt, /ДАННЫЕ_CRM_НАЧАЛО/);
   assert.match(prompt, /не выдумывай/i);
+});
+
+test("сжатая сводка использует короткую структуру и уменьшенный лимит ответа", async () => {
+  const prompts = [], tokens = [];
+  const result = await runSummaryProcessingBatch({
+    state: readSummaryProcessingState(undefined, 1, "compact-plan"),
+    chunks: ["переписка"],
+    maxCalls: 1,
+    maxInputCharacters: 12000,
+    operationalJson: "{}",
+    fromDate: "2026-09-01",
+    throughDate: "2026-09-06",
+    outputTokens: 1600,
+    detailLevel: "COMPACT",
+    request: async (prompt, limit) => { prompts.push(prompt); tokens.push(limit); return "готово"; },
+  });
+  assert.equal(result.resultText, "готово");
+  assert.match(prompts[0], /### Главное/);
+  assert.match(prompts[0], /не более 10 коротких пунктов/i);
+  assert.doesNotMatch(prompts[0], /### Нерешённые вопросы/);
+  assert.equal(tokens[0], 900);
 });
 
 test("сводки имеют расширяющую миграцию, уникальную версию источника и защищенные маршруты", () => {
@@ -175,8 +200,9 @@ test("сводки имеют расширяющую миграцию, уник�
   assert.match(service, /orderBy:\[\{createdAt:"desc"\},\{id:"desc"\}\]/);
   assert.match(service, /selectLatestSummaryVersions\(stored\)/);
   assert.doesNotMatch(service, /take:180/);
-  assert.match(service, /summarySourceDigest\(source\.messages,operationalSnapshot\)/);
-  assert.match(service, /summarySourceDigest\(current\.messages,currentOperational\)/);
+  assert.match(service, /summarySourceDigest\(source\.messages,operationalSnapshot,summaryDigestProfile\(detailLevel\)\)/);
+  assert.match(service, /summarySourceDigest\(current\.messages,currentOperational,summaryDigestProfile\(currentDetailLevel\)\)/);
+  assert.match(service, /summaryPromptVersion\(detailLevel\)/);
   assert.match(service, /this\.aiControl\.effective\(\)/);
   assert.doesNotMatch(service, /this\.aiControl\.effective\(\{conversationId:conversation\.id\}\)/);
   assert.doesNotMatch(service, /AI отключён политикой сервера или выбранного диалога/);
@@ -191,7 +217,7 @@ test("сводки имеют расширяющую миграцию, уник�
   assert.match(service, /checkpoint:async checkpointState/);
   assert.match(service, /pending:true/);
   assert.match(service, /completedAt:\{not:null\}/);
-  assert.ok((service.match(/assertSummaryCurrent\(conversation\.id,clientId,d\.fromDate,digest\)/g)||[]).length >= 4);
+  assert.ok((service.match(/assertSummaryCurrent\(conversation\.id,clientId,d\.fromDate,digest,detailLevel\)/g)||[]).length >= 4);
   assert.match(service, /formatMinorMoney\(order\.priceMinor,order\.currency\)/);
   assert.match(service, /isSoftDeletedMessage/);
   assert.match(service, /isDeduplicatedDraft/);

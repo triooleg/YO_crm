@@ -49,6 +49,9 @@ importers:
       imapflow:
         specifier: ^1.7.6
         version: 1.7.6
+      libphonenumber-js:
+        specifier: 1.13.10
+        version: 1.13.10
       mailparser:
         specifier: ^3.9.17
         version: 3.9.17

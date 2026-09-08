@@ -54,6 +54,8 @@ test("P1A effective policy keeps ENV and dangerous capabilities authoritative", 
   assert.equal(module.exports.deterministicRollout("conversation-1",100),true);
   assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,rolloutPercentage:0,maxConcurrency:1},conversation:{rolloutPercentage:100,maxConcurrency:10}}).rolloutPercentage,0);
   assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,rolloutPercentage:100,maxConcurrency:5},conversation:{rolloutPercentage:25,maxConcurrency:2}}).maxConcurrency,2);
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:base.global}).summaryDetailLevel,"DETAILED");
+  assert.equal(module.exports.resolveEffectiveAiConfig({env:{aiEnabled:true},global:{...base.global,summaryDetailLevel:"COMPACT"}}).summaryDetailLevel,"COMPACT");
 });
 
 test("message storage preserves replayable source and normalized attachments", () => {

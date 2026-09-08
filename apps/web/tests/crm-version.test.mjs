@@ -48,10 +48,10 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.10");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.11");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.10\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.10\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.11\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.11\}"/);
   assert.match(compose, /CRM_COMMIT:/);
 });
 
@@ -67,4 +67,12 @@ test("журнал 0.1.10 описывает восстановление сво
   assert.match(release,/Предыдущая сводка/);
   assert.match(release,/Зависший черновик/);
   assert.match(release,/Instagram/);
+});
+
+test("журнал 0.1.11 описывает форматы сводки и страну WhatsApp",()=>{
+  const release=i18n.slice(i18n.indexOf('version: "0.1.11"'),i18n.indexOf('version: "0.1.10"'));
+  assert.match(release,/Сжато/);
+  assert.match(release,/Подробно/);
+  assert.match(release,/WhatsApp/);
+  assert.match(release,/никогда не заменяется/);
 });
