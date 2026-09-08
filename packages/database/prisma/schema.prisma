@@ -301,11 +301,24 @@ model Client {
   aiRuns                  AiRun[]
   aiModeOverrides         AiModeOverride[]
   aiRuntimeSettings       AiRuntimeSetting[]        @relation("AiRuntimeSettingClient")
+  mergeRedirectSource     ClientMergeRedirect?      @relation("MergedClientSource")
+  incomingMergeRedirects  ClientMergeRedirect[]     @relation("MergedClientTarget")
 
   @@index([displayName])
   @@index([email])
   @@index([phone])
   @@index([status, archivedAt])
+}
+
+model ClientMergeRedirect {
+  sourceClientId String   @id
+  targetClientId String
+  createdById    String?
+  createdAt      DateTime @default(now())
+  sourceClient   Client   @relation("MergedClientSource", fields: [sourceClientId], references: [id], onDelete: Restrict)
+  targetClient   Client   @relation("MergedClientTarget", fields: [targetClientId], references: [id], onDelete: Restrict)
+
+  @@index([targetClientId])
 }
 
 model Athlete {

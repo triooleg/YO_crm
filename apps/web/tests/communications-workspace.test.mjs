@@ -673,6 +673,19 @@ test("вторичная фильтрация и шапка чата показ�
   assert.match(component,/activeOrders\.length/);
 });
 
+test("список отмечает готовую сводку, а шапка показывает все каналы клиента",()=>{
+  assert.match(component,/c\.hasSummary&&<span className="has-summary">/);
+  assert.match(component,/availableChannels\.map\(item=><span className="is-channel" aria-label=\{item\.label\} title=\{item\.label\} key=\{item\.key\}>/);
+  assert.match(component,/c\.linkedChannels\?\.length\?c\.linkedChannels/);
+});
+
+test("связанные каналы не скрываются на планшете и мобильном экране",()=>{
+  assert.doesNotMatch(css,/communications-chat-badges>span:nth-child/);
+  assert.match(component,/className="is-channel" aria-label=\{item\.label\}/);
+  assert.match(css,/@media\(max-width:650px\)\{[\s\S]*communications-chat-badges\{flex-wrap:nowrap;overflow-x:auto/);
+  assert.match(css,/communications-chat-badges \.is-channel b\{display:none\}/);
+});
+
 test("composer предлагает контекстные быстрые действия",()=>{
   assert.match(component,/communications-compose-shortcuts/);
   assert.match(component,/attachmentInput/);

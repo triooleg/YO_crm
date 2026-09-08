@@ -89,6 +89,12 @@ test("Orders sport is editable and persisted through the audited API", () => {
   assert.match(dashboard, /\/orders\/\$\{order\.id\}\/discipline/);
 });
 
+test("история заказа сначала показывает пять последних записей",()=>{
+  assert.match(dashboard,/historyItems\.slice\(0,5\)/);
+  assert.match(dashboard,/showOlderHistory/);
+  assert.match(dashboard,/hideOlderHistory/);
+});
+
 test("New order button opens the existing order form through client selection", () => {
   assert.match(dashboard, /import \{ OrderPanel \} from "\.\/order-panel"/);
   assert.match(dashboard, /onClick=\{\(\) => openNewOrder\(\)\}/);

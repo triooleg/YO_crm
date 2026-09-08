@@ -26,6 +26,9 @@ export class PromoteInboxClientDto extends CreateClientDto {}
 export class UpdateClientNotesDto {
   @ApiProperty() @IsString() @MaxLength(2000) notes!: string;
 }
+export class MergeClientDto {
+  @ApiProperty() @IsString() @Length(1,100) sourceClientId!: string;
+}
 export class CreateAthleteDto {
   @ApiProperty() @IsString() @Length(1,100) firstName!:string;
   @ApiPropertyOptional() @IsOptional() @IsString() lastName?:string;

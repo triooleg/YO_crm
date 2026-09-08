@@ -18,6 +18,16 @@ Do not confuse a client with a CRM `User`, who is a staff account, or with an
 `Athlete`, who wears the product. A channel-scoped external identifier is not an
 email address.
 
+### Client Merge Redirect
+
+A durable link from an archived duplicate client to the active canonical
+client selected by an operator. The merge window keeps redirect chains stable,
+and database ownership
+guards route concurrent direct writes to the canonical client while making the
+archived source immutable. It preserves old contact identities for inbound
+routing without reactivating the duplicate; it is not another client or a copy
+of the conversation history.
+
 ### Athlete
 
 The person for whom an item is made. Stored as `Athlete` and owned by one

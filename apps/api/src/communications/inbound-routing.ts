@@ -11,6 +11,35 @@ export function uniqueCandidate<T>(items: readonly T[]): T | null {
   return items.length === 1 ? items[0]! : null;
 }
 
+export function inboundClientCandidates<T extends {id:string}>(active:readonly T[],redirected:readonly T[],archived:readonly T[]):T[]{
+  const canonical=[...new Map([...active,...redirected].map(item=>[item.id,item])).values()];
+  return canonical.length?canonical:[...archived];
+}
+
+export async function resolveCanonicalInboundClient<C extends {id:string;clientId:string},K extends {id:string}>(input:{
+  initialClientId:string;
+  conversationId?:string;
+  lockClient:(id:string)=>Promise<unknown>;
+  findConversation:(id:string)=>Promise<C|null>;
+  findRedirectTarget:(id:string)=>Promise<K|null>;
+  findClient:(id:string)=>Promise<K|null>;
+}){
+  await input.lockClient(input.initialClientId);
+  const conversation=input.conversationId?await input.findConversation(input.conversationId):null;
+  const currentClientId=conversation?.clientId||input.initialClientId;
+  let clientId=currentClientId,redirected=false;
+  const visited=new Set<string>();
+  while(true){
+    if(visited.has(clientId))throw new Error("Обнаружен цикл объединения клиентов");
+    visited.add(clientId);
+    const target=await input.findRedirectTarget(clientId);
+    if(!target)break;
+    redirected=true;clientId=target.id;
+  }
+  const client=await input.findClient(clientId);
+  return{clientId,client,conversation,redirected};
+}
+
 export function isSyntheticFacebookEmail(value: unknown) {
   return typeof value === "string" && /^\s*\d+@facebook\.com\s*$/i.test(value);
 }

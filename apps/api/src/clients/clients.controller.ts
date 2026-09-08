@@ -4,7 +4,7 @@ import type { Request } from "express";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto, UpdateClientNotesDto } from "./clients.dto";
+import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, UpdateClientNotesDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
 
 type AuthRequest = Request & { user: User };
@@ -25,6 +25,14 @@ export class ClientsController {
   detail(@Param("id") id: string) {
     return this.clients.detail(id);
   }
+
+  @Get(":id/merge-suggestions")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  mergeSuggestions(@Param("id") id:string){return this.clients.mergeSuggestions(id)}
+
+  @Post(":id/merge")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  merge(@Param("id") id:string,@Body()dto:MergeClientDto,@Req()request:AuthRequest){return this.clients.merge(id,dto.sourceClientId,request.user)}
 
   @Post()
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

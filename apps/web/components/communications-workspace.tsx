@@ -39,6 +39,8 @@ type ConversationPreview = {
 };
 type Client = {
   id: string;
+  hasSummary?:boolean;
+  linkedChannels?:string[];
   displayName: string;
   firstName?: string;
   avatarUrl?: string;
@@ -143,8 +145,7 @@ function sendFailureText(reason: string | undefined, messageChannel: string) {
 function clientBadges(c: Client) {
   const keys = [
     ...new Set(
-      c.conversations
-        .map((x) => x.channel)
+      (c.linkedChannels?.length?c.linkedChannels:c.conversations.map((x) => x.channel))
         .filter((x): x is string => Boolean(x)),
     ),
   ];
@@ -1230,7 +1231,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                     <small className="communications-client-preview">
                       {last?.content || badges.map((b) => b.label).join(" · ")}
                     </small>
-                    <span className="communications-client-tags">{c.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrderCount>0&&<span className="has-order">{ui.activeOrdersShort} {activeOrderCount}</span>}</span>
+                    <span className="communications-client-tags">{c.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrderCount>0&&<span className="has-order">{ui.activeOrdersShort} {activeOrderCount}</span>}{c.hasSummary&&<span className="has-summary">{ui.contextSummary}</span>}</span>
                   </div>
                   <span className="communications-client-side">
                     {last && (
@@ -1270,7 +1271,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {client&&<span className="communications-chat-badges"><span>{active.icon} {active.label}</span>{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}</span>}
+                {client&&<span className="communications-chat-badges">{availableChannels.map(item=><span className="is-channel" aria-label={item.label} title={item.label} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b></span>)}{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>

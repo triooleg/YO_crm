@@ -39,7 +39,7 @@ import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMe
 import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
-import { chatwootScopeMatches, customerEmail, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
+import { chatwootScopeMatches, customerEmail, inboundClientCandidates, resolveCanonicalInboundClient, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { signMetaOauthState, verifyMetaOauthState } from "./meta-oauth";
 import { confirmMetaPageSubscription, isMetaAccessToken, metaChannelDeliveryStatus, metaDeliveryStatus, resolveInstagramWebhookReceiver, type MetaPageIdentity } from "./meta-delivery";
@@ -196,7 +196,7 @@ export class CommunicationsService {
     })));
     const clientIds = clients.map(client => client.id);
     const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
-    const [orderCounts, activeOrders, payments, chatwootIdentityMessages] = clientIds.length ? await Promise.all([
+    const [orderCounts, activeOrders, payments, chatwootIdentityMessages, linkedChannelRows] = clientIds.length ? await Promise.all([
       this.p.order.groupBy({ by: ["clientId"], where: { clientId: { in: clientIds }, archivedAt: null }, _count: { _all: true } }),
       this.p.order.findMany({
         where: { clientId: { in: clientIds }, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } },
@@ -213,7 +213,8 @@ export class CommunicationsService {
         distinct: ["conversationId"],
         select: { conversationId: true, metadata: true },
       }) : Promise.resolve([]),
-    ]) : [[], [], [], []];
+      this.p.conversation.findMany({where:{clientId:{in:clientIds},archivedAt:null},select:{clientId:true,channel:true,_count:{select:{summaries:{where:{completedAt:{not:null}}}}}}}),
+    ]) : [[], [], [], [], []];
     const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
     const items = clients.map(client => ({
       ...client,
@@ -226,6 +227,8 @@ export class CommunicationsService {
           return totals;
         }, {})).map(([currency, amountMinor]) => ({ currency, amountMinor })),
       },
+      hasSummary:linkedChannelRows.some(row=>row.clientId===client.id&&row._count.summaries>0),
+      linkedChannels:[...new Set(linkedChannelRows.filter(row=>row.clientId===client.id).map(row=>row.channel))],
       conversations: client.conversations.map(conversation => ({
         ...conversation,
         messages: conversation.messages.filter(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)).slice(0, 1).concat(conversation.messages.some(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)) ? [] : fallbackPreviewByConversation.get(conversation.id) ? [fallbackPreviewByConversation.get(conversation.id)!] : []),
@@ -1447,6 +1450,7 @@ export class CommunicationsService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
       const channel = event.channel as ContactChannel, externalConversationId = provider === "META" ? metaConversationExternalId(event.receiverId, event.externalSenderId) : event.externalSenderId;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + externalConversationId + ":" + event.externalMessageId}, 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${"client-merge-global"}, 0))`;
       let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: externalConversationId, channel } } });
       if (!conversation && provider === "META" && externalConversationId !== event.externalSenderId) {
         const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
@@ -1458,7 +1462,7 @@ export class CommunicationsService {
       const duplicate = conversation ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true } }) : null;
       if (duplicate) { if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_DUPLICATE_SKIPPED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), mid: event.externalMessageId })); return false; }
       let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } }) : null;
-      let ambiguousMatches = 0;
+      let ambiguousMatches = 0, matchedByMergeRedirect=false;
       const match: Prisma.ClientWhereInput[] = [];
       const email=customerEmail(event.email,event.channel);
       if (email) match.push({ email: { equals: email, mode: "insensitive" } });
@@ -1470,12 +1474,30 @@ export class CommunicationsService {
       if (channel === ContactChannel.INSTAGRAM && !sameChannelIdentity) match.push({ instagram: instagramIdentity });
       if (!client && match.length) {
         const active = await tx.client.findMany({ where: { archivedAt: null, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
-        const archived = active.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
-        const candidates = active.length ? active : archived;
+        const redirects=await tx.clientMergeRedirect.findMany({where:{sourceClient:{OR:match},targetClient:{archivedAt:null}},select:{targetClient:{select:{id:true,archivedAt:true,lastContactAt:true,displayName:true}}}});
+        const redirectedCandidates=redirects.map(item=>item.targetClient);
+        const archived = active.length||redirectedCandidates.length ? [] : await tx.client.findMany({ where: { archivedAt: { not: null }, OR: match }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true }, take: 2 });
+        const candidates=inboundClientCandidates(active,redirectedCandidates,archived);
         ambiguousMatches = candidates.length > 1 ? candidates.length : 0;
         client = uniqueCandidate(candidates);
         clientId = client?.id;
         linkedByContact = Boolean(client);
+        matchedByMergeRedirect=Boolean(client&&redirectedCandidates.some(candidate=>candidate.id===client!.id));
+      }
+      if(clientId){
+        const beforeLockClientId=clientId;
+        const resolved=await resolveCanonicalInboundClient({
+          initialClientId:clientId,
+          conversationId:conversation?.id,
+          lockClient:async id=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id}, 0))`},
+          findConversation:id=>tx.conversation.findUnique({where:{id}}),
+          findRedirectTarget:async id=>(await tx.clientMergeRedirect.findUnique({where:{sourceClientId:id},select:{targetClient:{select:{id:true,archivedAt:true,lastContactAt:true,displayName:true}}}}))?.targetClient||null,
+          findClient:id=>tx.client.findUnique({where:{id},select:{id:true,archivedAt:true,lastContactAt:true,displayName:true}}),
+        });
+        clientId=resolved.clientId;
+        client=resolved.client;
+        if(conversation&&resolved.conversation)conversation={...conversation,...resolved.conversation};
+        if(matchedByMergeRedirect||resolved.redirected||beforeLockClientId!==clientId)await tx.auditLog.create({data:{action:"LINK",entityType:"ClientMergeRedirect",entityId:clientId,after:{channel:event.channel,resolution:"canonicalClient"}}});
       }
       if (client && provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_FOUND", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), clientId: client.id }));
       if (client?.archivedAt) {

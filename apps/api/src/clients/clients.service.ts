@@ -1,8 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import type { User } from "@prisma/client";
+import type { AiMode, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto } from "./clients.dto";
+import { planClientAiMerge } from "./client-merge-policy";
+
+function comparable(value?:string|null){return value?.trim().toLocaleLowerCase("ru").replace(/^@/,"")||""}
+function comparablePhone(value?:string|null){return value?.replace(/\D/g,"")||""}
 
 @Injectable()
 export class ClientsService {
@@ -51,6 +55,69 @@ export class ClientsService {
     });
     if (!client) throw new NotFoundException("Клиент не найден");
     return presentClientContact(client);
+  }
+
+  async mergeSuggestions(id:string){
+    const target=await this.prisma.client.findFirst({where:{id,archivedAt:null}});
+    if(!target)throw new NotFoundException("CLIENT_MERGE_NOT_FOUND");
+    const candidates=await this.prisma.client.findMany({where:{id:{not:id},archivedAt:null},include:{conversations:{where:{archivedAt:null},select:{channel:true}}},orderBy:{lastContactAt:"desc"},take:200});
+    const targetValues={name:comparable(target.displayName),email:comparable(target.email),phone:comparablePhone(target.phone),whatsapp:comparablePhone(target.whatsapp),instagram:comparable(target.instagramUsername||target.instagram),facebook:comparable(target.facebook)};
+    return candidates.map(candidate=>{
+      const reasons:string[]=[];
+      if(targetValues.email&&targetValues.email===comparable(candidate.email))reasons.push("EMAIL");
+      if(targetValues.phone&&targetValues.phone===comparablePhone(candidate.phone))reasons.push("PHONE");
+      if(targetValues.whatsapp&&targetValues.whatsapp===comparablePhone(candidate.whatsapp))reasons.push("WHATSAPP");
+      if(targetValues.instagram&&targetValues.instagram===comparable(candidate.instagramUsername||candidate.instagram))reasons.push("INSTAGRAM");
+      if(targetValues.facebook&&targetValues.facebook===comparable(candidate.facebook))reasons.push("FACEBOOK");
+      if(targetValues.name&&targetValues.name===comparable(candidate.displayName))reasons.push("NAME");
+      return{...presentClientContact(candidate),reasons,channels:[...new Set(candidate.conversations.map(item=>item.channel))]};
+    }).filter(candidate=>candidate.reasons.length).sort((a,b)=>b.reasons.length-a.reasons.length||a.displayName.localeCompare(b.displayName,"ru"));
+  }
+
+  async merge(targetId:string,sourceId:string,actor:User){
+    if(targetId===sourceId)throw new BadRequestException("CLIENT_MERGE_SAME_CLIENT");
+    return this.prisma.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      for(const id of [targetId,sourceId].sort())await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" IN (${targetId},${sourceId}) ORDER BY "id" FOR UPDATE`;
+      const [target,source]=await Promise.all([
+        tx.client.findFirst({where:{id:targetId,archivedAt:null},include:{conversations:{select:{channel:true}},aiRuntimeSettings:{where:{scope:"CLIENT"},select:{id:true,key:true,value:true}},aiModeOverrides:{select:{id:true,mode:true,conversationId:true}}}}),
+        tx.client.findFirst({where:{id:sourceId,archivedAt:null},include:{conversations:{select:{channel:true}},aiRuntimeSettings:{where:{scope:"CLIENT"},select:{id:true,key:true,value:true}},aiModeOverrides:{select:{id:true,mode:true,conversationId:true}}}}),
+      ]);
+      if(!target||!source)throw new NotFoundException("CLIENT_MERGE_NOT_FOUND");
+      const targetChannels=new Set(target.conversations.map(item=>item.channel)),conflicts=source.conversations.map(item=>item.channel).filter(channel=>targetChannels.has(channel));
+      if(conflicts.length)throw new BadRequestException("CLIENT_MERGE_CHANNEL_CONFLICT");
+      let aiPlan:ReturnType<typeof planClientAiMerge>;
+      try{aiPlan=planClientAiMerge({targetRuntimeSettings:target.aiRuntimeSettings,sourceRuntimeSettings:source.aiRuntimeSettings,targetModeOverrides:target.aiModeOverrides,sourceModeOverrides:source.aiModeOverrides})}catch(error){throw new BadRequestException(error instanceof Error?error.message:"CLIENT_MERGE_AI_RUNTIME_CONFLICT")}
+      const firstContactAt=[target.firstContactAt,source.firstContactAt].filter((value):value is Date=>Boolean(value)).sort((a,b)=>a.getTime()-b.getTime())[0]||null;
+      const lastContactAt=[target.lastContactAt,source.lastContactAt].filter((value):value is Date=>Boolean(value)).sort((a,b)=>b.getTime()-a.getTime())[0]||null;
+      const nextActionAt=[target.nextActionAt,source.nextActionAt].filter((value):value is Date=>Boolean(value)).sort((a,b)=>a.getTime()-b.getTime())[0]||null;
+      const notes=[target.notes,source.notes&&`Из объединённой карточки ${source.displayName}:\n${source.notes}`].filter(Boolean).join("\n\n")||null;
+      const updated=await tx.client.update({where:{id:targetId},data:{
+        avatarUrl:target.avatarUrl||source.avatarUrl,country:target.country||source.country,city:target.city||source.city,address:target.address||source.address,postalCode:target.postalCode||source.postalCode,
+        email:target.email||source.email,phone:target.phone||source.phone,whatsapp:target.whatsapp||source.whatsapp,instagram:target.instagram||source.instagram,instagramUsername:target.instagramUsername||source.instagramUsername,
+        facebook:target.facebook||source.facebook,telegram:target.telegram||source.telegram,preferredChannel:target.preferredChannel||source.preferredChannel,language:target.language||source.language,timezone:target.timezone||source.timezone,
+        firstContactAt,lastContactAt,nextActionAt,notes,responsibleManagerId:target.responsibleManagerId||source.responsibleManagerId,status:target.status==="LEAD"?source.status:target.status,source:target.source==="MANUAL"?source.source:target.source,
+      }});
+      await Promise.all([
+        tx.athlete.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),tx.order.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),
+        tx.conversation.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),tx.messageDeliveryAttempt.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),
+        tx.workTask.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),tx.customerMemory.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),
+        tx.conversationFact.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),tx.agreement.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),
+        tx.aiRun.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),tx.activity.updateMany({where:{clientId:sourceId},data:{clientId:targetId}}),
+      ]);
+      if(aiPlan.runtimeSettingIdsToDelete.length)await tx.aiRuntimeSetting.deleteMany({where:{id:{in:aiPlan.runtimeSettingIdsToDelete}}});
+      if(aiPlan.runtimeSettingIdsToMove.length)await tx.aiRuntimeSetting.updateMany({where:{id:{in:aiPlan.runtimeSettingIdsToMove}},data:{clientId:targetId,scopeId:targetId}});
+      await tx.aiModeOverride.updateMany({where:{clientId:sourceId},data:{clientId:targetId}});
+      if(aiPlan.consolidatedClientMode)await tx.aiModeOverride.updateMany({where:{clientId:targetId,conversationId:null},data:{mode:aiPlan.consolidatedClientMode as AiMode}});
+      await tx.clientMergeRedirect.updateMany({where:{targetClientId:sourceId},data:{targetClientId:targetId}});
+      await tx.clientMergeRedirect.create({data:{sourceClientId:sourceId,targetClientId:targetId,createdById:actor.id}});
+      const archivedAt=new Date();
+      await tx.client.update({where:{id:sourceId},data:{archivedAt}});
+      await tx.activity.create({data:{clientId:targetId,type:"CLIENTS_MERGED",summary:`Объединены карточки клиентов: ${target.displayName} и ${source.displayName}`,metadata:{sourceClientId:sourceId,targetClientId:targetId,sourceChannels:source.conversations.map(item=>item.channel)}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"MERGE",entityType:"Client",entityId:targetId,before:{targetId,sourceId,sourceDisplayName:source.displayName},after:{targetId,sourceId,sourceArchivedAt:archivedAt.toISOString(),aiRuntimeSettingsMoved:aiPlan.runtimeSettingIdsToMove.length,aiRuntimeSettingsDeduplicated:aiPlan.runtimeSettingIdsToDelete.length,consolidatedClientAiMode:aiPlan.consolidatedClientMode}}});
+      return presentClientContact(updated);
+    });
   }
 
   create(dto: CreateClientDto, actor: User) {

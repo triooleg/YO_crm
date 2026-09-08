@@ -76,6 +76,19 @@ test("inbox list can be narrowed by order history or active orders", () => {
   assert.match(service, /salesStatus:\{notIn:\["COMPLETED","CANCELLED"\]\}/);
 });
 
+test("inbox exposes completed summary marker for the client",()=>{
+  assert.match(service,/_count:\{select:\{summaries:\{where:\{completedAt:\{not:null\}\}\}\}\}/);
+  assert.match(service,/hasSummary:linkedChannelRows\.some/);
+  assert.match(service,/linkedChannels:\[\.\.\.newSet\(linkedChannelRows/);
+});
+
+test("inbound identity of a merged client resolves to the canonical active client",()=>{
+  assert.match(service,/clientMergeRedirect\.findMany/);
+  assert.match(service,/targetClient:\{archivedAt:null\}/);
+  assert.match(service,/matchedByMergeRedirect/);
+  assert.doesNotMatch(service,/clientMergeRedirect\.findMany\([^;]*take:2/);
+});
+
 test("Instagram profile identity keeps scoped ID immutable and persists username separately", () => {
   assert.match(schema, /instagramUsername\s+String\?/);
   assert.match(service, /instagramUsername:before\.instagramUsername/);
@@ -619,6 +632,12 @@ test("inbound routing reuses contacts, reopens history and validates configured 
   assert.match(service,/chatwootScopeMatches/);
   assert.match(service,/uniqueCandidate/);
   assert.match(service,/candidateCount:ambiguousMatches/);
+  assert.match(service,/resolveCanonicalInboundClient/);
+  assert.match(service,/client-merge:/);
+  assert.match(service,/pg_advisory_xact_lock_shared/);
+  assert.match(service,/client-merge-global/);
+  assert.match(service,/findConversation:id=>tx\.conversation\.findUnique/);
+  assert.match(service,/findRedirectTarget/);
   const inbound=service.slice(service.indexOf("privateasyncpersistInbound"),service.indexOf("asyncdetail"));
   assert.ok(inbound.indexOf("if(duplicate)returnfalse") < inbound.indexOf("CLIENT_REACTIVATED_BY_INBOUND"));
 });

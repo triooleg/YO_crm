@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
-import { clientAthleteUi } from "../lib/i18n";
+import { clientAthleteUi, clientMergeUi } from "../lib/i18n";
 import { ClientAvatar } from "./client-avatar";
 
 type Client = {
@@ -39,9 +39,18 @@ type Order = {
   modelImagePath?: string;
 };
 type Activity = { id: string; summary: string; createdAt: string };
+type MergeReasonCode=keyof typeof clientMergeUi.reasonLabels;
+type MergeSuggestion = Client & { reasons:MergeReasonCode[]; channels:string[] };
+function mergeReasonLabel(reason:MergeReasonCode){return clientMergeUi.reasonLabels[reason]}
+function mergeErrorLabel(reason:unknown){const code=reason instanceof Error?reason.message:"";return clientMergeUi.errors[code as keyof typeof clientMergeUi.errors]||clientMergeUi.errorFallback}
+function mergeChannelLabel(channel:string){return clientMergeUi.channelLabels[channel as keyof typeof clientMergeUi.channelLabels]||clientMergeUi.channelFallback}
 
 export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>void}={}) {
   const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const mergeTriggerRef = useRef<HTMLButtonElement>(null);
+  const mergeDialogRef = useRef<HTMLElement>(null);
+  const mergeBusyRef = useRef(false);
+  const detailRequestId=useRef(0);
   const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
   const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
   const [auth, setAuth] = useState<boolean | null>(null),
@@ -54,7 +63,12 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
     [addingAthlete, setAddingAthlete] = useState(false),
     [measuring, setMeasuring] = useState(false),
     [ordering, setOrdering] = useState(false),
+    [mergeOpen,setMergeOpen]=useState(false),
+    [mergeSuggestions,setMergeSuggestions]=useState<MergeSuggestion[]>([]),
+    [mergeSourceId,setMergeSourceId]=useState(""),
+    [mergeBusy,setMergeBusy]=useState(false),
     [error, setError] = useState("");
+  mergeBusyRef.current=mergeBusy;
   async function request(path: string, init?: RequestInit) {
     const r = await fetch(`/api${path}`, {
       credentials: "include",
@@ -93,14 +107,37 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
     return () => clearTimeout(t);
   }, [search, auth]);
   useEffect(() => {
+    const requestId=++detailRequestId.current;
+    setDetail(undefined);setMergeSuggestions([]);setMergeSourceId("");setMergeOpen(false);
     if (!selected || !auth) {
       setDetail(undefined);
       return;
     }
     request(`/clients/${selected}`)
-      .then(value=>{setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
-      .catch((e) => setError(e.message));
+      .then(value=>{if(requestId!==detailRequestId.current)return;setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
+      .catch((e) => {if(requestId===detailRequestId.current)setError(e.message)});
+    request(`/clients/${selected}/merge-suggestions`).then(value=>{if(requestId===detailRequestId.current)setMergeSuggestions(value)}).catch(()=>{if(requestId===detailRequestId.current)setMergeSuggestions([])});
   }, [selected, auth]);
+  useEffect(()=>{
+    if(!mergeOpen)return;
+    function keydown(event:KeyboardEvent){
+      if(event.key==="Escape"&&!mergeBusyRef.current){event.preventDefault();setMergeOpen(false);return}
+      if(event.key!=="Tab"||!mergeDialogRef.current)return;
+      const controls=[...mergeDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),select:not([disabled]),input:not([disabled]),textarea:not([disabled]),a[href]')];
+      if(!controls.length)return;
+      const first=controls[0]!,last=controls[controls.length-1]!;
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+    }
+    document.addEventListener("keydown",keydown);
+    return()=>{document.removeEventListener("keydown",keydown);mergeTriggerRef.current?.focus()};
+  },[mergeOpen]);
+  async function mergeClient(){
+    if(!detail||detail.id!==selected||!mergeSourceId)return;
+    const mergeRequestId=detailRequestId.current,mergeTargetId=selected;
+    setMergeBusy(true);setError("");
+    try{await request(`/clients/${mergeTargetId}/merge`,{method:"POST",body:JSON.stringify({sourceClientId:mergeSourceId})});setMergeOpen(false);setMergeSourceId("");await load(search);const value=await request(`/clients/${mergeTargetId}`);if(mergeRequestId===detailRequestId.current)setDetail(value);request(`/clients/${mergeTargetId}/merge-suggestions`).then(suggestions=>{if(mergeRequestId===detailRequestId.current)setMergeSuggestions(suggestions)}).catch(()=>{if(mergeRequestId===detailRequestId.current)setMergeSuggestions([])})}catch(reason){if(mergeRequestId===detailRequestId.current)setError(mergeErrorLabel(reason))}finally{setMergeBusy(false)}
+  }
   if (auth === null) return <div className="phase2-loading">Загрузка CRM…</div>;
   if (!auth)
     return (
@@ -147,9 +184,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
             <h1>Клиенты</h1>
             <span>Контакты, спортсмены, заказы и вся история работы</span>
           </div>
-          <button className="phase2-primary" onClick={() => setCreating(true)}>
-            + Новый клиент
-          </button>
+          <div className="phase2-card-actions"><button ref={mergeTriggerRef} disabled={!detail||detail.id!==selected} onClick={()=>{if(detail?.id===selected)setMergeOpen(true)}}>{clientMergeUi.action}{mergeSuggestions.length?` · ${mergeSuggestions.length} ${clientMergeUi.suggestionBadge}`:""}</button><button className="phase2-primary" onClick={() => setCreating(true)}>+ Новый клиент</button></div>
         </header>
         {error && (
           <div className="phase2-error">
@@ -211,6 +246,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
           }}
         />
       )}
+      {mergeOpen&&detail&&<div className="phase2-overlay"><section ref={mergeDialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="client-merge-title"><div><h2 id="client-merge-title">{clientMergeUi.title}</h2><button type="button" aria-label={clientAthleteUi.close} disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>×</button></div><p>{clientMergeUi.hint}</p>{!mergeSuggestions.length&&<p>{clientMergeUi.noSuggestions}</p>}<label>{clientMergeUi.source}<select autoFocus value={mergeSourceId} onChange={event=>setMergeSourceId(event.target.value)}><option value="">{clientMergeUi.choose}</option>{[...mergeSuggestions,...clients.filter(client=>client.id!==detail.id&&!mergeSuggestions.some(item=>item.id===client.id)).map(client=>({...client,reasons:[],channels:[]} as MergeSuggestion))].map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.reasons.length?` — ${candidate.reasons.map(mergeReasonLabel).join(", ")}`:""}</option>)}</select></label>{mergeSourceId&&mergeSuggestions.find(item=>item.id===mergeSourceId)&&<div><strong>{clientMergeUi.reasons}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.reasons.map(mergeReasonLabel).join(" · ")}</p><strong>{clientMergeUi.channels}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.channels.map(mergeChannelLabel).join(" · ")||"—"}</p></div>}<footer><button type="button" disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>{clientMergeUi.cancel}</button><button type="button" className="phase2-primary" disabled={mergeBusy||!mergeSourceId} onClick={()=>void mergeClient()}>{mergeBusy?clientMergeUi.merging:clientMergeUi.confirm}</button></footer></section></div>}
       {addingAthlete && detail && (
         <AddAthlete
           clientId={detail.id}
