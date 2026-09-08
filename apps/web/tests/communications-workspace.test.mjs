@@ -686,15 +686,26 @@ test("вторичная фильтрация и шапка чата показ�
 
 test("список отмечает готовую сводку, а шапка показывает все каналы клиента",()=>{
   assert.match(component,/c\.hasSummary&&<span className="has-summary">/);
-  assert.match(component,/availableChannels\.map\(item=><span className="is-channel" aria-label=\{item\.label\} title=\{item\.label\} key=\{item\.key\}>/);
+  assert.match(component,/availableChannels\.map\(item=>\{const channelText=/);
+  assert.match(component,/className="is-channel" aria-label=\{channelText\} title=\{channelText\}/);
   assert.match(component,/c\.linkedChannels\?\.length\?c\.linkedChannels/);
+});
+
+test("шапка показывает имя каждого объединённого аккаунта и предлагает разделение",()=>{
+  assert.match(component,/linkedAccounts\?:/);
+  assert.match(component,/mergedClients\?:/);
+  assert.match(component,/item\.accountName\?` \/ \$\{item\.accountName\}`:""/);
+  assert.match(component,/communications-split-client/);
+  assert.match(component,/ui\.splitAccounts/);
+  assert.match(locale,/splitAccounts:/);
+  assert.match(locale,/splitLegacyWarning:/);
 });
 
 test("связанные каналы не скрываются на планшете и мобильном экране",()=>{
   assert.doesNotMatch(css,/communications-chat-badges>span:nth-child/);
-  assert.match(component,/className="is-channel" aria-label=\{item\.label\}/);
+  assert.match(component,/className="is-channel" aria-label=\{channelText\}/);
   assert.match(css,/@media\(max-width:650px\)\{[\s\S]*communications-chat-badges\{flex-wrap:nowrap;overflow-x:auto/);
-  assert.match(css,/communications-chat-badges \.is-channel b\{display:none\}/);
+  assert.match(css,/communications-chat-badges \.is-channel b,.communications-chat-badges \.is-channel small\{display:inline\}/);
 });
 
 test("composer предлагает контекстные быстрые действия",()=>{

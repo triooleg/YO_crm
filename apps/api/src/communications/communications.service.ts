@@ -66,6 +66,7 @@ import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFi
 import { chatwootDeleteTarget, classifyDraftDeliveryRecovery, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
 import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, normalizeSummaryDetailLevel, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, summaryDigestProfile, summaryPlanFingerprint, summaryPromptVersion, summarySourceDigest, type SummaryDetailLevel, type SummaryMessage } from "./conversation-summary";
 import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
+import { channelAccountName, conversationOwnerSourceId, hasValidMovedEntityIds, legacyConversationOwnerSourceId, legacyMergeTargetClientId, legacySourceChannels } from "../clients/client-merge-provenance";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -197,7 +198,7 @@ export class CommunicationsService {
     })));
     const clientIds = clients.map(client => client.id);
     const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
-    const [orderCounts, activeOrders, payments, chatwootIdentityMessages, linkedChannelRows] = clientIds.length ? await Promise.all([
+    const [orderCounts, activeOrders, payments, chatwootIdentityMessages, linkedChannelRows, mergeRedirects, mergeActivities] = clientIds.length ? await Promise.all([
       this.p.order.groupBy({ by: ["clientId"], where: { clientId: { in: clientIds }, archivedAt: null }, _count: { _all: true } }),
       this.p.order.findMany({
         where: { clientId: { in: clientIds }, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } },
@@ -214,10 +215,26 @@ export class CommunicationsService {
         distinct: ["conversationId"],
         select: { conversationId: true, metadata: true },
       }) : Promise.resolve([]),
-      this.p.conversation.findMany({where:{clientId:{in:clientIds},archivedAt:null},select:{clientId:true,channel:true,_count:{select:{summaries:{where:{completedAt:{not:null}}}}}}}),
-    ]) : [[], [], [], [], []];
+      this.p.conversation.findMany({where:{clientId:{in:clientIds},archivedAt:null},select:{id:true,clientId:true,channel:true,_count:{select:{summaries:{where:{completedAt:{not:null}}}}}}}),
+      this.p.clientMergeRedirect.findMany({where:{targetClientId:{in:clientIds}},include:{sourceClient:{select:{id:true,displayName:true,instagramUsername:true,instagram:true,email:true,phone:true,whatsapp:true,facebook:true,source:true,preferredChannel:true}}}}),
+      this.p.activity.findMany({where:{clientId:{in:clientIds},type:"CLIENTS_MERGED"},orderBy:{createdAt:"desc"},select:{clientId:true,metadata:true}}),
+    ]) : [[], [], [], [], [], [], []];
+    const mergeOperations=mergeRedirects.length?await this.p.clientMergeOperation.findMany({where:{sourceClientId:{in:mergeRedirects.map(redirect=>redirect.sourceClientId)},splitAt:null},orderBy:{createdAt:"desc"},select:{sourceClientId:true,targetClientId:true,movedEntityIds:true}}):[];
     const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
-    const items = clients.map(client => ({
+    const operationBySource=new Map<string,(typeof mergeOperations)[number]>();
+    for(const operation of mergeOperations)if(!operationBySource.has(operation.sourceClientId))operationBySource.set(operation.sourceClientId,operation);
+    const items = clients.map(client => {
+      const redirects=mergeRedirects.filter(redirect=>redirect.targetClientId===client.id),rows=linkedChannelRows.filter(row=>row.clientId===client.id);
+      const operations=redirects.map(redirect=>operationBySource.get(redirect.sourceClientId)).filter((operation):operation is (typeof mergeOperations)[number]=>Boolean(operation));
+      const legacyEvidence=redirects.filter(redirect=>!operationBySource.has(redirect.sourceClientId)).map(redirect=>{const activity=mergeActivities.filter(item=>item.clientId===client.id).find(item=>legacyMergeTargetClientId(item.metadata,redirect.sourceClientId));return{sourceClientId:redirect.sourceClientId,targetClientId:activity?legacyMergeTargetClientId(activity.metadata,redirect.sourceClientId)||"":"",channels:activity?legacySourceChannels(activity.metadata,redirect.sourceClientId):[]}}).filter(item=>item.targetClientId&&item.channels.length);
+      const sourceForConversation=(row:(typeof rows)[number])=>{
+        const exactSourceId=conversationOwnerSourceId(row.id,operations,client.id);
+        const legacySourceId=legacyConversationOwnerSourceId(row.channel,legacyEvidence,client.id);
+        return redirects.find(redirect=>redirect.sourceClientId===(exactSourceId||legacySourceId));
+      };
+      const linkedAccounts=rows.map(row=>{const owner=sourceForConversation(row),account=owner?.sourceClient||client;return{channel:row.channel,accountName:channelAccountName(account,row.channel),...(owner?{sourceClientId:owner.sourceClientId}:{})}});
+      const mergedClients=redirects.filter(redirect=>{const operation=operationBySource.get(redirect.sourceClientId);return operation?operation.targetClientId===client.id&&hasValidMovedEntityIds(operation.movedEntityIds):legacyEvidence.some(item=>item.sourceClientId===redirect.sourceClientId&&item.targetClientId===client.id)}).map(redirect=>({sourceClientId:redirect.sourceClientId,displayName:redirect.sourceClient.displayName,channels:rows.filter(row=>sourceForConversation(row)?.sourceClientId===redirect.sourceClientId).map(row=>row.channel),splitMode:operationBySource.has(redirect.sourceClientId)?"FULL" as const:"CHANNELS_ONLY" as const}));
+      return ({
       ...client,
       email: customerEmail(client.email, client.facebook ? "FACEBOOK" : client.source) ?? null,
       orders: activeOrders.filter(order => order.clientId === client.id),
@@ -230,6 +247,8 @@ export class CommunicationsService {
       },
       hasSummary:linkedChannelRows.some(row=>row.clientId===client.id&&row._count.summaries>0),
       linkedChannels:[...new Set(linkedChannelRows.filter(row=>row.clientId===client.id).map(row=>row.channel))],
+      linkedAccounts,
+      mergedClients,
       conversations: client.conversations.map(conversation => ({
         ...conversation,
         messages: conversation.messages.filter(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)).slice(0, 1).concat(conversation.messages.some(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)) ? [] : fallbackPreviewByConversation.get(conversation.id) ? [fallbackPreviewByConversation.get(conversation.id)!] : []),
@@ -239,7 +258,7 @@ export class CommunicationsService {
           instagramClientUsername: client.instagramUsername,
         }) || (conversation.channel === ContactChannel.CHATWOOT ? chatwootConversationInboxUrl(chatwootSettings.baseUrl, chatwootSettings.accountId, chatwootIdentityByConversation.get(conversation.id)) : ""),
       })),
-    }));
+    });});
     return { items, total, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + items.length < total };
   }
   templates() {

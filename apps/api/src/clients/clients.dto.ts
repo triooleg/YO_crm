@@ -29,6 +29,9 @@ export class UpdateClientNotesDto {
 export class MergeClientDto {
   @ApiProperty() @IsString() @Length(1,100) sourceClientId!: string;
 }
+export class SplitClientDto {
+  @ApiProperty() @IsString() @Length(1,100) sourceClientId!: string;
+}
 export class CreateAthleteDto {
   @ApiProperty() @IsString() @Length(1,100) firstName!:string;
   @ApiPropertyOptional() @IsOptional() @IsString() lastName?:string;

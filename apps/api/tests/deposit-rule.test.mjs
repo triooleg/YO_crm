@@ -29,3 +29,7 @@ test("order creation accepts an omitted deposit and resolves the configured perc
 test("an explicit deposit remains an intentional override", () => {
   assert.match(service, /dto\.depositRequiredMinor\s*\?\?/);
 });
+
+test("order ownership validation shares the client merge transaction lock", () => {
+  assert.match(service, /pg_advisory_xact_lock\(hashtextextended\(\$\{\"client-merge-global\"\},0\)\)/);
+});

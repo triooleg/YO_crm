@@ -31,6 +31,17 @@ changes. Update the handoff after meaningful implementation or deployment.
 - For fixes and risky rules: failing test first, then implementation.
 - Before completion run typecheck, tests, build and affected live smoke paths.
 
+## YO_crm UI Rules
+
+- Перед созданием нового универсального UI-компонента сначала проверить возможности Mantine.
+- Не создавать новый Button, Input, Modal, Drawer, Menu, Tooltip, Select, Checkbox, Switch, Badge, Tabs, Pagination или DatePicker, если Mantine уже предоставляет подходящий компонент.
+- Не добавлять произвольные стили кнопок и полей непосредственно в feature-модулях. Общие значения должны идти из единой Mantine theme.
+- Бизнес-компоненты YO_crm могут оборачивать Mantine, когда wrapper добавляет доменную семантику или общее поведение. Не создавать пустые pass-through wrappers вроде `YoButton`.
+- Перед созданием нового компонента искать существующий аналог по repository. Не добавлять другую UI-библиотеку без архитектурной необходимости.
+- Mantine является стандартом универсального UI; собственные компоненты остаются стандартом для бизнес-сущностей YO_crm.
+- Не менять бизнес-логику в рамках UI-миграции. Backend, contracts, auth, RBAC, routes и интеграции должны оставаться совместимыми.
+- Legacy UI и CSS удаляются только после миграции всех consumers, прохождения tests/build и визуальной проверки.
+
 ## Deployment
 
 Target `trio@192.168.31.219`, directory `/home/trio/yoleotard-crm`, compose

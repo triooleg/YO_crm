@@ -34,8 +34,8 @@ test("client routes require session and role guards", () => {
 });
 
 test("client mutations append audit and activity history", () => {
-  assert.equal((service.match(/auditLog\.create/g) ?? []).length, 6);
-  assert.equal((service.match(/activity\.create/g) ?? []).length, 6);
+  assert.ok((service.match(/auditLog\.create/g) ?? []).length >= 7);
+  assert.ok((service.match(/activity\.create/g) ?? []).length >= 8);
 });
 
 test("ручное объединение клиента архивирует дубль и сохраняет деловую историю",()=>{
@@ -44,8 +44,9 @@ test("ручное объединение клиента архивирует д
   assert.match(service,/client-merge:/);
   assert.match(service,/client-merge-global/);
   assert.match(service,/ORDER BY "id" FOR UPDATE/);
-  assert.match(service,/tx\.conversation\.updateMany\(\{where:\{clientId:sourceId\},data:\{clientId:targetId\}\}\)/);
-  assert.match(service,/tx\.order\.updateMany\(\{where:\{clientId:sourceId\},data:\{clientId:targetId\}\}\)/);
+  assert.match(service,/moveExact\(tx\.conversation as never,movedEntityIds\.conversations\)/);
+  assert.match(service,/moveExact\(tx\.order as never,movedEntityIds\.orders\)/);
+  assert.match(service,/result\.count!==entityIds\.length/);
   assert.match(service,/tx\.client\.update\(\{where:\{id:sourceId\},data:\{archivedAt\}\}\)/);
   assert.match(service,/action:"MERGE"/);
   assert.match(service,/if\(conflicts\.length\)throw new BadRequestException/);
@@ -54,8 +55,17 @@ test("ручное объединение клиента архивирует д
   assert.match(service,/aiRuntimeSetting\.updateMany/);
   assert.match(service,/aiModeOverride\.updateMany/);
   for(const code of ["EMAIL","PHONE","WHATSAPP","INSTAGRAM","FACEBOOK","NAME"])assert.match(service,new RegExp(`reasons\\.push\\("${code}"\\)`));
-  for(const code of ["CLIENT_MERGE_SAME_CLIENT","CLIENT_MERGE_NOT_FOUND","CLIENT_MERGE_CHANNEL_CONFLICT","CLIENT_MERGE_AI_RUNTIME_CONFLICT"])assert.match(service,new RegExp(code));
+  for(const code of ["CLIENT_MERGE_SAME_CLIENT","CLIENT_MERGE_NOT_FOUND","CLIENT_MERGE_CHANNEL_CONFLICT","CLIENT_MERGE_AI_RUNTIME_CONFLICT","CLIENT_MERGE_PROVENANCE_INVALID"])assert.match(service,new RegExp(code));
   assert.doesNotMatch(service,/reasons\.push\("Совпадает/);
+});
+
+test("объединённую карточку можно безопасно разделить с аудитом",()=>{
+  assert.match(controller,/@Post\(":id\/split"\)/);
+  assert.match(service,/async split\(targetId:string,sourceId:string,actor:User\)/);
+  assert.match(service,/clientMergeOperation/);
+  assert.match(service,/action:"SPLIT"/);
+  assert.match(service,/CLIENT_SPLIT_NOT_FOUND/);
+  assert.match(service,/CLIENT_SPLIT_CONVERSATION_CONFLICT/);
 });
 
 test("временный контакт из входящих оформляется без дублирования переписки",()=>{

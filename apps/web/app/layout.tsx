@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
+import {
+  ColorSchemeScript,
+  MantineProvider,
+  mantineHtmlProps,
+} from "@mantine/core";
+import "@mantine/core/styles.css";
 import "flag-icons/css/flag-icons.min.css";
+import { yoleotardTheme } from "../lib/mantine-theme";
 import "./styles.css";
 import "./phase2.css";
 import "./crm-shell.css";
@@ -18,6 +25,7 @@ import "./typography.css";
 import "./branding-settings.css";
 import "./workspace-layout-standard.css";
 import "./inbox-reference.css";
+import "./mantine-overrides.css";
 
 export const metadata: Metadata = {
   title: "CRM Yoleotard",
@@ -29,8 +37,15 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ru">
-      <body>{children}</body>
+    <html lang="ru" {...mantineHtmlProps}>
+      <head>
+        <ColorSchemeScript forceColorScheme="light" />
+      </head>
+      <body>
+        <MantineProvider theme={yoleotardTheme} forceColorScheme="light">
+          {children}
+        </MantineProvider>
+      </body>
     </html>
   );
 }

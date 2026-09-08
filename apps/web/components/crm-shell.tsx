@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { Modal } from "@mantine/core";
 import { CrmNavIcon } from "./crm-nav-icon";
 import { ClientWorkspace } from "./client-workspace";
 import { OrdersDashboard } from "./orders-dashboard";
@@ -28,7 +29,6 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
   useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
   const navigate=(next:CrmSectionId,context?:Record<string,string>)=>{if(next===sectionId&&!context)return;setSectionId(next);const url=new URL(crmSectionHref(next,window.location.search),window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);for(const[key,value]of Object.entries(context||{}))url.searchParams.set(key,value);window.history.pushState(null,"",url)};
   useEffect(()=>{const sync=()=>setSectionId(parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined));window.addEventListener("popstate",sync);return()=>window.removeEventListener("popstate",sync)},[]);
-  useEffect(()=>{if(!releaseHistoryOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setReleaseHistoryOpen(false)};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close)},[releaseHistoryOpen]);
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:authUi.loading}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
@@ -44,7 +44,7 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
       <div className="crm-topbar-user"><span className="crm-topbar-avatar" aria-hidden="true">{initials(auth.displayName.trim())}</span><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{navigationUi.userRoles[auth.role as keyof typeof navigationUi.userRoles]||navigationUi.unknownRole}</small></div><details className="crm-profile-menu"><summary aria-label={navigationUi.profileMenu}>⌄</summary><div><button type="button" onClick={()=>navigate("settings")}>{navigationUi.settings}</button><button type="button" onClick={()=>setReleaseHistoryOpen(true)}>{navigationUi.version}</button><button type="button" onClick={()=>void logout()}>{authUi.logout}</button></div></details></div>
     </header>
     <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace onNavigate={next=>navigate(next)}/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined}/>:sectionId==="orders"?<OrdersDashboard onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace/>:sectionId==="finance"?<FinanceWorkspace/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
-    {releaseHistoryOpen&&<ReleaseHistoryDialog onClose={()=>setReleaseHistoryOpen(false)}/>}
+    <ReleaseHistoryDialog opened={releaseHistoryOpen} onClose={()=>setReleaseHistoryOpen(false)}/>
   </main>
 }
 
@@ -53,10 +53,10 @@ function BrandMark({branding}:{branding:Branding}){
   return <svg viewBox="0 0 36 42" fill="none" aria-hidden="true"><circle cx="22" cy="7" r="3" fill="currentColor"/><path d="M5 6Q18 18 29 10M19 14L17 25 12 39M17 24L26 31M20 15L32 3" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="m16 13 8 2-4 12-6-3Z" fill="currentColor"/></svg>;
 }
 
-function ReleaseHistoryDialog({onClose}:{onClose:()=>void}){
+function ReleaseHistoryDialog({opened,onClose}:{opened:boolean;onClose:()=>void}){
   const currentVersion=process.env.NEXT_PUBLIC_CRM_VERSION||"development";
   const commit=process.env.NEXT_PUBLIC_CRM_COMMIT||"development";
-  return <div className="crm-release-overlay" onMouseDown={event=>event.target===event.currentTarget&&onClose()}><section className="crm-release-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-release-title"><header><div><p>{releaseHistoryUi.subtitle}</p><h2 id="crm-release-title">{releaseHistoryUi.title}</h2></div><button type="button" onClick={onClose} aria-label={releaseHistoryUi.close}>×</button></header><div className="crm-release-list">{releaseHistoryUi.releases.map(release=><article className={release.version===currentVersion?"current":""} key={release.version}><div className="crm-release-heading"><h3>CRM v{release.version}</h3><time>{release.date}</time>{release.version===currentVersion&&<span>{releaseHistoryUi.current}</span>}</div><h4>{releaseHistoryUi.changes}</h4><ul>{release.changes.map(change=><li key={change}>{change}</li>)}</ul><h4>{releaseHistoryUi.compatibility}</h4><p>{release.compatibility}</p>{release.version===currentVersion&&<small>{releaseHistoryUi.commit}: <code>{commit}</code></small>}</article>)}</div></section></div>;
+  return <Modal opened={opened} onClose={onClose} centered size={760} padding={0} radius={18} overlayProps={{color:"#241a33",backgroundOpacity:.36,blur:1}} closeButtonProps={{"aria-label":releaseHistoryUi.close}} classNames={{content:"crm-release-dialog",header:"crm-release-header",title:"crm-release-title",close:"crm-release-close",body:"crm-release-list"}} title={<span><small>{releaseHistoryUi.subtitle}</small><strong>{releaseHistoryUi.title}</strong></span>}>{releaseHistoryUi.releases.map(release=><article className={release.version===currentVersion?"current":""} key={release.version}><div className="crm-release-heading"><h3>CRM v{release.version}</h3><time>{release.date}</time>{release.version===currentVersion&&<span>{releaseHistoryUi.current}</span>}</div><h4>{releaseHistoryUi.changes}</h4><ul>{release.changes.map(change=><li key={change}>{change}</li>)}</ul><h4>{releaseHistoryUi.compatibility}</h4><p>{release.compatibility}</p>{release.version===currentVersion&&<small>{releaseHistoryUi.commit}: <code>{commit}</code></small>}</article>)}</Modal>;
 }
 
 function CrmLogin({onSuccess}:{onSuccess:(user:{email:string;displayName:string;role:string})=>void}){

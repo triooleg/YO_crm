@@ -16,6 +16,8 @@ backups/
 *.tgz
 *.tsbuildinfo
 .playwright-cli/
+apps/web/playwright-report/
+apps/web/test-results/
 apps/web/.next-*/
 output/
 tmp/

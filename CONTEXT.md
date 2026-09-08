@@ -28,6 +28,15 @@ archived source immutable. It preserves old contact identities for inbound
 routing without reactivating the duplicate; it is not another client or a copy
 of the conversation history.
 
+### Client Merge Operation
+
+An immutable provenance record for one operator-approved client merge. It
+records which pre-existing relations moved and the client values before and
+after the merge, so that the archived source can be restored without guessing
+ownership or deleting later business history. A split ends the active redirect;
+it does not erase the merge operation or its audit trail. Merges created before
+this provenance existed support only a conservative channel split.
+
 ### Athlete
 
 The person for whom an item is made. Stored as `Athlete` and owned by one

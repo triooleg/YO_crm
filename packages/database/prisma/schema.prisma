@@ -245,6 +245,8 @@ model User {
   createdKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeCreatedBy")
   updatedKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeUpdatedBy")
   updatedAiRuntimeSettings AiRuntimeSetting[]         @relation("AiRuntimeSettingUpdatedBy")
+  createdClientMergeOperations ClientMergeOperation[] @relation("ClientMergeOperationCreator")
+  splitClientMergeOperations   ClientMergeOperation[] @relation("ClientMergeOperationSplitter")
 }
 
 model Session {
@@ -303,6 +305,8 @@ model Client {
   aiRuntimeSettings       AiRuntimeSetting[]        @relation("AiRuntimeSettingClient")
   mergeRedirectSource     ClientMergeRedirect?      @relation("MergedClientSource")
   incomingMergeRedirects  ClientMergeRedirect[]     @relation("MergedClientTarget")
+  mergeOperationsAsSource ClientMergeOperation[]    @relation("ClientMergeOperationSource")
+  mergeOperationsAsTarget ClientMergeOperation[]    @relation("ClientMergeOperationTarget")
 
   @@index([displayName])
   @@index([email])
@@ -319,6 +323,28 @@ model ClientMergeRedirect {
   targetClient   Client   @relation("MergedClientTarget", fields: [targetClientId], references: [id], onDelete: Restrict)
 
   @@index([targetClientId])
+}
+
+model ClientMergeOperation {
+  id                   String   @id @default(cuid())
+  sourceClientId       String
+  targetClientId       String
+  createdById          String
+  splitById            String?
+  sourceSnapshot       Json
+  targetBeforeSnapshot Json
+  targetAfterSnapshot  Json
+  movedEntityIds       Json
+  deletedAiSettings    Json
+  createdAt            DateTime @default(now())
+  splitAt              DateTime?
+  sourceClient         Client   @relation("ClientMergeOperationSource", fields: [sourceClientId], references: [id], onDelete: Restrict)
+  targetClient         Client   @relation("ClientMergeOperationTarget", fields: [targetClientId], references: [id], onDelete: Restrict)
+  createdBy            User     @relation("ClientMergeOperationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  splitBy              User?    @relation("ClientMergeOperationSplitter", fields: [splitById], references: [id], onDelete: Restrict)
+
+  @@index([sourceClientId, splitAt])
+  @@index([targetClientId, splitAt])
 }
 
 model Athlete {

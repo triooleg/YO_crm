@@ -82,6 +82,14 @@ test("inbox exposes completed summary marker for the client",()=>{
   assert.match(service,/linkedChannels:\[\.\.\.newSet\(linkedChannelRows/);
 });
 
+test("inbox identifies every channel account inside a merged client",()=>{
+  assert.match(service,/constlinkedAccounts=/);
+  assert.match(service,/constlinkedAccounts=rows\.map/);
+  assert.match(service,/constmergedClients=/);
+  assert.match(service,/sourceClientId/);
+  assert.match(service,/splitMode/);
+});
+
 test("inbound identity of a merged client resolves to the canonical active client",()=>{
   assert.match(service,/clientMergeRedirect\.findMany/);
   assert.match(service,/targetClient:\{archivedAt:null\}/);

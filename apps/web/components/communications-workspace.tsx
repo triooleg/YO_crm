@@ -1,6 +1,7 @@
 "use client";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
+import { ActionIcon, Alert, Button, Modal, NativeSelect } from "@mantine/core";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
   canRefreshInbox,
@@ -41,6 +42,8 @@ type Client = {
   id: string;
   hasSummary?:boolean;
   linkedChannels?:string[];
+  linkedAccounts?:{channel:string;accountName:string;sourceClientId?:string}[];
+  mergedClients?:{sourceClientId:string;displayName:string;channels:string[];splitMode:"FULL"|"CHANNELS_ONLY"}[];
   displayName: string;
   firstName?: string;
   avatarUrl?: string;
@@ -151,6 +154,7 @@ function clientBadges(c: Client) {
   ];
   return (keys.length ? keys : [channel(c)]).map((key) => ({
     key,
+    accountName:c.linkedAccounts?.find(item=>item.channel===key)?.accountName,
     ...sourceBadge({ source: key } as Client),
   }));
 }
@@ -278,6 +282,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [creating, setCreating] = useState(false),
     [noteOpen,setNoteOpen]=useState(false),
     [noteText,setNoteText]=useState(""),
+    [splitOpen,setSplitOpen]=useState(false),
+    [splitSourceId,setSplitSourceId]=useState(""),
+    [splitBusy,setSplitBusy]=useState(false),
+    [splitError,setSplitError]=useState(""),
     [clientDetail,setClientDetail]=useState<ClientDetail>(),
     [selectedAthleteId,setSelectedAthleteId]=useState<string>(),
     [contextLoading,setContextLoading]=useState(false),
@@ -307,6 +315,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
     refreshRequestSequence = useRef(0),
+    skipNextFilterReload=useRef(false),
     listLoading = useRef(false),
     clientDetailRequest = useRef(0),
     orderRequestVersion = useRef(0),
@@ -328,6 +337,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     composerDraftId=useRef<string|undefined>(undefined),
     composerDraftKey=useRef<string|undefined>(undefined),
     draftSavePromise=useRef<Promise<void>|null>(null),
+    autosaveTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),
     draftSequence=useRef(0),
     lastAutosavedText=useRef(""),
     manualLoading = useRef(false),
@@ -351,6 +361,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     deleteClose=useRef<HTMLButtonElement|null>(null),
     summaryRequestSequence=useRef(0),
     summaryDateButtonRef=useRef<HTMLButtonElement|null>(null),
+    splitTriggerRef=useRef<HTMLButtonElement|null>(null),
+    clientIdentityRef=useRef<HTMLSpanElement|null>(null),
     currentActiveChannel=useRef(activeChannel);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
@@ -391,6 +403,36 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       const updated=await api(`/communications/messages/${encodeURIComponent(message.id)}/reaction`,{method:"POST",body:JSON.stringify({action,emoji:action==="react"?emoji:businessReaction?.emoji})}) as Message;
       if(isActive())setMessages(current=>current.map(item=>item.id===message.id?{...item,...updated,replyToMessage:item.replyToMessage}:item));
     }catch(reason){if(isActive())setError((reason as Error).message)}finally{if(isActive())setReactionBusyIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
+  }
+
+  async function splitClient(){
+    if(!client||!splitSourceId||splitBusy||busy)return;
+    const targetId=client.id,fallbackRemovedChannels=(client.mergedClients?.find(item=>item.sourceClientId===splitSourceId)?.channels||[]) as SocialChannel[];
+    if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
+    setSplitBusy(true);setSplitError("");
+    try{
+      if(draftSavePromise.current)await draftSavePromise.current;
+      const splitResult=await api(`/clients/${targetId}/split`,{method:"POST",body:JSON.stringify({sourceClientId:splitSourceId})}) as {movedConversationIds?:string[];movedChannels?:SocialChannel[];detachedSourceClientIds?:string[]};
+      setSplitOpen(false);setSplitSourceId("");
+      composeEpoch.current++;draftSequence.current++;aiOperationSequence.current++;summaryRequestSequence.current++;
+      composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";
+      pendingSend.current={};pendingAiSend.current={};pendingDraftSends.current.clear();
+      if(attachmentPreview)URL.revokeObjectURL(attachmentPreview);
+      if(attachmentInput.current)attachmentInput.current.value="";
+      const removedChannels=splitResult.movedChannels?.length?splitResult.movedChannels:fallbackRemovedChannels,movedConversationIds=new Set(splitResult.movedConversationIds||[]),detachedSourceClientIds=new Set(splitResult.detachedSourceClientIds||[splitSourceId]);
+      const survivingConversations=client.conversations.filter(item=>movedConversationIds.size?!movedConversationIds.has(item.id):!removedChannels.includes(item.channel as SocialChannel));
+      const survivingChannels=[...new Set(survivingConversations.map(item=>item.channel).filter((channel):channel is string=>Boolean(channel)))],survivingChannel=survivingChannels[0]||"MANUAL";
+      const reconciledClient={...client,linkedChannels:survivingChannels,linkedAccounts:client.linkedAccounts?.filter(item=>!item.sourceClientId||(!detachedSourceClientIds.has(item.sourceClientId)&&survivingChannels.includes(item.channel))),mergedClients:client.mergedClients?.filter(item=>!detachedSourceClientIds.has(item.sourceClientId)),conversations:survivingConversations};
+      setClient(reconciledClient);setClients(items=>items.map(item=>item.id===targetId?reconciledClient:item));setActiveChannel(survivingChannel);setMessages([]);setNewMessageCount(0);setMessagesLoading(true);
+      setText("");setDraftStatus("IDLE");setAttachment(undefined);setAttachmentPreview("");setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setBusyDraftIds(new Set());setReactionBusyIds(new Set());setReactionPickerMessageId(undefined);
+      setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
+      const nextFilters=currentSocialFilters.current.filter(channel=>!removedChannels.includes(channel));
+      if(nextFilters.length!==currentSocialFilters.current.length){skipNextFilterReload.current=true;currentSocialFilters.current=nextFilters;setSocialFilters(nextFilters)}
+      const refreshed=await loadClients(targetId,currentClientCount.current,currentSearch.current,nextFilters,currentOrderScope.current,currentConversationScope.current);
+      if(refreshed)await open(refreshed);
+      else setMessagesLoading(false);
+      requestAnimationFrame(()=>clientIdentityRef.current?.focus());
+    }catch(reason){const code=(reason as Error).message;setSplitError(ui.splitErrors[code as keyof typeof ui.splitErrors]||ui.splitError)}finally{setSplitBusy(false)}
   }
   function scrollMessagesToLatest(){if(!messagesViewport.current)return;if(!autoScrollPending.current&&!stickToBottom.current)return;requestAnimationFrame(()=>{if(!messagesViewport.current)return;messagesViewport.current.scrollTop=messagesViewport.current.scrollHeight;stickToBottom.current=true;autoScrollPending.current=false})}
   async function api(path: string, init?: RequestInit) {
@@ -718,8 +760,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         setClient(undefined);
         setMessages([]);
       }
+      return selected;
     } catch (e) {
       if(request===listRequestSequence.current)setError((e as Error).message);
+      return undefined;
     } finally {
       if(request===listRequestSequence.current){setLoading(false);listLoading.current=false}
     }
@@ -843,12 +887,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
   useEffect(()=>{
     const content=text.trim();
-    if(!client||!content||busy||content===lastAutosavedText.current){if(!content)setDraftStatus("IDLE");return}
-    const timer=setTimeout(()=>{const previous=draftSavePromise.current,promise=(async()=>{if(previous)await previous;await autosaveDraft(content)})();draftSavePromise.current=promise;void promise.finally(()=>{if(draftSavePromise.current===promise)draftSavePromise.current=null})},900);
-    return()=>clearTimeout(timer);
-  },[text,client?.id,activeChannel,busy]);
+    if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
+    if(!client||!content||busy||splitBusy||content===lastAutosavedText.current){if(!content)setDraftStatus("IDLE");return}
+    autosaveTimer.current=setTimeout(()=>{autosaveTimer.current=undefined;const previous=draftSavePromise.current,promise=(async()=>{if(previous)await previous;await autosaveDraft(content)})();draftSavePromise.current=promise;void promise.finally(()=>{if(draftSavePromise.current===promise)draftSavePromise.current=null})},900);
+    return()=>{if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}};
+  },[text,client?.id,activeChannel,busy,splitBusy]);
   const visibleClients=clients;
   useEffect(()=>{
+    if(skipNextFilterReload.current){skipNextFilterReload.current=false;return}
     selectedClientId.current=undefined;
     setClient(undefined);
     setMessages([]);
@@ -1130,8 +1176,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       setBusy(false);
     }
   }
-  const active = sourceBadge({source:activeChannel} as Client),
-    availableChannels = client ? clientBadges(client) : [],
+  const availableChannels = client ? clientBadges(client) : [],
+    active = availableChannels.find(item=>item.key===activeChannel)||{...sourceBadge({source:activeChannel} as Client),accountName:undefined as string|undefined},
     activeOrders=client?.orders||[],
     displayedContextOrders=contextTab==="CLIENT"?activeOrders.slice(0,1):activeOrders,
     nextTask=clientDetail?.workTasks?.[0],
@@ -1268,18 +1314,19 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         <main className="communications-chat">
           <header className="communications-chat-header">
             <button type="button" className="communications-mobile-list-toggle" aria-expanded={mobileClientListOpen} onClick={()=>setMobileClientListOpen(true)}>{ui.openClientList}</button>
-            <span className="communications-chat-client">
+            <span className="communications-chat-client" ref={clientIdentityRef} tabIndex={-1}>
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {client&&<span className="communications-chat-badges">{availableChannels.map(item=><span className="is-channel" aria-label={item.label} title={item.label} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b></span>)}{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
+                {client&&<span className="communications-chat-badges">{availableChannels.map(item=>{const channelText=`${item.label}${item.accountName?` / ${item.accountName}`:""}`;return <span className="is-channel" aria-label={channelText} title={channelText} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b>{item.accountName&&<small> / {item.accountName}</small>}</span>})}{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
+            {client?.mergedClients?.length?<ActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={()=>{setSplitError("");setSplitSourceId(client.mergedClients?.[0]?.sourceClientId||"");setSplitOpen(true)}}>⇄</ActionIcon>:null}
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}</option>)}</select></label>
+              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}{item.accountName?` / ${item.accountName}`:""}</option>)}</select></label>
             ) : (
-              <span title={active.label} aria-label={active.label}>{active.icon} {active.label}</span>
+              <span className="communications-active-channel" title={`${active.label}${active.accountName?` / ${active.accountName}`:""}`} aria-label={`${active.label}${active.accountName?` / ${active.accountName}`:""}`}>{active.icon} {active.label}{active.accountName?` / ${active.accountName}`:""}</span>
             ))}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
           </header>
@@ -1617,6 +1664,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         </div>
       )}
       {noteOpen&&client&&<div className="phase2-overlay"><form className="phase2-modal communications-note-modal" role="dialog" aria-modal="true" aria-labelledby="communications-note-title" onSubmit={saveClientNote}><div><h2 id="communications-note-title">{ui.chatNote}</h2><button type="button" aria-label={ui.close} onClick={()=>setNoteOpen(false)}>×</button></div><label>{ui.note}<textarea autoFocus maxLength={2000} rows={6} value={noteText} onChange={event=>setNoteText(event.target.value)}/></label><footer><button type="button" onClick={()=>setNoteOpen(false)}>{ui.cancel}</button><button className="phase2-primary" disabled={busy}>{busy?ui.saving:ui.save}</button></footer></form></div>}
+      <Modal opened={splitOpen&&Boolean(client)} onClose={()=>{if(!splitBusy){setSplitOpen(false);setSplitError("")}}} title={ui.splitAccounts} centered closeOnEscape={!splitBusy} closeOnClickOutside={!splitBusy} closeButtonProps={{"aria-label":ui.close,disabled:splitBusy}}><div className="communications-split-modal"><p>{ui.splitAccountsHint}</p><NativeSelect autoFocus size="md" label={ui.splitAccount} value={splitSourceId} onChange={event=>{setSplitError("");setSplitSourceId(event.target.value)}} data={client?.mergedClients?.map(item=>({value:item.sourceClientId,label:`${item.displayName}${item.channels.length?` — ${item.channels.map(value=>ui.sources[value as keyof typeof ui.sources]||value).join(", ")}`:""}`}))||[]}/>{client?.mergedClients?.find(item=>item.sourceClientId===splitSourceId)?.splitMode==="CHANNELS_ONLY"&&<Alert color="orange" className="communications-split-warning">{ui.splitLegacyWarning}</Alert>}{splitError&&<Alert color="red" role="alert">{splitError}</Alert>}<footer><Button type="button" size="md" variant="default" disabled={splitBusy} onClick={()=>{setSplitOpen(false);setSplitError("");requestAnimationFrame(()=>splitTriggerRef.current?.focus())}}>{ui.cancel}</Button><Button type="button" size="md" loading={splitBusy} disabled={!splitSourceId} onClick={()=>void splitClient()}>{ui.splitConfirm}</Button></footer></div></Modal>
       {deleteTarget&&<div className="phase2-overlay communications-delete-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)closeDeleteDialog()}}><section ref={deleteDialog} tabIndex={-1} className="phase2-modal communications-delete-modal" role="dialog" aria-modal="true" aria-labelledby="communications-delete-title"><div><h2 id="communications-delete-title">{deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessage:ui.deleteMessageTitle}</h2><button ref={deleteClose} type="button" aria-label={ui.close} disabled={deleteBusy} onClick={closeDeleteDialog}>×</button></div><p>{deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessageHint:ui.deleteMessageHint}</p><footer><button type="button" disabled={deleteBusy} onClick={closeDeleteDialog}>{ui.cancel}</button><button type="button" className="phase2-primary communications-delete-from-crm" disabled={deleteBusy} onClick={()=>void deleteMessage("CRM")}>{deleteBusy?ui.deleting:deleteTarget.status==="DRAFT"||deleteTarget.status==="FAILED"?ui.clearLocalMessage:ui.deleteMessageFromCrm}</button>{deleteTarget.channel==="CHATWOOT"&&deleteTarget.status==="SENT"&&Boolean(deleteTarget.externalId)&&<button type="button" className="phase2-primary communications-delete-for-client" disabled={deleteBusy} onClick={()=>void deleteMessage("CLIENT")}>{deleteBusy?ui.deleting:ui.deleteMessageForClient}</button>}</footer></section></div>}
       {ordering&&client&&clientDetail&&<OrderPanel client={clientDetail} request={api} initialAthleteId={selectedAthleteId} onClose={()=>{setOrdering(false);orderTriggerRef.current?.focus()}} onSaved={async()=>{setOrdering(false);await Promise.all([loadClientDetail(client.id),loadClients(client.id,currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current)])}}/>}
       {tasking&&client&&taskBoard&&<TaskDialog
