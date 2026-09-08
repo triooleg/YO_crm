@@ -1,5 +1,36 @@
 type JsonRecord = Record<string, unknown>;
 
+export const DRAFT_DELIVERY_STALE_MS = 120_000;
+
+type DraftDeliveryAttempt = {
+  id: string;
+  status: string;
+  messageId?: string | null;
+  updatedAt: Date | string;
+};
+
+export function classifyDraftDeliveryRecovery(input: {
+  draftMessageId: string;
+  visibleDraftIds: string[];
+  attempts: DraftDeliveryAttempt[];
+  uncertaintyDraftIds: Map<string, string>;
+  now: Date;
+  staleAfterMs?: number;
+}) {
+  const staleBefore = input.now.getTime() - (input.staleAfterMs ?? DRAFT_DELIVERY_STALE_MS);
+  const active = input.attempts.filter(attempt => attempt.status === "PENDING" || attempt.status === "UNCERTAIN");
+  const singleLegacyDraft = input.visibleDraftIds.length === 1 && input.visibleDraftIds[0] === input.draftMessageId && active.length === 1;
+  const recoverableIds: string[] = [], blockingIds: string[] = [];
+  for (const attempt of active) {
+    const linked = attempt.messageId === input.draftMessageId || input.uncertaintyDraftIds.get(attempt.id) === input.draftMessageId;
+    const stale = new Date(attempt.updatedAt).getTime() <= staleBefore;
+    const recoverable = (attempt.status === "UNCERTAIN" && linked)
+      || (attempt.status === "PENDING" && stale && (linked || (!attempt.messageId && !input.uncertaintyDraftIds.has(attempt.id) && singleLegacyDraft)));
+    (recoverable ? recoverableIds : blockingIds).push(attempt.id);
+  }
+  return { recoverableIds, blockingIds };
+}
+
 function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }

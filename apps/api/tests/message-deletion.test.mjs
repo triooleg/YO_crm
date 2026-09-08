@@ -21,6 +21,7 @@ async function loadHelper() {
 
 test("message deletion API validates CRM or CLIENT mode and is CRM-role protected", () => {
   assert.match(compact(dto), /classDeleteMessageDto\{@IsIn\(\["CRM","CLIENT"\]asconst\)mode!:"CRM"\|"CLIENT"/);
+  assert.match(compact(dto), /@IsOptional\(\)@IsBoolean\(\)resolveDelivery\?:boolean/);
   assert.match(compact(controller), /@Post\("messages\/:messageId\/delete"\)@Roles\("OWNER","ADMIN","MANAGER"\)deleteMessage\(@Param\("messageId"\)messageId:string,@Body\(\)d:DeleteMessageDto,@Req\(\)r:Request&\{user:User\}\)\{returnthis\.c\.deleteMessage\(messageId,d,r\.user\)\}/);
 });
 
@@ -68,14 +69,65 @@ test("provider failure is fail-closed and local deletion preserves message histo
   assert.match(method, /auditLog\.create/);
 });
 
-test("local deletion never releases another delivery attempt or detaches historical files", () => {
+test("local deletion releases only the selected recoverable draft attempt and never detaches historical files", () => {
   const x = compact(service);
   const method = x.slice(x.indexOf("asyncdeleteMessage"), x.indexOf("asyncmarkRead"));
   assert.match(method, /pg_advisory_xact_lock\(hashtextextended\(\$\{"message-send:"\+selected\.conversationId\},0\)\)/);
   assert.match(method, /status:\{in:\["PENDING","UNCERTAIN"\]\}/);
   assert.match(method, /Результатотправкиещёпроверяется/);
-  assert.doesNotMatch(method, /messageDeliveryAttempt\.updateMany/);
-  assert.doesNotMatch(method, /communicationAttachment\.updateMany/);
+  assert.match(method, /classifyDraftDeliveryRecovery/);
+  assert.match(method, /messageDeliveryAttempt\.updateMany\(\{where:\{id:attempt\.id,status:\{in:\["PENDING","UNCERTAIN"\]\}\}/);
+  assert.doesNotMatch(method, /messageDeliveryAttempt\.updateMany\(\{where:\{conversationId:/);
+  assert.match(method, /communicationAttachment\.updateMany\(\{where:\{clientRequestId:attempt\.clientRequestId,messageId:null,claimedAt:null\}/);
+});
+
+test("operator can resolve only the selected stale draft delivery without releasing fresh or unrelated sends", async () => {
+  const { classifyDraftDeliveryRecovery } = await loadHelper();
+  const now = new Date("2026-09-08T12:00:00.000Z");
+  const result = classifyDraftDeliveryRecovery({
+    draftMessageId: "draft-1",
+    visibleDraftIds: ["draft-1"],
+    now,
+    attempts: [
+      { id: "linked-uncertain", status: "UNCERTAIN", messageId: "draft-1", updatedAt: new Date("2026-09-08T11:59:50.000Z") },
+      { id: "linked-stale", status: "PENDING", messageId: "draft-1", updatedAt: new Date("2026-09-08T11:55:00.000Z") },
+      { id: "other-fresh", status: "PENDING", messageId: "draft-2", updatedAt: new Date("2026-09-08T11:59:50.000Z") },
+    ],
+    uncertaintyDraftIds: new Map([["linked-uncertain", "draft-1"]]),
+  });
+  assert.deepEqual(result.recoverableIds, ["linked-uncertain", "linked-stale"]);
+  assert.deepEqual(result.blockingIds, ["other-fresh"]);
+
+  const legacy = classifyDraftDeliveryRecovery({
+    draftMessageId: "draft-1",
+    visibleDraftIds: ["draft-1"],
+    now,
+    attempts: [{ id: "legacy-stale", status: "PENDING", messageId: null, updatedAt: new Date("2026-09-08T11:55:00.000Z") }],
+    uncertaintyDraftIds: new Map(),
+  });
+  assert.deepEqual(legacy, { recoverableIds: ["legacy-stale"], blockingIds: [] });
+
+  const ambiguous = classifyDraftDeliveryRecovery({
+    draftMessageId: "draft-1",
+    visibleDraftIds: ["draft-1", "draft-2"],
+    now,
+    attempts: [{ id: "legacy-stale", status: "PENDING", messageId: null, updatedAt: new Date("2026-09-08T11:55:00.000Z") }],
+    uncertaintyDraftIds: new Map(),
+  });
+  assert.deepEqual(ambiguous, { recoverableIds: [], blockingIds: ["legacy-stale"] });
+});
+
+test("a rejected Meta draft is persisted as FAILED and active reservations never return a draft as delivered", () => {
+  const x = compact(service);
+  const meta = x.slice(x.indexOf('if(channel!==ContactChannel.FACEBOOK'));
+  assert.match(meta, /constm=draft\?awaittx\.message\.update\(\{where:\{id:draft\.id\},data:\{status:MessageStatus\.FAILED/);
+  assert.match(meta, /if\(attempt\.status==="PENDING"\|\|attempt\.status==="UNCERTAIN"\|\|!attempt\.messageId\)return\{kind:"PENDING"asconst\}/);
+});
+
+test("Chatwoot does not treat a newly linked pending draft as a completed delivery", () => {
+  const x = compact(service);
+  const chatwoot = x.slice(x.indexOf('if(channel===ContactChannel.CHATWOOT)'),x.indexOf('if(channel!==ContactChannel.FACEBOOK'));
+  assert.match(chatwoot,/if\(existing\.messageId&&\(existing\.status==="SENT"\|\|existing\.status==="FAILED"\)\)/);
 });
 
 test("draft autosave deterministically reuses the single visible draft after deletion", () => {

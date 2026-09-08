@@ -961,6 +961,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       const delivered=action==="SEND"?latestSuccessfulMessage(sent):undefined;
       if(delivered)promoteClient(operationClientId,delivered);
       if (failed) {
+        if(failed.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE")}
         setError(sendFailureText(failed.metadata?.reason, activeChannel));
         return false;
       }
@@ -1027,7 +1028,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     if(!client||message.status!=="DRAFT")return;
     const operationClientId=client.id,operationEpoch=composeEpoch.current,requestId=pendingDraftSends.current.get(message.id)||crypto.randomUUID();
     pendingDraftSends.current.set(message.id,requestId);setBusyDraftIds(current=>new Set(current).add(message.id));setError("");
-    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;if(result.status==="FAILED"){pendingDraftSends.current.delete(message.id);setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item));promoteClient(operationClientId,result)}
+    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item));if(result.status==="FAILED"){if(message.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE")}setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}promoteClient(operationClientId,result)}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{setBusyDraftIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
   }
   async function deleteMessage(mode:"CRM"|"CLIENT"){
@@ -1036,7 +1037,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     if(mode==="CLIENT"&&!(target.channel==="CHATWOOT"&&target.status==="SENT"&&Boolean(target.externalId)))return;
     setDeleteBusy(true);setError("");
     try{
-      await api(`/communications/messages/${encodeURIComponent(target.id)}/delete`,{method:"POST",body:JSON.stringify({mode})});
+      await api(`/communications/messages/${encodeURIComponent(target.id)}/delete`,{method:"POST",body:JSON.stringify({mode,resolveDelivery:target.status==="DRAFT"||target.status==="FAILED"})});
       if(target.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setText("")}
       setSelectedMessageIds(current=>current.filter(id=>id!==target.id));
       if(targetWasSelected||aiReply?.messageIds.includes(target.id)){invalidateAiOperation();setAiReply(null);setAiDraftText("")}
@@ -1542,7 +1543,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
               <span className="communications-summary-date-picker"><button ref={summaryDateButtonRef} type="button" aria-haspopup="grid" aria-expanded={summaryCalendarOpen} onClick={()=>setSummaryCalendarOpen(value=>!value)}>{ui.summaryFromDate}: <b>{new Date(`${summaryDate||firstSummaryDate}T12:00:00`).toLocaleDateString("ru-RU")}</b> ▾</button>{summaryCalendarOpen&&<SummaryCalendar month={summaryMonth} onMonth={setSummaryMonth} selected={summaryDate||firstSummaryDate} minimum={firstSummaryDate} maximum={localDateKey(new Date())} generated={new Set(conversationSummaries.map(item=>item.fromDate))} onSelect={date=>{setSummaryDate(date);setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}} onClose={()=>{setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}}/>}</span>
               <button type="button" className="phase2-primary communications-summary-generate" disabled={summaryGenerating||summaryLoading||!summaryDate} onClick={()=>void generateConversationSummary()}>{summaryGenerating?ui.generatingSummary:summaryProgress?.fromDate===summaryDate?ui.continueSummary:activeSummary?ui.refreshSummary:ui.generateSummary}</button>
             </div>
-            {summaryLoading?<State text={ui.loadingSummary}/>:summaryProgress?.fromDate===summaryDate?<div className="communications-summary-stale is-progress" role="status">{ui.summaryProgress} {summaryProgress.processedChunks||0}/{summaryProgress.totalChunks||0}. {ui.summaryContinueHint}</div>:activeSummary?.isCurrent&&activeSummary.summary?<article className="communications-summary-result"><SummaryText text={activeSummary.summary}/><footer>{ui.summaryGenerated}: {new Date(activeSummary.generatedAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}{activeSummary.messageCount?` · ${ui.summaryMessages}: ${activeSummary.messageCount}`:""}</footer></article>:activeSummary&&!activeSummary.isCurrent?<div className="communications-summary-stale" role="status">{ui.summaryStale}</div>:<State text={ui.summaryEmpty}/>}</section>
+            {summaryLoading?<State text={ui.loadingSummary}/>:summaryProgress?.fromDate===summaryDate?<div className="communications-summary-stale is-progress" role="status">{ui.summaryProgress} {summaryProgress.processedChunks||0}/{summaryProgress.totalChunks||0}. {ui.summaryContinueHint}</div>:activeSummary?.summary?<article className="communications-summary-result">{!activeSummary.isCurrent&&<div className="communications-summary-stale" role="status">{ui.summaryStale}</div>}<SummaryText text={activeSummary.summary}/><footer>{ui.summaryGenerated}: {new Date(activeSummary.generatedAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}{activeSummary.messageCount?` · ${ui.summaryMessages}: ${activeSummary.messageCount}`:""}</footer></article>:<State text={ui.summaryEmpty}/>}</section>
           </div>
           </>}
         </aside>

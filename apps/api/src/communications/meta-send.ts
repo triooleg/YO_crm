@@ -148,6 +148,19 @@ export function deliverMetaMessage<T>(channel: "FACEBOOK" | "INSTAGRAM" | "WHATS
     : operations.send();
 }
 
+export async function deliverInstagramReplyWithFallback<T>(operations: {
+  sendReply: () => Promise<T>;
+  sendPlain: () => Promise<T>;
+  isReplyContextRejection: (error: unknown) => boolean;
+}) {
+  try {
+    return { result: await operations.sendReply(), usedFallback: false };
+  } catch (error) {
+    if (!operations.isReplyContextRejection(error)) throw error;
+    return { result: await operations.sendPlain(), usedFallback: true };
+  }
+}
+
 export class MetaGraphRequestError extends Error {
   readonly failure: ReturnType<typeof metaSendFailure>;
   constructor(failure: ReturnType<typeof metaSendFailure>) {

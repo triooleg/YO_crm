@@ -199,4 +199,6 @@ test("сводки имеют расширяющую миграцию, уник�
   assert.match(service, /Использование данных клиента для AI отключено/);
   assert.match(service, /entityType:"ConversationSummary"/);
   assert.match(service, /structuredSummary:Prisma\.JsonNull,processingState:Prisma\.JsonNull,processingLeaseUntil:null,processingLeaseToken:null/);
+  assert.match(service, /isCurrent,summary:item\.summary/);
+  assert.doesNotMatch(service, /summary:isCurrent\?item\.summary:null/);
 });

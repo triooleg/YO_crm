@@ -74,6 +74,7 @@ export class MessageReactionDto {
 }
 export class DeleteMessageDto {
   @IsIn(["CRM", "CLIENT"] as const) mode!: "CRM" | "CLIENT";
+  @IsOptional() @IsBoolean() resolveDelivery?: boolean;
 }
 export class UploadCommunicationAttachmentDto {
   @IsString() @Length(1, 180) name!: string;

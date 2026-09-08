@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/communications/meta-send.ts", impo
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
-const { MetaDeliveryUncertainError, instagramReactionMessageParams, whatsappReactionMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage } = module.exports;
+const { MetaDeliveryUncertainError, instagramReactionMessageParams, whatsappReactionMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaTextMessageParams, metaAttachmentMessageParams, whatsappTextMessageParams, whatsappAttachmentMessageParams, whatsappAttachmentHistoryContent, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, metaThreadControlParams, metaSendFailure, releaseUncertainWhatsappAttempt, runMetaSendOnce, deliverMetaWithThreadControl, deliverMetaMessage, deliverInstagramReplyWithFallback } = module.exports;
 
 test("Meta send accepts only the exact configured Page scope", () => {
   assert.equal(metaRecipientId("page-1", "page-1:psid-7"), "psid-7");
@@ -149,6 +149,33 @@ test("Instagram send uses the configured account scope and never invokes Faceboo
   });
   assert.equal(result.message_id, "ig-mid-1");
   assert.deepEqual(calls, ["send"]);
+});
+
+test("Instagram retries a provider-rejected quoted reply once as a plain message", async () => {
+  const calls = [];
+  const result = await deliverInstagramReplyWithFallback({
+    sendReply: async () => {
+      calls.push("reply");
+      const error = new Error("provider rejected reply context");
+      error.failure = { code: 100, reason: "PROVIDER_REJECTED" };
+      throw error;
+    },
+    sendPlain: async () => (calls.push("plain"), { message_id: "ig-mid-fallback" }),
+    isReplyContextRejection: error => error?.failure?.code === 100,
+  });
+  assert.deepEqual(calls, ["reply", "plain"]);
+  assert.equal(result.result.message_id, "ig-mid-fallback");
+  assert.equal(result.usedFallback, true);
+
+  await assert.rejects(deliverInstagramReplyWithFallback({
+    sendReply: async () => {
+      const error = new Error("token expired");
+      error.failure = { code: 190, reason: "TOKEN_EXPIRED" };
+      throw error;
+    },
+    sendPlain: async () => { throw new Error("must not retry"); },
+    isReplyContextRejection: error => error?.failure?.code === 100,
+  }), /token expired/);
 });
 
 test("WhatsApp send never invokes Facebook thread control", async () => {

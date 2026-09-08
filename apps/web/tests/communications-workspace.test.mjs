@@ -39,6 +39,8 @@ test("правая панель содержит вкладку Сводка р�
   assert.match(css,/communications-summary-day\.is-selected\.is-generated/);
   assert.match(css,/communications-orders article\.communications-summary-result\{display:block;grid-template-columns:none;width:100%/);
   for(const key of["contextSummary","generateSummary","refreshSummary","continueSummary","summaryProgress","summaryFromDate","summaryStale","summaryEmpty","summaryCalendarLabel"])assert.match(locale,new RegExp(`${key}:`));
+  assert.match(component,/activeSummary\?\.summary\?<article className="communications-summary-result"/);
+  assert.match(component,/!activeSummary\.isCurrent&&<div className="communications-summary-stale"/);
 });
 
 test("composer autosaves one draft and keeps a separate real send action", () => {
@@ -55,6 +57,15 @@ test("composer autosaves one draft and keeps a separate real send action", () =>
   assert.match(component, /clientRequestId: requestId \|\| crypto\.randomUUID\(\)/);
   for(const key of ["draftAutosaving","draftAutosaved","draftAutosaveFailed"])
     assert.match(locale,new RegExp(`${key}:`));
+});
+
+test("failed composer delivery releases the local draft pointer so later messages can autosave and send", () => {
+  const save=component.slice(component.indexOf('async function save('),component.indexOf('function chooseAttachment')).replace(/\s+/g,"");
+  assert.match(save,/if\(failed\)\{/);
+  assert.match(save,/failed\.id===composerDraftId\.current/);
+  assert.match(save,/composerDraftId\.current=undefined;composerDraftKey\.current=undefined;lastAutosavedText\.current=""/);
+  const savedDraft=component.slice(component.indexOf('async function sendSavedDraft'),component.indexOf('async function deleteMessage')).replace(/\s+/g,"");
+  assert.match(savedDraft,/setMessages\(current=>current\.map\(item=>item\.id===message\.id\?result:item\)\);if\(result\.status==="FAILED"\)/);
 });
 
 test("каждое входящее переводится внутри сообщения и перевод сохраняется",()=>{
@@ -215,7 +226,7 @@ test("меню исходящего сообщения открывает без
 test("удаление сообщения вызывает API и перечитывает detail и list",()=>{
   assert.match(component,/async function deleteMessage\(mode:"CRM"\|"CLIENT"\)/);
   assert.match(component,/`\/communications\/messages\/\$\{encodeURIComponent\(target\.id\)\}\/delete`/);
-  assert.match(component,/method:"POST",body:JSON\.stringify\(\{mode\}\)/);
+  assert.match(component,/resolveDelivery:target\.status==="DRAFT"\|\|target\.status==="FAILED"/);
   assert.match(component,/fetchClientWindow\(currentClientCount\.current,currentSearch\.current,currentSocialFilters\.current,currentOrderScope\.current,currentConversationScope\.current\)/);
   assert.match(component,/conversationDetailPath\(operationClientId,currentSocialFilters\.current\.length\?target\.channel:undefined\)/);
   assert.match(component,/setClients\(sortClients\(page\.items\)\)/);

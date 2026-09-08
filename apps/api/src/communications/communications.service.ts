@@ -36,7 +36,7 @@ import {
   UploadCommunicationAttachmentDto,
 } from "./communications.dto";
 import { isMetaMessageReadAt, legacyConversationMatchesReceiver, mergeMetaEchoMetadata, mergeMetaReactionMetadata, mergeMetaReadMetadata, metaConnectedAccountLabel, metaConversationInboxUrl, metaConversationExternalId, metaEchoAlreadyProcessed, metaEchoConversationExternalIds, metaIdentityLogRef, metaProfileTargets, metaWebhookReceiverMatches, normalizeMetaControlEvents, normalizeMetaEchoMessages, normalizeMetaFacebookProfile, normalizeMetaWebhook, persistMetaFacebookProfilePatch, resolveMetaFacebookProfileWithFallback, runFacebookProfileBackfillBatch, safeMetaWebhookLogSummary, safeTokenEqual, summarizeMetaWebhook, uniqueMetaControlTarget, verifyMetaSignature, type MetaControlEvent, type MetaConversationsResponse, type MetaEchoMessage, type MetaFacebookProfile, type MetaInboundMessage, type NormalizedMetaFacebookProfile } from "./meta-webhook";
-import { deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
+import { deliverInstagramReplyWithFallback, deliverMetaMessage, instagramReactionMessageParams, MetaDeliveryUncertainError, MetaGraphRequestError, metaAttachmentMessageParams, metaCommentReplyParams, metaRecipientId, metaRecipientIdForReceivers, metaSendFailure, metaTextMessageParams, metaThreadControlParams, releaseUncertainWhatsappAttempt, runMetaSendOnce, whatsappAttachmentHistoryContent, whatsappAttachmentMessageParams, whatsappImageMimeAllowed, whatsappVideoMimeAllowed, whatsappMessageId, whatsappReactionMessageParams, whatsappTextMessageParams } from "./meta-send";
 import { boundedChatwootResponseJson, chatwootReadReceiptFromApi, normalizeChatwootMessageUpdate, normalizeChatwootReadReceipt, normalizeChatwootWebhook, verifyChatwootSignature, type ChatwootMessage, type ChatwootReadReceipt, type ChatwootMessageUpdate } from "./chatwoot-webhook";
 import { chatwootConversationId, chatwootConversationInboxUrl, chatwootEchoDecision, chatwootMultipartBody, remoteMediaUrl } from "./chatwoot-delivery";
 import { chatwootScopeMatches, customerEmail, inboundClientCandidates, resolveCanonicalInboundClient, shouldRefreshInboundDisplayName, uniqueCandidate } from "./inbound-routing";
@@ -62,7 +62,7 @@ import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSent
 import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
-import { chatwootDeleteTarget, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
+import { chatwootDeleteTarget, classifyDraftDeliveryRecovery, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
 import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, SUMMARY_PROMPT_VERSION, summaryPlanFingerprint, summarySourceDigest, type SummaryMessage } from "./conversation-summary";
 import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
@@ -1608,8 +1608,33 @@ export class CommunicationsService {
       const currentDeletion = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata.deletion : undefined;
       if (isSoftDeletedMessage(current.metadata) && currentDeletion && typeof currentDeletion === "object" && !Array.isArray(currentDeletion) && (d.mode === "CRM" || currentDeletion.mode === "CLIENT"))
         return { id: current.id, deleted: true, mode: d.mode, deletedAt: currentDeletion.deletedAt };
-      if ((current.status === MessageStatus.DRAFT || current.status === MessageStatus.FAILED) && await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: current.conversationId, status: { in: ["PENDING", "UNCERTAIN"] } }, select: { id: true } }))
-        throw new ConflictException("Результат отправки ещё проверяется. Сначала завершите проверку доставки, чтобы избежать дубликата");
+      if (current.status === MessageStatus.DRAFT || current.status === MessageStatus.FAILED) {
+        const attempts = await tx.messageDeliveryAttempt.findMany({ where: { conversationId: current.conversationId, status: { in: ["PENDING", "UNCERTAIN"] } }, select: { id: true, status: true, messageId: true, clientRequestId: true, updatedAt: true } });
+        if (attempts.length) {
+          if (!d.resolveDelivery) throw new ConflictException("Результат отправки ещё проверяется. Удалите зависший черновик с разблокировкой доставки, чтобы избежать дубликата");
+          const uncertaintyRows = await tx.appSetting.findMany({ where: { section: { in: ["integration.email.delivery-uncertain", "integration.whatsapp.delivery-uncertain"] }, key: { in: attempts.map(attempt => attempt.id) } }, select: { section: true, key: true, value: true } });
+          const uncertaintyDraftIds = new Map<string,string>(), uncertaintyAiRunIds = new Map<string,string>();
+          for (const row of uncertaintyRows) {
+            const value = row.value && typeof row.value === "object" && !Array.isArray(row.value) ? row.value as Prisma.JsonObject : {};
+            if (typeof value.draftMessageId === "string") uncertaintyDraftIds.set(row.key,value.draftMessageId);
+            if (typeof value.aiRunId === "string") uncertaintyAiRunIds.set(row.key,value.aiRunId);
+          }
+          const draftRows = await tx.message.findMany({ where: { conversationId: current.conversationId, direction: MessageDirection.OUTBOUND, status: MessageStatus.DRAFT }, select: { id: true, metadata: true } });
+          const recovery = classifyDraftDeliveryRecovery({ draftMessageId: current.id, visibleDraftIds: draftRows.filter(row => !isSoftDeletedMessage(row.metadata)).map(row => row.id), attempts, uncertaintyDraftIds, now: new Date() });
+          if (recovery.blockingIds.length) throw new ConflictException("В диалоге выполняется другая или слишком свежая отправка. Подождите две минуты и повторите удаление черновика");
+          for (const attemptId of recovery.recoverableIds) {
+            const attempt = attempts.find(item => item.id === attemptId)!;
+            const claimed = await tx.messageDeliveryAttempt.updateMany({ where: { id: attempt.id, status: { in: ["PENDING", "UNCERTAIN"] } }, data: { status: "FAILED" } });
+            if (claimed.count !== 1) throw new ConflictException("Состояние отправки изменилось. Обновите диалог");
+            await tx.communicationAttachment.updateMany({ where: { clientRequestId: attempt.clientRequestId, messageId: null, claimedAt: null }, data: { clientRequestId: null } });
+            await tx.appSetting.deleteMany({ where: { section: { in: ["integration.email.delivery-uncertain", "integration.whatsapp.delivery-uncertain"] }, key: attempt.id } });
+            const aiRunId = uncertaintyAiRunIds.get(attempt.id);
+            if (aiRunId) await tx.aiResponseFeedback.updateMany({ where: { aiRunId, sentMessageId: null, accepted: false, aiRun: { clientId: current.conversation.clientId, conversationId: current.conversationId, operation: "REPLY", status: AiRunStatus.COMPLETED } }, data: { accepted: null } });
+            await tx.activity.create({ data: { clientId: current.conversation.clientId, type: "MESSAGE_DELIVERY_RESOLVED", summary: "Зависшая отправка черновика завершена оператором", metadata: { attemptId: attempt.id, messageId: current.id, channel: current.conversation.channel } } });
+            await tx.auditLog.create({ data: { actorId: u.id, action: "RESOLVE", entityType: "MessageDeliveryAttempt", entityId: attempt.id, after: { channel: current.conversation.channel, status: "FAILED", draftMessageId: current.id, retryAllowed: true } } });
+          }
+        }
+      }
 
       const deletedAt = new Date();
       const metadata = softDeleteMetadata(current.metadata, { mode: d.mode, actorId: u.id, deletedAt, providerDeletedAt }) as Prisma.InputJsonValue;
@@ -1972,7 +1997,7 @@ export class CommunicationsService {
             : undefined;
           if (!result || (result.id !== d.draftMessageId && mergedInto !== result.id))
             throw new ConflictException("Результат отправки не относится к выбранному черновику");
-          return { ...result, status: attempt.status === "FAILED" ? MessageStatus.FAILED : result.status, channel };
+          if (attempt.status === "SENT" || attempt.status === "FAILED") return { ...result, status: attempt.status === "FAILED" ? MessageStatus.FAILED : result.status, channel };
         }
       }
     }
@@ -2005,7 +2030,7 @@ export class CommunicationsService {
         if(d.replyToMessageId&&typeof latest.messageId!=="string")throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
         const {subject,parent,references}=emailReplyHeaders(latest,selected.displayName),replyToMessageId=replyMessage?.id;
         return runMetaSendOnce({
-          reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true,metadata:true}});if(!claimedDraft||isSoftDeletedMessage(claimedDraft.metadata))throw new ConflictException("Черновик уже отправляется, удалён или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING"}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING"}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}return{kind:"NEW" as const}}),
+          reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId&&(existing.status==="SENT"||existing.status==="FAILED")){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true,metadata:true}});if(!claimedDraft||isSoftDeletedMessage(claimedDraft.metadata))throw new ConflictException("Черновик уже отправляется, удалён или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING",messageId:draft?.id}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING",messageId:draft?.id}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}return{kind:"NEW" as const}}),
           deliver:()=>this.emailTransport.send({to:recipient,subject,text:content,inReplyTo:parent,references,attachment}),
           pendingError:()=>new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
           persistFailure:async error=>{if(error instanceof EmailDeliveryUncertainError){await this.recordEmailUncertain(d.clientRequestId!,clientId,u.id);throw new ConflictException("Gmail не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат")}return this.p.$transaction(async tx=>{const metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,to:recipient,failureType:error instanceof Error?error.constructor.name:"UnknownError"} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}});if(attachment)await tx.communicationAttachment.update({where:{path:attachment.path},data:{messageId:message.id,claimedAt:new Date(),clientRequestId:null}});await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"FAILED",messageId:message.id}});await tx.activity.create({data:{clientId,type:"MESSAGE_SEND_FAILED",summary:"Gmail не принял исходящее письмо",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND_FAILED",entityType:"Message",entityId:message.id,after:{channel,status:MessageStatus.FAILED}}});return{...message,channel}})},
@@ -2028,7 +2053,7 @@ export class CommunicationsService {
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
             if (existing) {
               if (existing.clientId !== clientId || existing.conversationId !== conversation.id) throw new ConflictException("Идентификатор отправки уже использован");
-              if (existing.messageId) {
+              if (existing.messageId && (existing.status === "SENT" || existing.status === "FAILED")) {
                 const result = await tx.message.findUnique({ where: { id: existing.messageId } });
                 if (result) return { kind: "DONE" as const, result: { ...result, channel } };
               }
@@ -2040,7 +2065,7 @@ export class CommunicationsService {
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return { kind: "PENDING" as const };
-            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
+            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
             if (attachment) {
               const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, claimedAt: null, clientRequestId: null, messageId: null }, data: { clientRequestId: d.clientRequestId! } });
               if (claimed.count !== 1) throw new ConflictException("Вложение уже используется в другой отправке");
@@ -2144,14 +2169,14 @@ export class CommunicationsService {
           const prior = await this.p.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
-            if (existing) return existing;
+            if (existing) return { attempt: existing, sameRequest: true };
             if (draft) {
               const currentDraft = await tx.message.findFirst({ where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id }, select: { id: true, metadata: true } });
               if (!currentDraft || isSoftDeletedMessage(currentDraft.metadata)) throw new ConflictException("Черновик уже отправляется, удалён или был отправлен");
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
-            if (pending) return pending;
-            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING" } });
+            if (pending) return { attempt: pending, sameRequest: false };
+            await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
             if (attachment) {
               const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, clientRequestId: null, claimedAt: null }, data: { clientRequestId: d.clientRequestId! } });
               if (claimed.count !== 1) throw new ConflictException("Вложение уже используется в другой отправке");
@@ -2160,11 +2185,13 @@ export class CommunicationsService {
             return null;
           });
           if (!prior) return { kind: "NEW" as const };
-          if (prior.clientId !== clientId || prior.conversationId !== conversation.id)
+          if (!prior.sameRequest) return { kind: "PENDING" as const };
+          const attempt = prior.attempt;
+          if (attempt.clientId !== clientId || attempt.conversationId !== conversation.id)
             throw new ConflictException("Идентификатор отправки уже использован");
-          if (!prior.messageId) return { kind: "PENDING" as const };
-          const existing = await this.p.message.findUnique({ where: { id: prior.messageId } });
-          if (existing) return { kind: "DONE" as const, result: { ...existing, status:prior.status==="FAILED"?MessageStatus.FAILED:existing.status, channel } };
+          if (attempt.status === "PENDING" || attempt.status === "UNCERTAIN" || !attempt.messageId) return { kind: "PENDING" as const };
+          const existing = await this.p.message.findUnique({ where: { id: attempt.messageId } });
+          if (existing) return { kind: "DONE" as const, result: { ...existing, status:attempt.status==="FAILED"?MessageStatus.FAILED:existing.status, channel } };
           throw new ConflictException("Результат отправки временно недоступен");
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
@@ -2188,8 +2215,22 @@ export class CommunicationsService {
             : channel === ContactChannel.INSTAGRAM
               ? this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", true)
               : this.metaGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, params as Record<string, string>, "POST", appSecret, true);
+          let replyContextFallback = false;
+          const sendWithInstagramFallback = async () => {
+            if (channel !== ContactChannel.INSTAGRAM || !directReplyToMessageId || commentReply) return send();
+            const plainParams = attachment
+              ? metaAttachmentMessageParams(recipientId, attachment.type, attachment.providerUrl)
+              : metaTextMessageParams(recipientId, content);
+            const fallback = await deliverInstagramReplyWithFallback({
+              sendReply: send,
+              sendPlain: () => this.instagramGraph<{ recipient_id?: string; message_id?: string }>(receiverId + "/messages", pageToken, plainParams, "POST", true),
+              isReplyContextRejection: error => error instanceof MetaGraphRequestError && error.failure.code === 100,
+            });
+            replyContextFallback = fallback.usedFallback;
+            return fallback.result;
+          };
           const result = await deliverMetaMessage(metaChannel, {
-            send,
+            send: sendWithInstagramFallback,
             takeControl: () => channel === ContactChannel.FACEBOOK&&!commentReply
               ? this.metaGraph("me/take_thread_control", pageToken, metaThreadControlParams(recipientId), "POST", appSecret, true)
               : Promise.resolve(),
@@ -2204,6 +2245,7 @@ export class CommunicationsService {
           return {
             ...(typeof (result as { recipient_id?: unknown }).recipient_id === "string" ? { recipient_id: (result as { recipient_id: string }).recipient_id } : {}),
             message_id: messageId,
+            replyContextFallback,
           };
         },
         persistFailure: async (error) => {
@@ -2225,7 +2267,7 @@ export class CommunicationsService {
           const failure = error instanceof MetaGraphRequestError ? error.failure : metaSendFailure(undefined);
           const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
           const failureMetadata={...draftMetadata,provider:"META",source:"CRM",...(persistedAttachment?{attachments:[persistedAttachment]}:{}),failureType:error instanceof Error?error.constructor.name:"UnknownError",...failure};
-          const m=draft?await tx.message.update({where:{id:draft.id},data:{replyToMessageId:metaReplyToMessage?.id,metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: messageContent, authorId: u.id, replyToMessageId:metaReplyToMessage?.id, metadata:failureMetadata } });
+          const m=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:messageContent,authorId:u.id,replyToMessageId:metaReplyToMessage?.id,metadata:failureMetadata}}):await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.OUTBOUND, status: MessageStatus.FAILED, content: messageContent, authorId: u.id, replyToMessageId:metaReplyToMessage?.id, metadata:failureMetadata } });
           if (attachment) await tx.communicationAttachment.update({ where: { path: attachment.path }, data: { messageId: m.id, claimedAt: new Date() } });
           await tx.$executeRaw`UPDATE "Conversation" SET "lastMessageAt"=GREATEST(COALESCE("lastMessageAt",${m.createdAt}),${m.createdAt}),"updatedAt"=NOW() WHERE "id"=${conversation.id}`;
           await tx.messageDeliveryAttempt.update({ where: { clientRequestId: d.clientRequestId! }, data: { status: "FAILED", messageId: m.id } });
@@ -2238,7 +2280,7 @@ export class CommunicationsService {
         persistSuccess: async (result) => this.p.$transaction(async (tx) => {
         const sentAt=new Date();
         const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-        const successMetadata={...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(isPublicCommentReply?{engagementReply:{mode:"PUBLIC_COMMENT",targetExternalId:metaReplyToMessageId}}:{}),...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+        const successMetadata={...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(result.replyContextFallback?{replyContextDelivery:"CRM_ONLY"}:{}),...(isPublicCommentReply?{engagementReply:{mode:"PUBLIC_COMMENT",targetExternalId:metaReplyToMessageId}}:{}),...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"meta-echo:" + conversation.id + ":" + result.message_id}, 0))`;
         const existingEcho = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: result.message_id! } } });
         const existingEchoMetadata=existingEcho?.metadata&&typeof existingEcho.metadata==="object"&&!Array.isArray(existingEcho.metadata)?existingEcho.metadata as Prisma.JsonObject:{};
@@ -2696,7 +2738,7 @@ export class AiAssistantService {
     const items=dates.map(fromDate=>{
       const item=latestByDate.get(fromDate)!;
       const start=this.summaryStart(fromDate),messages=source.messages.filter(message=>message.createdAt>=start),digest=summarySourceDigest(messages,operational),isCurrent=digest===item.sourceDigest;
-      return{id:item.id,fromDate,generatedAt:item.createdAt,throughMessageAt:item.throughMessageAt,messageCount:item.sourceMessageCount,isCurrent,summary:isCurrent?item.summary:null};
+      return{id:item.id,fromDate,generatedAt:item.createdAt,throughMessageAt:item.throughMessageAt,messageCount:item.sourceMessageCount,isCurrent,summary:item.summary};
     }).reverse();
     return{channel,timezone:CRM_SUMMARY_TIMEZONE,firstMessageDate,items};
   }
