@@ -38,10 +38,10 @@
 - Playwright проверяет реальные PATCH обоих редактируемых статусов, русские подписи, success/warning/danger/violet, fallback неизвестного кода, nowrap и отсутствие document overflow.
 - Для статуса позиции отдельно проверяются прежние блочное расположение и отступ под строкой оплаты; feature-правило остаётся в `orders-dashboard.css`, а общий Mantine compatibility layer не содержит CSS страницы заказов.
 - Viewports: 1920×1080, 1366×768 и 390×844; кадры сохранены test run и просмотрены вручную.
-- Standards/compatibility, spec/regression, business/security, visual/accessibility и локальный release gate завершены с PASS. Deployment-проверки не запускались, потому что этот этап остаётся локальным.
+- Standards/compatibility, spec/regression, business/security, visual/accessibility и локальный release gate завершены с PASS. Этап опубликован и развёрнут как CRM v0.1.15 (`cb610898bea91454866ad1b0565dd74b8b9f3408`); production health и авторизованный read-only smoke прошли успешно.
 - Дополнительный browser contract для «Доставки» и «Производства» прошёл 6/6 на 1920×1080, 1366×768 и 390×844; проверены сохранение PUT/PATCH контрактов, responsive layout и отсутствие document overflow.
 - После review контракт расширен проверками фактического тега `SPAN`, danger-цвета `RETURNED` и отсутствия browser console/page errors.
-- Повторные Standards, Spec/regression, business/security и UI/accessibility reviews после этих исправлений — PASS; локальный release gate — PASS. Production deployment и live smoke не выполнялись.
+- Повторные Standards, Spec/regression, business/security и UI/accessibility reviews после этих исправлений — PASS; локальный release gate — PASS. Production deployment и live smoke v0.1.15 выполнены, точка отката — `crm-v0.1.14`.
 
 ## Следующий рекомендуемый срез
 

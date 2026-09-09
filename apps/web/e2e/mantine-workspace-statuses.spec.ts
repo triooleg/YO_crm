@@ -54,7 +54,7 @@ const productionOrder = {
   },
 };
 
-async function mockWorkspaceApi(page: Page) {
+async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
   const consoleErrors: string[] = [];
@@ -79,7 +79,13 @@ async function mockWorkspaceApi(page: Page) {
       ["/api/auth/me", auth],
       ["/api/branding", {}],
       ["/api/shipping", { orders: shippingOrders, carriers: [{ carrier: "NOVA_GLOBAL", label: "Nova Global", enabled: true }, { carrier: "DHL", label: "DHL", enabled: true }] }],
-      ["/api/orders/production", [productionOrder]],
+      ["/api/orders/production", [{
+        ...productionOrder,
+        productionSlot: {
+          ...productionOrder.productionSlot,
+          locked: options.lockedProductionSlot ?? productionOrder.productionSlot.locked,
+        },
+      }]],
       ["/api/orders/defaults", { defaultDurationDays: 7, shippingLeadDays: 2 }],
     ]);
     if (request.method() !== "GET" || !responses.has(pathname)) {
@@ -90,6 +96,52 @@ async function mockWorkspaceApi(page: Page) {
   });
   return { shippingUpdates, slotUpdates, consoleErrors };
 }
+
+async function dragTimelineBar(page: Page, deltaX: number) {
+  const bar = page.locator(".timeline-bar");
+  const box = await bar.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + deltaX, box!.y + box!.height / 2);
+  await page.mouse.up();
+  return box!;
+}
+
+test("Закреплённый производственный слот открывается без ложной ошибки загрузки", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const { slotUpdates, consoleErrors } = await mockWorkspaceApi(page, { lockedProductionSlot: true });
+  await page.goto("/?section=production");
+
+  const beforeDrag = await dragTimelineBar(page, 80);
+  const afterDrag = await page.locator(".timeline-bar").boundingBox();
+
+  expect(afterDrag?.x).toBe(beforeDrag.x);
+  expect(slotUpdates).toEqual([]);
+  await expect(page.locator(".phase2-error")).toHaveCount(0);
+
+  await page.locator(".timeline-bar").click();
+
+  await expect(page.locator(".production-slot-card")).toBeVisible();
+  await expect(page.locator(".phase2-error")).toHaveCount(0);
+  expect(slotUpdates).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("Незакреплённый производственный слот сохраняет перетаскивание одним запросом", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const { slotUpdates, consoleErrors } = await mockWorkspaceApi(page);
+  await page.goto("/?section=production");
+
+  const beforeDrag = await dragTimelineBar(page, 80);
+
+  await expect.poll(() => slotUpdates.length).toBe(1);
+  expect(slotUpdates[0]).toMatchObject({ startsAt: "2026-09-03", endsAt: "2026-09-05" });
+  const afterDrag = await page.locator(".timeline-bar").boundingBox();
+  expect(afterDrag?.x).toBeGreaterThan(beforeDrag.x);
+  await expect(page.locator(".phase2-error")).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});
 
 for (const viewport of [
   { name: "desktop", width: 1920, height: 1080 },
