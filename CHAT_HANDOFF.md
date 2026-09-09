@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-09 — просмотр закреплённого производственного слота, 0.1.16 (release candidate)
+## 2026-09-09 — просмотр закреплённого производственного слота, 0.1.16 (deployed)
 
 - Failing-first browser test воспроизвёл production-дефект: `pointerdown` по закреплённому слоту записывал ложную ошибку загрузки, перерисовывал строку и не позволял обычному `click` открыть карточку заказа.
 - Drag guard разделён: отсутствие слота или производственных настроек остаётся ошибкой загрузки, а `locked` даёт тихий отказ от перетаскивания без изменения UI-состояния. Карточка закреплённого слота открывается, PATCH не отправляется.
@@ -8,7 +8,11 @@
 - Устаревшая формулировка документа Mantine Phase 2 исправлена: версия 0.1.15 действительно была развёрнута и проверена live smoke.
 - Новый browser contract дополнен настоящим drag-жестом: locked-слот сохраняет позицию и не отправляет PATCH, unlocked-контроль сдвигается и отправляет ровно один PATCH. Полный изменённый Playwright-набор 8/8 PASS на desktop, laptop и mobile.
 - `pnpm quality:check` PASS: database 9/9, API 468/468, web 261/261, все typecheck и production builds. Compatibility, regression, business/security и UI/accessibility reviews после устранения двух review-блокеров — PASS.
-- До deployment остаются финальный release review, exact-SHA публикация и проверенный FULL backup.
+- Финальный release review — PASS. Runtime commit `bb917b23bbf66ff2b65c48e4d7c5288d07bcaf6e` fast-forward опубликован в `origin/main`; GitHub Actions `Quality gates` run 34343137894 завершён со статусом success. Release archive `yoleotard-crm-0.1.16-bb917b2.tar.gz` совпал локально и на сервере по SHA-256 `f2d7017ec4082c57414bbd8434de43527717f6ea77a0ddf1d2d9bb2197ab3cd5`.
+- Перед deployment создан и независимо проверен FULL backup `20260909T110341Z-v016-bb917b2-predeploy`: `SHA256SUMS` совпадают, PostgreSQL custom dump читается, uploads archive и JSON manifest валидны. Source rollback: `/home/trio/yoleotard-crm-backups/source-20260909T110617Z-pre-bb917b2.tar.gz`, SHA-256 `b9fa56672711108edc0c0690c29fb46a271f31f394ddf69f97790dabb252eb32`; прежний source-каталог: `/home/trio/yoleotard-crm-previous-20260909T110617Z`.
+- Пересозданы только API `df46c7fe3c9f6463437c6fee0caf701e19a0c5970400fbaa340999741129b8b5` и web `34518065c7a48bfe072c0f4525708f165ec277acde13d24fb1a9d2bfa1ff7a1e`. PostgreSQL `4f715cdae8b20715d5f8d06077ed2e3f7002045e2c3595ca5c9ffc044671106e` и Redis `e619cd2fc6ad402b673ed35c5590a11250309f2b31bd88b70e3faae61741f206` не заменялись. Все сервисы running, обязательные healthchecks healthy, restart count 0; 22 миграции актуальны, сохранены 100 клиентов, 98 переписок, 986 сообщений и 3 заказа.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. Внутренние и публичные `/` и `/api/health` возвращают HTTP 200, health подтверждает PostgreSQL, Redis и uploads `up`; встроенные web version/commit равны `0.1.16` и runtime SHA. Единственный стартовый `ECONNREFUSED` возник до готовности пересозданного API; после стабилизации fresh API/web error scan равен 0.
+- Авторизованный read-only smoke в новой Edge-вкладке подтвердил CRM v0.1.16 и точный SHA. Клик по реальному закреплённому слоту открыл карточку заказа, блокировка осталась включённой, ложная ошибка отсутствует. После smoke новых `ProductionSlot` audit-записей 0 — production-данные не изменялись.
 
 ## 2026-09-09 — Mantine Phase 2: единые статусы заказов, доставки и производства, 0.1.15 (deployed)
 
