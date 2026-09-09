@@ -91,7 +91,7 @@ export function chatwootHasNextPage(payload: unknown, requestedPage: number) {
   const totalPages = Number(meta.total_pages);
   if (Number.isFinite(totalPages) && totalPages > 0) return currentPage < totalPages;
   const totalContacts = Number(meta.count);
-  if (!Number.isFinite(totalContacts) || totalContacts <= 0) return false;
+  if (!Number.isFinite(totalContacts) || totalContacts <= 0) return true;
   const providerPageSize = Math.max(1, Number(meta.per_page) || rows.length);
   return currentPage * providerPageSize < totalContacts;
 }

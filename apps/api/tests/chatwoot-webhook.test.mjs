@@ -156,6 +156,8 @@ test("Chatwoot pagination uses response metadata or actual page length instead o
   assert.equal(chatwootHasNextPage({meta:{count:20,current_page:2},payload:Array.from({length:10},(_,id)=>({id}))},2),false);
   assert.equal(chatwootHasNextPage({meta:{current_page:1,total_pages:3},payload:[{}]},1),true);
   assert.equal(chatwootHasNextPage({meta:{current_page:3,total_pages:3},payload:[{}]},3),false);
+  assert.equal(chatwootHasNextPage({payload:[{}]},1),true);
+  assert.equal(chatwootHasNextPage({payload:[]},2),false);
 });
 
 test("Chatwoot contact lookup is fail-open when the provider rejects or times out",async()=>{
