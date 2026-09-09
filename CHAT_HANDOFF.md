@@ -1,6 +1,15 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-09 — импорт профилей клиентов из Chatwoot, 0.1.13 (готово к deployment)
+## 2026-09-09 — внутренний маршрут Chatwoot, 0.1.14 (готово к deployment)
+
+- Авторизованный production smoke версии 0.1.13 дошёл до реальной кнопки синхронизации и получил `Chatwoot не вернул список клиентов`. Безопасная диагностика без вывода токена или тела ответа установила `UND_ERR_CONNECT_TIMEOUT`: API-контейнер не мог выйти на собственный публичный домен `chatwoot.yoleotard.com` через внешний DNS/NAT-маршрут.
+- TLS-маршрут через LAN-адрес `192.168.31.219` проверен из API-контейнера: reverse proxy отвечает ожидаемым HTTP 401 без токена, то есть DNS-подмена сохраняет корректный HTTPS/SNI и достигает Chatwoot.
+- В обычный `docker-compose.yml` добавлено то же ограниченное `extra_hosts`-сопоставление, которое уже было в Portainer-варианте. Параметр `CHATWOOT_HOST_IP` документирован в обоих env-примерах; PostgreSQL, Redis и web не получают это сопоставление.
+- Failing-first тест расширен на обе Compose-сборки: до исправления обычная production-сборка падала, после исправления обе проходят. Версия и русский журнал повышены до 0.1.14; миграций БД нет.
+- После восстановления зависимостей вследствие аварийной перезагрузки `pnpm db:generate` и `pnpm quality:check` PASS: database 9/9, API 468/468, web suite PASS, typecheck и production builds PASS.
+- Перед deployment обязательны review-роли, проверенный FULL backup и точная публикация SHA. После deployment нужно повторить синхронизацию Chatwoot и зафиксировать итоговые счётчики.
+
+## 2026-09-09 — импорт профилей клиентов из Chatwoot, 0.1.13 (deployed)
 
 - Причина пропущенных e-mail найдена в границе webhook: события Chatwoot часто не содержат контактную карточку, а CRM ранее не сохраняла numeric contact ID, не запрашивала Contacts API и не дополняла уже существующего клиента.
 - Входящие Chatwoot теперь сохраняют contact ID и при необходимости безопасно получают контакт по точному account/contact endpoint. Импортируются только пустые поля CRM: e-mail, телефон, аватар, город и страна; введённые оператором значения не перезаписываются. Недоступность Contacts API не блокирует само входящее сообщение.
@@ -8,7 +17,7 @@
 - Синтетический Facebook SID вида `123@facebook.com` не считается e-mail клиента. Профили без e-mail всё равно могут дополнить телефон, аватар, город или страну.
 - Кнопка показывает русское состояние `Синхронизация…`, `aria-busy` и итоговые счётчики. Playwright 3/3 PASS на 1920×1080, 1366×768 и 390×844; прямой просмотр и SHA-256 кадров записаны в `docs/release-evidence/chatwoot-profile-import-0.1.13.md`.
 - После финального изменения `pnpm quality:check` PASS: database 9/9, web suite PASS, API 468/468, typecheck и production builds PASS. Compatibility, regression, business/security и visual reviews подтвердили отсутствие продуктовых блокеров; отдельный read-only reviewer не мог создать Gmail test temp-файл, но основной writable прогон полного набора завершён успешно.
-- Release candidate до этой записи: `a58e75df62399765c9d684679e515aca9279eaed`; миграций БД нет. Перед deployment обязательны полный проверенный backup, fast-forward публикация точного итогового SHA и тег `crm-v0.1.13`. После deployment обязательны HTTP 200 для `/` и `/api/health`, health PostgreSQL/Redis/uploads, restart count 0, проверка версии и SHA в UI, отсутствие свежих API/web ошибок и контролируемый запуск синхронизации Chatwoot с фиксацией счётчиков.
+- Runtime commit `a366afeba921f25abdc1d3df03034c48b256665a` опубликован в `origin/main` и отмечен тегом `crm-v0.1.13`. Перед deployment проверен FULL backup `20260909T004720Z-v013-a366afe-predeploy`; публичные `/` и `/api/health` вернули HTTP 200, зависимости PostgreSQL/Redis/uploads — `up`, restart count всех CRM-контейнеров — 0. Контролируемый запуск синхронизации выявил отдельный production routing defect, исправляемый в 0.1.14; импорт нельзя считать завершённым до повторного успешного запуска.
 
 ## 2026-09-09 — обратимое разделение аккаунтов и Mantine foundation, 0.1.12 (deployed)
 

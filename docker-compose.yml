@@ -32,6 +32,8 @@ services:
       retries: 10
   api:
     build: { context: ., dockerfile: docker/api.Dockerfile }
+    extra_hosts:
+      - "chatwoot.yoleotard.com:${CHATWOOT_HOST_IP:-192.168.31.219}"
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-yoleotard_crm}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-yoleotard_crm}?schema=public
@@ -64,7 +66,7 @@ services:
       args:
         {
           NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4500/api}",
-          CRM_VERSION: "${CRM_VERSION:-0.1.12}",
+          CRM_VERSION: "${CRM_VERSION:-0.1.14}",
           CRM_COMMIT: "${CRM_COMMIT:-development}",
         }
     ports: ["${WEB_PUBLIC_PORT:-3500}:3500"]

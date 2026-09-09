@@ -49,10 +49,10 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.13");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.14");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.12\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.12\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.14\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.14\}"/);
   assert.match(compose, /CRM_COMMIT:/);
 });
 
@@ -70,6 +70,13 @@ test("журнал 0.1.13 описывает безопасный импорт �
   assert.match(release,/без перезаписи/);
   assert.match(release,/синхронизац/);
   assert.match(release,/crm-v0\.1\.12/);
+});
+
+test("журнал 0.1.14 описывает внутренний маршрут Chatwoot",()=>{
+  const release=i18n.slice(i18n.indexOf('version: "0.1.14"'),i18n.indexOf('version: "0.1.13"'));
+  assert.match(release,/внутренн/i);
+  assert.match(release,/Chatwoot/);
+  assert.match(release,/crm-v0\.1\.13/);
 });
 
 test("журнал 0.1.9 честно описывает миграцию redirect и границу отката",()=>{
