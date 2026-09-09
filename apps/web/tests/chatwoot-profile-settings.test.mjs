@@ -13,4 +13,6 @@ test("настройки Chatwoot запускают постраничную с
   assert.match(settings,/do\{.*nextCursor.*\}while\(cursor&&batches<500\)/s);
   assert.match(settings,/type="button"[^>]*onClick=\{\(\)=>void refreshChatwootProfiles\(\)\}/);
   assert.match(i18n,/chatwootRefreshProfiles:\s*"Синхронизировать клиентов Chatwoot"/);
+  assert.match(i18n,/chatwootRefreshingProfiles:\s*"Синхронизация…"/);
+  assert.match(settings,/aria-busy=\{chatwootProfilesRefreshing\}/);
 });

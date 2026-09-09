@@ -418,6 +418,7 @@ export const settingsUi = {
   chatwootWebhook: "Адрес webhook Chatwoot",
   chatwootWebhookSecret: "Секрет webhook Chatwoot",
   chatwootRefreshProfiles: "Синхронизировать клиентов Chatwoot",
+  chatwootRefreshingProfiles: "Синхронизация…",
   chatwootProfilesRefreshError: "Не удалось синхронизировать клиентов Chatwoot",
   chatwootProfilesRefreshIncomplete: "Синхронизация Chatwoot остановлена по безопасному лимиту. Запустите её повторно.",
   chatwootProfilesScanned: "Получено контактов",

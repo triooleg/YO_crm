@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 const source=await readFile(new URL("../src/communications/chatwoot-webhook.ts",import.meta.url),"utf8");
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
 const require=createRequire(import.meta.url),module={exports:{}};vm.runInNewContext(js,{module,exports:module.exports,require,Buffer,Date,URL,Response,ReadableStream,AbortSignal,RangeError,TypeError});
-const {boundedChatwootResponseJson,chatwootBackfillBatch,chatwootContactProfile,chatwootContactRecords,chatwootReadReceiptFromApi,fetchChatwootContactProfile,normalizeChatwootMessageUpdate,normalizeChatwootReadReceipt,normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
+const {boundedChatwootResponseJson,chatwootBackfillBatch,chatwootContactProfile,chatwootContactRecords,chatwootHasNextPage,chatwootReadReceiptFromApi,fetchChatwootContactProfile,normalizeChatwootMessageUpdate,normalizeChatwootReadReceipt,normalizeChatwootWebhook,verifyChatwootSignature}=module.exports;
 
 test("Chatwoot normalizes Facebook, Instagram, WhatsApp, e-mail and native inboxes",()=>{
   const base={event:"message_created",message_type:"incoming",id:17,content:"Здравствуйте",created_at:1700000000,sender:{id:9,name:"Анна"},conversation:{contact_inbox:{source_id:"contact-9"},account_id:2}};
@@ -129,23 +129,33 @@ test("Chatwoot keeps the contact id and normalizes contact details fetched from 
   });
 });
 
-test("Chatwoot contact backfill keeps only the configured inbox and usable e-mail",()=>{
+test("Chatwoot contact backfill keeps configured-inbox profiles even without e-mail",()=>{
   const records=chatwootContactRecords({meta:{count:2,current_page:1},payload:[
     {id:91,name:"Nicola",identifier:"visitor-91",email:"nicola@example.com",contact_inboxes:[
       {source_id:"contact-91",inbox:{id:2,channel_type:"Channel::Api"}},
       {source_id:"other-91",inbox:{id:3,channel_type:"Channel::Email"}},
     ]},
-    {id:92,name:"Anonymous",email:null,contact_inboxes:[{source_id:"contact-92",inbox:{id:2,channel_type:"Channel::Api"}}]},
+    {id:92,name:"Anonymous",email:null,phone_number:"+3900000000",contact_inboxes:[{source_id:"contact-92",inbox:{id:2,channel_type:"Channel::Api"}}]},
   ]},"2");
-  assert.deepEqual(JSON.parse(JSON.stringify(records)),[{contactId:"91",sourceId:"contact-91",candidateExternalIds:["contact-91","visitor-91","91"],channel:"CHATWOOT",displayName:"Nicola",email:"nicola@example.com"}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(records)),[
+    {contactId:"91",sourceId:"contact-91",candidateExternalIds:["contact-91","visitor-91","91"],channel:"CHATWOOT",displayName:"Nicola",email:"nicola@example.com"},
+    {contactId:"92",sourceId:"contact-92",candidateExternalIds:["contact-92","92"],channel:"CHATWOOT",displayName:"Anonymous",phone:"+3900000000"},
+  ]);
 });
 
 test("Chatwoot backfill cursor never skips the remainder of a provider page",()=>{
   const records=Array.from({length:15},(_,index)=>({contactId:String(index+1),sourceId:`contact-${index+1}`,candidateExternalIds:[`contact-${index+1}`],channel:"CHATWOOT",email:`c${index+1}@example.com`}));
-  const first=chatwootBackfillBatch(records,1,0,4,16),second=chatwootBackfillBatch(records,1,4,4,16),last=chatwootBackfillBatch(records,1,12,4,16);
+  const first=chatwootBackfillBatch(records,1,0,4,true),second=chatwootBackfillBatch(records,1,4,4,true),last=chatwootBackfillBatch(records,1,12,4,true);
   assert.deepEqual(first.records.map(item=>item.contactId),["1","2","3","4"]);assert.equal(first.nextCursor,"1:4");
   assert.deepEqual(second.records.map(item=>item.contactId),["5","6","7","8"]);assert.equal(second.nextCursor,"1:8");
   assert.deepEqual(last.records.map(item=>item.contactId),["13","14","15"]);assert.equal(last.nextCursor,"2:0");
+});
+
+test("Chatwoot pagination uses response metadata or actual page length instead of a fixed page size",()=>{
+  assert.equal(chatwootHasNextPage({meta:{count:20,current_page:1},payload:Array.from({length:10},(_,id)=>({id}))},1),true);
+  assert.equal(chatwootHasNextPage({meta:{count:20,current_page:2},payload:Array.from({length:10},(_,id)=>({id}))},2),false);
+  assert.equal(chatwootHasNextPage({meta:{current_page:1,total_pages:3},payload:[{}]},1),true);
+  assert.equal(chatwootHasNextPage({meta:{current_page:3,total_pages:3},payload:[{}]},3),false);
 });
 
 test("Chatwoot contact lookup is fail-open when the provider rejects or times out",async()=>{

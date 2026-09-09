@@ -3,6 +3,10 @@ import { expect, test, type Page } from "@playwright/test";
 async function mockSettingsApi(page: Page) {
   await page.route("**/api/**", async route => {
     const pathname = new URL(route.request().url()).pathname;
+    if (route.request().method() === "POST" && pathname === "/api/communications/chatwoot/profiles/backfill") {
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      return route.fulfill({ json: { scanned: 2, matched: 1, updated: 1 } });
+    }
     const responses = new Map<string, unknown>([
       ["/api/auth/me", { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } }],
       ["/api/branding", {}],
@@ -31,14 +35,20 @@ for (const viewport of [
     await page.goto("/?section=settings");
     await page.getByRole("tab", { name: "Каналы связи" }).click();
 
-    const action = page.getByRole("button", { name: "Синхронизировать клиентов Chatwoot" });
+    const chatwootCard = page.locator("form.settings-card").filter({ has: page.getByRole("heading", { name: /^Chatwoot/ }) });
+    const action = chatwootCard.locator("button.settings-secondary");
     await expect(action).toBeVisible();
     await expect(action).toBeEnabled();
+    await expect(action).toHaveText("Синхронизировать клиентов Chatwoot");
     const box = await action.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    await action.click();
+    await expect(action).toHaveAttribute("aria-busy", "true");
+    await expect(action).toHaveText("Синхронизация…");
+    await expect(chatwootCard.getByRole("status")).toContainText("Обновлено профилей: 1");
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("chatwoot-settings-" + viewport.width + "x" + viewport.height + ".png"), fullPage: true });
   });

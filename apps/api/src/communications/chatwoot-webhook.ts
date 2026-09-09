@@ -67,7 +67,7 @@ export function chatwootContactRecords(payload: unknown, inboxId: string): Chatw
     const contact = row as RecordLike, contactId = String(contact.id || "");
     if (!/^\d+$/.test(contactId) || Number(contactId) <= 0) continue;
     const profile = chatwootContactProfile(contact);
-    if (!profile?.email) continue;
+    if (!profile || ![profile.email, profile.phone, profile.avatarUrl, profile.city, profile.country].some(Boolean)) continue;
     const inboxes = Array.isArray(contact.contact_inboxes) ? contact.contact_inboxes : [];
     for (const entry of inboxes) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
@@ -81,12 +81,27 @@ export function chatwootContactRecords(payload: unknown, inboxId: string): Chatw
   return records;
 }
 
-export function chatwootBackfillBatch(records: ChatwootContactRecord[], page: number, offset: number, limit: number, totalContacts: number) {
+export function chatwootHasNextPage(payload: unknown, requestedPage: number) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const value = payload as RecordLike;
+  const rows = Array.isArray(value.payload) ? value.payload : [];
+  if (!rows.length) return false;
+  const meta = value.meta && typeof value.meta === "object" && !Array.isArray(value.meta) ? value.meta as RecordLike : {};
+  const currentPage = Math.max(1, Number(meta.current_page) || requestedPage);
+  const totalPages = Number(meta.total_pages);
+  if (Number.isFinite(totalPages) && totalPages > 0) return currentPage < totalPages;
+  const totalContacts = Number(meta.count);
+  if (!Number.isFinite(totalContacts) || totalContacts <= 0) return false;
+  const providerPageSize = Math.max(1, Number(meta.per_page) || rows.length);
+  return currentPage * providerPageSize < totalContacts;
+}
+
+export function chatwootBackfillBatch(records: ChatwootContactRecord[], page: number, offset: number, limit: number, hasNextPage: boolean) {
   const batchLimit = Math.max(1, Math.min(50, Math.floor(limit) || 15));
   const selected = records.slice(offset, offset + batchLimit);
   const nextCursor = offset + selected.length < records.length
     ? `${page}:${offset + selected.length}`
-    : page * 15 < totalContacts ? `${page + 1}:0` : undefined;
+    : hasNextPage ? `${page + 1}:0` : undefined;
   return { records: selected, nextCursor };
 }
 
