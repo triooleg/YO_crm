@@ -1,13 +1,18 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-09 — внутренний маршрут Chatwoot, 0.1.14 (готово к deployment)
+## 2026-09-09 — внутренний маршрут Chatwoot, 0.1.14 (deployed)
 
 - Авторизованный production smoke версии 0.1.13 дошёл до реальной кнопки синхронизации и получил `Chatwoot не вернул список клиентов`. Безопасная диагностика без вывода токена или тела ответа установила `UND_ERR_CONNECT_TIMEOUT`: API-контейнер не мог выйти на собственный публичный домен `chatwoot.yoleotard.com` через внешний DNS/NAT-маршрут.
 - TLS-маршрут через LAN-адрес `192.168.31.219` проверен из API-контейнера: reverse proxy отвечает ожидаемым HTTP 401 без токена, то есть DNS-подмена сохраняет корректный HTTPS/SNI и достигает Chatwoot.
 - В обычный `docker-compose.yml` добавлено то же ограниченное `extra_hosts`-сопоставление, которое уже было в Portainer-варианте. Параметр `CHATWOOT_HOST_IP` документирован в обоих env-примерах; PostgreSQL, Redis и web не получают это сопоставление.
 - Failing-first тест расширен на обе Compose-сборки: до исправления обычная production-сборка падала, после исправления обе проходят. Версия и русский журнал повышены до 0.1.14; миграций БД нет.
 - После восстановления зависимостей вследствие аварийной перезагрузки `pnpm db:generate` и `pnpm quality:check` PASS: database 9/9, API 468/468, web suite PASS, typecheck и production builds PASS.
-- Перед deployment обязательны review-роли, проверенный FULL backup и точная публикация SHA. После deployment нужно повторить синхронизацию Chatwoot и зафиксировать итоговые счётчики.
+- Compatibility, regression, business/security, visual и final release reviews — PASS. Первый business/security review нашёл неверный полный SHA 0.1.13 в handoff; запись исправлена на существующий `a366afeba921f25abdc1d3df03034c48b256665a`, после чего повторный review дал PASS. Обе Compose-конфигурации прошли `docker compose config --quiet` на production Docker.
+- Runtime commit `20a5490780664bb904f68b9383e396b0dd6b0adb` fast-forward опубликован в `origin/main` и отмечен тегом `crm-v0.1.14`. Release archive `yoleotard-crm-0.1.14-20a5490.tar.gz` совпал локально и на сервере по SHA-256 `c3ae44338648a7642a0f1ea41a997ef554620eea7484084700e3e61ef8e2a558`.
+- Перед deployment создан и независимо проверен FULL backup `20260909T013019Z-v014-51eb6a0-predeploy`: `SHA256SUMS`, PostgreSQL custom dump, uploads archive и JSON manifest валидны. Source rollback: `/home/trio/yoleotard-crm-backups/source-20260909T014552Z-pre-20a5490.tar.gz`, SHA-256 `feeafed13395ae0f8ddaa954650c6405b7836f3e681859645dbeb50d7adafd41`; прежний source-каталог: `/home/trio/yoleotard-crm-previous-20260909T014552Z`.
+- Пересозданы только API `d35e039bc0858ff1c96e73ddafb7de72e408f73b41d9e3f295bcf7d5a7498902` и web `0d49597681f6d4f94b94713bf4820bba1110f0abadd37ec1e31dcfb753f2133b`. PostgreSQL `232ed04fba038f0d3fc86004e20de6b9cde85e2c4fc040a347cc3113a79ccb72` и Redis `582e11b1890f003fa7be8ba6e0d208d343d30501b230bf1f9ad6f7730f9ca703` не заменялись; все сервисы healthy/running с restart count 0.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. API-контейнер разрешает `chatwoot.yoleotard.com` в `192.168.31.219`; внутренние web/API проверки успешны. Публичные `/` и `/api/health` извне возвращают HTTP 200, health подтверждает PostgreSQL, Redis и uploads `up`.
+- Авторизованный production smoke в Edge подтвердил `CRM v0.1.14` и точный runtime SHA. Синхронизация Chatwoot завершилась: получено контактов 34, найдено клиентов CRM 5, обновлено профилей 3. В БД созданы 3 AuditLog и 3 Activity с source `CHATWOOT_CONTACT_BACKFILL`; исходные counts Client 99, Conversation 97, Message 968 сохранены. Новых Chatwoot timeout/TLS/gateway ошибок, web 5xx/runtime ошибок и browser console errors — 0.
 
 ## 2026-09-09 — импорт профилей клиентов из Chatwoot, 0.1.13 (deployed)
 
