@@ -41,6 +41,24 @@
   color: var(--violet);
 }
 
+.crm-status-badge {
+  display: inline-flex;
+  height: auto;
+  min-height: 20px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.crm-status-badge--danger { background: #ffe2e2; color: #a93232; }
+.crm-status-badge--warning { background: #fff0d2; color: #9b5d05; }
+.crm-status-badge--success { background: #dff5e8; color: #177344; }
+.crm-status-badge--info { background: #dff2ff; color: #176891; }
+.crm-status-badge--violet { background: #ece5ff; color: #5b3bc4; }
+
 @media (max-width: 720px) {
   .mantine-Modal-close {
     width: 40px;

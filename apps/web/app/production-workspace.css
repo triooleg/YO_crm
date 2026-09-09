@@ -14,3 +14,4 @@
 .production-canvas{min-width:0;width:var(--timeline-width)}
 .timeline-months,.timeline-days,.timeline-load,.timeline-row,.timeline-unscheduled{grid-template-columns:var(--order-column-width) repeat(var(--timeline-days),40px)}
 .timeline-row::before{left:var(--order-column-width)}
+.production-slot-card .production-slot-status{margin-top:14px}

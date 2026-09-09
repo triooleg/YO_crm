@@ -1,5 +1,20 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-09 — Mantine Phase 2: единые статусы заказов, доставки и производства, 0.1.15 (pre-deploy)
+
+- Продолжена постепенная миграция без изменения бизнес-логики: создан доменный `CrmStatusBadge` поверх Mantine `Badge` для read-only статусов оплаты, доставки и производства в раскрытом заказе.
+- Исчерпывающая типизированная таблица охватывает все известные sales/production/payment/shipping коды. `crmStatusPresentation` централизует русскую подпись, semantic tone и Mantine color; этот же resolver используется редактируемым sales-select. Неизвестный будущий код безопасно отображается русской подписью «Неизвестный статус» и violet fallback, а исходный код остаётся только в диагностическом атрибуте.
+- Сохранены прежние размеры и цвета статусов, редактируемые sales/production controls и read-only payment/shipping. API, Prisma, auth/RBAC, расчёты и transitions не изменялись.
+- Failing-first тест воспроизвёл отсутствие общего компонента. После реализации web suite 259/259 PASS. Playwright после review проверяет реальные PATCH sales/production, четыре tone, неизвестный статус, nowrap и отсутствие document overflow на 1920×1080, 1366×768 и 390×844; 3/3 PASS, кадры просмотрены вручную.
+- Первый независимый review выявил дублирующий `statusTone`, слабую проверку интерактивности, некорректную PAID-фикстуру и generated diff `next-env.d.ts`. Все четыре замечания устранены; generated файл исключён из diff. Финальный `pnpm quality:check` PASS: database 9/9, API 468/468, web 259/259, все typecheck и production builds.
+- Compatibility re-review дополнительно восстановил прежнее расположение badge позиции отдельной строкой под оплатой; feature CSS оставлен в `orders-dashboard.css`, а Playwright теперь проверяет `display` и вертикальный отступ. Standards/compatibility, spec/regression, business/security, visual/accessibility и локальный release gate — PASS.
+- Следующим вертикальным срезом тот же `CrmStatusBadge` подключён к read-only статусу в списке «Доставка» и карточке производственного слота. Редактируемый select отправления, правила переходов доставки, даты/lock производственного слота и соответствующие API не изменялись.
+- Новый failing-first browser contract подтвердил RED до миграции и затем 6/6 PASS на desktop, laptop и mobile. Он также проверяет прежние PUT доставки и PATCH производственного слота, semantic colors и отсутствие document overflow; итоговые кадры просмотрены вручную.
+- Business/UI review выявил два compatibility edge case: Mantine Badge по умолчанию рендерил `div` внутри кликабельной строки доставки, а `RETURNED` потерял прежний danger tone. Общий компонент теперь всегда рендерится как `span`, `RETURNED` снова красный; browser contract дополнительно проверяет тег, цвет возврата и отсутствие console/page errors.
+- После исправлений повторные standards/compatibility, spec/regression, business/security, visual/accessibility reviews и финальный локальный release gate — PASS. Post-deploy health/live smoke не запускались и не считаются пройденными.
+- Версия повышена до 0.1.15; русский журнал и rollback-граница `crm-v0.1.14` добавлены. Подробности: `docs/ui/mantine-phase-2-statuses.md`. Commit, push и deployment на момент этой записи ещё не выполнялись.
+- Финальный visual/release review обнаружил устаревший Next.js cache с подписью 0.1.13. Cache изолирован, после чего на принудительно свежем runtime `CRM_VERSION=0.1.15` повторно запущены оба Mantine Playwright-набора: Orders, Shipping и Production — 9/9 PASS. Все девять кадров для 1920×1080, 1366×768 и 390×844 просмотрены вручную и показывают именно CRM v0.1.15 без document overflow, console или page errors.
+
 ## 2026-09-09 — внутренний маршрут Chatwoot, 0.1.14 (deployed)
 
 - Авторизованный production smoke версии 0.1.13 дошёл до реальной кнопки синхронизации и получил `Chatwoot не вернул список клиентов`. Безопасная диагностика без вывода токена или тела ответа установила `UND_ERR_CONNECT_TIMEOUT`: API-контейнер не мог выйти на собственный публичный домен `chatwoot.yoleotard.com` через внешний DNS/NAT-маршрут.

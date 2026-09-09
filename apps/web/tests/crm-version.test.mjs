@@ -49,11 +49,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.14");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.15");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.14\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.14\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.15\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.15\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.15 описывает единые Mantine-статусы и безопасный откат",()=>{
+  const release=i18n.slice(i18n.indexOf('version: "0.1.15"'),i18n.indexOf('version: "0.1.14"'));
+  assert.match(release,/Mantine/);
+  assert.match(release,/заказ/i);
+  assert.match(release,/достав/i);
+  assert.match(release,/производ/i);
+  assert.match(release,/crm-v0\.1\.14/);
+  assert.match(changelog,/## \[0\.1\.15\] - 2026-09-09/);
 });
 
 test("журнал 0.1.12 описывает разделение аккаунтов и миграцию",()=>{

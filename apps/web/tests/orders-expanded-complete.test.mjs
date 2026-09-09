@@ -32,8 +32,8 @@ test("expanded order preserves all four statuses with only sales and production 
   }
   assert.match(expanded, /<select[^>]*value=\{order\.salesStatus\}[^>]*onChange=\{[^}]*onStatus\("salesStatus",/);
   assert.match(expanded, /<select[^>]*value=\{order\.productionStatus\}[^>]*onChange=\{[^}]*onStatus\("productionStatus",/);
-  assert.match(expanded, /orderLabel\("payment",\s*order\.paymentStatus\)/);
-  assert.match(expanded, /orderLabel\("shipping",\s*order\.shippingStatus\)/);
+  assert.match(expanded, /<CrmStatusBadge domain="payment" status=\{order\.paymentStatus\}/);
+  assert.match(expanded, /<CrmStatusBadge domain="shipping" status=\{order\.shippingStatus\}/);
   assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)",/);
 });
 
