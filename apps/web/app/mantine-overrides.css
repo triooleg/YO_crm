@@ -77,6 +77,19 @@
 }
 .crm-alert .mantine-Alert-closeButton { color: inherit; }
 
+.settings-grid .crm-text-input .mantine-InputWrapper-label { display: inline-flex; gap: 3px; }
+
+.branding-uses .crm-checkbox { display: flex; align-items: flex-start; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; }
+.branding-uses .crm-checkbox span:not(.crm-checkbox-copy) { display: initial; }
+.branding-uses .crm-checkbox .crm-checkbox-copy { display: grid; gap: 4px; }
+.branding-uses .crm-checkbox small { color: var(--muted); line-height: 1.4; }
+.branding-settings form > .crm-button { margin-top: 10px; }
+
+@media (max-width: 440px) {
+  .branding-settings form > .crm-button,
+  #settings-production-panel .crm-button { width: 100%; }
+}
+
 @media (max-width: 720px) {
   .mantine-Modal-close {
     width: 40px;

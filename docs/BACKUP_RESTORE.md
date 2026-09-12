@@ -27,6 +27,15 @@ Only OWNER and ADMIN may use these routes. Manual and scheduled requests share t
 
 ## Create a backup
 
+The manifest records the current Git checkout SHA when `.git` is available. A
+deployed source archive has no `.git`, so the backup CLI falls back to validated
+`.release-commit` and `.deployed-commit` markers. Each marker is accepted only
+when it contains an exact 40-character SHA. When both markers are valid, they
+must match; a valid conflict produces `unknown`. Otherwise a valid release
+marker has priority, then a valid deployed marker. Invalid markers are ignored,
+and no valid marker produces `unknown` instead of asserting uncertain
+provenance.
+
 ```bash
 export BACKUP_STORAGE_PATH=/srv/backups/yoleotard-crm
 ./scripts/backup.sh data

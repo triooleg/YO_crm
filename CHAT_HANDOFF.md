@@ -1,5 +1,20 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-13 — Mantine Phase 5: NativeSelect формата сводки (локально)
+
+- Добавлен общий `CrmNativeSelect` поверх Mantine и на него переведён только выбор «Формат сводки» в настройках AI. Остальные селекторы каналов, режима, rollout и интеграций не затрагивались.
+- Сохранены значения `COMPACT`/`DETAILED` и точный глобальный PATCH `/api/ai-control/settings` с `key=summaryDetailLevel`, выбранным `value` и `scope=GLOBAL`; API, AI-политика, RBAC и генерация сводки не менялись.
+- Failing-first unit contract прошёл после реализации; целевые тесты 4/4 PASS. Playwright после исправления порядка mobile-проверки — 3/3 PASS на 1920×1080, 1366×768 и 390×844. Три свежих кадра просмотрены вручную без overflow; dev-only индикатор Next.js скрыт только в visual-test.
+- Полный `pnpm quality:check` PASS: database 9/9, API 468/468, web 266/266, все typecheck и production builds. Standards/compatibility, spec/regression, business/security, UI visual/accessibility и локальный release gate дали PASS; production health и live smoke ожидают отдельного разрешённого deployment. Commit, push и deployment не выполнялись. Подробности: `docs/ui/mantine-phase-5-native-select.md`.
+
+## 2026-09-13 — Mantine Phase 4: контролы настроек и SHA резервной копии (локально)
+
+- Добавлены общие `CrmButton`, `CrmCheckbox` и `CrmTextInput` поверх Mantine; на них переведены только безопасные формы «Интерфейс → Логотип CRM» и «Производство». Общие размеры и типографика контролов вынесены в сериализуемые токены `other.crmControls` единой Mantine theme без глобальных component overrides. Нативные `select`, настройки каналов/секретов и API-контракты не затрагивались.
+- Сохранены имена HTML-полей, `FormData`, типы кнопок, ограничения чисел и прежние PUT/PATCH payload. Failing-first unit contracts прошли после реализации; browser assertions подтвердили payload, удаление логотипа, кликабельность всей checkbox-карточки, мобильную ширину кнопки и отсутствие overflow на desktop, laptop и mobile. Кадры обеих форм просмотрены вручную во всех трёх размерах.
+- `backup.sh` принимает Git SHA только из checkout, корень которого точно совпадает с каталогом приложения. В release-архиве без `.git` каждый `.release-commit`/`.deployed-commit` принимается только как точный 40-символьный SHA: два валидных marker обязаны совпадать, иначе результат — `unknown`; при одном валидном значении используется release, затем deployed, а невалидный marker игнорируется. Исполняемые shell-тесты покрывают CRLF, fallback, конфликт, невалидный SHA и защиту от родительского Git-репозитория.
+- Финальный Playwright на отдельно управляемом Next.js dev-server — 3/3 PASS с exit code 0. `pnpm db:generate` и полный `pnpm quality:check` PASS: database 9/9, API 468/468, web 265/265, все typecheck и production builds. Review-блокеры по marker-конфликту, родительскому Git, runtime theme API, mobile width, визуальному покрытию и точности backup-документации устранены; compatibility, regression/spec, business/security, UI visual и локальный release gate дали PASS. Production health и live smoke остаются ожидаемо неисполненными до отдельного разрешения на deployment.
+- Commit, push и deployment не выполнялись. Подробности: `docs/ui/mantine-phase-4-settings-controls.md`.
+
 ## 2026-09-12 — Mantine Phase 3: единые ошибки и очистка поиска, 0.1.17 (deployed)
 
 - Добавлен общий `CrmAlert` поверх Mantine `Alert`; верхнеуровневые ошибки в разделах «Производство», «Финансы» и «Задачи» переведены на единый визуальный и accessibility-контракт.

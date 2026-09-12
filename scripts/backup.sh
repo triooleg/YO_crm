@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-metadata.sh
+. "$SCRIPT_DIR/backup-metadata.sh"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-yoleotard-crm}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.portainer.yml}"
 ENV_FILE="${ENV_FILE:-.env}"
@@ -22,7 +25,7 @@ update_failed(){ code=$?;psql_exec --command="UPDATE \"Backup\" SET \"status\"='
 psql_exec --command="INSERT INTO \"Backup\"(\"id\",\"type\",\"status\",\"storageProvider\",\"storagePath\",\"startedAt\",\"createdAt\",\"updatedAt\",\"metadata\") VALUES('$BACKUP_ID','$backup_enum'::\"BackupType\",'RUNNING','LOCAL','$BACKUP_ID',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'{\"job\":\"CreateBackupJob\",\"requestedVia\":\"CLI\"}'::jsonb) ON CONFLICT(\"id\") DO UPDATE SET \"status\"='RUNNING',\"storagePath\"=EXCLUDED.\"storagePath\",\"startedAt\"=CURRENT_TIMESTAMP,\"errorMessage\"=NULL,\"updatedAt\"=CURRENT_TIMESTAMP;" >/dev/null
 echo "Creating PostgreSQL custom dump...";"${compose[@]}" exec -T postgres sh -c 'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' > "$BACKUP_DIR/postgres.dump"
 echo "Archiving persistent uploads...";"${compose[@]}" exec -T api tar -C /app/uploads -czf - . > "$BACKUP_DIR/uploads.tar.gz"
-APP_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json|head -n1)";GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null||echo unknown)"
+APP_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json|head -n1)";GIT_COMMIT="$(resolve_backup_git_commit "$(pwd)")"
 SCHEMA_VERSION="$(psql_exec --tuples-only --no-align --command='SELECT "migration_name" FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL ORDER BY "finished_at" DESC LIMIT 1;'|tr -d '\r')";DATABASE_VERSION="$(psql_exec --tuples-only --no-align --command='SHOW server_version;'|tr -d '\r')"
 case "$APP_VERSION:$SCHEMA_VERSION" in *[!A-Za-z0-9._:-]*|:) echo "Unsafe application or schema version" >&2;exit 1;;esac
 [[ "$GIT_COMMIT" =~ ^([a-f0-9]{40}|unknown)$ && "$DATABASE_VERSION" =~ ^[0-9.]+$ ]]||{ echo "Unsafe Git or database version" >&2;exit 1; }

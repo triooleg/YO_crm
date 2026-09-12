@@ -58,4 +58,18 @@ export const yoleotardTheme = createTheme({
   focusRing: "auto",
   cursorType: "pointer",
   respectReducedMotion: true,
+  other: {
+    crmControls: {
+      controlHeight: 38,
+      horizontalPadding: 17,
+      buttonFontWeight: 750,
+      fieldLabelMarginBottom: 5,
+      fieldLabelColor: "var(--muted)",
+      fieldLabelFontWeight: 400,
+      fieldBorderColor: "var(--line)",
+      fieldDescriptionMarginTop: 5,
+      fieldDescriptionColor: "var(--muted)",
+      fieldDescriptionLineHeight: 1.4,
+    },
+  },
 });
