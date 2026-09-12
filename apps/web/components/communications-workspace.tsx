@@ -15,6 +15,7 @@ import { OrderPanel } from "./order-panel";
 import { TaskDialog } from "./tasks-workspace";
 import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
+import { CrmSearchField } from "./crm/search-field";
 type Order = {
   id: string;
   number: string;
@@ -1228,11 +1229,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           </details>
         </div>
       </header>
-          <input
+          <CrmSearchField
+            className="communications-search-field"
             value={search}
-            onChange={(e) => {setSearch(e.target.value);onSearchChange?.(e.target.value)}}
+            onValueChange={(value) => {setSearch(value);onSearchChange?.(value)}}
             placeholder={ui.search}
-            aria-label={ui.search}
+            ariaLabel={ui.search}
+            clearLabel={ui.clearSearch}
           />
           <div className="communications-social-filters" role="group" aria-label={ui.socialNetworkFilter}>
             <button type="button" className="communications-social-filter communications-channel-filter-all" aria-pressed={!socialFilters.length} onClick={()=>setSocialFilters([])}><span>{ui.allChannels}</span><strong>{clientTotal}</strong></button>

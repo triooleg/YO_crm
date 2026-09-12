@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { tasksUi } from "../lib/i18n";
+import { CrmAlert } from "./crm/alert";
 import { taskChannel, taskChannelIcons } from "../lib/task-channel";
 
 type User = { id: string; displayName: string; role: string };
@@ -189,9 +190,7 @@ export function TasksWorkspace() {
         </div>
       </header>
       {error && (
-        <div className="phase2-error" role="alert">
-          {error}
-        </div>
+        <CrmAlert>{error}</CrmAlert>
       )}
       <div className="tasks-stats">
         <span>

@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-09-12 — Mantine Phase 3: единые ошибки и очистка поиска, 0.1.17 (local RC)
+
+- Добавлен общий `CrmAlert` поверх Mantine `Alert`; верхнеуровневые ошибки в разделах «Производство», «Финансы» и «Задачи» переведены на единый визуальный и accessibility-контракт.
+- Верхний поиск CRM и поиск списка «Входящих» переведены на общий `CrmSearchField` с Mantine `ActionIcon`: крестик виден только при наличии текста, очищает оба связанных поля и возвращает фокус; мобильная цель — 40×40 px.
+- Failing-first Playwright подтвердил отсутствие общего элемента до реализации. После review восстановлен прежний click-to-focus по лупе, верхняя цель увеличена до 32×32 px и добавлен laptop-контракт. Итоговый version-aware изменённый набор — 27/27 PASS; desktop, laptop и mobile кадры поиска просмотрены вручную, без horizontal overflow. SHA-256: desktop `c98cb723188d0c789cd16030b4933bd7a518834ba1ee19bf1151e5999910a7e1`, laptop `723eacdcdF8ce140dfc3f09f1b80ba8ddc2841f663b62e7db19cc1173ec59fb0`, mobile `afd34b2143f191758e86d0dac6edaf82c706b67b4ec51bb0d02a46ec834a4148`.
+- Производственное уведомление сохраняет прежнее ручное закрытие и получило русскую доступную подпись «Закрыть уведомление». API, Prisma, auth/RBAC, производственные правила, деньги, задачи и аудит не изменялись.
+- Failing-first browser test подтвердил RED до миграции; отдельный RED подтвердил типографическую регрессию Mantine 12 px, после чего сохранён прежний размер 16 px. Финальный version-aware Playwright-набор на отдельном свежем dev-server — 17/17 PASS: Production, Finance и Tasks на 1920×1080, 1366×768 и 390×844. Горизонтального document overflow и page errors нет.
+- Финальные кадры Production CRM v0.1.17 просмотрены вручную: desktop SHA-256 `b7a647ea4ed274f7247ac6fd70235209a4cce8e2a8ba4b7da1bf8555156553fc`, laptop `d32a73ab2f918188c18cc73b674e42e1cf1ec1040830aa54190ad8b5321028b8`, mobile `f070bfeccf94b6186b5b0b4066d96c00b8b8e0430c2e445c2d83bca1525ccb32`. Mobile-кадры Finance и Tasks также просмотрены вручную.
+- `pnpm db:generate` и полный `pnpm quality:check` PASS: database 9/9, API 468/468, web 263/263, все typecheck и production builds. Первый объединённый Playwright-прогон дал инфраструктурный `ENOENT` при сохранении trace после успешно выполненных assertions; повтор без trace прошёл, а после review-расширения итоговый набор прошёл 17/17.
+- Версия и русский журнал подготовлены как 0.1.17; миграций БД нет. Планируемая точка отката — `crm-v0.1.16`. Commit, push, tag, GitHub Release и deployment ещё не выполнялись.
+- Подробности: `docs/ui/mantine-phase-3-alert.md`.
+
 ## 2026-09-09 — просмотр закреплённого производственного слота, 0.1.16 (deployed)
 
 - Failing-first browser test воспроизвёл production-дефект: `pointerdown` по закреплённому слоту записывал ложную ошибку загрузки, перерисовывал строку и не позволял обычному `click` открыть карточку заказа.

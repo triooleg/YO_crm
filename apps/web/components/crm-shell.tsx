@@ -14,6 +14,7 @@ import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
 import { crmSectionHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
 import { useBranding, type Branding } from "../lib/branding";
+import { CrmSearchField } from "./crm/search-field";
 
 const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbox,"✉"],["clients",navigationUi.clients,"●"],["orders",navigationUi.orders,"▣"],["production",navigationUi.production,"⚙"],["finance",navigationUi.finance,"₴"],["shipping",navigationUi.shipping,"➜"],["tasks",navigationUi.tasks,"✓"],["settings",navigationUi.settings,"☰"]] as const;
 const topbarItems = [items[0], items[1], items[3], items[2], items[4], items[5], items[6], items[7], items[8]];
@@ -39,7 +40,7 @@ export function CrmShell({initialSectionId="clients"}:{initialSectionId?:CrmSect
     <header className="crm-topbar">
       <div className="crm-topbar-brand"><BrandMark branding={branding}/><span className="crm-topbar-brand-copy"><strong>Yoleotard CRM</strong><button type="button" className="crm-version" title={`${navigationUi.version} ${process.env.NEXT_PUBLIC_CRM_VERSION} · ${process.env.NEXT_PUBLIC_CRM_COMMIT}`} onClick={()=>setReleaseHistoryOpen(true)}>CRM v{process.env.NEXT_PUBLIC_CRM_VERSION}</button></span></div>
       <nav className="crm-topbar-nav">{topbarItems.map(([id,name,icon])=><button type="button" key={id} className={sectionId===id?"active":""} onClick={()=>navigate(id)} aria-current={sectionId===id?"page":undefined} title={name} aria-label={name}><i aria-hidden="true"><CrmNavIcon section={id}/></i><span>{name}</span></button>)}</nav>
-      <label className="crm-topbar-search"><span aria-hidden="true">⌕</span><input type="search" value={inboxSearch} onChange={event=>updateGlobalSearch(event.target.value)} placeholder={navigationUi.inboxSearch} aria-label={communicationsUi.search}/></label>
+      <CrmSearchField className="crm-topbar-search" value={inboxSearch} onValueChange={updateGlobalSearch} placeholder={navigationUi.inboxSearch} ariaLabel={communicationsUi.search} clearLabel={communicationsUi.clearSearch} showSearchIcon/>
       <button type="button" className="crm-topbar-notifications" aria-label={communicationsUi.unreadChats} title={communicationsUi.unreadChats} onClick={showUnread}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Zm5 3h4"/></svg></button>
       <div className="crm-topbar-user"><span className="crm-topbar-avatar" aria-hidden="true">{initials(auth.displayName.trim())}</span><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{navigationUi.userRoles[auth.role as keyof typeof navigationUi.userRoles]||navigationUi.unknownRole}</small></div><details className="crm-profile-menu"><summary aria-label={navigationUi.profileMenu}>⌄</summary><div><button type="button" onClick={()=>navigate("settings")}>{navigationUi.settings}</button><button type="button" onClick={()=>setReleaseHistoryOpen(true)}>{navigationUi.version}</button><button type="button" onClick={()=>void logout()}>{authUi.logout}</button></div></details></div>
     </header>

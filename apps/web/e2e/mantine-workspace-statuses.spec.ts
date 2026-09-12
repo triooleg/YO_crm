@@ -54,7 +54,7 @@ const productionOrder = {
   },
 };
 
-async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean } = {}) {
+async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean; productionLoadError?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
   const consoleErrors: string[] = [];
@@ -73,6 +73,10 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
     if (request.method() === "PATCH" && pathname === "/api/orders/production-hold/production-slot") {
       slotUpdates.push(request.postDataJSON());
       await route.fulfill({ json: request.postDataJSON() });
+      return;
+    }
+    if (request.method() === "GET" && pathname === "/api/orders/defaults" && options.productionLoadError) {
+      await route.fulfill({ json: {} });
       return;
     }
     const responses = new Map<string, unknown>([
@@ -95,6 +99,29 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
     await route.fulfill({ json: responses.get(pathname) });
   });
   return { shippingUpdates, slotUpdates, consoleErrors };
+}
+
+for (const viewport of [
+  { name: "desktop", width: 1920, height: 1080 },
+  { name: "laptop", width: 1366, height: 768 },
+  { name: "mobile", width: 390, height: 844 },
+]) {
+  test(`Ошибка производства показана единым доступным уведомлением и закрывается: ${viewport.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
+    await page.goto("/?section=production");
+
+    await expect(page.locator(".crm-version")).toContainText("0.1.17");
+    const alert = page.locator("main.production-page").getByRole("alert");
+    await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
+    await expect(alert).toHaveClass(/mantine-Alert-root/);
+    await expect(alert.locator(".mantine-Alert-message")).toHaveCSS("font-size", "16px");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    expect(consoleErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath(`mantine-alert-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await page.getByRole("button", { name: "Закрыть уведомление" }).click();
+    await expect(alert).toHaveCount(0);
+  });
 }
 
 async function dragTimelineBar(page: Page, deltaX: number) {

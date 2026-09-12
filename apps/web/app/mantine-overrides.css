@@ -59,6 +59,24 @@
 .crm-status-badge--info { background: #dff2ff; color: #176891; }
 .crm-status-badge--violet { background: #ece5ff; color: #5b3bc4; }
 
+.crm-alert {
+  width: 100%;
+  max-width: none;
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #fff0f0;
+  color: #a33;
+}
+
+.crm-alert .mantine-Alert-body { gap: 0; }
+.crm-alert .mantine-Alert-message {
+  color: inherit;
+  font-size: 16px;
+}
+.crm-alert .mantine-Alert-closeButton { color: inherit; }
+
 @media (max-width: 720px) {
   .mantine-Modal-close {
     width: 40px;

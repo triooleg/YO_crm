@@ -73,6 +73,10 @@ export const crmStatusUi = {
   unknown: "Неизвестный статус",
 } as const;
 
+export const crmAlertUi = {
+  close: "Закрыть уведомление",
+} as const;
+
 export const labels = {
   salesStatus: {
     NEW_LEAD: "Новый запрос",
@@ -653,6 +657,17 @@ export const releaseHistoryUi = {
   commit: "Git commit",
   releases: [
     {
+      version: "0.1.17",
+      date: "12.09.2026",
+      changes: [
+        "Добавлен единый компонент Mantine для ошибок рабочих разделов.",
+        "Ошибки страниц Производство, Финансы и Задачи используют одинаковое отображение и доступную роль уведомления.",
+        "Закрываемое уведомление в производстве получило русскую подпись кнопки и проверено на desktop, laptop и mobile.",
+        "Общий поиск CRM и поиск списка Входящих получили единый крестик очистки с возвратом фокуса в поле.",
+      ],
+      compatibility: "Миграций базы данных и изменений API нет. Производственные данные, фильтрация и обработчики сохранения не изменялись. Откат приложения: crm-v0.1.16 без изменения PostgreSQL, uploads и истории.",
+    },
+    {
       version: "0.1.16",
       date: "09.09.2026",
       changes: [
@@ -950,6 +965,7 @@ export const communicationsUi = {
     activeOrderBadge: "Есть активные заказы",
     completedOrderBadge: "Все заказы завершены или отменены",
   search: "Имя, телефон, Instagram…",
+  clearSearch: "Очистить поиск",
   allChannels: "Все",
   unreadChats: "Непрочитанные",
   clientFilter: "Клиенты",
