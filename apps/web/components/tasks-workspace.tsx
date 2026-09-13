@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { tasksUi } from "../lib/i18n";
 import { CrmAlert } from "./crm/alert";
+import { CrmModal } from "./crm/modal";
 import { taskChannel, taskChannelIcons } from "../lib/task-channel";
 
 type User = { id: string; displayName: string; role: string };
@@ -584,28 +585,35 @@ export function TaskDialog({
   archive?: () => Promise<void>;
 }) {
   const [files, setFiles] = useState<string[]>([]);
+  const submittingRef = useRef(false);
   const previewPaths=[...(task.attachments?.map((attachment) => attachment.path)||[]),...files];
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     const f = new FormData(e.currentTarget);
-    await save({
-      columnId: f.get("columnId"),
-      title: f.get("title"),
-      description: f.get("description"),
-      type: f.get("type"),
-      clientId: task.client?.id,
-      sourceMessageId: task.sourceMessageId,
-      assigneeId: f.get("assigneeId") || undefined,
-      dueAt: f.get("dueAt")
-        ? new Date(String(f.get("dueAt")) + "T12:00:00Z").toISOString()
-        : null,
-      markerColor: f.get("markerColor"),
-      labels: String(f.get("labels") || "")
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean),
-      attachmentPaths: files,
-    });
+    try {
+      await save({
+        columnId: f.get("columnId"),
+        title: f.get("title"),
+        description: f.get("description"),
+        type: f.get("type"),
+        clientId: task.client?.id,
+        sourceMessageId: task.sourceMessageId,
+        assigneeId: f.get("assigneeId") || undefined,
+        dueAt: f.get("dueAt")
+          ? new Date(String(f.get("dueAt")) + "T12:00:00Z").toISOString()
+          : null,
+        markerColor: f.get("markerColor"),
+        labels: String(f.get("labels") || "")
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        attachmentPaths: files,
+      });
+    } finally {
+      submittingRef.current = false;
+    }
   }
   async function upload(list: FileList | null) {
     if (!list) return;
@@ -621,7 +629,7 @@ export function TaskDialog({
     setFiles((x) => [...x, ...added]);
   }
   return (
-    <Dialog title={task.id ? tasksUi.editTask : tasksUi.newTask} close={close}>
+    <Dialog title={task.id ? tasksUi.editTask : tasksUi.newTask} close={close} busy={saving}>
       <form className="task-form" onSubmit={submit}>
         <label>
           {tasksUi.titleField}
@@ -729,7 +737,7 @@ export function TaskDialog({
             </button>
           )}
           <span />
-          <button type="button" onClick={close}>
+          <button type="button" onClick={close} disabled={saving}>
             {tasksUi.cancel}
           </button>
           <button className="phase2-primary" disabled={saving}>
@@ -843,68 +851,14 @@ function Dialog({
   title,
   close,
   children,
+  busy = false,
 }: {
   title: string;
   close: () => void;
   children: React.ReactNode;
+  busy?: boolean;
 }) {
-  const panel = useRef<HTMLElement>(null),
-    previous = useRef<HTMLElement | null>(null),
-    closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    previous.current = document.activeElement as HTMLElement;
-    const controls = () =>
-      Array.from(
-        panel.current?.querySelectorAll<HTMLElement>(
-          "button,input,select,textarea",
-        ) || [],
-      ).filter((x) => !x.hasAttribute("disabled"));
-    controls()[0]?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeRef.current();
-      if (e.key === "Tab") {
-        const a = controls(),
-          first = a[0],
-          last = a[a.length - 1];
-        if (!first || !last) return;
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("keydown", key);
-      previous.current?.focus();
-    };
-  }, []);
-  return (
-    <div
-      className="finance-overlay"
-      onMouseDown={(e) => e.target === e.currentTarget && close()}
-    >
-      <section
-        ref={panel}
-        className="finance-modal tasks-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tasks-dialog-title"
-      >
-        <header>
-          <h2 id="tasks-dialog-title">{title}</h2>
-          <button onClick={close} aria-label={tasksUi.close}>
-            ×
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  );
+  return <CrmModal title={title} close={close} busy={busy} className="tasks-modal">{children}</CrmModal>;
 }
 function readFile(file: File) {
   return new Promise<string>((resolve, reject) => {

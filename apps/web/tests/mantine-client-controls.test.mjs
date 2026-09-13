@@ -37,6 +37,7 @@ test("кнопки закрытия и сворачивания имеют до�
   assert.match(workspace, /clientWorkspaceUi\.collapseList/);
   assert.match(workspace, /clientWorkspaceUi\.expandList/);
   assert.match(workspace, /clientWorkspaceUi\.closeCreateClient/);
+  assert.match(workspace, /ariaLabel=\{clientWorkspaceUi\.tabList\}/);
 });
 
 test("форма создания клиента удерживает и возвращает клавиатурный фокус", () => {

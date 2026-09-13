@@ -77,6 +77,14 @@ export const crmAlertUi = {
   close: "Закрыть уведомление",
 } as const;
 
+export const crmModalUi = {
+  close: "Закрыть",
+} as const;
+
+export const crmAvatarUi = {
+  label: "Аватар: {name}",
+} as const;
+
 export const labels = {
   salesStatus: {
     NEW_LEAD: "Новый запрос",
@@ -352,6 +360,7 @@ export const clientWorkspaceUi = {
   collapseList: "Свернуть список клиентов",
   expandList: "Развернуть список клиентов",
   closeCreateClient: "Закрыть форму создания клиента",
+  tabList: "Разделы карточки клиента",
 } as const;
 
 export const clientMergeUi = {
@@ -664,6 +673,18 @@ export const releaseHistoryUi = {
   expandVersion: "Развернуть версию",
   collapseVersion: "Свернуть версию",
   releases: [
+    {
+      version: "0.1.22",
+      date: "13.09.2026",
+      changes: [
+        "Большая форма заказа и редактор замеров используют Mantine Drawer и блокируют закрытие или повторную отправку во время сохранения.",
+        "Окна доставки, расходов, категорий, счетов и задач используют общую Mantine-оболочку с едиными правилами фокуса и busy-состояния.",
+        "Аватары, меню профиля, состояния загрузки и вкладки клиента переведены на общие CRM-компоненты Mantine с клавиатурной навигацией.",
+        "Во Входящих безопасные внешние контролы используют Mantine без изменения polling, черновиков, реакций, вложений, Ctrl+Enter и provider delivery.",
+        "Проверены desktop, laptop и mobile, точные payload-контракты, ошибки сохранения и защита от двойного POST.",
+      ],
+      compatibility: "Миграций базы данных и изменений API нет. Контракты заказов, замеров, финансов, доставки, задач и сообщений сохранены. Откат приложения: crm-v0.1.21 без восстановления PostgreSQL, uploads или истории.",
+    },
     {
       version: "0.1.21",
       date: "13.09.2026",

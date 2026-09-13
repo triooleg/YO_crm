@@ -11,7 +11,7 @@ type CrmButtonProps = ButtonProps &
 };
 
 type CrmActionIconProps = ActionIconProps &
-  Pick<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "disabled" | "onClick" | "type"> & {
+  Pick<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "disabled" | "onClick" | "title" | "type"> & {
   children?: ReactNode;
   className?: string;
 };

@@ -1,6 +1,7 @@
 "use client";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { financeUi } from "../lib/i18n";
+import { CrmModal } from "./crm/modal";
 
 export type InvoiceItem = { description: string; quantity: number; amountMinor: number };
 export type FinanceInvoice = {
@@ -65,10 +66,10 @@ export function InvoiceEditor({ order, invoice, request, close, done }: Props) {
     } catch (error) { setSaveError((error as Error).message); } finally { setSaving(false); }
   }
 
-  return <EditorModal title={invoice ? financeUi.editInvoice : financeUi.invoiceEditor} close={close}>
+  return <CrmModal title={invoice ? financeUi.editInvoice : financeUi.invoiceEditor} close={close} busy={saving} className="invoice-editor-modal">
     <form className="finance-form invoice-editor-form" onSubmit={submit}>
       {saveError && <div className="phase2-error wide">{saveError}</div>}
-      <label>{financeUi.seller}<input required value={seller} onChange={e => setSeller(e.target.value)} /></label>
+      <label>{financeUi.seller}<input data-autofocus required value={seller} onChange={e => setSeller(e.target.value)} /></label>
       <label>{financeUi.sellerAddress}<input value={sellerAddress} onChange={e => setSellerAddress(e.target.value)} /></label>
       <label>{financeUi.client}<input required value={customer} onChange={e => setCustomer(e.target.value)} /></label>
       <label>{financeUi.customerAddress}<input value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} /></label>
@@ -89,31 +90,7 @@ export function InvoiceEditor({ order, invoice, request, close, done }: Props) {
       <div className="invoice-total wide"><span>{financeUi.invoiceTotal}</span><strong>{money(total, order.currency)}</strong></div>
       <button disabled={saving || !total} className="phase2-primary">{saving ? financeUi.saving : invoice ? financeUi.saveInvoice : financeUi.createInvoiceAction}</button>
     </form>
-  </EditorModal>;
-}
-
-function EditorModal({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) {
-  const panel = useRef<HTMLElement>(null), previous = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    previous.current = document.activeElement as HTMLElement;
-    const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>("button,input,select,textarea,a[href]") || []).filter(element => !element.hasAttribute("disabled"));
-    focusable()[0]?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-      if (event.key !== "Tab") return;
-      const items = focusable(); if (!items.length) return;
-      const first = items[0]!, last = items[items.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("keydown", onKey); previous.current?.focus(); };
-  }, [close]);
-  return <div className="finance-overlay" onMouseDown={event => event.target === event.currentTarget && close()}>
-    <section ref={panel} className="finance-modal invoice-editor-modal" role="dialog" aria-modal="true" aria-labelledby="invoice-editor-title" tabIndex={-1}>
-      <header><h2 id="invoice-editor-title">{title}</h2><button type="button" onClick={close} aria-label={financeUi.close}>&times;</button></header>{children}
-    </section>
-  </div>;
+  </CrmModal>;
 }
 function money(value: number, currency: string) { return new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(value / 100); }
 

@@ -111,7 +111,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.21");
+    await expect(page.locator(".crm-version")).toContainText("0.1.22");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -192,6 +192,9 @@ for (const viewport of [
     expect(await ready.evaluate((element) => element.tagName)).toBe("SPAN");
 
     await page.getByRole("button", { name: /YO-26-0101/ }).click();
+    const shippingDialog = page.getByRole("dialog", { name: "YO-26-0101" });
+    await expect(shippingDialog).toBeVisible();
+    await shippingDialog.screenshot({ path: testInfo.outputPath(`mantine-shipping-modal-${viewport.width}x${viewport.height}.png`) });
     const status = page.locator('select[name="status"]');
     await expect(status).toHaveValue("READY");
     await status.selectOption("SHIPPED");

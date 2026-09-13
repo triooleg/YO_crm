@@ -87,6 +87,12 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("/?section=clients");
 
+    const profileMenu = page.getByRole("button", { name: "Меню профиля" });
+    await profileMenu.click();
+    await expect(page.getByRole("menuitem", { name: "Настройки" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(profileMenu).toBeFocused();
+
     const search = page.getByPlaceholder("Имя, телефон, Instagram…");
     await expect(search).toHaveClass(/mantine-TextInput-input/);
     await search.fill("Anna");
@@ -111,6 +117,15 @@ for (const viewport of [
     await dialog.getByLabel("Язык общения").fill("es");
     await dialog.getByRole("button", { name: "Создать клиента" }).click();
     await expect(page.getByRole("heading", { name: "Maria Lopez" })).toBeVisible();
+
+    const clientTabs = page.getByRole("tablist", { name: "Разделы карточки клиента" });
+    const mainTab = clientTabs.getByRole("tab", { name: "Главное" });
+    const ordersTab = clientTabs.getByRole("tab", { name: "Заказы" });
+    await expect(mainTab).toHaveAttribute("aria-selected", "true");
+    await mainTab.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(ordersTab).toHaveAttribute("aria-selected", "true");
+    await mainTab.click();
 
     const addAthlete = page.getByRole("button", { name: "+ Добавить", exact: true });
     await addAthlete.click();

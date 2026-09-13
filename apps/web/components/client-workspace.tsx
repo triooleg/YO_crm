@@ -7,6 +7,7 @@ import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
 import { clientAthleteUi, clientMergeUi, clientWorkspaceUi } from "../lib/i18n";
 import { ClientAvatar } from "./client-avatar";
 import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
+import { CrmTabList } from "./crm/tab-list";
 
 type Client = {
   id: string;
@@ -380,22 +381,7 @@ function Card({
           <button onClick={onMeasure}>+ Замеры</button>
         </div>
       </div>
-      <nav className="phase2-tabs">
-        {[
-          ["main", "Главное"],
-          ["orders", "Заказы"],
-          ["history", "История"],
-          ["files", "Файлы"],
-        ].map(([id, n]) => (
-          <button
-            className={tab === id ? "active" : ""}
-            onClick={() => setTab(id ?? "main")}
-            key={id}
-          >
-            {n}
-          </button>
-        ))}
-      </nav>
+      <CrmTabList className="phase2-tabs" ariaLabel={clientWorkspaceUi.tabList} value={tab} onChange={setTab} tabs={[{value:"main",label:"Главное"},{value:"orders",label:"Заказы"},{value:"history",label:"История"},{value:"files",label:"Файлы"}]}/>
       {tab === "main" && (
         <div className="phase2-card-content">
           <div className="phase2-facts">

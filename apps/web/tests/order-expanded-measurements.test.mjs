@@ -36,12 +36,10 @@ test("замеры из заказа открываются модально и 
   assert.match(workspace, /await load\(\)/);
   assert.match(i18n, /addMeasurements:\s*"\+ Добавить замеры"/);
   assert.match(i18n, /measurementDialogTitle:\s*"Замеры для заказа"/);
-  assert.match(panel, /role="dialog"/);
-  assert.match(panel, /aria-modal="true"/);
-  assert.match(panel, /panelRef/);
+  assert.match(panel, /<Drawer opened/);
+  assert.match(panel, /trapFocus returnFocus/);
   assert.match(panel, /previousFocus/);
-  assert.match(panel, /e\.key==="Escape"/);
-  assert.match(panel, /e\.key!=="Tab"/);
+  assert.match(panel, /closeOnEscape/);
 });
 
 test("ростовой стандарт заполняет редактируемые поля до создания snapshot", () => {

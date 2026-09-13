@@ -77,6 +77,36 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 76
     await mockInboxWithMessage(page);
     await page.goto("/?section=inbox");
 
+    const orderFilter = page.locator("select[aria-label='Фильтр по заказам']");
+    await expect(orderFilter).toHaveClass(/mantine-NativeSelect-input/);
+    if (viewport.width < 700) {
+      await page.locator(".communications-mobile-list-toggle").click();
+      await expect(page.locator(".communications-clients.mobile-open")).toBeVisible();
+    }
+    await page.screenshot({ path: testInfo.outputPath(`inbox-controls-${viewport.width}x${viewport.height}.png`), fullPage: false });
+
+    if (viewport.width >= 1600) {
+      const headerMenu = page.locator(".communications-header-menu").first();
+      await headerMenu.click();
+      await expect(page.getByRole("menuitem", { name: "Сбросить ширину" })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await page.keyboard.press("Escape");
+      await expect(headerMenu).toBeFocused();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(headerMenu).toBeFocused();
+      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    } else {
+      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      const createClient = page.getByRole("button", { name: "Новый клиент" });
+      await createClient.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(createClient).toBeFocused();
+      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    }
+    if (viewport.width < 700) await page.reload();
+
     const message = page.getByText("Текст для копирования", { exact: true }).last();
     await expect(message).toBeVisible();
     const article = message.locator("xpath=ancestor::article[1]");

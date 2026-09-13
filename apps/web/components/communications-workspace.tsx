@@ -1,7 +1,7 @@
 "use client";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ActionIcon, Alert, Button, Modal, NativeSelect } from "@mantine/core";
+import { Alert, Button, Modal, NativeSelect } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
@@ -17,6 +17,9 @@ import { TaskDialog } from "./tasks-workspace";
 import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
 import { CrmSearchField } from "./crm/search-field";
+import { CrmAlert } from "./crm/alert";
+import { CrmActionIcon, CrmButton, CrmNativeSelect } from "./crm/settings-controls";
+import { CrmMenu } from "./crm/menu";
 type Order = {
   id: string;
   number: string;
@@ -1195,12 +1198,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   const attachmentAccept=attachmentMimeTypes.join(",");
   return (
     <div className="communications-page">
-      {error && (
-        <div className="phase2-error" role="alert">
-          {error}
-          <button onClick={() => setError("")}>{ui.close}</button>
-        </div>
-      )}
+      {error && <CrmAlert className="phase2-error" onClose={() => setError("")}>{error}</CrmAlert>}
       {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
       <section
         className="communications-grid"
@@ -1215,20 +1213,17 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           <span>{ui.subtitle}</span>
         </div>
         <div className="communications-header-actions">
-          <button onClick={() => setCreating(true)}>
-            {ui.createClient}
-          </button>
-          <details className="communications-header-menu">
-            <summary aria-label={ui.moreActions} title={ui.moreActions}>•••</summary>
-            <button type="button" onClick={() => {
+          <CrmButton className="communications-create-client" aria-label={ui.createClient} onClick={() => setCreating(true)}>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          </CrmButton>
+          <CrmMenu className="communications-header-menu" label={ui.moreActions} children="•••" items={[{label:ui.resetWidths,onClick:() => {
               widths.current = { ...defaults };
               setLeft(defaults.left);
               setRight(defaults.right);
               setContextCollapsed(false);
               localStorage.removeItem("communications-widths");
               localStorage.removeItem("communications-context-collapsed");
-            }}>{ui.resetWidths}</button>
-          </details>
+            }}]}/>
         </div>
       </header>
           <CrmSearchField
@@ -1247,7 +1242,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
             <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope} onClick={()=>{setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels}</button>
             <button type="button" aria-pressed={conversationScope==="UNREAD"} onClick={()=>setConversationScope(current=>current==="UNREAD"?"ALL":"UNREAD")}>{ui.unreadChats}</button>
             <button type="button" aria-pressed={conversationScope==="CLIENTS"} onClick={()=>setConversationScope(current=>current==="CLIENTS"?"ALL":"CLIENTS")}>{ui.clientFilter}</button>
-            <select className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)}><option value="">{ui.orderScopeMenu}</option><option value="WITH_ORDERS">{ui.clientsWithOrders}</option><option value="ACTIVE_ORDERS">{ui.clientsWithActiveOrders}</option></select>
+            <CrmNativeSelect className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)} data={[{value:"",label:ui.orderScopeMenu},{value:"WITH_ORDERS",label:ui.clientsWithOrders},{value:"ACTIVE_ORDERS",label:ui.clientsWithActiveOrders}]}/>
           </div>
           <div className="communications-client-list">
           {loading ? (
@@ -1327,9 +1322,9 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
-            {client?.mergedClients?.length?<ActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={()=>{setSplitError("");setSplitSourceId(client.mergedClients?.[0]?.sourceClientId||"");setSplitOpen(true)}}>⇄</ActionIcon>:null}
+            {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={()=>{setSplitError("");setSplitSourceId(client.mergedClients?.[0]?.sourceClientId||"");setSplitOpen(true)}}>⇄</CrmActionIcon>:null}
             {client && (availableChannels.length > 1 ? (
-              <label>{ui.replyChannel}<select value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}}>{availableChannels.map(item=><option key={item.key} value={item.key}>{item.icon} {item.label}{item.accountName?` / ${item.accountName}`:""}</option>)}</select></label>
+              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
             ) : (
               <span className="communications-active-channel" title={`${active.label}${active.accountName?` / ${active.accountName}`:""}`} aria-label={`${active.label}${active.accountName?` / ${active.accountName}`:""}`}>{active.icon} {active.label}{active.accountName?` / ${active.accountName}`:""}</span>
             ))}

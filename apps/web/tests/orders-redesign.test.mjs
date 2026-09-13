@@ -102,7 +102,8 @@ test("New order button opens the existing order form through client selection", 
   assert.match(dashboard, /<OrderPanel client=\{newOrderClient\}/);
   assert.match(dashboard, /\?search=\$\{encodeURIComponent\(query\)\}/);
   assert.match(dashboard, /<Modal opened/);
-  assert.match(orderPanel, /role="dialog" aria-modal="true" aria-label=\{orderFormUi\.title\}/);
+  assert.match(orderPanel, /<Drawer opened/);
+  assert.match(orderPanel, /closeOnEscape=\{!saving\} closeOnClickOutside=\{!saving\} trapFocus returnFocus/);
   assert.match(orderPanel, /aria-label=\{orderFormUi\.close\}/);
   assert.doesNotMatch(dashboard, /orders-new-order" onClick=\{\(\) => onNavigate\("clients"\)\}/);
 });

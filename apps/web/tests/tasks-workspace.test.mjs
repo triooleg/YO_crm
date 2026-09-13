@@ -48,7 +48,7 @@ test("mobile board scrolls internally without document overflow",()=>{
   assert.match(css,/\.tasks-column\{[^}]*min-width:/);
   assert.match(css,/\.tasks-header-actions \.phase2-primary\{[^}]*background:#7047eb[^}]*color:#fff/);
   assert.match(css,/\.tasks-modal>header\{[^}]*flex-direction:row/);
-  assert.match(css,/@media\(max-width:650px\)\{[\s\S]*?\.tasks-modal\{width:100%;max-width:720px/);
+  assert.match(css,/@media\(max-width:650px\)\{[\s\S]*?\.mantine-Modal-content\.tasks-modal\{box-sizing:border-box;width:calc\(100vw - 32px\);max-width:calc\(100vw - 32px\);min-width:0;padding:0/);
 });
 
 test("drop position is calculated without the dragged card and an empty column appends",()=>{

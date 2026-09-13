@@ -99,3 +99,13 @@
     padding: 17px;
   }
 }
+
+.communications-order-scope .mantine-NativeSelect-input { height: 29px; min-height: 29px; padding: 3px 24px 3px 6px; border-color: var(--line); border-radius: 7px; background: #faf9fd; color: #655d78; font-size: 10px; }
+.communications-chat-header > .crm-native-select { width: 260px; max-width: min(260px, 40vw); margin-left: auto; }
+.communications-chat-header > .crm-native-select .mantine-NativeSelect-input { height: 34px; min-height: 34px; }
+.communications-chat-header > .crm-native-select .mantine-InputWrapper-label { font-size: 12px; }
+.communications-header-actions .communications-header-menu { width: 38px; min-width: 38px; min-height: 38px; padding: 0; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 14px; }
+@media (max-width: 650px) {
+  .communications-chat-header > .crm-native-select { order: 2; width: min(260px, calc(100vw - 32px)); max-width: none; margin-left: 0; }
+  .communications-chat-header > .crm-native-select .mantine-NativeSelect-input { height: 40px; min-height: 40px; font-size: 12px; }
+}

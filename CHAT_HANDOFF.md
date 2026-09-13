@@ -1,5 +1,37 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-09-13 — Mantine phases 11-15, CRM 0.1.22 (release candidate)
+
+- Последовательно завершены пять срезов: большая форма заказа, Drawer мерок,
+  общая Modal-оболочка операционных форм, общие примитивы shell/client и
+  безопасные внешние контролы Inbox. Детали и границы совместимости:
+  `docs/ui/mantine-phases-11-15.md`.
+- API, Prisma и миграции не менялись. Сохранены исходные payload builders и
+  бизнес-правила денег, мерок, производства, доставки и сообщений.
+- Review выявил риск двойной записи при закрытии Drawer во время pending POST.
+  Закрытие по Escape, overlay, кресту и отмене теперь заблокировано до ответа;
+  ошибки сохраняют открытую форму. Исполняемые проверки — 4/4 PASS.
+- Финальный `quality:check` на 0.1.22 — PASS: web 300/300, API 468/468,
+  database 9/9, все typecheck и production builds. Полный Playwright на свежем
+  Next.js 16.3.4 dev-сервере — 78/78 PASS после добавления visual-сценариев
+  и проверок блокировки двойной отправки заказа, замеров и задач;
+  DAG tooling — 45/45 PASS; `git diff --check` — PASS. Повторные независимые
+  compatibility, regression, business/security и visual review дали PASS.
+  Финальный release-gate ожидает только postdeploy HTTP/live-smoke и запись
+  фактических данных deployment.
+- Первый финальный visual-review поставил BLOCK из-за отсутствия снимков новых
+  Drawer/Modal. Добавлен visual-набор 20/20 на трёх viewport; ручной просмотр
+  выявил и исправил выход task modal за мобильный экран и обрезание действия в
+  редакторе инвойса. После этих CSS/test-изменений обязательны повторные полные
+  gates и visual/release review.
+- Для строгого before/after visual gate снят matching baseline семи
+  поверхностей из commit `ef8da630` (CRM 0.1.21) и сопоставлен с 0.1.22 на
+  1920×1080, 1366×768 и 390×844. Результат и имена файлов:
+  `docs/ui/mantine-phases-11-15-visual-review.md`.
+- Версия кандидата — 0.1.22, точка отката — `crm-v0.1.21`; deployment должен
+  включать FULL backup, exact-SHA source archive и обновление только API/web с
+  `--no-deps`.
+
 # 2026-09-13 — production deployment CRM 0.1.21
 
 - Runtime commit `d0545ed916efae4968fd2ee2ca9072774ac6afb0` опубликован в `main`; GitHub Actions `Quality gates` run `34767695627` и `CRM release` run `34768170860` завершены со статусом `success`. Неизменяемый tag `crm-v0.1.21` указывает на runtime SHA.

@@ -100,7 +100,7 @@ test("правую панель можно свернуть стрелкой и 
 
 test("форма заказа не подменяет отсутствующего спортсмена именем клиента", () => {
   assert.match(orderPanel, /initialAthleteId/);
-  assert.match(orderPanel, /<select[^>]*aria-label=\{orderFormUi\.selectAthlete\}/);
+  assert.match(orderPanel, /<CrmNativeSelect[^>]*aria-label=\{orderFormUi\.selectAthlete\}/);
   assert.match(orderPanel, /orderFormUi\.noAthletes/);
   assert.doesNotMatch(orderPanel, /:client\.displayName/);
 });
