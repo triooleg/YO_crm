@@ -17,7 +17,7 @@ button { cursor: pointer; }
 .phase2-login form { width: min(420px, calc(100vw - 32px)); padding: 36px; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: 0 16px 50px #38234d14; }
 .phase2-login h1 { margin: 18px 0 6px; }
 .phase2-login p { margin: 0 0 28px; color: var(--muted); }
-.phase2-login label, .phase2-modal label { display: grid; gap: 7px; margin-top: 15px; color: #554d60; font-size: 13px; font-weight: 650; }
+.phase2-login label, .phase2-modal > label { display: grid; gap: 7px; margin-top: 15px; color: #554d60; font-size: 13px; font-weight: 650; }
 .phase2-login input, .phase2-modal input, .phase2-list-tools input { width: 100%; border: 1px solid #ddd5e4; border-radius: 10px; padding: 11px 12px; background: #fff; outline: none; }
 .phase2-login input:focus, .phase2-modal input:focus, .phase2-list-tools input:focus { border-color: var(--violet); box-shadow: 0 0 0 3px #7047eb16; }
 .phase2-logo, .phase2-brand > span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--violet); color: #fff; font-weight: 800; }
@@ -43,6 +43,7 @@ button { cursor: pointer; }
 .phase2-shell.is-collapsed .phase2-workspace { grid-template-columns: 64px minmax(0, 1fr); }
 .phase2-list, .phase2-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }
 .phase2-list-tools { display: flex; gap: 7px; padding: 11px; border-bottom: 1px solid var(--line); }
+.phase2-list-tools .phase2-client-search { flex: 1 1 auto; min-width: 0; }
 .phase2-list-tools input { min-width: 0; padding: 9px; }
 .phase2-list-tools button { flex: 0 0 34px; border: 0; border-radius: 9px; background: var(--violet-soft); color: var(--violet); font-size: 22px; }
 .phase2-client { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 66px; padding: 10px; border: 0; border-bottom: 1px solid #f0ecf2; background: #fff; text-align: left; }
@@ -57,6 +58,8 @@ button { cursor: pointer; }
 .phase2-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 22px; }
 .phase2-card-head > button, .phase2-card-actions button, .phase2-section-title button { border: 0; background: transparent; color: var(--violet); font-weight: 700; }
 .phase2-card-actions{display:flex;gap:10px}.phase2-person { display: flex; align-items: center; gap: 13px; }
+.phase2-client-header-actions .crm-button--primary { background: var(--violet); color: #fff; }
+.phase2-client-header-actions .crm-button--secondary { border: 1px solid var(--line); background: #fff; color: var(--violet); }
 .phase2-person h2 { margin: 0 0 5px; font-size: 24px; }
 .phase2-person em { padding: 5px 9px; border-radius: 20px; background: var(--green-soft); color: #27834e; font-size: 12px; font-style: normal; }
 .phase2-tabs { display: flex; gap: 20px; padding: 0 22px; border-bottom: 1px solid var(--line); }
@@ -81,6 +84,7 @@ button { cursor: pointer; }
 .phase2-error button { border: 0; background: transparent; color: inherit; }
 .phase2-overlay { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: #211a2daa; }
 .phase2-modal { width: min(520px, 100%); max-height: 90vh; overflow: auto; padding: 24px; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px #0003; }
+.phase2-modal > .crm-text-input, .phase2-modal > .crm-native-select { margin-top: 15px; }
 .phase2-modal > div:first-child, .phase2-modal footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .phase2-modal h2 { margin: 0; }
 .phase2-modal > div:first-child button { border: 0; background: transparent; font-size: 25px; }
@@ -99,7 +103,7 @@ button { cursor: pointer; }
   .phase2-nav { display: none; }
   .phase2-main { padding: 18px 12px; }
   .phase2-header { align-items: flex-start; }
-  .phase2-header span { display: none; }
+  .phase2-header > div:first-child > span { display: none; }
   .phase2-workspace, .phase2-shell.is-collapsed .phase2-workspace { grid-template-columns: 1fr; min-height: auto; }
   .phase2-list { max-height: 275px; }
   .phase2-card { min-height: 480px; }
@@ -112,5 +116,11 @@ button { cursor: pointer; }
 @media (max-width: 440px) {
   .phase2-header { display: grid; }
   .phase2-primary { width: 100%; }
+  .phase2-client-header-actions { display: grid; width: 100%; }
+  .phase2-client-header-actions .crm-button { width: 100%; }
+  .phase2-card-head { display: grid; align-items: start; }
+  .phase2-card-head .phase2-card-actions { justify-content: flex-end; width: 100%; }
+  .phase2-person { min-width: 0; }
+  .phase2-person h2 { overflow-wrap: anywhere; font-size: 22px; }
   .phase2-row { align-items: flex-start; flex-direction: column; }
 }

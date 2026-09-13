@@ -12,7 +12,7 @@ const locale = await readFile(
 );
 
 test("форма отправляет только допустимый код дисциплины и пропускает пустое значение", () => {
-  assert.match(workspace, /<selectname="discipline">/);
+  assert.match(workspace, /<CrmNativeSelectname="discipline"/);
   assert.match(workspace, /RHYTHMIC_GYMNASTICS/);
   assert.match(workspace, /if\(discipline\)body\.discipline=discipline/);
   assert.doesNotMatch(workspace, /<inputname="discipline"/);

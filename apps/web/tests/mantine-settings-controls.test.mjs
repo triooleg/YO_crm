@@ -11,13 +11,20 @@ const [settings, controls, theme, compatibilityCss] = await Promise.all([
 
 test("shared CRM settings controls use Mantine without changing native form semantics", () => {
   assert.match(controls, /from "@mantine\/core"/);
+  assert.match(controls, /forwardRef/);
   assert.match(controls, /Button/);
+  assert.match(controls, /ActionIcon/);
   assert.match(controls, /Checkbox/);
   assert.match(controls, /TextInput/);
   assert.match(controls, /CrmButton/);
+  assert.match(controls, /CrmActionIcon/);
   assert.match(controls, /CrmCheckbox/);
   assert.match(controls, /CrmTextInput/);
   assert.match(controls, /CrmNativeSelect/);
+  assert.match(controls, /forwardRef<HTMLButtonElement, CrmButtonProps>/);
+  assert.match(controls, /forwardRef<HTMLButtonElement, CrmActionIconProps>/);
+  assert.match(controls, /forwardRef<HTMLInputElement, TextInputProps>/);
+  assert.match(controls, /forwardRef<HTMLSelectElement, NativeSelectProps>/);
   assert.match(controls, /inputWrapperOrder=\{\["label", "input", "description", "error"\]\}/);
   assert.match(controls, /value="on"/);
   assert.match(controls, /useMantineTheme/);

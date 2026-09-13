@@ -1,5 +1,6 @@
-import { Button, Checkbox, NativeSelect, TextInput, useMantineTheme } from "@mantine/core";
-import type { ButtonProps, CheckboxProps, NativeSelectProps, TextInputProps } from "@mantine/core";
+import { ActionIcon, Button, Checkbox, NativeSelect, TextInput, useMantineTheme } from "@mantine/core";
+import type { ActionIconProps, ButtonProps, CheckboxProps, NativeSelectProps, TextInputProps } from "@mantine/core";
+import { forwardRef } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 type CrmButtonProps = ButtonProps &
@@ -7,6 +8,12 @@ type CrmButtonProps = ButtonProps &
   children?: ReactNode;
   className?: string;
   tone?: "primary" | "secondary";
+};
+
+type CrmActionIconProps = ActionIconProps &
+  Pick<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "disabled" | "onClick" | "type"> & {
+  children?: ReactNode;
+  className?: string;
 };
 
 type CrmControlTheme = {
@@ -26,10 +33,14 @@ function useCrmControlTheme() {
   return useMantineTheme().other.crmControls as CrmControlTheme;
 }
 
-export function CrmButton({ className, tone = "primary", ...props }: CrmButtonProps) {
+export const CrmButton = forwardRef<HTMLButtonElement, CrmButtonProps>(function CrmButton(
+  { className, tone = "primary", ...props },
+  ref,
+) {
   const controls = useCrmControlTheme();
   return (
     <Button
+      ref={ref}
       className={["crm-button", `crm-button--${tone}`, className].filter(Boolean).join(" ")}
       variant={tone === "secondary" ? "default" : "filled"}
       mih={controls.controlHeight}
@@ -39,7 +50,24 @@ export function CrmButton({ className, tone = "primary", ...props }: CrmButtonPr
       {...props}
     />
   );
-}
+});
+
+export const CrmActionIcon = forwardRef<HTMLButtonElement, CrmActionIconProps>(function CrmActionIcon(
+  { className, ...props },
+  ref,
+) {
+  const controls = useCrmControlTheme();
+  return (
+    <ActionIcon
+      ref={ref}
+      className={["crm-action-icon", className].filter(Boolean).join(" ")}
+      variant="subtle"
+      radius="md"
+      size={controls.controlHeight}
+      {...props}
+    />
+  );
+});
 
 export function CrmCheckbox({ className, label, ...props }: CheckboxProps) {
   return (
@@ -50,10 +78,14 @@ export function CrmCheckbox({ className, label, ...props }: CheckboxProps) {
   );
 }
 
-export function CrmTextInput({ className, ...props }: TextInputProps) {
+export const CrmTextInput = forwardRef<HTMLInputElement, TextInputProps>(function CrmTextInput(
+  { className, ...props },
+  ref,
+) {
   const controls = useCrmControlTheme();
   return (
     <TextInput
+      ref={ref}
       className={["crm-text-input", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
       styles={{
@@ -75,12 +107,16 @@ export function CrmTextInput({ className, ...props }: TextInputProps) {
       {...props}
     />
   );
-}
+});
 
-export function CrmNativeSelect({ className, ...props }: NativeSelectProps) {
+export const CrmNativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(function CrmNativeSelect(
+  { className, ...props },
+  ref,
+) {
   const controls = useCrmControlTheme();
   return (
     <NativeSelect
+      ref={ref}
       className={["crm-native-select", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
       styles={{
@@ -102,4 +138,4 @@ export function CrmNativeSelect({ className, ...props }: NativeSelectProps) {
       {...props}
     />
   );
-}
+});

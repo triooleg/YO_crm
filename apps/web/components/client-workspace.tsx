@@ -4,8 +4,9 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
-import { clientAthleteUi, clientMergeUi } from "../lib/i18n";
+import { clientAthleteUi, clientMergeUi, clientWorkspaceUi } from "../lib/i18n";
 import { ClientAvatar } from "./client-avatar";
+import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 
 type Client = {
   id: string;
@@ -47,8 +48,10 @@ function mergeChannelLabel(channel:string){return clientMergeUi.channelLabels[ch
 
 export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>void}={}) {
   const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const createClientTriggerRef = useRef<HTMLButtonElement>(null);
   const mergeTriggerRef = useRef<HTMLButtonElement>(null);
   const mergeDialogRef = useRef<HTMLElement>(null);
+  const mergeSelectRef = useRef<HTMLSelectElement>(null);
   const mergeBusyRef = useRef(false);
   const detailRequestId=useRef(0);
   const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
@@ -120,6 +123,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
   }, [selected, auth]);
   useEffect(()=>{
     if(!mergeOpen)return;
+    mergeSelectRef.current?.focus();
     function keydown(event:KeyboardEvent){
       if(event.key==="Escape"&&!mergeBusyRef.current){event.preventDefault();setMergeOpen(false);return}
       if(event.key!=="Tab"||!mergeDialogRef.current)return;
@@ -184,7 +188,10 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
             <h1>Клиенты</h1>
             <span>Контакты, спортсмены, заказы и вся история работы</span>
           </div>
-          <div className="phase2-card-actions"><button ref={mergeTriggerRef} disabled={!detail||detail.id!==selected} onClick={()=>{if(detail?.id===selected)setMergeOpen(true)}}>{clientMergeUi.action}{mergeSuggestions.length?` · ${mergeSuggestions.length} ${clientMergeUi.suggestionBadge}`:""}</button><button className="phase2-primary" onClick={() => setCreating(true)}>+ Новый клиент</button></div>
+          <div className="phase2-card-actions phase2-client-header-actions">
+            <CrmButton tone="secondary" ref={mergeTriggerRef} disabled={!detail||detail.id!==selected} onClick={()=>{if(detail?.id===selected)setMergeOpen(true)}}>{clientMergeUi.action}{mergeSuggestions.length?` · ${mergeSuggestions.length} ${clientMergeUi.suggestionBadge}`:""}</CrmButton>
+            <CrmButton ref={createClientTriggerRef} onClick={() => setCreating(true)}>+ Новый клиент</CrmButton>
+          </div>
         </header>
         {error && (
           <div className="phase2-error">
@@ -196,15 +203,19 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
           <section className="phase2-list">
             <div className="phase2-list-tools">
               {!collapsed && (
-                <input
+                <CrmTextInput
+                  className="phase2-client-search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Имя, телефон, Instagram…"
                 />
               )}
-              <button onClick={() => setCollapsed((v) => !v)}>
+              <CrmActionIcon
+                aria-label={collapsed ? clientWorkspaceUi.expandList : clientWorkspaceUi.collapseList}
+                onClick={() => setCollapsed((v) => !v)}
+              >
                 {collapsed ? "›" : "‹"}
-              </button>
+              </CrmActionIcon>
             </div>
             {clients.map((c) => (
               <button
@@ -239,6 +250,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
       {creating && (
         <Create
           request={request}
+          returnFocusRef={createClientTriggerRef}
           close={() => setCreating(false)}
           done={(c) => {
             setCreating(false);
@@ -246,7 +258,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
           }}
         />
       )}
-      {mergeOpen&&detail&&<div className="phase2-overlay"><section ref={mergeDialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="client-merge-title"><div><h2 id="client-merge-title">{clientMergeUi.title}</h2><button type="button" aria-label={clientAthleteUi.close} disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>×</button></div><p>{clientMergeUi.hint}</p>{!mergeSuggestions.length&&<p>{clientMergeUi.noSuggestions}</p>}<label>{clientMergeUi.source}<select autoFocus value={mergeSourceId} onChange={event=>setMergeSourceId(event.target.value)}><option value="">{clientMergeUi.choose}</option>{[...mergeSuggestions,...clients.filter(client=>client.id!==detail.id&&!mergeSuggestions.some(item=>item.id===client.id)).map(client=>({...client,reasons:[],channels:[]} as MergeSuggestion))].map(candidate=><option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.reasons.length?` — ${candidate.reasons.map(mergeReasonLabel).join(", ")}`:""}</option>)}</select></label>{mergeSourceId&&mergeSuggestions.find(item=>item.id===mergeSourceId)&&<div><strong>{clientMergeUi.reasons}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.reasons.map(mergeReasonLabel).join(" · ")}</p><strong>{clientMergeUi.channels}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.channels.map(mergeChannelLabel).join(" · ")||"—"}</p></div>}<footer><button type="button" disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>{clientMergeUi.cancel}</button><button type="button" className="phase2-primary" disabled={mergeBusy||!mergeSourceId} onClick={()=>void mergeClient()}>{mergeBusy?clientMergeUi.merging:clientMergeUi.confirm}</button></footer></section></div>}
+      {mergeOpen&&detail&&<div className="phase2-overlay"><section ref={mergeDialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="client-merge-title"><div><h2 id="client-merge-title">{clientMergeUi.title}</h2><CrmActionIcon type="button" aria-label={clientAthleteUi.close} disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>×</CrmActionIcon></div><p>{clientMergeUi.hint}</p>{!mergeSuggestions.length&&<p>{clientMergeUi.noSuggestions}</p>}<CrmNativeSelect ref={mergeSelectRef} label={clientMergeUi.source} value={mergeSourceId} onChange={event=>setMergeSourceId(event.target.value)} data={[{value:"",label:clientMergeUi.choose},...[...mergeSuggestions,...clients.filter(client=>client.id!==detail.id&&!mergeSuggestions.some(item=>item.id===client.id)).map(client=>({...client,reasons:[],channels:[]} as MergeSuggestion))].map(candidate=>({value:candidate.id,label:`${candidate.displayName}${candidate.reasons.length?` — ${candidate.reasons.map(mergeReasonLabel).join(", ")}`:""}`}))]}/>{mergeSourceId&&mergeSuggestions.find(item=>item.id===mergeSourceId)&&<div><strong>{clientMergeUi.reasons}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.reasons.map(mergeReasonLabel).join(" · ")}</p><strong>{clientMergeUi.channels}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.channels.map(mergeChannelLabel).join(" · ")||"—"}</p></div>}<footer><CrmButton type="button" tone="secondary" disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>{clientMergeUi.cancel}</CrmButton><CrmButton type="button" disabled={mergeBusy||!mergeSourceId} onClick={()=>void mergeClient()}>{mergeBusy?clientMergeUi.merging:clientMergeUi.confirm}</CrmButton></footer></section></div>}
       {addingAthlete && detail && (
         <AddAthlete
           clientId={detail.id}
@@ -476,12 +488,48 @@ function Create({
   close,
   done,
   request,
+  returnFocusRef,
 }: {
   close: () => void;
   done: (c: Client) => void;
   request: (p: string, i?: RequestInit) => Promise<any>;
+  returnFocusRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const firstNameRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    firstNameRef.current?.focus();
+    function keydown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const controls = [
+        ...dialogRef.current.querySelectorAll<HTMLElement>(
+          "button:not([disabled]),input:not([disabled]),select:not([disabled])",
+        ),
+      ];
+      if (!controls.length) return;
+      const first = controls[0]!, last = controls[controls.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", keydown);
+    return () => {
+      document.removeEventListener("keydown", keydown);
+      returnFocusRef.current?.focus();
+    };
+  }, [returnFocusRef]);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     try {
@@ -498,44 +546,30 @@ function Create({
     }
   }
   return (
-    <div className="phase2-overlay">
-      <form className="phase2-modal" onSubmit={submit}>
+    <div className="phase2-overlay" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+      <form ref={dialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="create-client-title" onSubmit={submit}>
         <div>
-          <h2>Новый клиент</h2>
-          <button type="button" onClick={close}>
+          <h2 id="create-client-title">Новый клиент</h2>
+          <CrmActionIcon
+            type="button"
+            aria-label={clientWorkspaceUi.closeCreateClient}
+            onClick={close}
+          >
             ×
-          </button>
+          </CrmActionIcon>
         </div>
-        <label>
-          Имя
-          <input name="firstName" required />
-        </label>
-        <label>
-          Фамилия
-          <input name="lastName" />
-        </label>
-        <label>
-          Страна
-          <input name="country" />
-        </label>
-        <label>
-          Телефон
-          <input name="phone" />
-        </label>
-        <label>
-          Instagram
-          <input name="instagram" />
-        </label>
-        <label>
-          Язык общения
-          <input name="language" />
-        </label>
+        <CrmTextInput ref={firstNameRef} label="Имя" name="firstName" required />
+        <CrmTextInput label="Фамилия" name="lastName" />
+        <CrmTextInput label="Страна" name="country" />
+        <CrmTextInput label="Телефон" name="phone" />
+        <CrmTextInput label="Instagram" name="instagram" />
+        <CrmTextInput label="Язык общения" name="language" />
         {error && <div className="phase2-error">{error}</div>}
         <footer>
-          <button type="button" onClick={close}>
+          <CrmButton type="button" tone="secondary" onClick={close}>
             Отмена
-          </button>
-          <button className="phase2-primary">Создать клиента</button>
+          </CrmButton>
+          <CrmButton type="submit">Создать клиента</CrmButton>
         </footer>
       </form>
     </div>
@@ -557,11 +591,13 @@ export function AddAthlete({
   const [error, setError] = useState(""),
     [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLFormElement>(null);
+  const firstNameRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef(close),
     savingRef = useRef(saving);
   closeRef.current = close;
   savingRef.current = saving;
   useEffect(() => {
+    firstNameRef.current?.focus();
     function keydown(e: KeyboardEvent) {
       if (e.key === "Escape" && !savingRef.current) closeRef.current();
       if (e.key !== "Tab" || !dialogRef.current) return;
@@ -625,57 +661,42 @@ export function AddAthlete({
       >
         <div>
           <h2 id="add-athlete-title">{clientAthleteUi.title}</h2>
-          <button
+          <CrmActionIcon
             type="button"
             onClick={close}
             disabled={saving}
             aria-label={clientAthleteUi.close}
           >
             ×
-          </button>
+          </CrmActionIcon>
         </div>
-        <label>
-          {clientAthleteUi.firstName}
-          <input name="firstName" autoFocus required />
-        </label>
-        <label>
-          {clientAthleteUi.lastName}
-          <input name="lastName" />
-        </label>
-        <label>
-          {clientAthleteUi.discipline}
-          <select name="discipline">
-            <option value="">{clientAthleteUi.disciplineNotSet}</option>
-            <option value="RHYTHMIC_GYMNASTICS">
-              {clientAthleteUi.rhythmicGymnastics}
-            </option>
-            <option value="ACROBATIC_GYMNASTICS">
-              {clientAthleteUi.acrobaticGymnastics}
-            </option>
-            <option value="FIGURE_SKATING">
-              {clientAthleteUi.figureSkating}
-            </option>
-            <option value="AEROBIC_GYMNASTICS">
-              {clientAthleteUi.aerobicGymnastics}
-            </option>
-            <option value="BATON_TWIRLING_MAJORETTE">
-              {clientAthleteUi.batonTwirling}
-            </option>
-            <option value="OTHER">{clientAthleteUi.other}</option>
-          </select>
-        </label>
+        <CrmTextInput ref={firstNameRef} label={clientAthleteUi.firstName} name="firstName" required />
+        <CrmTextInput label={clientAthleteUi.lastName} name="lastName" />
+        <CrmNativeSelect
+          name="discipline"
+          label={clientAthleteUi.discipline}
+          data={[
+            { value: "", label: clientAthleteUi.disciplineNotSet },
+            { value: "RHYTHMIC_GYMNASTICS", label: clientAthleteUi.rhythmicGymnastics },
+            { value: "ACROBATIC_GYMNASTICS", label: clientAthleteUi.acrobaticGymnastics },
+            { value: "FIGURE_SKATING", label: clientAthleteUi.figureSkating },
+            { value: "AEROBIC_GYMNASTICS", label: clientAthleteUi.aerobicGymnastics },
+            { value: "BATON_TWIRLING_MAJORETTE", label: clientAthleteUi.batonTwirling },
+            { value: "OTHER", label: clientAthleteUi.other },
+          ]}
+        />
         {error && (
           <div className="phase2-error" role="alert">
             {error}
           </div>
         )}
         <footer>
-          <button type="button" onClick={close} disabled={saving}>
+          <CrmButton type="button" tone="secondary" onClick={close} disabled={saving}>
             {clientAthleteUi.cancel}
-          </button>
-          <button className="phase2-primary" disabled={saving}>
+          </CrmButton>
+          <CrmButton type="submit" disabled={saving}>
             {saving ? clientAthleteUi.saving : clientAthleteUi.save}
-          </button>
+          </CrmButton>
         </footer>
       </form>
     </div>
