@@ -1,13 +1,23 @@
 # Yoleotard CRM — передача контекста
 
-# 2026-09-13 — Mantine Phase 10: настройка столбцов заказов (локально)
+# 2026-09-13 — production deployment CRM 0.1.21
+
+- Runtime commit `d0545ed916efae4968fd2ee2ca9072774ac6afb0` опубликован в `main`; GitHub Actions `Quality gates` run `34767695627` и `CRM release` run `34768170860` завершены со статусом `success`. Неизменяемый tag `crm-v0.1.21` указывает на runtime SHA.
+- Перед выпуском создан и независимо проверен FULL backup `20260913T161203Z-07e7322c`: `SHA256SUMS`, PostgreSQL custom dump, uploads-архив, manifest и запись `Backup=COMPLETED` валидны. Копия относится к CRM 0.1.20 / commit `8582021af56b86a54a655b24f2e7162b54100d92`.
+- Exact-SHA source archive совпал локально и на сервере по SHA-256 `93069139a32f22eb4a2f5279eff829ecb07042d38cf4a7d821864a5739d60775`. Source rollback сохранён как `/home/trio/yoleotard-crm-backups/source-20260913T161346Z-pre-d0545ed.tar.gz`, SHA-256 `6562d08806769f9e2096f24db2b86d5a1e95dc72027599dea9edf874182f1480`; прежний source-каталог — `/home/trio/yoleotard-crm-previous-20260913T161346Z`.
+- Compose пересобрал и пересоздал только API `bf3af8096b1dc9650db63ea9829a7a8c4ee443148034a92140db55892a95981b` и web `05823a1227361194de9b8547ad47b5415d8464fb65fa3275421f1bec11b313fe` с `--no-deps`. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` сохранены; restart count всех четырёх сервисов равен 0.
+- После deployment актуальны 22 миграции; clients 125, conversations 123, messages 1241, orders 3. По сравнению с predeploy появилось два новых сообщения во время активной работы CRM, остальные бизнес-счётчики не изменились.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. Внутренний и публичный `/api/health` возвращают `ok` с PostgreSQL/Redis/uploads `up`, внутренний и публичный `/` отвечают HTTP 200; свежие API/web error scans равны 0.
+- Авторизованный read-only smoke в существующей Edge-вкладке подтвердил `CRM v0.1.21`, точный SHA, загрузку реальных заказов и Mantine-окно «Столбцы». Первый checkbox получает фокус, `Escape` закрывает окно и возвращает фокус на кнопку «Столбцы»; browser console errors отсутствуют. Точка отката приложения — `crm-v0.1.20`; миграций БД в 0.1.21 нет.
+
+# 2026-09-13 — Mantine Phase 10: настройка столбцов заказов (deployed)
 
 - Окно «Столбцы» переведено с самописного overlay на Mantine `Modal` и общие `CrmCheckbox`, `CrmActionIcon`, `CrmButton`. Первый столбец получает фокус, `Escape` закрывает окно, а фокус возвращается на кнопку «Столбцы».
 - Сохранены ключ `orders-dashboard-columns-v2`, мгновенная запись в `localStorage`, drag-and-drop, кнопки «Выше»/«Ниже», сброс и автоматическое добавление новых известных столбцов к старой конфигурации. Отдельный fail-closed parser атомарно отклоняет повреждённую структуру и удаляет неизвестные или повторяющиеся идентификаторы. API, Prisma, номера и данные заказов, деньги, статусы, RBAC и аудит не менялись.
 - На laptop и mobile прокрутка ограничена списком столбцов; действия «Сбросить» и «Готово» остаются в viewport. Кадры 1920×1080, 1366×768 и 390×844 просмотрены вручную.
 - Failing-first source-тест прошёл после реализации. Исполняемый Playwright дополнительно проверяет скрытие, кнопочное перемещение, реальный drag-and-drop, одинаковый порядок заголовков и ячеек, сохранение после reload, полный reset, `Escape`, возврат фокуса и document overflow.
 - Финальный `pnpm db:generate` и `pnpm quality:check` — PASS: database 9/9, API 468/468, web 287/287, все typecheck и production builds. Полный Playwright с отключённой записью trace-артефактов — 63/63 PASS; запись trace на Windows отдельно давала файловый `ENOENT`, продуктовые assertions не падали.
-- Версия подготовлена как 0.1.21, русский журнал и rollback-граница `crm-v0.1.20` добавлены. Подробности: `docs/ui/mantine-phase-10-order-columns.md`. Commit, push, tag и deployment выполняются после финальных review PASS.
+- Версия выпущена как 0.1.21, русский журнал и rollback-граница `crm-v0.1.20` добавлены. Подробности: `docs/ui/mantine-phase-10-order-columns.md`; полное release evidence приведено выше.
 
 # 2026-09-13 — production deployment CRM 0.1.20
 
