@@ -1,36 +1,43 @@
 # Yoleotard CRM — передача контекста
 
-# 2026-09-13 — Mantine phases 11-15, CRM 0.1.22 (release candidate)
+# 2026-09-14 — production deployment CRM 0.1.22
 
-- Последовательно завершены пять срезов: большая форма заказа, Drawer мерок,
-  общая Modal-оболочка операционных форм, общие примитивы shell/client и
-  безопасные внешние контролы Inbox. Детали и границы совместимости:
-  `docs/ui/mantine-phases-11-15.md`.
-- API, Prisma и миграции не менялись. Сохранены исходные payload builders и
-  бизнес-правила денег, мерок, производства, доставки и сообщений.
-- Review выявил риск двойной записи при закрытии Drawer во время pending POST.
-  Закрытие по Escape, overlay, кресту и отмене теперь заблокировано до ответа;
-  ошибки сохраняют открытую форму. Исполняемые проверки — 4/4 PASS.
-- Финальный `quality:check` на 0.1.22 — PASS: web 300/300, API 468/468,
-  database 9/9, все typecheck и production builds. Полный Playwright на свежем
-  Next.js 16.3.4 dev-сервере — 78/78 PASS после добавления visual-сценариев
-  и проверок блокировки двойной отправки заказа, замеров и задач;
-  DAG tooling — 45/45 PASS; `git diff --check` — PASS. Повторные независимые
-  compatibility, regression, business/security и visual review дали PASS.
-  Финальный release-gate ожидает только postdeploy HTTP/live-smoke и запись
-  фактических данных deployment.
-- Первый финальный visual-review поставил BLOCK из-за отсутствия снимков новых
-  Drawer/Modal. Добавлен visual-набор 20/20 на трёх viewport; ручной просмотр
-  выявил и исправил выход task modal за мобильный экран и обрезание действия в
-  редакторе инвойса. После этих CSS/test-изменений обязательны повторные полные
-  gates и visual/release review.
-- Для строгого before/after visual gate снят matching baseline семи
-  поверхностей из commit `ef8da630` (CRM 0.1.21) и сопоставлен с 0.1.22 на
-  1920×1080, 1366×768 и 390×844. Результат и имена файлов:
+- Последовательно завершены пять Mantine-срезов: большая форма заказа, Drawer
+  мерок, общая Modal-оболочка операционных форм, общие примитивы shell/client и
+  безопасные внешние контролы Inbox. API, Prisma и миграции не менялись;
+  сохранены payload builders и правила денег, мерок, производства, доставки и
+  сообщений. Детали: `docs/ui/mantine-phases-11-15.md`.
+- Синхронные in-flight guards исключают двойную запись заказа, изображения,
+  спортсмена, снимка замеров и задачи. Escape, overlay, крест и отмена
+  заблокированы во время pending POST. Ошибка оставляет форму открытой.
+- Локальные gates: `quality:check` PASS — web 300/300, API 468/468, database
+  9/9, все typecheck и production builds; Playwright 78/78 на Next.js 16.3.4;
+  DAG tooling 45/45; `git diff --check` PASS. Повторные compatibility,
+  regression, business/security и visual review дали PASS. Before/after
+  матрица 0.1.21→0.1.22 проверена на 1920×1080, 1366×768 и 390×844:
   `docs/ui/mantine-phases-11-15-visual-review.md`.
-- Версия кандидата — 0.1.22, точка отката — `crm-v0.1.21`; deployment должен
-  включать FULL backup, exact-SHA source archive и обновление только API/web с
-  `--no-deps`.
+- Runtime commit `3c757b36b17793569003f1459444ef99e9165e43` fast-forward опубликован
+  в `origin/main`. Перед deployment создан и проверен FULL backup
+  `20260914T211146Z-v022-3c757b3-predeploy`: SHA256 совпали, PostgreSQL custom
+  dump читается через `pg_restore`, uploads-архив и manifest валидны. Release
+  archive SHA-256 `675a62dda676861b9a43e177b1fb445493cf6bfda98dd8c26eeb147f98ae7084`
+  совпал на сервере. Source rollback сохранён как
+  `/home/trio/yoleotard-crm-backups/source-20260914T211350Z-pre-3c757b3.tar.gz`
+  с SHA-256 `68b699480c8f0669b2057ed38eb2b0ec8260b3260985f4c3039a6863b73c2f30`;
+  предыдущий source — `/home/trio/yoleotard-crm-previous-20260914T211350Z`.
+- С `--no-deps` пересозданы только API
+  `f17dd2fa0eff9b864096ba540f22b5312075508a975dc620fc5598ac0d55457f`
+  и web `96c781a7141c42a4bcffdc8a0934b1189ae02912498f921a9db9e3d3fe0eb2bb`.
+  ID PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b`
+  и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc`
+  не изменились; все сервисы healthy, restart count 0, миграций 22. После
+  deployment: clients 127, conversations 125, messages 1254, orders 3.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. Внутренние и
+  публичные `/` и `/api/health` отвечают HTTP 200; PostgreSQL, Redis и uploads
+  — `up`; fresh API/web error scan — 0. Авторизованный read-only smoke в Edge
+  подтвердил CRM v0.1.22 и точный SHA, загрузку Входящих, Заказов, Клиентов,
+  Производства, Финансов и Задач, а также открытие/закрытие Task Modal без
+  сохранения; browser console errors — 0. Точка отката — `crm-v0.1.21`.
 
 # 2026-09-13 — production deployment CRM 0.1.21
 
