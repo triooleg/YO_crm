@@ -37,8 +37,13 @@ commit:
 CRM_VERSION="$(node -p "require('./package.json').version")"
 CRM_COMMIT="$(git rev-parse HEAD)"
 export CRM_VERSION CRM_COMMIT
-docker compose --env-file .env -p yoleotard-crm -f docker-compose.portainer.yml up -d --build api web
+docker compose --env-file .env -p yoleotard-crm -f docker-compose.portainer.yml up -d --build --no-deps api web
 ```
+
+`--no-deps` is mandatory for an API/web-only update: it prevents Compose from
+recreating PostgreSQL or Redis when their existing containers were created from
+a different but compatible Compose file. Verify both dependency health checks
+before the update and confirm their container IDs afterwards.
 
 After backup verification, quality gates, deployment and live smoke checks
 have succeeded, create and push the immutable release tag:

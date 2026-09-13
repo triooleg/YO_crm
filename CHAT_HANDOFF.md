@@ -1,13 +1,17 @@
 # Yoleotard CRM — передача контекста
 
-## 2026-09-13 — Mantine Phase 6: раздел «Клиенты», 0.1.19 (release prepared)
+## 2026-09-13 — Mantine Phase 6: раздел «Клиенты», 0.1.19 (deployed)
 
 - На общие Mantine-контролы переведены поиск клиентов, действия создания и объединения, форма нового клиента, форма спортсмена и выбор второй карточки для объединения. «Входящие», заказы, замеры, API и Prisma не менялись.
 - Сохранены точные POST-контракты: поля `FormData` для `/clients`, нормализованный объект спортсмена для `/clients/:id/athletes` и единственный `sourceClientId` для `/clients/:id/merge`. Для submit-кнопок явно задан `type="submit"`.
 - Создание клиента теперь, как формы спортсмена и объединения, удерживает фокус, закрывается по `Escape` и возвращает фокус на кнопку запуска. Новые доступные подписи сворачивания списка и закрытия формы находятся в `apps/web/lib/i18n.ts`.
 - Все четыре общие оболочки явно передают DOM-ref через `forwardRef`. Исправлена мобильная совместимость старого CSS с Mantine: скрывается только подзаголовок страницы, а не внутренние подписи кнопок; быстрые действия карточки располагаются под именем.
 - После release bump `pnpm db:generate` и полный `pnpm quality:check` PASS: database 9/9, API 468/468, web 273/273, все typecheck и production builds. Version-aware Playwright выполнил 46/46 сценариев без тестовых ошибок; новый срез — 3/3 на 1920×1080, 1366×768 и 390×844. Страница и три диалога просмотрены вручную без overflow. Compatibility, regression, business/security, UI visual и локальный release-gate дали PASS после явного `forwardRef`.
-- Подробности: `docs/ui/mantine-phase-6-clients.md`. Версия 0.1.19 подготовлена в `codex/mantine-clients`; commit, push и deployment выполняются только после итогового predeploy gate.
+- Runtime commit `6634e1c615c75254887f5e7e3570020a72b56e28` fast-forward опубликован в `origin/main`; GitHub Actions `Quality gates` run `34747595275` завершён успешно за 2 минуты 2 секунды. Неизменяемый тег `crm-v0.1.19` указывает на runtime SHA; `CRM release` run `34748540432` завершён успешно и создал GitHub Release `Yoleotard CRM v0.1.19`. Release archive `yoleotard-crm-0.1.19-6634e1c.tar.gz` совпал локально и на сервере по SHA-256 `26455a6e5043b027f7ba79856c1e4c65f12f450b65682ccd031db45ed5d2d421`.
+- Перед deployment создан и независимо проверен FULL backup `20260913T083731Z-v019-6634e1c-predeploy`: `SHA256SUMS`, PostgreSQL custom dump, uploads archive и JSON manifest валидны; SHA-256 файла `SHA256SUMS` — `2ea65ca8785149c1138612c85433dac8a18852373ea52a8601ca7ea77ff91840`. Source rollback: `/home/trio/yoleotard-crm-backups/source-20260913T084020Z-pre-6634e1c.tar.gz`, SHA-256 `7966bb3586babc1ed421544f62adae9c0844256c443e1aaa57a7c1044ae4b77e`; прежний source-каталог: `/home/trio/yoleotard-crm-previous-20260913T084020Z`.
+- Compose пересоздал PostgreSQL и Redis вместе с API/web, потому что предыдущие контейнеры имели метаданные другого compose-файла. Volumes не удалялись: после запуска все четыре контейнера healthy с restart count 0; 22 миграции актуальны. Pre/post counts: 123/123 клиента, 121/121 переписка, 1186/1187 сообщений (одно новое входящее во время deployment), 3/3 заказа. Runbook уточнён: точечное обновление API/web выполняется с `--no-deps`, чтобы исключить повторение.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. Внутренние и публичные `/` и `/api/health` возвращают HTTP 200; health подтверждает PostgreSQL, Redis и uploads `up`, fresh API/web error scan равен 0.
+- Авторизованный read-only smoke в Edge подтвердил CRM v0.1.19 и точный SHA. Раздел «Клиенты» открывается, поиск оставляет Eve Emeterio, форма нового клиента переводит фокус на имя, закрывается по `Escape` и возвращает фокус на «+ Новый клиент»; browser console errors отсутствуют. Predeploy и postdeploy release gates — PASS. Подробности: `docs/ui/mantine-phase-6-clients.md`.
 
 ## 2026-09-13 — Mantine Phase 4–5: контролы настроек и NativeSelect, 0.1.18 (deployed)
 
