@@ -1,5 +1,14 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-09-13 — production deployment CRM 0.1.20
+
+- Runtime commit `8582021af56b86a54a655b24f2e7162b54100d92` опубликован в `main`; GitHub Actions `Quality gates` run `34761745148` завершён со статусом `success`.
+- Перед выпуском создан и проверен FULL backup `20260913T141323Z-4b1365b2`: SHA256 всех файлов совпали, PostgreSQL dump и uploads-архив читаются, manifest и запись `Backup` имеют статус `COMPLETED`. Копия относится к CRM 0.1.19 / commit `6634e1c615c75254887f5e7e3570020a72b56e28`.
+- Exact-SHA source archive имел SHA256 `0a68e5132f66db56501bd960c1e437fd8cea31f97d6bde5a4b428cbbbe826faa`. Production обновлён командой Compose только для `api web` с `--no-deps`.
+- PostgreSQL container `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis container `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc`, а также тома `crm_postgres`, `crm_redis` и `crm_uploads` сохранены. После деплоя: migrations 22, clients 125, conversations 123, messages 1239, orders 3 — без изменений.
+- Внутренний и публичный `/api/health` возвращают `ok`, PostgreSQL/Redis/uploads — `up`; публичный `/` отвечает HTTP 200, в свежих логах нет error/fatal findings.
+- Live browser smoke подтвердил `CRM v0.1.20`, точный SHA, раскрытую текущую версию, свёрнутые прошлые версии и раскрытие 0.1.19 по клику. Точка отката приложения — `crm-v0.1.19`; миграций БД в 0.1.20 нет.
+
 # 2026-09-13 — журнал версий: компактные сворачиваемые сборки (локально)
 
 - При каждом открытии журнала полностью раскрыта только текущая версия CRM. Прошлые сборки показаны компактными строками и раскрываются или сворачиваются по клику.
