@@ -1,12 +1,15 @@
 # Yoleotard CRM — передача контекста
 
-# 2026-09-14 — CRM 0.1.23, Mantine Phase 16 готова к выпуску
+# 2026-09-14 — production deployment CRM 0.1.23
 
 - Все стандартные элементы раздела «Настройки» переведены на общие Mantine/CRM-компоненты: поля, списки, textarea, checkbox, кнопки и вкладки. Скрытый системный input загрузки файла оставлен нативным. API, Prisma, миграции и бизнес-контракты не менялись.
 - Для вкладок добавлены стабильные связи `tab`/`tabpanel`, включая состояние загрузки каналов; на мобильном экране вкладки прокручиваются одной строкой. Выбор Meta-страницы и подписи недоступных разделов сохранены.
 - Исполняемые проверки подтверждают прежние методы, URL и payload аккаунта, финансов, Chatwoot и AI; пустые секреты Chatwoot передаются как пустые строки, но API не перезаписывает ими сохранённые значения, а изменение AI-настроек без согласия не записывается.
 - Локальные gates: `pnpm db:generate` и `pnpm quality:check` PASS — database 9/9, web 302/302, API 468/468, все typecheck и production builds; полный Playwright 81/81, отдельный Settings-набор 6/6, журнал версий 5/5, `git diff --check` PASS. Детали: `docs/ui/mantine-phase-16-settings.md`.
-- Версия подготовлена как CRM 0.1.23. Деплой, production smoke, точный runtime SHA, backup ID и новая точка отката будут добавлены после успешного выпуска.
+- Runtime commit `6a46a22290d69a5e6ad583e88c563605234bfbd5` fast-forward опубликован в `origin/main`. Перед deployment создан и независимо проверен FULL backup `20260913T232109Z-v023-predeploy`: SHA-256 всех файлов совпали, PostgreSQL custom dump читается через `pg_restore`, uploads-архив и JSON manifest валидны. Release archive SHA-256 `cd4ca3a08cd1d16cb64acb80843ed841c70cc625f8a244dc9ee3773c87b1e126` совпал локально и на сервере.
+- Старый source сохранён как `/home/trio/yoleotard-crm-backups/source-20260913T232900Z-pre-6a46a22.tar.gz`, SHA-256 `4c89bb5001bbc222d71b53c9c91833ce75cb504ea3a34b8a9ba20bf17ca4f90e`; прежний каталог — `/home/trio/yoleotard-crm-previous-20260913T232900Z`. С `--no-deps` пересозданы только API `37adb665027aed2127a3c570083183f740c3dadcf933ea6c7ab1eb69129d730a` и web `6a9b101ec94f22649e0495c3756ae91653cf95e296bc007eebb205ca61cb126b`; образы: API `294f1af17ce569d2f21aee908935774cfaf1967f5c392f0f8997737bea27461b`, web `c3a2a1ec7ea71ec2a507956c02d328be2005ada411ef5ef3520002b2257440f6`.
+- PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались; все сервисы healthy, restart count 0, 22 миграции актуальны. До и после deployment: clients 127, conversations 125, messages 1254, orders 3.
+- `.release-commit` и `.deployed-commit` совпадают с runtime SHA. Внутренние и публичные `/` и `/api/health` отвечают HTTP 200; PostgreSQL, Redis и uploads — `up`; свежий API/web error scan — 0. Авторизованный read-only smoke в Edge подтвердил CRM v0.1.23, точный SHA и загрузку всех шести активных вкладок «Настройки» без сохранения форм; browser logs — 0. Точка отката приложения — `crm-v0.1.22`; миграций БД в 0.1.23 нет.
 
 # 2026-09-14 — production deployment CRM 0.1.22
 
