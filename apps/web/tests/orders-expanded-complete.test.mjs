@@ -30,8 +30,8 @@ test("expanded order preserves all four statuses with only sales and production 
   for (const field of ["salesStatus", "productionStatus", "paymentStatus", "shippingStatus"]) {
     assert.match(expanded, new RegExp(`order\\.${field}`), `${field} must remain visible in the expanded row`);
   }
-  assert.match(expanded, /<select[^>]*value=\{order\.salesStatus\}[^>]*onChange=\{[^}]*onStatus\("salesStatus",/);
-  assert.match(expanded, /<select[^>]*value=\{order\.productionStatus\}[^>]*onChange=\{[^}]*onStatus\("productionStatus",/);
+  assert.match(expanded, /<CrmNativeSelect[^>]*value=\{order\.salesStatus\}[^>]*onChange=\{[^}]*onStatus\("salesStatus",/);
+  assert.match(expanded, /<CrmNativeSelect[^>]*value=\{order\.productionStatus\}[^>]*onChange=\{[^}]*onStatus\("productionStatus",/);
   assert.match(expanded, /<CrmStatusBadge domain="payment" status=\{order\.paymentStatus\}/);
   assert.match(expanded, /<CrmStatusBadge domain="shipping" status=\{order\.shippingStatus\}/);
   assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)",/);

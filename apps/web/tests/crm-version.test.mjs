@@ -49,10 +49,10 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.19");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.20");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.19\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.19\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.20\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.20\}"/);
   assert.match(compose, /CRM_COMMIT:/);
 });
 
@@ -73,6 +73,16 @@ test("журнал 0.1.19 описывает Mantine-контролы клиен
   assert.match(release,/forwardRef/);
   assert.match(release,/crm-v0\.1\.18/);
   assert.match(changelog,/## \[0\.1\.19\] - 2026-09-13/);
+});
+
+test("журнал 0.1.20 описывает уведомления, заказы, оплату и безопасный откат",()=>{
+  const release=i18n.slice(i18n.indexOf('version: "0.1.20"'),i18n.indexOf('version: "0.1.19"'));
+  assert.match(release,/уведомлен/i);
+  assert.match(release,/Заказы/);
+  assert.match(release,/оплат/i);
+  assert.match(release,/minor units/);
+  assert.match(release,/crm-v0\.1\.19/);
+  assert.match(changelog,/## \[0\.1\.20\] - 2026-09-13/);
 });
 
 test("журнал 0.1.17 описывает Mantine-компоненты, очистку поиска и безопасный откат",()=>{

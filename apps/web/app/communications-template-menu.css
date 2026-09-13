@@ -13,8 +13,6 @@
 .communications-save-template:hover,.communications-save-template:focus-visible{background:#ffffff38!important;outline:2px solid #fff;outline-offset:1px}
 .communications-save-template:disabled{cursor:wait;opacity:.55}
 .communications-messages article.selectable.out .communications-save-template{right:36px}
-.communications-template-notice{display:flex;justify-content:space-between;gap:16px;max-width:1540px;margin:0 auto 12px;padding:11px 14px;border-radius:9px;background:#edf9f0;color:#24733d}
-.communications-template-notice button{border:0;background:transparent;color:inherit}
 .settings-grid .settings-channel-toggle{display:flex;align-items:center;gap:8px;align-self:center;color:var(--text)}
 .settings-grid .settings-channel-toggle input[type="checkbox"]{flex:0 0 18px;width:18px;height:18px;min-height:0;margin:0;padding:0}
 @media(max-width:650px){.communications-template-menu{position:static}.communications-template-menu>div{right:0;left:0;min-width:0;width:auto;max-width:100%;overflow-x:hidden}.communications-template-menu>div button{min-width:0}.communications-template-menu>div b{overflow-wrap:anywhere}}

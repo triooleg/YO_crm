@@ -5,6 +5,8 @@ import {
   mantineHtmlProps,
 } from "@mantine/core";
 import "@mantine/core/styles.css";
+import { Notifications } from "@mantine/notifications";
+import "@mantine/notifications/styles.css";
 import "flag-icons/css/flag-icons.min.css";
 import { yoleotardTheme } from "../lib/mantine-theme";
 import "./styles.css";
@@ -43,6 +45,7 @@ export default function RootLayout({
       </head>
       <body>
         <MantineProvider theme={yoleotardTheme} forceColorScheme="light">
+          <Notifications position="top-right" autoClose={3000} limit={3} containerWidth={360} />
           {children}
         </MantineProvider>
       </body>

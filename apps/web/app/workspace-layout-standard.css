@@ -33,8 +33,7 @@
 }
 
 .phase2-error,
-.crm-alert,
-.communications-template-notice {
+.crm-alert {
   width: 100%;
   max-width: none;
   margin-right: 0;

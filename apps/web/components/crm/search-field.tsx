@@ -11,6 +11,7 @@ type CrmSearchFieldProps = {
   clearLabel: string;
   className?: string;
   showSearchIcon?: boolean;
+  autoFocus?: boolean;
 };
 
 export function CrmSearchField({
@@ -21,6 +22,7 @@ export function CrmSearchField({
   clearLabel,
   className = "",
   showSearchIcon = false,
+  autoFocus = false,
 }: CrmSearchFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const classes = ["crm-search-field", className].filter(Boolean).join(" ");
@@ -46,6 +48,8 @@ export function CrmSearchField({
         onChange={(event) => onValueChange(event.target.value)}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        autoFocus={autoFocus}
+        data-autofocus={autoFocus || undefined}
       />
       {value ? (
         <ActionIcon

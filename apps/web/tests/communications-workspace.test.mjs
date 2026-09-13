@@ -749,6 +749,18 @@ test("переписка разделяет дни и даёт компактн�
     assert.match(locale, new RegExp(`${key}:`));
 });
 
+test("успешные действия показывают компактное временное Mantine-уведомление", () => {
+  assert.match(component, /import \{ notifications \} from "@mantine\/notifications"/);
+  assert.match(component, /function showInboxNotification\(message:string\)/);
+  assert.match(component, /notifications\.show\(\{message,color:"teal",autoClose:3000/);
+  assert.match(component, /closeButtonProps:\{\"aria-label\":ui\.close\}/);
+  assert.match(component, /showInboxNotification\(ui\.messageCopied\)/);
+  assert.match(component, /showInboxNotification\(ui\.templateSaved\)/);
+  assert.doesNotMatch(component, /communications-template-notice/);
+  assert.doesNotMatch(component, /templateNotice/);
+  assert.doesNotMatch(css, /\.communications-template-notice/);
+});
+
 test("меню сообщения выполняет реальные действия вместо скрытого копирования",()=>{
   assert.match(component,/communications-message-more/);
   assert.match(component,/role="menu"/);

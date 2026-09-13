@@ -2,6 +2,7 @@
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { ActionIcon, Alert, Button, Modal, NativeSelect } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { communicationsUi as ui, labels } from "../lib/i18n";
 import {
   canRefreshInbox,
@@ -219,6 +220,9 @@ function clipboardImageName(mimeType:string,now=Date.now()){
   const extension:Record<string,string>={"image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif"};
   return `clipboard-image-${now}.${extension[mimeType]||"png"}`;
 }
+function showInboxNotification(message:string){
+  notifications.show({message,color:"teal",autoClose:3000,withCloseButton:true,closeButtonProps:{"aria-label":ui.close}});
+}
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
@@ -247,7 +251,6 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [templates, setTemplates] = useState<Template[]>([]),
     [templatesOpen, setTemplatesOpen] = useState(false),
     [templateBusy,setTemplateBusy]=useState(false),
-    [templateNotice,setTemplateNotice]=useState(""),
     [text, setText] = useState(""),
     [draftStatus,setDraftStatus]=useState<"IDLE"|"SAVING"|"SAVED"|"ERROR">("IDLE"),
     [emailReplyTarget,setEmailReplyTarget]=useState<Message>(),
@@ -1128,13 +1131,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   async function saveAsTemplate(content:string,channel:string,language="ru"){
     const suggested=content.replace(/\s+/g," ").trim().slice(0,60),entered=window.prompt(ui.templateNamePrompt,suggested);
     const name=entered?.trim().slice(0,120);if(!name||!content.trim())return;
-    setTemplateBusy(true);setError("");setTemplateNotice("");
-    try{const created=await api("/communications/templates",{method:"POST",body:JSON.stringify({name,content:content.trim(),channel,language})});setTemplates(current=>[...current,created].sort((a,b)=>a.name.localeCompare(b.name,"ru")));setTemplateNotice(ui.templateSaved)}
+    setTemplateBusy(true);setError("");
+    try{const created=await api("/communications/templates",{method:"POST",body:JSON.stringify({name,content:content.trim(),channel,language})});setTemplates(current=>[...current,created].sort((a,b)=>a.name.localeCompare(b.name,"ru")));showInboxNotification(ui.templateSaved)}
     catch(e){setError((e as Error).message)}finally{setTemplateBusy(false)}
   }
   async function archiveTemplate(template:Template){
     if(!window.confirm(ui.deleteTemplateConfirm.replace("{name}",template.name)))return;
-    setTemplateBusy(true);setError("");setTemplateNotice("");
+    setTemplateBusy(true);setError("");
     try{await api("/communications/templates/"+template.id+"/archive",{method:"POST",body:"{}"});setTemplates(current=>current.filter(item=>item.id!==template.id))}
     catch(e){setError((e as Error).message)}finally{setTemplateBusy(false)}
   }
@@ -1199,7 +1202,6 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         </div>
       )}
       {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
-      {templateNotice && <div className="communications-template-notice" role="status">{templateNotice}<button type="button" onClick={()=>setTemplateNotice("")}>{ui.close}</button></div>}
       <section
         className="communications-grid"
         style={{ gridTemplateColumns: grid }}
@@ -1359,8 +1361,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                     {message.direction==="INBOUND"&&client&&<span className="communications-message-avatar" aria-hidden="true"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/></span>}
                     {message.direction==="OUTBOUND"&&<span className="communications-message-avatar is-business" aria-hidden="true">{businessLogoUrl?<img className="communications-business-logo" src={businessLogoUrl} alt=""/>:"Y"}</span>}
                     <span className="communications-message-actions">
-                      <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
-                      <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>setTemplateNotice(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}{message.direction==="OUTBOUND"&&<button type="button" role="menuitem" className="communications-message-delete" onClick={event=>{const details=event.currentTarget.closest("details");deleteTrigger.current=details?.querySelector("summary")||event.currentTarget;details?.removeAttribute("open");setDeleteTarget(message)}}>{ui.deleteMessage}</button>}</span></details>
+                      <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>showInboxNotification(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
+                      <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>showInboxNotification(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}{message.direction==="OUTBOUND"&&<button type="button" role="menuitem" className="communications-message-delete" onClick={event=>{const details=event.currentTarget.closest("details");deleteTrigger.current=details?.querySelector("summary")||event.currentTarget;details?.removeAttribute("open");setDeleteTarget(message)}}>{ui.deleteMessage}</button>}</span></details>
                     </span>
                     {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
