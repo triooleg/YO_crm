@@ -51,6 +51,27 @@ test("журнал сборок закрывается всеми штатным
   await expect(dialog).toBeHidden();
 });
 
+test("журнал раскрывает только текущую версию и сбрасывает раскрытие при повторном открытии", async ({ page }) => {
+  const versionButton = page.getByRole("button", { name: "CRM v0.1.20" });
+
+  await versionButton.click();
+  const currentVersion = page.locator("article.current .crm-release-heading");
+  const previousVersion = page.locator("article:not(.current) .crm-release-heading").first();
+  await expect(currentVersion).toHaveAccessibleName("Свернуть версию CRM v0.1.20");
+  await expect(previousVersion).toHaveAccessibleName("Развернуть версию CRM v0.1.19");
+  await expect(currentVersion).toHaveAttribute("aria-expanded", "true");
+  await expect(previousVersion).toHaveAttribute("aria-expanded", "false");
+
+  await previousVersion.click();
+  await expect(previousVersion).toHaveAttribute("aria-expanded", "true");
+  await expect(previousVersion).toHaveAccessibleName(/Свернуть версию CRM v/);
+
+  await page.getByRole("button", { name: "Закрыть журнал изменений" }).click();
+  await versionButton.click();
+  await expect(currentVersion).toHaveAttribute("aria-expanded", "true");
+  await expect(previousVersion).toHaveAttribute("aria-expanded", "false");
+});
+
 for (const viewport of [
   { name: "desktop", width: 1920, height: 1080 },
   { name: "laptop", width: 1366, height: 768 },

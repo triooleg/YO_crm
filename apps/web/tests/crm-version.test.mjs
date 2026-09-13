@@ -35,6 +35,15 @@ test("клик по версии открывает русский журнал 
   assert.match(i18n, /Ранее аватары Facebook-клиентов импортировались/);
 });
 
+test("журнал раскрывает только актуальную версию и позволяет читать прошлые по клику", () => {
+  assert.match(shell, /new Set\(\[currentVersion\]\)/);
+  assert.match(shell, /aria-expanded=\{isExpanded\}/);
+  assert.match(shell, /setExpandedVersions/);
+  assert.match(shell, /release\.version===currentVersion/);
+  assert.match(i18n, /Развернуть версию/);
+  assert.match(i18n, /Свернуть версию/);
+});
+
 test("каждая сборка имеет журнал изменений и GitHub Release", () => {
   assert.match(changelog, /## \[0\.1\.6\]/);
   assert.match(changelog, /## \[0\.1\.5\]/);
