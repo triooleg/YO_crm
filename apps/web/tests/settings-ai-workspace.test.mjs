@@ -12,7 +12,8 @@ const communicationsCss = await readFile(
   "utf8",
 );
 test("AI настройки находятся в самостоятельной вкладке", () => {
-  assert.match(source, /role="tablist"/);
+  assert.match(source, /<CrmTabList/);
+  assert.match(source, /ariaLabel=\{settingsUi\.title\}/);
   assert.match(source, /settingsUi\.aiTab/);
   assert.match(source, /settings-ai-panel/);
 });
@@ -29,7 +30,7 @@ test("AI настройки имеют доступные состояния з�
 });
 test("AI модель выбирается только из поддерживаемого списка", () => {
   assert.match(source, /constAI_MODEL_OPTIONS=\["gpt-4\.1-mini","gpt-4\.1","gpt-5-mini"\]asconst/);
-  assert.match(source, /<selectname="model"defaultValue=\{data\.model\}required>/);
+  assert.match(source, /<CrmNativeSelectlabel=\{settingsUi\.aiModel\}name="model"defaultValue=\{data\.model\}requireddata=\{AI_MODEL_OPTIONS\.map/);
   assert.match(source, /AI_MODEL_OPTIONS\.map/);
   assert.doesNotMatch(source, /<inputname="model"/);
 });

@@ -77,7 +77,15 @@
 }
 .crm-alert .mantine-Alert-closeButton { color: inherit; }
 
-.settings-grid .crm-text-input .mantine-InputWrapper-label { display: inline-flex; gap: 3px; }
+.settings-grid .crm-text-input,
+.settings-grid .crm-native-select,
+.settings-grid .crm-textarea { min-width: 0; }
+.settings-grid .crm-text-input .mantine-InputWrapper-label,
+.settings-grid .crm-native-select .mantine-InputWrapper-label,
+.settings-grid .crm-textarea .mantine-InputWrapper-label { display: inline-flex; gap: 3px; }
+.settings-grid .settings-wide { grid-column: 1 / -1; }
+.settings-tabs [data-active] { border-color: var(--violet); background: var(--violet); color: #fff; }
+.settings-tabs { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; }
 
 .branding-uses .crm-checkbox { display: flex; align-items: flex-start; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; }
 .branding-uses .crm-checkbox span:not(.crm-checkbox-copy) { display: initial; }

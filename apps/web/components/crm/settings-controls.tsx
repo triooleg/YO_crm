@@ -1,10 +1,10 @@
-import { ActionIcon, Button, Checkbox, NativeSelect, TextInput, useMantineTheme } from "@mantine/core";
-import type { ActionIconProps, ButtonProps, CheckboxProps, NativeSelectProps, TextInputProps } from "@mantine/core";
+import { ActionIcon, Button, Checkbox, NativeSelect, Textarea, TextInput, useMantineTheme } from "@mantine/core";
+import type { ActionIconProps, ButtonProps, CheckboxProps, NativeSelectProps, TextareaProps, TextInputProps } from "@mantine/core";
 import { forwardRef } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 type CrmButtonProps = ButtonProps &
-  Pick<ButtonHTMLAttributes<HTMLButtonElement>, "disabled" | "form" | "name" | "onClick" | "type" | "value"> & {
+  Pick<ButtonHTMLAttributes<HTMLButtonElement>, "disabled" | "form" | "name" | "onClick" | "title" | "type" | "value"> & {
   children?: ReactNode;
   className?: string;
   tone?: "primary" | "secondary";
@@ -31,6 +31,25 @@ type CrmControlTheme = {
 
 function useCrmControlTheme() {
   return useMantineTheme().other.crmControls as CrmControlTheme;
+}
+
+function crmInputStyles(controls: CrmControlTheme, minHeight = controls.controlHeight) {
+  return {
+    label: {
+      marginBottom: controls.fieldLabelMarginBottom,
+      color: controls.fieldLabelColor,
+      fontWeight: controls.fieldLabelFontWeight,
+    },
+    input: {
+      minHeight,
+      borderColor: controls.fieldBorderColor,
+    },
+    description: {
+      marginTop: controls.fieldDescriptionMarginTop,
+      color: controls.fieldDescriptionColor,
+      lineHeight: controls.fieldDescriptionLineHeight,
+    },
+  };
 }
 
 export const CrmButton = forwardRef<HTMLButtonElement, CrmButtonProps>(function CrmButton(
@@ -88,22 +107,23 @@ export const CrmTextInput = forwardRef<HTMLInputElement, TextInputProps>(functio
       ref={ref}
       className={["crm-text-input", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
-      styles={{
-        label: {
-          marginBottom: controls.fieldLabelMarginBottom,
-          color: controls.fieldLabelColor,
-          fontWeight: controls.fieldLabelFontWeight,
-        },
-        input: {
-          minHeight: controls.controlHeight,
-          borderColor: controls.fieldBorderColor,
-        },
-        description: {
-          marginTop: controls.fieldDescriptionMarginTop,
-          color: controls.fieldDescriptionColor,
-          lineHeight: controls.fieldDescriptionLineHeight,
-        },
-      }}
+      styles={crmInputStyles(controls)}
+      {...props}
+    />
+  );
+});
+
+export const CrmTextarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function CrmTextarea(
+  { className, ...props },
+  ref,
+) {
+  const controls = useCrmControlTheme();
+  return (
+    <Textarea
+      ref={ref}
+      className={["crm-textarea", className].filter(Boolean).join(" ")}
+      inputWrapperOrder={["label", "input", "description", "error"]}
+      styles={crmInputStyles(controls, 80)}
       {...props}
     />
   );
@@ -119,22 +139,7 @@ export const CrmNativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
       ref={ref}
       className={["crm-native-select", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
-      styles={{
-        label: {
-          marginBottom: controls.fieldLabelMarginBottom,
-          color: controls.fieldLabelColor,
-          fontWeight: controls.fieldLabelFontWeight,
-        },
-        input: {
-          minHeight: controls.controlHeight,
-          borderColor: controls.fieldBorderColor,
-        },
-        description: {
-          marginTop: controls.fieldDescriptionMarginTop,
-          color: controls.fieldDescriptionColor,
-          lineHeight: controls.fieldDescriptionLineHeight,
-        },
-      }}
+      styles={crmInputStyles(controls)}
       {...props}
     />
   );

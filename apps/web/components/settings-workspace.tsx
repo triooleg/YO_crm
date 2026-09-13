@@ -1,7 +1,8 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
 import { settingsUi, summaryFormatUi } from "../lib/i18n";
-import { CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
+import { CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextarea, CrmTextInput } from "./crm/settings-controls";
+import { CrmTabList, type CrmTab } from "./crm/tab-list";
 const AI_MODEL_OPTIONS = ["gpt-4.1-mini", "gpt-4.1", "gpt-5-mini"] as const;
 type Setting = { key: string; section: string; value: unknown };
 type AiData = {
@@ -63,7 +64,7 @@ type IntegrationData = {
   };
 };
 function Secret({ name, label, saved, inputRef }: { name: string; label: string; saved: boolean; inputRef?: Ref<HTMLInputElement> }) {
-  return <label>{label}<input ref={inputRef} name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/></label>;
+  return <CrmTextInput ref={inputRef} label={label} name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/>;
 }
 function CommunicationsSettings() {
   const instagramAdvancedRef = useRef<HTMLDetailsElement>(null);
@@ -161,6 +162,7 @@ function CommunicationsSettings() {
       <section
         id="settings-communications-panel"
         role="tabpanel"
+        aria-labelledby="settings-communications-tab"
         className="settings-card"
         aria-busy={!error}
       >
@@ -178,7 +180,7 @@ function CommunicationsSettings() {
   const metaStatus = (value: string) => value === "VERIFY_TOKEN_UNSAFE" ? settingsUi.metaVerifyTokenUnsafe : value === "RECEIVING" ? settingsUi.metaDeliveryReceiving : value === "VERIFIED" || value === "SUBSCRIBED" ? settingsUi.metaDeliveryVerified : value === "NOT_VERIFIED" ? settingsUi.metaDeliveryNotVerified : settingsUi.notConnected;
   const instagramConnected = data.meta.instagramStatus === "SUBSCRIBED" || data.meta.instagramStatus === "RECEIVING";
   return (
-    <section id="settings-communications-panel" role="tabpanel">
+    <section id="settings-communications-panel" role="tabpanel" aria-labelledby="settings-communications-tab">
       <div className="settings-card">
         <h2>{settingsUi.channelsTitle}</h2>
         <p>{settingsUi.channelsHint}</p>
@@ -198,34 +200,34 @@ function CommunicationsSettings() {
         <p>{settingsUi.metaHint}</p>
         {(data.meta.pageId||instagramConnected)&&<div className="settings-meta-current"><b>{data.meta.pageName||settingsUi.metaConnectedPage}</b><span>{data.meta.pageId?`ID ${data.meta.pageId}`:""}{instagramConnected&&data.meta.instagramAccountId?`${data.meta.pageId?" · ":""}Instagram ${data.meta.instagramAccountId}`:""}</span>{data.meta.pageId&&<small>{settingsUi.metaFacebookStatus}: {metaStatus(data.meta.status)}</small>}{data.meta.instagramAccountId&&<small>{settingsUi.metaInstagramStatus}: {metaStatus(data.meta.instagramStatus)}</small>}</div>}
         <div className="settings-meta-actions">
-          <button type="button" className="settings-facebook-button" onClick={connectFacebook} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</button>
-          <button type="button" className="phase2-primary" onClick={connectInstagram} disabled={oauthLoading||saving} title={!data.meta.instagramAppId||!data.meta.instagramAppSecretConfigured?settingsUi.metaInstagramCredentialsNeeded:undefined}>{settingsUi.metaConnectInstagram}</button>
-          {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<button type="button" className="phase2-primary" onClick={verifyMetaDelivery} disabled={saving}>{settingsUi.metaVerifyDelivery}</button>}
-          {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<button type="button" onClick={refreshFacebookProfiles} disabled={saving}>{settingsUi.metaRefreshProfiles}</button>}
+          <CrmButton type="button" color="blue" className="settings-facebook-button" onClick={connectFacebook} disabled={oauthLoading||saving}>{oauthLoading?settingsUi.metaConnecting:(data.meta.pageId?settingsUi.metaReconnect:settingsUi.metaContinue)}</CrmButton>
+          <CrmButton type="button" onClick={connectInstagram} disabled={oauthLoading||saving} title={!data.meta.instagramAppId||!data.meta.instagramAppSecretConfigured?settingsUi.metaInstagramCredentialsNeeded:undefined}>{settingsUi.metaConnectInstagram}</CrmButton>
+          {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<CrmButton type="button" onClick={verifyMetaDelivery} disabled={saving}>{settingsUi.metaVerifyDelivery}</CrmButton>}
+          {data.meta.pageId&&data.meta.pageAccessTokenConfigured&&<CrmButton tone="secondary" type="button" onClick={refreshFacebookProfiles} disabled={saving}>{settingsUi.metaRefreshProfiles}</CrmButton>}
         </div>
         {data.meta.pageId&&<small>{settingsUi.metaProfileDataHint}</small>}
         {profileRefresh&&<div className="settings-success" role="status">{profileRefresh}</div>}
         {data.meta.instagramAccountId&&<div className="settings-instagram-routing"><a href="https://www.facebook.com/settings/?tab=ig_conversation_routing" target="_blank" rel="noreferrer">{settingsUi.metaInstagramRouting} ↗</a><small>{settingsUi.metaInstagramRoutingHint}</small></div>}
-        {metaPages.length>0&&<div className="settings-meta-pages" role="group" aria-label={settingsUi.metaChoosePage}><h3>{settingsUi.metaChoosePage}</h3>{metaPages.map(page=><button type="button" key={page.id} onClick={()=>selectMetaPage(page.id)} disabled={saving}><span><b>{page.name}</b><small>ID {page.id}{page.instagramUsername?` · @${page.instagramUsername}`:""}</small></span><span>{settingsUi.metaSelect}</span></button>)}</div>}
+        {metaPages.length>0&&<div className="settings-meta-pages" role="group" aria-label={settingsUi.metaChoosePage}><h3>{settingsUi.metaChoosePage}</h3>{metaPages.map(page=><CrmButton tone="secondary" type="button" key={page.id} onClick={()=>selectMetaPage(page.id)} disabled={saving}><span className="settings-meta-page-copy"><b>{page.name}</b><small>ID {page.id}{page.instagramUsername?` · @${page.instagramUsername}`:""}</small></span><span className="settings-meta-page-action">{settingsUi.metaSelect}</span></CrmButton>)}</div>}
         {(!data.meta.instagramAppId||!data.meta.instagramAppSecretConfigured)&&<div className="phase2-warning" role="status">{settingsUi.metaInstagramCredentialsHelp} <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">{settingsUi.metaOpenMetaDevelopers}</a></div>}
         <details ref={instagramAdvancedRef} className="settings-meta-advanced">
           <summary>{settingsUi.metaAdvanced}</summary>
           <p>{settingsUi.metaAdvancedHint}</p>
-          <label className="settings-channel-toggle"><input name="enabled" type="checkbox" defaultChecked={data.meta.enabled}/>{settingsUi.channelEnabled}</label>
+          <CrmCheckbox className="settings-channel-toggle" name="enabled" defaultChecked={data.meta.enabled} label={settingsUi.channelEnabled}/>
           <div className="settings-grid">
-            <label>{settingsUi.metaWebhook}<input value={data.meta.webhookUrl} readOnly/></label>
-            <label>{settingsUi.metaAppId}<input name="appId" defaultValue={data.meta.appId}/></label>
-            <label>{settingsUi.metaPageId}<input name="pageId" defaultValue={data.meta.pageId}/></label>
-            <label>{settingsUi.metaInstagramId}<input name="instagramAccountId" defaultValue={data.meta.instagramAccountId} readOnly/></label>
-            <label>{settingsUi.metaInstagramAppId}<input ref={instagramAppIdRef} name="instagramAppId" defaultValue={data.meta.instagramAppId}/></label>
-            <label>{settingsUi.metaWhatsappId}<input name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/></label>
+            <CrmTextInput label={settingsUi.metaWebhook} value={data.meta.webhookUrl} readOnly/>
+            <CrmTextInput label={settingsUi.metaAppId} name="appId" defaultValue={data.meta.appId}/>
+            <CrmTextInput label={settingsUi.metaPageId} name="pageId" defaultValue={data.meta.pageId}/>
+            <CrmTextInput label={settingsUi.metaInstagramId} name="instagramAccountId" defaultValue={data.meta.instagramAccountId} readOnly/>
+            <CrmTextInput label={settingsUi.metaInstagramAppId} ref={instagramAppIdRef} name="instagramAppId" defaultValue={data.meta.instagramAppId}/>
+            <CrmTextInput label={settingsUi.metaWhatsappId} name="whatsappPhoneNumberId" defaultValue={data.meta.whatsappPhoneNumberId}/>
             <Secret name="appSecret" label={settingsUi.metaAppSecret} saved={data.meta.appSecretConfigured}/>
             <Secret inputRef={instagramAppSecretRef} name="instagramAppSecret" label={settingsUi.metaInstagramAppSecret} saved={data.meta.instagramAppSecretConfigured}/>
             <Secret name="verifyToken" label={settingsUi.metaVerifyToken} saved={data.meta.verifyTokenConfigured}/>
             <Secret name="pageAccessToken" label={settingsUi.metaPageToken} saved={data.meta.pageAccessTokenConfigured}/>
             <Secret name="whatsappAccessToken" label={settingsUi.metaWhatsappToken} saved={data.meta.whatsappAccessTokenConfigured}/>
           </div>
-          <button className="phase2-primary" disabled={saving}>{settingsUi.saveAdvanced}</button>
+          <CrmButton type="submit" disabled={saving}>{settingsUi.saveAdvanced}</CrmButton>
         </details>
         {saved==="meta"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
       </form>
@@ -234,116 +236,33 @@ function CommunicationsSettings() {
           {settingsUi.chatwootTitle} {"\u00b7"} {status(data.chatwoot.status)}
         </h2>
         <div className="settings-grid">
-          <label>{settingsUi.chatwootWebhook}<input value={data.chatwoot.webhookUrl} readOnly/></label>
-          <label className="settings-channel-toggle">
-            <input
-              name="enabled"
-              type="checkbox"
-              defaultChecked={data.chatwoot.enabled}
-            />
-            {settingsUi.channelEnabled}
-          </label>
-          <label>
-            {settingsUi.baseUrl}
-            <input
-              name="baseUrl"
-              type="url"
-              defaultValue={data.chatwoot.baseUrl}
-            />
-          </label>
-          <label>
-            {settingsUi.accountId}
-            <input name="accountId" defaultValue={data.chatwoot.accountId} />
-          </label>
-          <label>
-            {settingsUi.inboxId}
-            <input name="inboxId" defaultValue={data.chatwoot.inboxId} />
-          </label>
-          <label>
-            {settingsUi.accessToken}
-            <input
-              name="accessToken"
-              type="password"
-              autoComplete="new-password"
-              placeholder={
-                data.chatwoot.accessTokenConfigured
-                  ? settingsUi.secretSaved
-                  : settingsUi.secretNotSaved
-              }
-            />
-          </label>
+          <CrmTextInput label={settingsUi.chatwootWebhook} value={data.chatwoot.webhookUrl} readOnly/>
+          <CrmCheckbox className="settings-channel-toggle" name="enabled" defaultChecked={data.chatwoot.enabled} label={settingsUi.channelEnabled}/>
+          <CrmTextInput label={settingsUi.baseUrl} name="baseUrl" type="url" defaultValue={data.chatwoot.baseUrl}/>
+          <CrmTextInput label={settingsUi.accountId} name="accountId" defaultValue={data.chatwoot.accountId}/>
+          <CrmTextInput label={settingsUi.inboxId} name="inboxId" defaultValue={data.chatwoot.inboxId}/>
+          <CrmTextInput label={settingsUi.accessToken} name="accessToken" type="password" autoComplete="new-password" placeholder={data.chatwoot.accessTokenConfigured ? settingsUi.secretSaved : settingsUi.secretNotSaved}/>
           <Secret name="webhookSecret" label={settingsUi.chatwootWebhookSecret} saved={data.chatwoot.webhookSecretConfigured}/>
         </div>
         <p>{settingsUi.chatwootEmailHint}</p>
         {saved==="chatwoot"&&<div className="settings-success" role="status">{settingsUi.saved}</div>}
         {chatwootProfileRefresh&&<div className="settings-success" role="status">{chatwootProfileRefresh}</div>}
-        <div className="settings-actions"><button className="phase2-primary" disabled={saving}>{settingsUi.save}</button><button className="settings-secondary" type="button" aria-busy={chatwootProfilesRefreshing} disabled={saving||!data.chatwoot.accessTokenConfigured} onClick={()=>void refreshChatwootProfiles()}>{chatwootProfilesRefreshing?settingsUi.chatwootRefreshingProfiles:settingsUi.chatwootRefreshProfiles}</button></div>
+        <div className="settings-actions"><CrmButton type="submit" disabled={saving}>{settingsUi.save}</CrmButton><CrmButton tone="secondary" className="settings-secondary" type="button" aria-busy={chatwootProfilesRefreshing} disabled={saving||!data.chatwoot.accessTokenConfigured} onClick={()=>void refreshChatwootProfiles()}>{chatwootProfilesRefreshing?settingsUi.chatwootRefreshingProfiles:settingsUi.chatwootRefreshProfiles}</CrmButton></div>
       </form>
       <form className="settings-card" onSubmit={(e) => submit("email", e)}>
         <h2>
           {settingsUi.emailTitle} {"\u00b7"} {status(data.email.status)}
         </h2>
         <div className="settings-grid">
-          <label className="settings-channel-toggle">
-            <input
-              name="enabled"
-              type="checkbox"
-              defaultChecked={data.email.enabled}
-            />
-            {settingsUi.channelEnabled}
-          </label>
-          <label>
-            {settingsUi.smtpHost}
-            <input name="smtpHost" defaultValue={data.email.smtpHost} />
-          </label>
-          <label>
-            {settingsUi.smtpPort}
-            <input
-              name="smtpPort"
-              type="number"
-              min="1"
-              max="65535"
-              defaultValue={data.email.smtpPort||465}
-            />
-          </label>
-          <label>{settingsUi.imapHost}<input name="imapHost" defaultValue={data.email.imapHost||"imap.gmail.com"}/></label>
-          <label>{settingsUi.imapPort}<input name="imapPort" type="number" min="1" max="65535" defaultValue={data.email.imapPort||993}/></label>
-          <label>
-            {settingsUi.username}
-            <input name="username" type="email" defaultValue={data.email.username||"yoleotard@gmail.com"} />
-          </label>
-          <label>
-            {settingsUi.password}
-            <input
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              aria-describedby="email-app-password-hint"
-              placeholder={
-                data.email.passwordConfigured
-                  ? settingsUi.secretSaved
-                  : settingsUi.secretNotSaved
-              }
-            />
-          </label>
-          <label>
-            {settingsUi.fromAddress}
-            <input
-              name="fromAddress"
-              type="email"
-              defaultValue={data.email.fromAddress||"yoleotard@gmail.com"}
-            />
-          </label>
-          <label className="settings-span-all">
-            {settingsUi.emailSignature}
-            <textarea
-              name="signature"
-              rows={5}
-              maxLength={5000}
-              defaultValue={data.email.signature||""}
-              placeholder={settingsUi.emailSignaturePlaceholder}
-            />
-          </label>
+          <CrmCheckbox className="settings-channel-toggle" name="enabled" defaultChecked={data.email.enabled} label={settingsUi.channelEnabled}/>
+          <CrmTextInput label={settingsUi.smtpHost} name="smtpHost" defaultValue={data.email.smtpHost}/>
+          <CrmTextInput label={settingsUi.smtpPort} name="smtpPort" type="number" min="1" max="65535" defaultValue={data.email.smtpPort||465}/>
+          <CrmTextInput label={settingsUi.imapHost} name="imapHost" defaultValue={data.email.imapHost||"imap.gmail.com"}/>
+          <CrmTextInput label={settingsUi.imapPort} name="imapPort" type="number" min="1" max="65535" defaultValue={data.email.imapPort||993}/>
+          <CrmTextInput label={settingsUi.username} name="username" type="email" defaultValue={data.email.username||"yoleotard@gmail.com"}/>
+          <CrmTextInput label={settingsUi.password} name="password" type="password" autoComplete="new-password" aria-describedby="email-app-password-hint" placeholder={data.email.passwordConfigured ? settingsUi.secretSaved : settingsUi.secretNotSaved}/>
+          <CrmTextInput label={settingsUi.fromAddress} name="fromAddress" type="email" defaultValue={data.email.fromAddress||"yoleotard@gmail.com"}/>
+          <CrmTextarea className="settings-span-all" label={settingsUi.emailSignature} name="signature" rows={5} maxLength={5000} defaultValue={data.email.signature||""} placeholder={settingsUi.emailSignaturePlaceholder}/>
         </div>
         <p className="settings-inline-note">{settingsUi.emailSignatureHint}</p>
         <p id="email-app-password-hint">{settingsUi.emailAppPasswordHint}</p>
@@ -354,17 +273,27 @@ function CommunicationsSettings() {
         )}
         {!data.email.passwordConfigured&&<p className="settings-inline-note">{settingsUi.emailSaveBeforeVerify}</p>}
         <div className="settings-actions">
-          <button className="phase2-primary" disabled={saving}>{settingsUi.save}</button>
-          <button className="settings-secondary" type="button" disabled={saving||!data.email.passwordConfigured} onClick={()=>void verifyEmail()}>{settingsUi.emailVerify}</button>
+          <CrmButton type="submit" disabled={saving}>{settingsUi.save}</CrmButton>
+          <CrmButton tone="secondary" className="settings-secondary" type="button" disabled={saving||!data.email.passwordConfigured} onClick={()=>void verifyEmail()}>{settingsUi.emailVerify}</CrmButton>
         </div>
       </form>
     </section>
   );
 }
+type SettingsSection = "account" | "finance" | "communications" | "ai" | "production" | "interface";
 export function SettingsWorkspace({role}:{role:string}) {
-  const [section, setSection] = useState<"account" | "finance" | "communications" | "ai" | "production" | "interface">(
+  const [section, setSection] = useState<SettingsSection>(
     role==="OWNER"?"account":"finance",
   );
+  const tabs: CrmTab[] = [
+    ...(role==="OWNER"?[{value:"account",label:settingsUi.accountTab,panelId:"settings-account-panel",tabId:"settings-account-tab"}]:[]),
+    {value:"finance",label:settingsUi.finance,panelId:"settings-finance-panel",tabId:"settings-finance-tab"},
+    {value:"communications",label:settingsUi.communications,panelId:"settings-communications-panel",tabId:"settings-communications-tab"},
+    {value:"ai",label:settingsUi.aiTab,panelId:"settings-ai-panel",tabId:"settings-ai-tab"},
+    ...((role==="OWNER"||role==="ADMIN")?[{value:"production",label:settingsUi.production,panelId:"settings-production-panel",tabId:"settings-production-tab"},{value:"interface",label:settingsUi.interface,panelId:"settings-interface-panel",tabId:"settings-interface-tab"}]:[]),
+    {value:"orders",label:settingsUi.orders,disabled:true,title:settingsUi.comingSoon},
+    {value:"shipping",label:settingsUi.shipping,disabled:true,title:settingsUi.comingSoon},
+  ];
   return (
     <div className="settings-page">
       <header className="phase2-header">
@@ -374,57 +303,7 @@ export function SettingsWorkspace({role}:{role:string}) {
           <span>{settingsUi.subtitle}</span>
         </div>
       </header>
-      <nav
-        className="settings-tabs"
-        aria-label={settingsUi.title}
-        role="tablist"
-      >
-        {role==="OWNER"&&<button type="button" role="tab" aria-selected={section === "account"} aria-controls="settings-account-panel" className={section === "account" ? "active" : ""} onClick={() => setSection("account")}>{settingsUi.accountTab}</button>}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={section === "finance"}
-          aria-controls="settings-finance-panel"
-          className={section === "finance" ? "active" : ""}
-          onClick={() => setSection("finance")}
-        >
-          {settingsUi.finance}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={section === "communications"}
-          aria-controls="settings-communications-panel"
-          className={section === "communications" ? "active" : ""}
-          onClick={() => setSection("communications")}
-        >
-          {settingsUi.communications}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={section === "ai"}
-          aria-controls="settings-ai-panel"
-          className={section === "ai" ? "active" : ""}
-          onClick={() => setSection("ai")}
-        >
-          {settingsUi.aiTab}
-        </button>
-        {(role==="OWNER"||role==="ADMIN")&&<button type="button" role="tab" aria-selected={section === "production"} aria-controls="settings-production-panel" className={section === "production" ? "active" : ""} onClick={() => setSection("production")}>{settingsUi.production}</button>}
-        {(role==="OWNER"||role==="ADMIN")&&<button type="button" role="tab" aria-selected={section === "interface"} aria-controls="settings-interface-panel" className={section === "interface" ? "active" : ""} onClick={() => setSection("interface")}>{settingsUi.interface}</button>}
-        {(["orders", "shipping"] as const).map(
-          (key) => (
-            <button
-              type="button"
-              key={key}
-              disabled
-              title={settingsUi.comingSoon}
-            >
-              {settingsUi[key]}
-            </button>
-          ),
-        )}
-      </nav>
+      <CrmTabList className="settings-tabs" ariaLabel={settingsUi.title} value={section} onChange={value=>setSection(value as SettingsSection)} tabs={tabs}/>
       {section === "account"&&role==="OWNER" ? (
         <AccountSettings />
       ) : section === "finance" ? (
@@ -450,8 +329,8 @@ function BrandingSettings(){
   function pick(next?:File){if(preview)URL.revokeObjectURL(preview);setFile(undefined);setPreview("");setError("");if(!next)return;if(!["image/jpeg","image/png","image/webp"].includes(next.type)){setError(settingsUi.brandingTypeError);return}if(next.size>3*1024*1024){setError(settingsUi.brandingSizeError);return}setFile(next);setPreview(URL.createObjectURL(next))}
   async function persist(formElement:HTMLFormElement,removeLogo=false){if(!data)return;setSaving(true);setError("");setMessage("");try{const form=new FormData(formElement),body:Record<string,unknown>={useInHeader:Boolean(form.get("useInHeader")),useInMessages:Boolean(form.get("useInMessages")),removeLogo};if(file&&!removeLogo){body.name=file.name;body.mime=file.type;body.data=await brandingFileData(file)}const response=await fetch("/api/branding",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(Array.isArray(result.message)?result.message.join(", "):result.message||settingsUi.saveError);setData(result);pick(undefined);setMessage(settingsUi.brandingSaved);window.dispatchEvent(new Event("yoleotard-branding-changed"))}catch(reason){setError((reason as Error).message)}finally{setSaving(false)}}
   async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();await persist(event.currentTarget)}
-  if(!data)return <section id="settings-interface-panel" role="tabpanel" className="settings-card">{error?<div className="phase2-error" role="alert">{error}</div>:<p>{settingsUi.brandingLoading}</p>}</section>;
-  return <section id="settings-interface-panel" role="tabpanel" className="settings-card branding-settings"><h2>{settingsUi.brandingTitle}</h2><p>{settingsUi.brandingHint}</p><form onSubmit={event=>void save(event)}><div className="branding-logo-row"><div className="branding-logo-preview">{(preview||data.logoUrl)?<img src={preview||data.logoUrl||""} alt={settingsUi.brandingPreviewAlt}/>:<span>Y</span>}</div><div><label className="branding-file-button">{settingsUi.brandingChoose}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>pick(event.target.files?.[0])}/></label><small>{file?.name||settingsUi.brandingFileHint}</small>{(data.logoUrl||file)&&<CrmButton type="button" tone="secondary" disabled={saving} onClick={event=>{const form=event.currentTarget.form;if(form)void persist(form,true)}}>{settingsUi.brandingRemove}</CrmButton>}</div></div><div className="branding-uses"><CrmCheckbox name="useInHeader" defaultChecked={data.useInHeader} label={<span className="crm-checkbox-copy"><strong>{settingsUi.brandingHeader}</strong><small>{settingsUi.brandingHeaderHint}</small></span>}/><CrmCheckbox name="useInMessages" defaultChecked={data.useInMessages} label={<span className="crm-checkbox-copy"><strong>{settingsUi.brandingMessages}</strong><small>{settingsUi.brandingMessagesHint}</small></span>}/></div>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<CrmButton type="submit" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.save}</CrmButton></form></section>
+  if(!data)return <section id="settings-interface-panel" role="tabpanel" aria-labelledby="settings-interface-tab" className="settings-card">{error?<div className="phase2-error" role="alert">{error}</div>:<p>{settingsUi.brandingLoading}</p>}</section>;
+  return <section id="settings-interface-panel" role="tabpanel" aria-labelledby="settings-interface-tab" className="settings-card branding-settings"><h2>{settingsUi.brandingTitle}</h2><p>{settingsUi.brandingHint}</p><form onSubmit={event=>void save(event)}><div className="branding-logo-row"><div className="branding-logo-preview">{(preview||data.logoUrl)?<img src={preview||data.logoUrl||""} alt={settingsUi.brandingPreviewAlt}/>:<span>Y</span>}</div><div><label className="branding-file-button">{settingsUi.brandingChoose}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>pick(event.target.files?.[0])}/></label><small>{file?.name||settingsUi.brandingFileHint}</small>{(data.logoUrl||file)&&<CrmButton type="button" tone="secondary" disabled={saving} onClick={event=>{const form=event.currentTarget.form;if(form)void persist(form,true)}}>{settingsUi.brandingRemove}</CrmButton>}</div></div><div className="branding-uses"><CrmCheckbox name="useInHeader" defaultChecked={data.useInHeader} label={<span className="crm-checkbox-copy"><strong>{settingsUi.brandingHeader}</strong><small>{settingsUi.brandingHeaderHint}</small></span>}/><CrmCheckbox name="useInMessages" defaultChecked={data.useInMessages} label={<span className="crm-checkbox-copy"><strong>{settingsUi.brandingMessages}</strong><small>{settingsUi.brandingMessagesHint}</small></span>}/></div>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<CrmButton type="submit" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.save}</CrmButton></form></section>
 }
 function brandingFileData(file:File){return new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error(settingsUi.brandingReadError));reader.readAsDataURL(file)})}
 
@@ -461,23 +340,23 @@ function ProductionSettings() {
   useEffect(()=>{request().then(x=>{setSettings(x);setLoaded(true)}).catch(e=>setError((e as Error).message))},[]);
   const value=(key:string,fallback:number)=>{const current=settings.find(item=>item.section==="production"&&item.key===key)?.value;return typeof current==="number"?current:fallback};
   async function save(e:FormEvent<HTMLFormElement>){e.preventDefault();setSaving(true);setError("");setMessage("");try{const form=new FormData(e.currentTarget),updated=await request({method:"PATCH",body:JSON.stringify({defaultDurationDays:Number(form.get("defaultDurationDays")),shippingLeadDays:Number(form.get("shippingLeadDays"))})},"/api/finance/settings/production");setSettings(updated);setMessage(settingsUi.saved)}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
-  return <section id="settings-production-panel" role="tabpanel" className="settings-card"><h2>{settingsUi.productionSettingsTitle}</h2><p>{settingsUi.productionSettingsHint}</p><form key={JSON.stringify(settings)} className="settings-grid" onSubmit={save}><CrmTextInput label={settingsUi.productionDuration} description={settingsUi.productionDurationHint} name="defaultDurationDays" type="number" min="1" max="90" defaultValue={value("defaultDurationDays",7)} disabled={!loaded} required/><CrmTextInput label={settingsUi.shippingLeadDays} description={settingsUi.shippingLeadDaysHint} name="shippingLeadDays" type="number" min="0" max="30" defaultValue={value("shippingLeadDays",2)} disabled={!loaded} required/>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<CrmButton type="submit" disabled={saving||!loaded}>{saving?settingsUi.accountSaving:settingsUi.save}</CrmButton></form></section>
+  return <section id="settings-production-panel" role="tabpanel" aria-labelledby="settings-production-tab" className="settings-card"><h2>{settingsUi.productionSettingsTitle}</h2><p>{settingsUi.productionSettingsHint}</p><form key={JSON.stringify(settings)} className="settings-grid" onSubmit={save}><CrmTextInput label={settingsUi.productionDuration} description={settingsUi.productionDurationHint} name="defaultDurationDays" type="number" min="1" max="90" defaultValue={value("defaultDurationDays",7)} disabled={!loaded} required/><CrmTextInput label={settingsUi.shippingLeadDays} description={settingsUi.shippingLeadDaysHint} name="shippingLeadDays" type="number" min="0" max="30" defaultValue={value("shippingLeadDays",2)} disabled={!loaded} required/>{error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}<CrmButton type="submit" disabled={saving||!loaded}>{saving?settingsUi.accountSaving:settingsUi.save}</CrmButton></form></section>
 }
 
 function AccountSettings(){
   const[currentEmail,setCurrentEmail]=useState(""),[newEmail,setNewEmail]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState(""),[saving,setSaving]=useState(false);
   useEffect(()=>{fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(!r.ok)throw new Error();const x=await r.json();setCurrentEmail(x.user.email);setNewEmail(x.user.email)}).catch(()=>setError(settingsUi.accountLoadError))},[]);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setError("");setMessage("");const form=e.currentTarget,f=new FormData(form),newPassword=String(f.get("newPassword")||""),confirmPassword=String(f.get("confirmPassword")||"");if(newPassword!==confirmPassword){setError(settingsUi.accountMismatch);return}setSaving(true);try{const body:{currentPassword:string;email:string;newPassword?:string}={currentPassword:String(f.get("currentPassword")||""),email:String(f.get("email")||"")};if(newPassword)body.newPassword=newPassword;const r=await fetch("/api/auth/account",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(Array.isArray(x.message)?x.message.join(", "):x.message||settingsUi.saveError);setCurrentEmail(x.user.email);setNewEmail(x.user.email);form.reset();setMessage(settingsUi.accountSaved);window.dispatchEvent(new Event("yoleotard-auth-changed"))}catch(x){setError((x as Error).message)}finally{setSaving(false)}}
-  return <section id="settings-account-panel" role="tabpanel" className="settings-card">
+  return <section id="settings-account-panel" role="tabpanel" aria-labelledby="settings-account-tab" className="settings-card">
     <h2>{settingsUi.accountTitle}</h2><p>{settingsUi.accountHint}</p>
     <form className="settings-grid" onSubmit={submit}>
-      <label>{settingsUi.currentLogin}<input value={currentEmail} readOnly/></label>
-      <label>{settingsUi.newLogin}<input name="email" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} autoComplete="username" required/></label>
-      <label>{settingsUi.currentPassword}<input name="currentPassword" type="password" autoComplete="current-password" minLength={8} required/></label>
-      <label>{settingsUi.newPassword}<input name="newPassword" type="password" autoComplete="new-password" minLength={8}/></label>
-      <label>{settingsUi.confirmPassword}<input name="confirmPassword" type="password" autoComplete="new-password" minLength={8}/><small>{settingsUi.accountPasswordHint}</small></label>
+      <CrmTextInput label={settingsUi.currentLogin} value={currentEmail} readOnly/>
+      <CrmTextInput label={settingsUi.newLogin} name="email" type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} autoComplete="username" required/>
+      <CrmTextInput label={settingsUi.currentPassword} name="currentPassword" type="password" autoComplete="current-password" minLength={8} required/>
+      <CrmTextInput label={settingsUi.newPassword} name="newPassword" type="password" autoComplete="new-password" minLength={8}/>
+      <CrmTextInput label={settingsUi.confirmPassword} description={settingsUi.accountPasswordHint} name="confirmPassword" type="password" autoComplete="new-password" minLength={8}/>
       {error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}
-      <button className="phase2-primary" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.accountSave}</button>
+      <CrmButton type="submit" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.accountSave}</CrmButton>
     </form>
   </section>
 }
@@ -536,7 +415,7 @@ function FinanceSettings() {
     }
   }
   return (
-    <div id="settings-finance-panel" role="tabpanel">
+    <div id="settings-finance-panel" role="tabpanel" aria-labelledby="settings-finance-tab">
       <form
         key={JSON.stringify(settings)}
         className="settings-card"
@@ -546,48 +425,11 @@ function FinanceSettings() {
         <h2>{settingsUi.financeInvoices}</h2>
         <p>{settingsUi.financeHint}</p>
         <div className="settings-grid">
-          <label>
-            {settingsUi.invoicePrefix}
-            <input
-              name="invoicePrefix"
-              defaultValue={value("invoicePrefix", "INV-YO")}
-            />
-          </label>
-          <label>
-            {settingsUi.defaultCurrency}
-            <select
-              name="defaultCurrency"
-              defaultValue={value("defaultCurrency", "EUR")}
-            >
-              <option>EUR</option>
-              <option>USD</option>
-              <option>UAH</option>
-            </select>
-          </label>
-          <label>
-            {settingsUi.sellerName}
-            <input
-              name="sellerName"
-              defaultValue={value("sellerName", "Yoleotard")}
-            />
-          </label>
-          <label>
-            {settingsUi.sellerDetails}
-            <textarea
-              name="sellerAddress"
-              defaultValue={value("sellerAddress", settingsUi.defaultCountry)}
-            />
-          </label>
-          <label>
-            {settingsUi.defaultDeposit}
-            <input
-              name="depositPercent"
-              type="number"
-              min="0"
-              max="100"
-              defaultValue={value("depositPercent", "50")}
-            />
-          </label>
+          <CrmTextInput label={settingsUi.invoicePrefix} name="invoicePrefix" defaultValue={value("invoicePrefix", "INV-YO")}/>
+          <CrmNativeSelect label={settingsUi.defaultCurrency} name="defaultCurrency" defaultValue={value("defaultCurrency", "EUR")} data={["EUR","USD","UAH"]}/>
+          <CrmTextInput label={settingsUi.sellerName} name="sellerName" defaultValue={value("sellerName", "Yoleotard")}/>
+          <CrmTextarea label={settingsUi.sellerDetails} name="sellerAddress" defaultValue={value("sellerAddress", settingsUi.defaultCountry)}/>
+          <CrmTextInput label={settingsUi.defaultDeposit} name="depositPercent" type="number" min="0" max="100" defaultValue={value("depositPercent", "50")}/>
         </div>
         {error && (
           <div className="phase2-error" role="alert">
@@ -599,9 +441,9 @@ function FinanceSettings() {
             {message}
           </div>
         )}
-        <button className="phase2-primary" disabled={saving}>
+        <CrmButton type="submit" disabled={saving}>
           {settingsUi.save}
-        </button>
+        </CrmButton>
       </form>
       <section className="settings-card muted-card">
         <h2>{settingsUi.otherSections}</h2>
@@ -624,14 +466,14 @@ function AiControlCenter(){
   async function update(key:string,value:unknown,globalOnly=false){setError("");setSaved("");const scopedChannel=globalOnly?"":channel;const response=await fetch("/api/ai-control/settings",{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,value,scope:scopedChannel?"CHANNEL":"GLOBAL",...(scopedChannel?{scopeId:scopedChannel}:{})})});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||settingsUi.aiControl.saveError)}await load();setSaved(settingsUi.aiControl.saved)}
   if(!data)return <section className="settings-card" aria-busy={!error}><h2>{settingsUi.aiControl.title}</h2>{error?<div className="phase2-error" role="alert">{error}</div>:<p>{settingsUi.aiLoading}</p>}</section>;
   const labels=settingsUi.aiControl.labels as Record<string,string>,effective=data.effective,disabled=data.effective.serverBlocked;
-  const toggle=(key:string,forcedDisabled=false)=><label key={key} className="settings-check"><input type="checkbox" checked={Boolean(effective[key])} disabled={disabled||forcedDisabled} onChange={event=>update(key,event.target.checked).catch(e=>setError((e as Error).message))}/><span><strong>{labels[key]}</strong>{(forcedDisabled||disabled)&&<small>{disabled?settingsUi.aiControl.disabledByServer:settingsUi.aiControl.policyDisabled}</small>}</span></label>;
+  const toggle=(key:string,forcedDisabled=false)=><CrmCheckbox key={key} className="settings-check" checked={Boolean(effective[key])} disabled={disabled||forcedDisabled} onChange={event=>update(key,event.target.checked).catch(e=>setError((e as Error).message))} label={<span><strong>{labels[key]}</strong>{(forcedDisabled||disabled)&&<small>{disabled?settingsUi.aiControl.disabledByServer:settingsUi.aiControl.policyDisabled}</small>}</span>}/>;
   return <div className="settings-ai-control">
     <section className="settings-card"><h2>{settingsUi.aiControl.title}</h2><p>{settingsUi.aiControl.hint}</p><div className={disabled?"phase2-warning":"settings-success"}>{disabled?settingsUi.aiControl.disabledByServer:settingsUi.aiControl.serverPolicy}</div><div className="settings-grid"><strong>{settingsUi.aiControl.global}: {effective.masterEnabled?settingsUi.aiControl.stateLabels.on:settingsUi.aiControl.stateLabels.off}</strong><strong>{settingsUi.aiControl.mode}: {settingsUi.aiControl.modeLabels[effective.mode as keyof typeof settingsUi.aiControl.modeLabels]||effective.mode}</strong><span>{settingsUi.aiControl.provider}: {data.serverPolicy.provider}</span><span>{settingsUi.aiControl.model}: {data.serverPolicy.analysisModel}</span><span>{settingsUi.aiControl.worker}: {data.worker.running?settingsUi.aiControl.running:settingsUi.aiControl.stopped}</span><span>{settingsUi.aiControl.outbox}: {data.outbox.status==="healthy"?settingsUi.aiControl.healthy:settingsUi.aiControl.warning}</span><span>{settingsUi.aiControl.autoReplies}: {settingsUi.aiControl.stateLabels.off}</span><span>{settingsUi.aiControl.lastRun}: {data.lastSuccessfulRun?new Date(data.lastSuccessfulRun).toLocaleString("ru-RU"):settingsUi.aiControl.never}</span></div></section>
     <section className="settings-card"><h3>{summaryFormatUi.title}</h3><p>{summaryFormatUi.hint}</p><CrmNativeSelect label={summaryFormatUi.title} value={String(effective.summaryDetailLevel||"DETAILED")} data={[{value:"COMPACT",label:summaryFormatUi.compact},{value:"DETAILED",label:summaryFormatUi.detailed}]} onChange={event=>update("summaryDetailLevel",event.target.value,true).catch(e=>setError((e as Error).message))}/></section>
-    <section className="settings-card"><label>{settingsUi.aiControl.channel}<select value={channel} onChange={event=>setChannel(event.target.value)}><option value="">{settingsUi.aiControl.globalScope}</option>{(["INSTAGRAM","FACEBOOK","WHATSAPP","EMAIL"] as const).map(value=><option key={value} value={value}>{settingsUi.aiControl.channelLabels[value]}</option>)}</select></label>{toggle("masterEnabled")}<label>{settingsUi.aiControl.operatingMode}<select value={String(effective.mode)} disabled={disabled} onChange={event=>update("mode",event.target.value).catch(e=>setError((e as Error).message))}><option value="OFF">{settingsUi.aiControl.modeLabels.OFF}</option><option value="SHADOW">{settingsUi.aiControl.modeLabels.SHADOW}</option>{(["ASSIST","AUTO_SAFE","AGENT","AUTONOMOUS"] as const).map(value=><option key={value} value={value} disabled>{settingsUi.aiControl.modeLabels[value]} — {settingsUi.aiControl.policyDisabled}</option>)}</select></label><label>{settingsUi.aiControl.rollout}<select value={Number(effective.rolloutPercentage||0)} disabled={disabled} onChange={event=>update("rolloutPercentage",Number(event.target.value)).catch(e=>setError((e as Error).message))}>{[0,10,25,50,100].map(value=><option key={value} value={value}>{value}%</option>)}</select></label></section>
+    <section className="settings-card"><CrmNativeSelect label={settingsUi.aiControl.channel} value={channel} onChange={event=>setChannel(event.target.value)} data={[{value:"",label:settingsUi.aiControl.globalScope},...(["INSTAGRAM","FACEBOOK","WHATSAPP","EMAIL"] as const).map(value=>({value,label:settingsUi.aiControl.channelLabels[value]}))]}/>{toggle("masterEnabled")}<CrmNativeSelect label={settingsUi.aiControl.operatingMode} value={String(effective.mode)} disabled={disabled} onChange={event=>update("mode",event.target.value).catch(e=>setError((e as Error).message))} data={[{value:"OFF",label:settingsUi.aiControl.modeLabels.OFF},{value:"SHADOW",label:settingsUi.aiControl.modeLabels.SHADOW},...(["ASSIST","AUTO_SAFE","AGENT","AUTONOMOUS"] as const).map(value=>({value,label:`${settingsUi.aiControl.modeLabels[value]} — ${settingsUi.aiControl.policyDisabled}`,disabled:true}))]}/><CrmNativeSelect label={settingsUi.aiControl.rollout} value={String(Number(effective.rolloutPercentage||0))} disabled={disabled} onChange={event=>update("rolloutPercentage",Number(event.target.value)).catch(e=>setError((e as Error).message))} data={[0,10,25,50,100].map(value=>({value:String(value),label:`${value}%`}))}/></section>
     {AI_CONTROL_GROUPS.map(([title,keys])=><section className="settings-card" key={title}><h3>{settingsUi.aiControl[title]}</h3><div className="settings-ai-switches">{keys.map(key=>toggle(key,["autoPromoteMemories","autoConfirmAgreements","autoReplies"].includes(key)))}</div></section>)}
     <section className="settings-card"><h3>{settingsUi.aiControl.actions}</h3><div className="settings-grid">{settingsUi.aiControl.actionNames.map((name,index)=><div key={name}><strong>{name}</strong><small>{index<5?settingsUi.aiControl.readOnly:index<8?settingsUi.aiControl.approvalRequired:settingsUi.aiControl.disabled}</small></div>)}</div><p>{settingsUi.aiControl.policyDisabled}</p></section>
-    <section className="settings-card"><h3>{settingsUi.aiControl.limits}</h3><div className="settings-grid">{Object.entries(settingsUi.aiControl.limitNames).map(([key,name])=>{const definition=(data as AiControlData&{definitions?:Record<string,{min:number;max:number;writable?:boolean}>}).definitions?.[key];return <label key={key}>{name}<input type="number" min={definition?.min} max={definition?.max} defaultValue={Number(effective[key]||definition?.min||1)} disabled={disabled||definition?.writable===false} onBlur={event=>update(key,Number(event.target.value)).catch(e=>setError((e as Error).message))}/>{definition?.writable===false&&<small>{settingsUi.aiControl.policyDisabled}</small>}</label>})}</div></section>
+    <section className="settings-card"><h3>{settingsUi.aiControl.limits}</h3><div className="settings-grid">{Object.entries(settingsUi.aiControl.limitNames).map(([key,name])=>{const definition=(data as AiControlData&{definitions?:Record<string,{min:number;max:number;writable?:boolean}>}).definitions?.[key];return <CrmTextInput key={key} label={name} description={definition?.writable===false?settingsUi.aiControl.policyDisabled:undefined} type="number" min={definition?.min} max={definition?.max} defaultValue={Number(effective[key]||definition?.min||1)} disabled={disabled||definition?.writable===false} onBlur={event=>update(key,Number(event.target.value)).catch(e=>setError((e as Error).message))}/>})}</div></section>
     <section className="settings-card"><h3>{settingsUi.aiControl.statistics}</h3><div className="settings-grid"><span>{settingsUi.aiControl.messagesQueued}: {data.statistics24h.messagesQueued}</span><span>{settingsUi.aiControl.completed}: {data.statistics24h.analysesCompleted}</span><span>{settingsUi.aiControl.failed}: {data.statistics24h.failed}</span><span>{settingsUi.aiControl.retries}: {data.statistics24h.retryCount}</span><span>{settingsUi.aiControl.latency}: {data.statistics24h.averageLatencyMs} ms</span><span>{settingsUi.aiControl.tokens}: {data.statistics24h.inputTokens}/{data.statistics24h.outputTokens}</span><span>{settingsUi.aiControl.cost}: {data.statistics24h.estimatedCostMinor}</span><span>{settingsUi.aiControl.automaticSent}: 0</span></div></section>
     {saved&&<div className="settings-success" role="status">{saved}</div>}{error&&<div className="phase2-error" role="alert">{error}</div>}
   </div>
@@ -724,6 +566,7 @@ function AiSettings() {
       <section
         id="settings-ai-panel"
         role="tabpanel"
+        aria-labelledby="settings-ai-tab"
         className="settings-card"
         aria-busy={!error}
       >
@@ -738,7 +581,7 @@ function AiSettings() {
       </section>
     );
   return (
-    <div id="settings-ai-panel" role="tabpanel" className="settings-ai-panel">
+    <div id="settings-ai-panel" role="tabpanel" aria-labelledby="settings-ai-tab" className="settings-ai-panel">
       <AiControlCenter />
       <form className="settings-card settings-ai-card" onSubmit={submit} aria-busy={saving}>
       <header className="settings-ai-header">
@@ -758,40 +601,11 @@ function AiSettings() {
         </span>
       </header>
       <div className="settings-ai-switches">
-        <label className="settings-check">
-          <input
-            name="enabled"
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          <span>
-            <strong>{settingsUi.aiEnabled}</strong>
-          </span>
-        </label>
-        <label className="settings-check settings-consent">
-          <input
-            name="allowClientContext"
-            type="checkbox"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-          />
-          <span>
-            <strong>{settingsUi.aiConsent}</strong>
-            <small>{settingsUi.aiConsentHint}</small>
-          </span>
-        </label>
+        <CrmCheckbox className="settings-check" name="enabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} label={<span><strong>{settingsUi.aiEnabled}</strong></span>}/>
+        <CrmCheckbox className="settings-check settings-consent" name="allowClientContext" checked={consent} onChange={(e) => setConsent(e.target.checked)} label={<span><strong>{settingsUi.aiConsent}</strong><small>{settingsUi.aiConsentHint}</small></span>}/>
       </div>
       <div className="settings-grid">
-        <label className="settings-wide">
-          {settingsUi.aiToken}
-          <input
-            name="apiKey"
-            type="password"
-            autoComplete="new-password"
-            placeholder={settingsUi.aiTokenPlaceholder}
-          />
-          <small>
+        <CrmTextInput className="settings-wide" label={settingsUi.aiToken} name="apiKey" type="password" autoComplete="new-password" placeholder={settingsUi.aiTokenPlaceholder} description={<>
             {data.apiKeySource === "settings"
               ? settingsUi.aiTokenSaved
               : data.apiKeySource === "environment"
@@ -799,30 +613,11 @@ function AiSettings() {
                 : settingsUi.aiTokenMissing}
             {" · "}
             {settingsUi.aiTokenHint}
-          </small>
-        </label>
-        <label>
-          {settingsUi.aiModel}
-          <select name="model" defaultValue={data.model} required>
-            {AI_MODEL_OPTIONS.map((model) => <option key={model} value={model}>{model}</option>)}
-          </select>
-        </label>
-        <label>
-          {settingsUi.aiLanguage}
-          <input
-            name="defaultLanguage"
-            defaultValue={data.defaultLanguage}
-            required
-          />
-        </label>
-        <label>
-          {settingsUi.aiTone}
-          <input name="tone" defaultValue={data.tone} required />
-        </label>
-        <label className="settings-wide">
-          {settingsUi.aiInstructions}
-          <textarea name="systemPrompt" defaultValue={data.systemPrompt} />
-        </label>
+          </>}/>
+        <CrmNativeSelect label={settingsUi.aiModel} name="model" defaultValue={data.model} required data={AI_MODEL_OPTIONS.map(model=>({value:model,label:model}))}/>
+        <CrmTextInput label={settingsUi.aiLanguage} name="defaultLanguage" defaultValue={data.defaultLanguage} required/>
+        <CrmTextInput label={settingsUi.aiTone} name="tone" defaultValue={data.tone} required/>
+        <CrmTextarea className="settings-wide" label={settingsUi.aiInstructions} name="systemPrompt" defaultValue={data.systemPrompt}/>
       </div>
       {saved && (
         <div className="settings-success" role="status">
@@ -831,10 +626,10 @@ function AiSettings() {
       )}
       {error && <div className="phase2-error" role="alert">{error}</div>}
       <div className="settings-ai-actions">
-        <button className="phase2-primary" disabled={saving}>
+        <CrmButton type="submit" disabled={saving}>
           {saving ? settingsUi.aiSaving : settingsUi.aiSave}
-        </button>
-        {data.connected && <button type="button" className="phase2-secondary" disabled={saving} onClick={removeToken}>{settingsUi.aiDeleteToken}</button>}
+        </CrmButton>
+        {data.connected && <CrmButton tone="secondary" type="button" disabled={saving} onClick={removeToken}>{settingsUi.aiDeleteToken}</CrmButton>}
       </div>
       </form>
     </div>

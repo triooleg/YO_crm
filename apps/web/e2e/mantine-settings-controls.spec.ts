@@ -18,12 +18,23 @@ async function mockSettings(page: Page) {
     settings: [], worker: { running: false }, outbox: { status: "healthy", queued: 0 }, lastSuccessfulRun: null,
     statistics24h: { messagesQueued: 0, analysesCompleted: 0, failed: 0, retryCount: 0, averageLatencyMs: 0, inputTokens: 0, outputTokens: 0, estimatedCostMinor: 0, automaticRepliesSent: 0 },
   };
+  const integrations = {
+    deliveryAvailable: true,
+    meta: { enabled: false, status: "DISCONNECTED", appId: "", pageId: "", pageName: "", instagramAccountId: "", instagramAppId: "", instagramStatus: "DISCONNECTED", instagramSubscriptionVerifiedAt: null, lastInstagramWebhookAt: null, whatsappPhoneNumberId: "", appSecretConfigured: false, instagramAppSecretConfigured: false, verifyTokenConfigured: false, verifyTokenUnsafe: false, pageAccessTokenConfigured: false, whatsappAccessTokenConfigured: false, subscriptionVerifiedAt: null, lastWebhookAt: null, webhookUrl: "https://crm.test/meta" },
+    chatwoot: { enabled: true, status: "CONNECTED", baseUrl: "https://chatwoot.test", accountId: "1", inboxId: "2", accessTokenConfigured: true, webhookSecretConfigured: true, webhookUrl: "https://crm.test/chatwoot" },
+    email: { enabled: true, status: "CONNECTED", smtpHost: "smtp.test", smtpPort: 465, imapHost: "imap.test", imapPort: 993, username: "mail@test.local", fromAddress: "mail@test.local", signature: "YO", passwordConfigured: true },
+  };
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/auth/me") {
       return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } } });
+    }
+    if (path === "/api/auth/account" && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      writes.push({ path, body });
+      return route.fulfill({ json: { user: { email: body.email, displayName: "QA Operator", role: "OWNER" } } });
     }
     if (path === "/api/branding" && request.method() === "GET") return route.fulfill({ json: branding });
     if (path === "/api/branding" && request.method() === "PUT") {
@@ -32,12 +43,28 @@ async function mockSettings(page: Page) {
       return route.fulfill({ json: { ...branding, ...body, logoUrl: body.removeLogo ? null : branding.logoUrl } });
     }
     if (path === "/api/finance/settings" && request.method() === "GET") return route.fulfill({ json: production });
+    if (path === "/api/finance/settings" && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      writes.push({ path, body });
+      return route.fulfill({ json: { saved: true } });
+    }
     if (path === "/api/finance/settings/production" && request.method() === "PATCH") {
       const body = request.postDataJSON();
       writes.push({ path, body });
       return route.fulfill({ json: production.map(item => ({ ...item, value: body[item.key] })) });
     }
     if (path === "/api/ai-assistant/settings" && request.method() === "GET") return route.fulfill({ json: aiAssistant });
+    if (path === "/api/ai-assistant/settings" && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      writes.push({ path, body });
+      return route.fulfill({ json: { ...aiAssistant, ...body, connected: false, apiKeySource: "none" } });
+    }
+    if (path === "/api/communications/integrations" && request.method() === "GET") return route.fulfill({ json: integrations });
+    if (path === "/api/communications/integrations/chatwoot" && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      writes.push({ path, body });
+      return route.fulfill({ json: integrations.chatwoot });
+    }
     if (path === "/api/ai-control/status" && request.method() === "GET") return route.fulfill({ json: aiControl });
     if (path === "/api/ai-control/settings" && request.method() === "PATCH") {
       const body = request.postDataJSON();
@@ -49,6 +76,115 @@ async function mockSettings(page: Page) {
   });
   return writes;
 }
+
+test("все разделы настроек используют доступные Mantine-контролы", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  await mockSettings(page);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.goto("/?section=settings");
+
+  const tabs = page.getByRole("tablist", { name: "Настройки" });
+  const accountTab = tabs.getByRole("tab", { name: "Учётная запись" });
+  await accountTab.focus();
+  await page.keyboard.press("ArrowRight");
+  const financeTab = tabs.getByRole("tab", { name: "Финансы" });
+  await expect(financeTab).toHaveAttribute("aria-selected", "true");
+  await expect(financeTab).toHaveAttribute("aria-controls", "settings-finance-panel");
+  await expect(tabs.getByRole("tab", { name: "Заказы" })).toHaveAttribute("title", "Настройки раздела появятся позже");
+  await expect(page.locator('select[name="defaultCurrency"]')).toHaveClass(/mantine-NativeSelect-input/);
+  await expect(page.locator('textarea[name="sellerAddress"]')).toHaveClass(/mantine-Textarea-input/);
+
+  await tabs.getByRole("tab", { name: "Каналы связи" }).click();
+  await expect(page.locator('input[name="baseUrl"]')).toHaveClass(/mantine-TextInput-input/);
+  await expect(page.locator('textarea[name="signature"]')).toHaveClass(/mantine-Textarea-input/);
+  await expect(page.locator('input[name="enabled"]').first()).toHaveClass(/mantine-Checkbox-input/);
+
+  await tabs.getByRole("tab", { name: "AI-помощник" }).click();
+  await expect(page.locator('select[name="model"]')).toHaveClass(/mantine-NativeSelect-input/);
+  await expect(page.locator('textarea[name="systemPrompt"]')).toHaveClass(/mantine-Textarea-input/);
+
+  await tabs.getByRole("tab", { name: "Учётная запись" }).click();
+  await expect(page.locator('input[name="currentPassword"]')).toHaveClass(/mantine-TextInput-input/);
+  expect(pageErrors).toEqual([]);
+});
+
+test("панель каналов сохраняет доступную связь во время загрузки", async ({ page }) => {
+  let releaseIntegrations!: () => void;
+  const integrationsReady = new Promise<void>(resolve => { releaseIntegrations = resolve; });
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } } });
+    if (path === "/api/communications/integrations") {
+      await integrationsReady;
+      return route.fulfill({ status: 500, json: { message: "test complete" } });
+    }
+    return route.fulfill({ status: 501, json: { message: "Unexpected test route" } });
+  });
+  await page.goto("/?section=settings");
+  const channelsTab = page.getByRole("tab", { name: "Каналы связи" });
+  await channelsTab.click();
+  const loadingPanel = page.locator("#settings-communications-panel");
+  await expect(channelsTab).toHaveAttribute("aria-controls", "settings-communications-panel");
+  await expect(loadingPanel).toHaveAttribute("aria-labelledby", "settings-communications-tab");
+  releaseIntegrations();
+});
+
+test("мигрированные формы сохраняют прежние бизнес-payload", async ({ page }) => {
+  const writes = await mockSettings(page);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.goto("/?section=settings");
+  const tabs = page.getByRole("tablist", { name: "Настройки" });
+
+  const account = page.locator("#settings-account-panel form");
+  await account.locator('input[name="email"]').fill("owner@yoleotard.local");
+  await account.locator('input[name="currentPassword"]').fill("current-password");
+  await account.getByRole("button", { name: "Изменить учётные данные" }).click();
+  await expect.poll(() => writes.length).toBe(1);
+
+  await tabs.getByRole("tab", { name: "Финансы" }).click();
+  const finance = page.locator("#settings-finance-panel form");
+  await finance.locator('input[name="invoicePrefix"]').fill("YO-TEST");
+  await finance.locator('select[name="defaultCurrency"]').selectOption("USD");
+  await finance.locator('input[name="sellerName"]').fill("Yoleotard Test");
+  await finance.locator('textarea[name="sellerAddress"]').fill("Kyiv");
+  await finance.locator('input[name="depositPercent"]').fill("55");
+  await finance.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect.poll(() => writes.length).toBe(6);
+
+  await tabs.getByRole("tab", { name: "Каналы связи" }).click();
+  const chatwoot = page.locator('form').filter({ has: page.locator('input[name="baseUrl"]') });
+  await chatwoot.locator('input[name="enabled"]').uncheck();
+  await chatwoot.locator('input[name="accessToken"]').fill("");
+  await chatwoot.locator('input[name="webhookSecret"]').fill("");
+  await chatwoot.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect.poll(() => writes.length).toBe(7);
+
+  await tabs.getByRole("tab", { name: "AI-помощник" }).click();
+  const ai = page.locator("#settings-ai-panel form");
+  await ai.locator('input[name="enabled"]').check();
+  await ai.getByRole("button", { name: "Сохранить настройки AI" }).click();
+  await expect(ai.getByRole("alert")).toBeVisible();
+  expect(writes).toHaveLength(7);
+  await ai.locator('input[name="allowClientContext"]').check();
+  await ai.locator('select[name="model"]').selectOption("gpt-4.1");
+  await ai.locator('input[name="defaultLanguage"]').fill("ru");
+  await ai.locator('input[name="tone"]').fill("краткий");
+  await ai.locator('textarea[name="systemPrompt"]').fill("Отвечать по делу");
+  await ai.getByRole("button", { name: "Сохранить настройки AI" }).click();
+  await expect.poll(() => writes.length).toBe(8);
+
+  expect(writes).toEqual([
+    { path: "/api/auth/account", body: { currentPassword: "current-password", email: "owner@yoleotard.local" } },
+    { path: "/api/finance/settings", body: { section: "finance", key: "invoicePrefix", value: "YO-TEST" } },
+    { path: "/api/finance/settings", body: { section: "finance", key: "sellerName", value: "Yoleotard Test" } },
+    { path: "/api/finance/settings", body: { section: "finance", key: "sellerAddress", value: "Kyiv" } },
+    { path: "/api/finance/settings", body: { section: "finance", key: "defaultCurrency", value: "USD" } },
+    { path: "/api/finance/settings", body: { section: "orders", key: "depositPercent", value: 55 } },
+    { path: "/api/communications/integrations/chatwoot", body: { enabled: false, baseUrl: "https://chatwoot.test", accountId: "1", inboxId: "2", accessToken: "", webhookSecret: "" } },
+    { path: "/api/ai-assistant/settings", body: { enabled: true, allowClientContext: true, model: "gpt-4.1", defaultLanguage: "ru", tone: "краткий", systemPrompt: "Отвечать по делу" } },
+  ]);
+});
 
 for (const viewport of [
   { name: "desktop", width: 1920, height: 1080 },
@@ -63,7 +199,29 @@ for (const viewport of [
     await page.goto("/?section=settings");
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 
-    await page.getByRole("tab", { name: "Производство" }).click();
+    const settingsTabs = page.getByRole("tablist", { name: "Настройки" });
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-account-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await page.locator("#settings-account-panel").screenshot({ path: screenshotPath(testInfo, `mantine-account-panel-${viewport.width}x${viewport.height}.png`) });
+    await settingsTabs.getByRole("tab", { name: "Финансы" }).click();
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-finance-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await page.locator("#settings-finance-panel").screenshot({ path: screenshotPath(testInfo, `mantine-finance-panel-${viewport.width}x${viewport.height}.png`) });
+    await settingsTabs.getByRole("tab", { name: "Каналы связи" }).click();
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-communications-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await page.locator("#settings-communications-panel").screenshot({ path: screenshotPath(testInfo, `mantine-communications-panel-${viewport.width}x${viewport.height}.png`) });
+    const baseUrlBox = await page.locator('input[name="baseUrl"]').boundingBox();
+    const signatureBox = await page.locator('textarea[name="signature"]').boundingBox();
+    expect(baseUrlBox).not.toBeNull();
+    expect(signatureBox).not.toBeNull();
+    expect(baseUrlBox!.height).toBeGreaterThanOrEqual(38);
+    expect(signatureBox!.height).toBeGreaterThanOrEqual(80);
+    if (viewport.width <= 440) {
+      const tabsBox = await settingsTabs.boundingBox();
+      expect(tabsBox).not.toBeNull();
+      expect(tabsBox!.height).toBeLessThanOrEqual(44);
+      expect(await settingsTabs.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    }
+
+    await settingsTabs.getByRole("tab", { name: "Производство" }).click();
     const productionPanel = page.locator("#settings-production-panel");
     await productionPanel.getByLabel("Срок выполнения заказа, дней").fill("12");
     await productionPanel.getByLabel("Резерв до отправки, дней").fill("4");
@@ -72,6 +230,7 @@ for (const viewport of [
     await productionSave.click();
     await expect(productionPanel.getByRole("status")).toHaveText("Настройки сохранены");
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-production-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await productionPanel.screenshot({ path: screenshotPath(testInfo, `mantine-production-panel-${viewport.width}x${viewport.height}.png`) });
 
     await page.getByRole("tab", { name: "Интерфейс" }).click();
     const brandingPanel = page.locator("#settings-interface-panel");
@@ -88,6 +247,8 @@ for (const viewport of [
     await expect(brandingPanel.getByRole("status")).toHaveText("Логотип и места использования сохранены");
     await brandingPanel.getByRole("button", { name: "Сохранить настройки" }).click();
     await expect(brandingPanel.getByRole("status")).toHaveText("Логотип и места использования сохранены");
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-interface-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await brandingPanel.screenshot({ path: screenshotPath(testInfo, `mantine-interface-panel-${viewport.width}x${viewport.height}.png`) });
     if (viewport.width <= 440) {
       const buttonBox = await brandingPanel.getByRole("button", { name: "Сохранить настройки" }).boundingBox();
       const panelBox = await brandingPanel.boundingBox();
@@ -96,7 +257,7 @@ for (const viewport of [
       expect(Math.abs(buttonBox!.width - (panelBox!.width - 36))).toBeLessThanOrEqual(2);
     }
 
-    await page.getByRole("tab", { name: "AI-помощник" }).click();
+    await settingsTabs.getByRole("tab", { name: "AI-помощник" }).click();
     const summarySelect = page.getByLabel("Формат сводки");
     await expect(summarySelect).toHaveClass(/mantine-NativeSelect-input/);
     await summarySelect.selectOption("COMPACT");
@@ -111,6 +272,7 @@ for (const viewport of [
     ]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     expect(pageErrors).toEqual([]);
-    await page.screenshot({ path: screenshotPath(testInfo, `mantine-settings-controls-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-ai-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    await page.locator("#settings-ai-panel").screenshot({ path: screenshotPath(testInfo, `mantine-ai-panel-${viewport.width}x${viewport.height}.png`) });
   });
 }
