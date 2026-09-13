@@ -158,3 +158,69 @@ test("фильтры и сортировка заказов сохраняют �
   await page.getByLabel("Сортировка").selectOption("client");
   await expect(orderNumbers).toHaveText([secondOrder.number, order.number]);
 });
+
+for (const viewport of [
+  { name: "desktop", width: 1920, height: 1080 },
+  { name: "laptop", width: 1366, height: 768 },
+  { name: "mobile", width: 390, height: 844 },
+]) {
+  test(`настройка столбцов сохраняется и доступна с клавиатуры: ${viewport.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockOrdersApi(page);
+    await page.goto("/?section=orders");
+
+    const trigger = page.getByRole("button", { name: "Столбцы" });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "Столбцы" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("checkbox", { name: "№ / Клиент" })).toBeFocused();
+
+    const designs = dialog.getByRole("checkbox", { name: "Дизайны" });
+    await designs.uncheck();
+    await expect(page.getByRole("columnheader", { name: "Дизайны" })).toBeHidden();
+
+    await dialog.getByRole("button", { name: "Ниже" }).first().click();
+    await expect(page.locator("thead th.orders-col").nth(0)).toHaveText("Кол-во");
+    await expect(page.locator("thead th.orders-col").nth(1)).toHaveText("№ / Клиент");
+
+    const deadlineRow = dialog.locator('[data-column-id="deadline"]');
+    const paymentRow = dialog.locator('[data-column-id="payment"]');
+    await deadlineRow.dragTo(paymentRow);
+    const visibleColumnClasses = async (selector: string) => page.locator(selector).evaluateAll((elements) => elements.map((element) => [...element.classList].find((name) => name.startsWith("orders-col-") && name !== "orders-col") || ""));
+    await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
+      "orders-col-quantity", "orders-col-client", "orders-col-discipline", "orders-col-payment", "orders-col-deadline", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+    ]);
+    expect(await visibleColumnClasses("tbody tr.orders-summary-row td.orders-col")).toEqual(await visibleColumnClasses("thead th.orders-col"));
+    await expect(dialog.getByRole("button", { name: "Готово" })).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath(`mantine-orders-columns-${viewport.width}x${viewport.height}.png`), fullPage: false });
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await expect(page.getByRole("dialog", { name: "Столбцы" }).getByRole("checkbox", { name: "Дизайны" })).not.toBeChecked();
+    await page.getByRole("dialog", { name: "Столбцы" }).getByRole("button", { name: "Готово" }).click();
+    await page.reload();
+    await page.getByRole("button", { name: "Столбцы" }).click();
+    const persistedDialog = page.getByRole("dialog", { name: "Столбцы" });
+    await expect(persistedDialog.getByRole("checkbox", { name: "Дизайны" })).not.toBeChecked();
+    await expect(page.locator("thead th.orders-col").nth(0)).toHaveText("Кол-во");
+    await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
+      "orders-col-quantity", "orders-col-client", "orders-col-discipline", "orders-col-payment", "orders-col-deadline", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+    ]);
+
+    await persistedDialog.getByRole("button", { name: "Сбросить" }).click();
+    await expect(persistedDialog.getByRole("checkbox", { name: "Дизайны" })).toBeChecked();
+    await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
+      "orders-col-client", "orders-col-quantity", "orders-col-discipline", "orders-col-designs", "orders-col-deadline", "orders-col-payment", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+    ]);
+    await persistedDialog.getByRole("button", { name: "Готово" }).click();
+    await page.reload();
+    await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
+      "orders-col-client", "orders-col-quantity", "orders-col-discipline", "orders-col-designs", "orders-col-deadline", "orders-col-payment", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+    ]);
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  });
+}

@@ -4,8 +4,9 @@ import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useE
 import { Modal } from "@mantine/core";
 import { ordersDashboardUi as ui } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
+import { parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
-import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
+import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 import { CrmSearchField } from "./crm/search-field";
 import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
 import { repairMojibake } from "../lib/text-encoding.mjs";
@@ -45,6 +46,7 @@ export function OrdersDashboard({ onNavigate }: Props) {
   const [measurementOrder, setMeasurementOrder] = useState<Order>();
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const columnsTrigger = useRef<HTMLButtonElement>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(DEFAULT_COLUMNS);
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set());
   const [draggedColumn, setDraggedColumn] = useState<ColumnId>();
@@ -84,13 +86,10 @@ export function OrdersDashboard({ onNavigate }: Props) {
   }, [search]);
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(COLUMN_SETTINGS_KEY) || "null") as { order?: ColumnId[]; hidden?: ColumnId[] } | null;
-      if (!saved) return;
-      const known = (saved.order || []).filter((id): id is ColumnId => DEFAULT_COLUMNS.includes(id));
-      setColumnOrder([...known, ...DEFAULT_COLUMNS.filter((id) => !known.includes(id))]);
-      setHiddenColumns(new Set((saved.hidden || []).filter((id): id is ColumnId => DEFAULT_COLUMNS.includes(id))));
-    } catch {}
+    const saved = parseOrderColumnSettings(localStorage.getItem(COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS);
+    if (!saved) return;
+    setColumnOrder(saved.order);
+    setHiddenColumns(new Set(saved.hidden));
   }, []);
 
   useEffect(() => setPage(1), [quickFilter, statusFilter, disciplineFilter, sort, search]);
@@ -244,7 +243,7 @@ export function OrdersDashboard({ onNavigate }: Props) {
       </div>
       <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.deposit], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{value}</small></button>)}</div>
       <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort} onChange={(event) => setSort(event.target.value)} data={[{ value: "created", label: ui.sortCreated }, { value: "deadline", label: ui.sortDeadline }, { value: "balance", label: ui.sortBalance }, { value: "client", label: ui.sortClient }]} />
-      <CrmButton tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
+      <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
     </div>
 
@@ -277,7 +276,11 @@ export function OrdersDashboard({ onNavigate }: Props) {
 
     {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, page - 3), Math.max(5, page + 2)).map((value) => <button key={value} className={page === value ? "active" : ""} onClick={() => setPage(value)}>{value}</button>)}<button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)}><UiIcon name="chevronRight" /></button></nav><span>{PAGE_SIZE} / {ui.rowsPerPage}</span></div>}
 
-    {columnsOpen && <div className="orders-column-settings-overlay" onMouseDown={(event) => event.target === event.currentTarget && setColumnsOpen(false)}><aside className="orders-column-settings" role="dialog" aria-modal="true" aria-label={ui.columns}><header><div><h2>{ui.columns}</h2><small>{ui.columnsHint}</small></div><button onClick={() => setColumnsOpen(false)} aria-label={ui.close}>×</button></header><div className="orders-columns-list">{columnOrder.map((id) => <div key={id} draggable onDragStart={() => setDraggedColumn(id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropColumn(id)}><span>⋮⋮</span><label><input type="checkbox" checked={!hiddenColumns.has(id)} onChange={() => toggleColumn(id)} />{ui.columnsMap[id]}</label><button onClick={() => moveColumn(id, -1)} aria-label={ui.moveUp}>↑</button><button onClick={() => moveColumn(id, 1)} aria-label={ui.moveDown}>↓</button></div>)}</div><footer><button onClick={() => persistColumns(DEFAULT_COLUMNS, new Set())}>{ui.reset}</button><button onClick={() => setColumnsOpen(false)}>{ui.done}</button></footer></aside></div>}
+    <Modal opened={columnsOpen} onClose={() => setColumnsOpen(false)} title={ui.columns} aria-label={ui.columns} closeButtonProps={{ "aria-label": ui.close }} returnFocus centered size={440} classNames={{ content: "orders-column-settings", header: "orders-column-settings-header", title: "orders-column-settings-title", body: "orders-column-settings-body" }}>
+      <p className="orders-columns-hint">{ui.columnsHint}</p>
+      <div className="orders-columns-list">{columnOrder.map((id, index) => <div key={id} data-column-id={id} draggable onDragStart={() => setDraggedColumn(id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropColumn(id)}><span aria-hidden="true">⋮⋮</span><CrmCheckbox data-autofocus={index === 0 || undefined} checked={!hiddenColumns.has(id)} onChange={() => toggleColumn(id)} label={ui.columnsMap[id]} /><CrmActionIcon disabled={index === 0} onClick={() => moveColumn(id, -1)} aria-label={ui.moveUp}>↑</CrmActionIcon><CrmActionIcon disabled={index === columnOrder.length - 1} onClick={() => moveColumn(id, 1)} aria-label={ui.moveDown}>↓</CrmActionIcon></div>)}</div>
+      <footer className="orders-column-settings-footer"><CrmButton tone="secondary" onClick={() => persistColumns(DEFAULT_COLUMNS, new Set())}>{ui.reset}</CrmButton><CrmButton onClick={() => setColumnsOpen(false)}>{ui.done}</CrmButton></footer>
+    </Modal>
     {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}

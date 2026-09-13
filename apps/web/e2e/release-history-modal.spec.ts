@@ -52,13 +52,13 @@ test("журнал сборок закрывается всеми штатным
 });
 
 test("журнал раскрывает только текущую версию и сбрасывает раскрытие при повторном открытии", async ({ page }) => {
-  const versionButton = page.getByRole("button", { name: "CRM v0.1.20" });
+  const versionButton = page.getByRole("button", { name: "CRM v0.1.21" });
 
   await versionButton.click();
   const currentVersion = page.locator("article.current .crm-release-heading");
   const previousVersion = page.locator("article:not(.current) .crm-release-heading").first();
-  await expect(currentVersion).toHaveAccessibleName("Свернуть версию CRM v0.1.20");
-  await expect(previousVersion).toHaveAccessibleName("Развернуть версию CRM v0.1.19");
+  await expect(currentVersion).toHaveAccessibleName("Свернуть версию CRM v0.1.21");
+  await expect(previousVersion).toHaveAccessibleName("Развернуть версию CRM v0.1.20");
   await expect(currentVersion).toHaveAttribute("aria-expanded", "true");
   await expect(previousVersion).toHaveAttribute("aria-expanded", "false");
 
