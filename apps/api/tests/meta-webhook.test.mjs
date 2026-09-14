@@ -415,6 +415,16 @@ test("preserves Instagram story media and quoted-message context", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(messageReply.metadata.replyTo)), { kind: "message", externalMessageId: "original-mid" });
 });
 
+test("story replies from Instagram and Facebook are routed through durable CRM media storage", () => {
+  assert.match(service, /materializeMetaStoryReply/);
+  assert.match(service, /META_STORY_MEDIA_MATERIALIZATION_FAILED/);
+  assert.match(service, /persistMaterializedMetaStory/);
+  const inboundStart = service.indexOf("private async persistInbound");
+  const inboundEnd = service.indexOf("async deleteMessage", inboundStart);
+  const storyRegistration = service.indexOf("metaStoryAttachment(event.metadata)", inboundStart);
+  assert.ok(inboundStart >= 0 && storyRegistration > inboundStart && storyRegistration < inboundEnd);
+});
+
 test("summarizes every Messenger event before filtering without message text or attachment URLs", () => {
   const summary = summarizeMetaWebhook({ object: "page", entry: [{ id: "page-1", messaging: [
     { sender: { id: "psid-1" }, recipient: { id: "page-1" }, timestamp: 42, message: { mid: "mid-1", text: "private text", attachments: [{ type: "image", payload: { url: "https://private.example/token" } }] } },

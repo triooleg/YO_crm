@@ -62,6 +62,7 @@ import { blocksEmailDelivery, canReleaseEmailDelivery, emailConnectionSettingsCh
 import { cleanupEmailSentDuplicateFiles, emailReconciledDraftMetadata, emailSentFirstMetadata, emailSentMergeDecision } from "./email-sync-rules";
 import { emailReplyHeaders, latestInboundEmailReplyLookup } from "./email-reply";
 import { materializeWhatsappAttachments, persistMaterializedWhatsapp, trustedWhatsappMediaUrl, whatsappMediaExtension, WHATSAPP_MEDIA_MAX_BYTES } from "./whatsapp-media";
+import { materializeMetaStoryReply, metaStoryAttachment, persistMaterializedMetaStory, trustedMetaStoryMediaUrl } from "./meta-story-media";
 import { COMMUNICATION_FILE_NAME, COMMUNICATION_VIDEO_MAX_BYTES, communicationFileMaxBytes, decodeCommunicationDataUrl, validCommunicationFile } from "./communication-file";
 import { chatwootDeleteTarget, classifyDraftDeliveryRecovery, isSoftDeletedMessage, softDeleteMetadata } from "./message-deletion";
 import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, normalizeSummaryDetailLevel, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, summaryDigestProfile, summaryPlanFingerprint, summaryPromptVersion, summarySourceDigest, type SummaryDetailLevel, type SummaryMessage } from "./conversation-summary";
@@ -544,6 +545,41 @@ export class CommunicationsService {
       onFailure: (mediaId, error) => this.logger.warn(`WHATSAPP_MEDIA_MATERIALIZATION_FAILED mediaRef=${metaIdentityLogRef(mediaId)} failure=${error instanceof Error ? error.constructor.name : "UnknownError"}`),
     });
     return { event: { ...event, metadata: { ...event.metadata, attachments: result.attachments } } as T, paths: result.paths };
+  }
+  private async materializeMetaStoryMedia<T extends MetaInboundMessage>(event: T) {
+    if (event.channel !== "FACEBOOK" && event.channel !== "INSTAGRAM") return { event, paths: [] as string[] };
+    const result = await materializeMetaStoryReply(event, {
+      download: async source => {
+        let url = trustedMetaStoryMediaUrl(source);
+        if (!url) throw new BadRequestException("Некорректный адрес изображения истории Meta");
+        let response: Response | undefined;
+        for (let redirect = 0; redirect < 4; redirect++) {
+          response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
+          if (!response) throw new BadGatewayException("Не удалось загрузить изображение истории Meta");
+          if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get("location");
+            url = trustedMetaStoryMediaUrl(location ? new URL(location, url).toString() : undefined);
+            if (!url) throw new BadGatewayException("Meta перенаправила изображение истории на недоверенный адрес");
+            continue;
+          }
+          break;
+        }
+        if (!response?.ok || !response.body) throw new BadGatewayException("Meta не вернула изображение истории");
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (contentLength > REMOTE_MEDIA_MAX_BYTES) throw new BadRequestException("Изображение истории превышает 50 МБ");
+        const contentType = String(response.headers.get("content-type") || "").split(";")[0]!.trim().toLowerCase();
+        if (!(contentType.startsWith("image/") || contentType === "video/mp4")) throw new BadGatewayException("Meta вернула неподдерживаемый формат истории");
+        return { body: await boundedRemoteMedia(response.body), contentType, sourceUrl: url };
+      },
+      store: async (body, extension) => {
+        const directory = join(uploadsRoot(), "communication-files"), path = `${randomUUID()}.${extension}`;
+        await mkdir(directory, { recursive: true });
+        await writeFile(join(directory, path), body, { flag: "wx" });
+        return { path, url: `/api/communications/files/${path}` };
+      },
+    });
+    if ("error" in result && result.error) this.logger.warn(JSON.stringify({ event: "META_STORY_MEDIA_MATERIALIZATION_FAILED", channel: event.channel, messageRef: metaIdentityLogRef(event.externalMessageId), errorType: result.error.constructor.name }));
+    return { event: result.event, paths: result.paths };
   }
   private async enrichMetaEngagementContext(event:MetaInboundMessage,token:string|undefined,appSecret?:string){
     const engagement=event.metadata.engagement;
@@ -1048,9 +1084,10 @@ export class CommunicationsService {
       const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),whatsappToken=this.secretValue(values,"whatsappAccessTokenEncrypted"),events=scopedEvents;
       const persisted = await Promise.all(events.map(async originalEvent => {
         const enriched=await this.enrichMetaEngagementContext(originalEvent,originalEvent.channel==="INSTAGRAM"?instagramToken:originalEvent.channel==="FACEBOOK"?pageToken:undefined,originalEvent.channel==="FACEBOOK"?appSecret:undefined);
-        const materialized = await this.materializeWhatsappMedia(enriched, whatsappToken), event = materialized.event;
+        const storyMaterialized = await this.materializeMetaStoryMedia(enriched);
+        const materialized = await this.materializeWhatsappMedia(storyMaterialized.event, whatsappToken), event = materialized.event;
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
-        return persistMaterializedWhatsapp(materialized.paths, () => this.persistInbound(event, "META", replayFragment(event,"META")), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
+        return persistMaterializedMetaStory(storyMaterialized.paths, () => persistMaterializedWhatsapp(materialized.paths, () => this.persistInbound(event, "META", replayFragment(event,"META")), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined)), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
       }));
       const accepted = persisted.filter(Boolean).length;
       const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM");
@@ -1651,7 +1688,8 @@ export class CommunicationsService {
       const replyToMessage = replyExternalId ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: replyExternalId } }, select: { id: true } }) : null;
       const envelope=await tx.webhookEnvelope.create({data:{provider,payload:rawPayload,payloadHash:createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex"),receivedAt}});
       const message = await tx.message.create({ data: { conversationId: conversation.id, direction: MessageDirection.INBOUND, status: MessageStatus.RECEIVED, content: event.content, normalizedText: event.content.normalize("NFKC"), messageType, externalId: event.externalMessageId, replyToMessageId: replyToMessage?.id, createdAt: receivedAt, receivedAt, rawPayload, webhookEnvelopeId:envelope.id, metadata: { ...event.metadata, receiverId: event.receiverId, accountId: "accountId" in event ? event.accountId : undefined, inboxId: "inboxId" in event ? event.inboxId : undefined, source:provider==="META"?"META":"CHATWOOT",...(provider==="EMAIL"?{source:"EMAIL"}:{}) } as Prisma.InputJsonValue } });
-      const normalizedAttachments = Array.isArray(event.metadata.attachments) ? event.metadata.attachments : [];
+      const storyAttachment = metaStoryAttachment(event.metadata);
+      const normalizedAttachments = [...(Array.isArray(event.metadata.attachments) ? event.metadata.attachments : []), ...(storyAttachment ? [storyAttachment] : [])];
       for (const attachment of normalizedAttachments) if (attachment && typeof attachment === "object" && !Array.isArray(attachment)) {
         const item = attachment as Record<string, unknown>;
         await tx.messageAttachment.create({ data: {

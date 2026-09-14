@@ -1,15 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boolean; templateFailure?: boolean } = {}) {
+async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boolean; templateFailure?: boolean; instagramFailure?: boolean } = {}) {
   await page.addInitScript((clipboardReject) => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: async () => clipboardReject ? Promise.reject(new Error("clipboard rejected")) : undefined },
     });
   }, Boolean(options.clipboardReject));
+  const activeChannel = options.instagramFailure ? "INSTAGRAM" : "FACEBOOK";
   const conversation = {
     id: "conversation-toast",
-    channel: "FACEBOOK",
+    channel: activeChannel,
     lastMessageAt: "2026-09-13T08:00:00.000Z",
     unreadCount: 0,
     unreadVersion: 0,
@@ -19,15 +20,20 @@ async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boo
     id: "client-toast",
     displayName: "Тестовый клиент",
     status: "ACTIVE",
-    source: "FACEBOOK",
-    preferredChannel: "FACEBOOK",
+    source: activeChannel,
+    preferredChannel: activeChannel,
     orders: [],
     buyerSummary: { purchaseCount: 0, paymentTotals: [] },
-    linkedChannels: ["FACEBOOK"],
+    linkedChannels: [activeChannel],
     conversations: [conversation],
   };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (options.instagramFailure && route.request().method() === "POST" && path === "/api/communications/client-toast/messages") {
+      const request = route.request().postDataJSON();
+      await route.fulfill({ json: { id: "failed-instagram", content: request.content, channel: "INSTAGRAM", direction: "OUTBOUND", status: "FAILED", createdAt: "2026-09-14T13:31:00.000Z", metadata: { reason: "PERMISSION_REQUIRED" } } });
+      return;
+    }
     if (route.request().method() === "POST" && path === "/api/communications/templates") {
       if (options.templateFailure) {
         await route.fulfill({ status: 500, json: { message: "Не удалось сохранить шаблон" } });
@@ -53,14 +59,19 @@ async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boo
       return;
     }
     if (path === "/api/communications") {
-      await route.fulfill({ json: { items: [client], total: 1, hasMore: false, channelCounts: { FACEBOOK: 1 } } });
+      await route.fulfill({ json: { items: [client], total: 1, hasMore: false, channelCounts: { [activeChannel]: 1 } } });
       return;
     }
     if (path === "/api/communications/client-toast") {
       await route.fulfill({ json: { messages: [
-        { id: "message-toast", content: "Текст для копирования", channel: "FACEBOOK", direction: "INBOUND", status: "SENT", createdAt: "2026-09-13T08:00:00.000Z" },
-        { id: "message-template", content: "Исходящий ответ", channel: "FACEBOOK", direction: "OUTBOUND", status: "SENT", createdAt: "2026-09-13T08:01:00.000Z" },
+        { id: "message-toast", content: "Текст для копирования", channel: activeChannel, direction: "INBOUND", status: "SENT", createdAt: "2026-09-13T08:00:00.000Z", ...(options.instagramFailure ? { metadata: { replyTo: { kind: "story", storyUrl: "/api/communications/files/story.png", storyMediaType: "image" } } } : {}) },
+        { id: "message-template", content: "Исходящий ответ", channel: activeChannel, direction: "OUTBOUND", status: "SENT", createdAt: "2026-09-13T08:01:00.000Z" },
+        ...(options.instagramFailure ? [{ id: "draft-instagram", content: "Текст для повторной отправки", channel: "INSTAGRAM", direction: "OUTBOUND", status: "DRAFT", createdAt: "2026-09-14T13:30:00.000Z", metadata: { composerDraftKey: "draft-key" } }] : []),
       ] } });
+      return;
+    }
+    if (path === "/api/communications/files/story.png") {
+      await route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") });
       return;
     }
     if (path === "/api/clients/client-toast") {
@@ -137,24 +148,43 @@ test("сохранение ответа как шаблона показывае
   await expect(page.getByText("Ответ сохранён как шаблон", { exact: true })).toBeVisible();
 });
 
-test("ошибка копирования остаётся постоянной и не превращается в toast", async ({ page }) => {
+test("ошибка копирования показывается компактным временным toast", async ({ page }) => {
   await mockInboxWithMessage(page, { clipboardReject: true });
   await page.goto("/?section=inbox");
   const message = page.getByText("Текст для копирования", { exact: true }).last();
   const article = message.locator("xpath=ancestor::article[1]");
   await article.hover();
   await article.getByRole("button", { name: "Копировать сообщение" }).click();
-  await expect(page.locator(".phase2-error")).toContainText("Не удалось скопировать сообщение");
-  await expect(page.getByText("Сообщение скопировано", { exact: true })).toHaveCount(0);
+  const errorText = page.getByText("Не удалось скопировать сообщение", { exact: true });
+  await expect(errorText).toBeVisible();
+  const toast = errorText.locator("xpath=../..");
+  expect((await toast.boundingBox())?.width ?? 0).toBeLessThanOrEqual(360);
+  await expect(toast.getByRole("button", { name: "Закрыть" })).toBeVisible();
 });
 
-test("ошибка сохранения шаблона остаётся постоянной", async ({ page }) => {
+test("ошибка сохранения шаблона показывается стандартным toast", async ({ page }) => {
   await mockInboxWithMessage(page, { templateFailure: true });
   await page.goto("/?section=inbox");
   page.once("dialog", (dialog) => dialog.accept("Шаблон ответа"));
   const message = page.getByText("Исходящий ответ", { exact: true });
   await message.locator("xpath=ancestor::article[1]").hover();
   await page.getByRole("button", { name: "Сохранить как шаблон" }).click();
-  await expect(page.locator(".phase2-error")).toContainText("Не удалось сохранить шаблон");
+  const toast = page.getByRole("alert").filter({ hasText: "Не удалось сохранить шаблон" });
+  await expect(toast).toBeVisible();
+  await expect(toast.getByRole("button", { name: "Закрыть" })).toBeVisible();
   await expect(page.getByText("Ответ сохранён как шаблон", { exact: true })).toHaveCount(0);
+});
+
+test("отказ Instagram сохраняет текст для повтора, скрывает черновик и показывает превью истории", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockInboxWithMessage(page, { instagramFailure: true });
+  await page.goto("/?section=inbox");
+  const composer = page.locator(".communications-compose textarea");
+  await expect(page.getByText("Черновик", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("img", { name: "Фото или видео истории" })).toBeVisible();
+  await composer.fill("Текст для повторной отправки");
+  await page.getByRole("button", { name: /^Отправить$/ }).click();
+  await expect(page.getByText("Instagram не разрешил отправку. Переподключите страницу и подтвердите доступ к сообщениям", { exact: true })).toBeVisible();
+  await expect(composer).toHaveValue("Текст для повторной отправки");
+  await expect(page.getByRole("alert").filter({ hasText: "Instagram не разрешил отправку" })).toBeVisible();
 });

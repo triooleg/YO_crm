@@ -64,8 +64,7 @@ test("failed composer delivery releases the local draft pointer so later message
   assert.match(save,/if\(failed\)\{/);
   assert.match(save,/failed\.id===composerDraftId\.current/);
   assert.match(save,/composerDraftId\.current=undefined;composerDraftKey\.current=undefined;lastAutosavedText\.current=""/);
-  const savedDraft=component.slice(component.indexOf('async function sendSavedDraft'),component.indexOf('async function deleteMessage')).replace(/\s+/g,"");
-  assert.match(savedDraft,/setMessages\(current=>current\.map\(item=>item\.id===message\.id\?result:item\)\);if\(result\.status==="FAILED"\)/);
+  assert.doesNotMatch(component,/async function sendSavedDraft/);
 });
 
 test("каждое входящее переводится внутри сообщения и перевод сохраняется",()=>{
@@ -79,9 +78,9 @@ test("каждое входящее переводится внутри сооб
   for(const key of["translateAgain","translating","selectMessageForReply"])assert.match(locale,new RegExp(`${key}:`));
 });
 
-test("AI ответ использует выбранные входящие и черновики и требует подтверждения",()=>{
+test("AI ответ использует выбранные входящие и требует подтверждения",()=>{
   assert.match(component,/selectedMessageIds/);
-  assert.match(component,/message\.direction === "INBOUND" \|\| message\.status === "DRAFT"/);
+  assert.match(component,/message\.direction === "INBOUND"/);
   assert.match(component,/replyInstruction/);
   assert.match(component,/action:"REPLY"[\s\S]*messageIds:selectedMessageIds/);
   assert.match(component,/action:"FINALIZE_REPLY"[\s\S]*messageIds:aiReply\.messageIds/);
@@ -108,7 +107,7 @@ test("AI ответ использует выбранные входящие и 
   assert.match(component,/function chooseTemplate[\s\S]*setAiReply\(null\)/);
   assert.match(component,/if\(action==="DRAFT"\)\{setAiReply\(null\);setAiDraftText\(""\)\}/);
   assert.match(component,/ui\.confirmTranslationAndSend/);
-  for(const key of["selectDraftForReply","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
+  for(const key of["replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
 });
 
 test("чекбоксы ответа появляются только в режиме ответа и не показываются для фото и видео", () => {
@@ -123,23 +122,36 @@ test("чекбоксы ответа появляются только в реж�
   assert.match(css, /article\.selectable\.in/);
   assert.match(locale, /cancelReplySelection:\s*"Отменить выбор"/);
 });
-test("сохранённый черновик имеет собственную идемпотентную отправку из ленты",()=>{
-  assert.match(component,/async function sendSavedDraft/);
+test("черновик восстанавливается в редактор, но не отображается отдельным сообщением",()=>{
+  assert.match(component,/prepareInboxMessages/);
+  assert.match(component,/displayMessages/);
+  assert.doesNotMatch(component,/async function sendSavedDraft/);
   assert.match(component,/function promoteClient/);
   assert.match(component,/setClients\(current=>sortClients/);
   assert.match(component,/promoteClient\(operationClientId/);
-  assert.match(component,/draftMessageId:message\.id/);
-  assert.match(component,/message\.status === "DRAFT" && <button[^>]*communications-send-saved-draft/s);
-  assert.match(component,/pendingDraftSends\.current/);
-  assert.match(css,/communications-send-saved-draft/);
-  assert.match(locale,/sendSavedDraft:/);
+  assert.match(component,/draftMessageId:draftId/);
+  assert.doesNotMatch(component,/communications-send-saved-draft/);
+});
+
+test("быстрое переключение канала не теряет текст и даты считают только видимые сообщения",()=>{
+  assert.match(component,/volatileDrafts\.current\.set\(activeChannel,text\)/);
+  assert.match(component,/restoreInboxDraft\(messages,nextChannel,volatileDrafts\.current\.get\(nextChannel\)\)/);
+  assert.match(component,/displayMessages\[messageIndex-1\]/);
+  assert.doesNotMatch(component,/messages\[messageIndex-1\]/);
+  assert.match(component,/if\(messagesLoading\|\|!client\|\|currentComposerText\.current\|\|composerDraftId\.current!==undefined\)return/);
+});
+
+test("ошибки входящих показываются компактным уведомлением Mantine, а не полосой",()=>{
+  assert.match(component,/showInboxErrorNotification/);
+  assert.match(component,/notifications\.show\(\{id:"communications-error"/);
+  assert.doesNotMatch(component,/\{error && <CrmAlert className="phase2-error"/);
 });
 
 test("composer sends Facebook, Instagram, WhatsApp and Chatwoot conversations", () => {
   assert.match(component, /\["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"\]\.includes\(activeChannel\)/);
   assert.match(component, /\["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"\]\.includes\(activeChannel\)/);
   assert.match(component, /value=\{activeChannel\}/);
-  assert.match(component, /setActiveChannel\(event\.target\.value\)/);
+  assert.match(component, /setActiveChannel\(nextChannel\)/);
   assert.match(component, /availableChannels\.map/);
   assert.match(component, /availableChannels\.length > 1/);
   assert.match(component, /active\.label/);
@@ -591,7 +603,8 @@ test("видео показывает превью и воспроизводит
 
 test("ошибка отправки провайдера показывает безопасную причину на русском", () => {
   assert.match(component, /sendFailureReasons/);
-  assert.match(component, /sendFailureText\(message\.metadata\?\.reason, message\.channel\)/);
+  assert.match(component, /setError\(sendFailureText\(failed\.metadata\?\.reason, activeChannel\)\)/);
+  assert.match(component, /message\.status === "FAILED" \? ui\.failed/);
   assert.match(component, /messageChannel === "EMAIL" \? "Gmail" : "Facebook"/);
   assert.match(locale, /TOKEN_EXPIRED/);
   assert.match(locale, /PERMISSION_REQUIRED/);

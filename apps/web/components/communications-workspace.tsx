@@ -16,8 +16,8 @@ import { OrderPanel } from "./order-panel";
 import { TaskDialog } from "./tasks-workspace";
 import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
+import { prepareInboxMessages, restoreInboxDraft } from "../lib/inbox-message-visibility";
 import { CrmSearchField } from "./crm/search-field";
-import { CrmAlert } from "./crm/alert";
 import { CrmActionIcon, CrmButton, CrmNativeSelect } from "./crm/settings-controls";
 import { CrmMenu } from "./crm/menu";
 type Order = {
@@ -99,7 +99,7 @@ type Message = {
   channel: string;
   status?: string;
   language?: string;
-  metadata?: { attachments?: Attachment[]; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string }; engagement?: { kind:"comment"|"reaction"|"mention"|"share"; surface:"post"|"story"|"reel"|"live"|"comment"; objectExternalId:string; mediaId?:string; mediaUrl?:string; permalinkUrl?:string; reactionType?:string; action?:string; replyMode:"PUBLIC_COMMENT"|"DIRECT_MESSAGE" }; engagementReply?:{mode?:"PUBLIC_COMMENT";targetExternalId?:string}; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string }; emailHtml?: string; subject?: string; messageId?: string };
+  metadata?: { attachments?: Attachment[]; composerDraftKey?:string; replyTo?: { kind: "story" | "message"; externalMessageId?: string; storyId?: string; storyUrl?: string; storyMediaType?:"image"|"video" }; engagement?: { kind:"comment"|"reaction"|"mention"|"share"; surface:"post"|"story"|"reel"|"live"|"comment"; objectExternalId:string; mediaId?:string; mediaUrl?:string; permalinkUrl?:string; reactionType?:string; action?:string; replyMode:"PUBLIC_COMMENT"|"DIRECT_MESSAGE" }; engagementReply?:{mode?:"PUBLIC_COMMENT";targetExternalId?:string}; reactions?: { customer?: { name?: string; emoji?: string; reactedAt?: string }; business?: { name?: string; emoji?: string; reactedAt?: string } }; reason?: string; code?: number; subcode?: number; source?: string; metaReadAt?: string; translation?: { text?: string; language?: string }; emailHtml?: string; subject?: string; messageId?: string };
   replyToMessage?: { id: string; content: string; metadata?: { attachments?: Attachment[] } } | null;
 };
 type Template = {
@@ -226,6 +226,9 @@ function clipboardImageName(mimeType:string,now=Date.now()){
 function showInboxNotification(message:string){
   notifications.show({message,color:"teal",autoClose:3000,withCloseButton:true,closeButtonProps:{"aria-label":ui.close}});
 }
+function showInboxErrorNotification(message:string){
+  notifications.show({id:"communications-error",message,color:"red",autoClose:5000,withCloseButton:true,closeButtonProps:{"aria-label":ui.close}});
+}
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
@@ -266,7 +269,6 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [aiDraftText,setAiDraftText]=useState(""),
     [translatingId,setTranslatingId]=useState<string|null>(null),
     [aiPreparing,setAiPreparing]=useState(false),
-    [busyDraftIds,setBusyDraftIds]=useState<Set<string>>(()=>new Set()),
     [reactionBusyIds,setReactionBusyIds]=useState<Set<string>>(()=>new Set()),
     [reactionPickerMessageId,setReactionPickerMessageId]=useState<string>(),
     [deleteTarget,setDeleteTarget]=useState<Message>(),
@@ -340,13 +342,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     pendingReads = useRef(new Map<string, Map<string, number>>()),
     pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
     pendingAiSend = useRef<{textContent?:string;textRequestId?:string}>({}),
-    pendingDraftSends = useRef(new Map<string,string>()),
     composerDraftId=useRef<string|undefined>(undefined),
     composerDraftKey=useRef<string|undefined>(undefined),
     draftSavePromise=useRef<Promise<void>|null>(null),
     autosaveTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),
     draftSequence=useRef(0),
     lastAutosavedText=useRef(""),
+    volatileDrafts=useRef(new Map<string,string>()),
     manualLoading = useRef(false),
     refreshing = useRef(false),
     addAthleteTriggerRef = useRef<HTMLButtonElement | null>(null),
@@ -370,11 +372,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     summaryDateButtonRef=useRef<HTMLButtonElement|null>(null),
     splitTriggerRef=useRef<HTMLButtonElement|null>(null),
     clientIdentityRef=useRef<HTMLSpanElement|null>(null),
-    currentActiveChannel=useRef(activeChannel);
+    currentActiveChannel=useRef(activeChannel),
+    currentComposerText=useRef(text);
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentOrderScope.current=orderScope;
   currentActiveChannel.current=activeChannel;
+  currentComposerText.current=text;
   currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
   currentMessages.current=messages;
@@ -423,7 +427,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       setSplitOpen(false);setSplitSourceId("");
       composeEpoch.current++;draftSequence.current++;aiOperationSequence.current++;summaryRequestSequence.current++;
       composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";
-      pendingSend.current={};pendingAiSend.current={};pendingDraftSends.current.clear();
+      pendingSend.current={};pendingAiSend.current={};
       if(attachmentPreview)URL.revokeObjectURL(attachmentPreview);
       if(attachmentInput.current)attachmentInput.current.value="";
       const removedChannels=splitResult.movedChannels?.length?splitResult.movedChannels:fallbackRemovedChannels,movedConversationIds=new Set(splitResult.movedConversationIds||[]),detachedSourceClientIds=new Set(splitResult.detachedSourceClientIds||[splitSourceId]);
@@ -431,7 +435,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       const survivingChannels=[...new Set(survivingConversations.map(item=>item.channel).filter((channel):channel is string=>Boolean(channel)))],survivingChannel=survivingChannels[0]||"MANUAL";
       const reconciledClient={...client,linkedChannels:survivingChannels,linkedAccounts:client.linkedAccounts?.filter(item=>!item.sourceClientId||(!detachedSourceClientIds.has(item.sourceClientId)&&survivingChannels.includes(item.channel))),mergedClients:client.mergedClients?.filter(item=>!detachedSourceClientIds.has(item.sourceClientId)),conversations:survivingConversations};
       setClient(reconciledClient);setClients(items=>items.map(item=>item.id===targetId?reconciledClient:item));setActiveChannel(survivingChannel);setMessages([]);setNewMessageCount(0);setMessagesLoading(true);
-      setText("");setDraftStatus("IDLE");setAttachment(undefined);setAttachmentPreview("");setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setBusyDraftIds(new Set());setReactionBusyIds(new Set());setReactionPickerMessageId(undefined);
+      setText("");setDraftStatus("IDLE");setAttachment(undefined);setAttachmentPreview("");setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiReply(null);setAiDraftText("");setTranslatingId(null);setAiPreparing(false);setReactionBusyIds(new Set());setReactionPickerMessageId(undefined);
       setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
       const nextFilters=currentSocialFilters.current.filter(channel=>!removedChannels.includes(channel));
       if(nextFilters.length!==currentSocialFilters.current.length){skipNextFilterReload.current=true;currentSocialFilters.current=nextFilters;setSocialFilters(nextFilters)}
@@ -677,9 +681,9 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       setAttachmentPreview("");
       pendingSend.current = {};
       pendingAiSend.current = {};
-      pendingDraftSends.current.clear();
     }
     selectedClientId.current = c.id;
+    volatileDrafts.current.clear();
     clientDetailRequest.current++;
     orderRequestVersion.current++;
     taskRequestVersion.current++;
@@ -699,7 +703,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     manualLoading.current = true;
     setClient(c);
     setNewMessageCount(0);
-    setActiveChannel(latestConversation(c)?.channel||channel(c));
+    const openingChannel=latestConversation(c)?.channel||channel(c);
+    setActiveChannel(openingChannel);
     autoScrollPending.current = true;
     stickToBottom.current = true;
     setMessagesLoading(true);
@@ -717,8 +722,9 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           detailVersion.current,
         )
       ){
-        const nextMessages=x.messages||[];
+        const nextMessages=x.messages||[],prepared=prepareInboxMessages(nextMessages,openingChannel);
         setMessages(nextMessages);
+        setText(prepared.draft?.content||"");composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";setDraftStatus(prepared.draft?"SAVED":"IDLE");
         const firstForChannel=nextMessages.find((message:Message)=>message.channel===(latestConversation(c)?.channel||channel(c)))||nextMessages[0];
         const initialDate=localDateKey(firstForChannel?.createdAt||new Date());
         setSummaryDate(initialDate);setSummaryMonth(new Date(`${initialDate}T12:00:00`));
@@ -892,6 +898,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     return()=>window.removeEventListener("keydown",handleKey);
   },[deleteTarget?.id,deleteBusy]);
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
+  useEffect(()=>{if(!error)return;showInboxErrorNotification(error);setError("")},[error]);
+  useEffect(()=>{
+    if(messagesLoading||!client||currentComposerText.current||composerDraftId.current!==undefined)return;
+    const prepared=prepareInboxMessages(messages,activeChannel);
+    if(!prepared.draft)return;
+    setText(prepared.draft.content);composerDraftId.current=prepared.draft.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft.content;setDraftStatus("SAVED");
+  },[messagesLoading,client?.id,messages,activeChannel]);
   useEffect(()=>{
     const content=text.trim();
     if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
@@ -1020,6 +1033,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       }
       else {
         setText("");
+        volatileDrafts.current.delete(activeChannel);
         composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";draftSequence.current++;setDraftStatus("IDLE");
         setEmailReplyTarget(undefined);
         setSocialReplyTarget(undefined);
@@ -1076,13 +1090,6 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     setTranslatingId(message.id);setError("");
     try{const result=await api(`/ai-assistant/messages/${message.id}/translate`,{method:"POST",body:"{}"});if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setMessages(current=>current.map(item=>item.id===message.id?{...item,metadata:result.metadata}:item))}
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setTranslatingId(null)}
-  }
-  async function sendSavedDraft(message:Message){
-    if(!client||message.status!=="DRAFT")return;
-    const operationClientId=client.id,operationEpoch=composeEpoch.current,requestId=pendingDraftSends.current.get(message.id)||crypto.randomUUID();
-    pendingDraftSends.current.set(message.id,requestId);setBusyDraftIds(current=>new Set(current).add(message.id));setError("");
-    try{const result=await api("/communications/"+operationClientId+"/messages",{method:"POST",body:JSON.stringify({content:message.content,channel:message.channel||activeChannel,action:"SEND",clientRequestId:requestId,draftMessageId:message.id})});if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;pendingDraftSends.current.delete(message.id);setMessages(current=>current.map(item=>item.id===message.id?result:item));if(result.status==="FAILED"){if(message.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE")}setError(sendFailureText(result.metadata?.reason,message.channel||activeChannel));return}promoteClient(operationClientId,result)}
-    catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch)setError((e as Error).message)}finally{setBusyDraftIds(current=>{const next=new Set(current);next.delete(message.id);return next})}
   }
   async function deleteMessage(mode:"CRM"|"CLIENT"){
     if(!client||!deleteTarget||deleteBusy)return;
@@ -1190,15 +1197,16 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     nextTask=clientDetail?.workTasks?.[0],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     channelCounts=Object.fromEntries(socialChannels.map(item=>[item,channelTotals[item]||0])) as Record<SocialChannel,number>,
-    conversationFiles=messages.flatMap(message=>(message.metadata?.attachments||[]).map((attachment,index)=>({messageId:message.id,index,attachment}))),
+    preparedMessages=prepareInboxMessages(messages,activeChannel),
+    displayMessages=preparedMessages.visible,
+    conversationFiles=displayMessages.flatMap(message=>(message.metadata?.attachments||[]).map((attachment,index)=>({messageId:message.id,index,attachment}))),
     activeSummary=conversationSummaries.find(item=>item.fromDate===summaryDate),
-    firstSummaryDate=summaryFirstMessageDate||localDateKey(messages.find(message=>message.channel===activeChannel)?.createdAt||messages[0]?.createdAt||new Date()),
+    firstSummaryDate=summaryFirstMessageDate||localDateKey(displayMessages.find(message=>message.channel===activeChannel)?.createdAt||displayMessages[0]?.createdAt||new Date()),
     grid = `min(${left}px,23vw) 4px minmax(320px,1fr) ${contextCollapsed?"0px 46px":`4px min(${right}px,25vw)`}`;
   const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
   const attachmentAccept=attachmentMimeTypes.join(",");
   return (
     <div className="communications-page">
-      {error && <CrmAlert className="phase2-error" onClose={() => setError("")}>{error}</CrmAlert>}
       {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
       <section
         className="communications-grid"
@@ -1324,7 +1332,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
             </span>
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={()=>{setSplitError("");setSplitSourceId(client.mergedClients?.[0]?.sourceClientId||"");setSplitOpen(true)}}>⇄</CrmActionIcon>:null}
             {client && (availableChannels.length > 1 ? (
-              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>{draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";setDraftStatus("IDLE");setActiveChannel(event.target.value);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
+              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>{volatileDrafts.current.set(activeChannel,text);const nextChannel=event.target.value,prepared=restoreInboxDraft(messages,nextChannel,volatileDrafts.current.get(nextChannel));draftSequence.current++;summaryRequestSequence.current++;composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";setText(prepared.content);setDraftStatus(prepared.draft?"SAVED":"IDLE");setActiveChannel(nextChannel);setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false)}} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
             ) : (
               <span className="communications-active-channel" title={`${active.label}${active.accountName?` / ${active.accountName}`:""}`} aria-label={`${active.label}${active.accountName?` / ${active.accountName}`:""}`}>{active.icon} {active.label}{active.accountName?` / ${active.accountName}`:""}</span>
             ))}
@@ -1335,10 +1343,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
             {messagesLoading ? (
               <InboxSkeleton kind="messages" rows={4}/>
             ) : (
-              messages.map((message,messageIndex) => {
+              displayMessages.map((message,messageIndex) => {
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
-                const canSelectForReply = replyMode && !hasVisualAttachment && (message.direction === "INBOUND" || message.status === "DRAFT");
+                const canSelectForReply = replyMode && !hasVisualAttachment && message.direction === "INBOUND";
                 const externalReply = message.direction === "OUTBOUND" && ["META","META_ECHO","CHATWOOT","GMAIL"].includes(message.metadata?.source || "");
                 const replyContext=message.metadata?.replyTo;
                 const engagement=message.metadata?.engagement;
@@ -1347,7 +1355,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                 const canSocialReply=message.direction==="INBOUND"&&Boolean(message.externalId)&&(["INSTAGRAM","WHATSAPP"].includes(message.channel)||(message.channel==="FACEBOOK"&&Boolean(engagement)));
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
                 const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url),engagementMediaUrl=safeAttachmentUrl(engagement?.mediaUrl),engagementPermalink=safeAttachmentUrl(engagement?.permalinkUrl);
-                const previousCreatedAt=messages[messageIndex-1]?.createdAt,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(message.createdAt);
+                const previousCreatedAt=displayMessages[messageIndex-1]?.createdAt,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(message.createdAt);
                 return (<Fragment key={message.id}>
                   {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(message.createdAt)}</span></div>}
                   <article
@@ -1359,14 +1367,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                       <button type="button" aria-label={ui.copyMessage} title={ui.copyMessage} onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>showInboxNotification(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>⧉</button>
                       <details className="communications-message-more"><summary aria-label={ui.moreActions} title={ui.moreActions}>⋯</summary><span role="menu"><button type="button" role="menuitem" onClick={()=>void navigator.clipboard.writeText(message.content).then(()=>showInboxNotification(ui.messageCopied)).catch(()=>setError(ui.copyFailed))}>{ui.copyMessage}</button>{canSocialReply&&<button type="button" role="menuitem" onClick={()=>{setSocialReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.reply}</button>}{message.direction==="INBOUND"&&!hasVisualAttachment&&shouldOfferInboundTranslation(message.language)&&<button type="button" role="menuitem" disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}>{ui.translate}</button>}{message.direction==="OUTBOUND"&&<button type="button" role="menuitem" className="communications-message-delete" onClick={event=>{const details=event.currentTarget.closest("details");deleteTrigger.current=details?.querySelector("summary")||event.currentTarget;details?.removeAttribute("open");setDeleteTarget(message)}}>{ui.deleteMessage}</button>}</span></details>
                     </span>
-                    {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={message.status==="DRAFT"?ui.selectDraftForReply:ui.selectMessageForReply}/></label>}
+                    {canSelectForReply && <label className="communications-message-select"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={()=>toggleMessage(message.id)} aria-label={ui.selectMessageForReply}/></label>}
                     {externalReply && <small className="communications-external-message-source">{ui.externalReplyByChannel[message.channel as keyof typeof ui.externalReplyByChannel] || ui.externalReplyOutsideCrm}</small>}
                     {engagement&&<div className="communications-engagement-context">
                       <b>{engagement.kind==="comment"?(engagement.surface==="story"?ui.commentOnStory:engagement.surface==="reel"?ui.commentOnReel:engagement.surface==="live"?ui.commentOnLive:engagement.surface==="comment"?ui.replyToComment:ui.commentOnPost):engagement.kind==="mention"?ui.mentionInContent:engagement.kind==="share"?ui.sharedSocialContent:(engagement.action==="remove"?ui.removedReaction:ui.reactionOnContent)}</b>
                       {engagementMediaUrl&&<ReplyMedia url={engagementMediaUrl} label={ui.socialContentMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:engagementMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>}
                       {engagementPermalink&&<a href={engagementPermalink} target="_blank" rel="noreferrer">{ui.openSocialContent} ↗</a>}
                     </div>}
-                    {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
+                    {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} type={replyContext?.storyMediaType==="video"?"video":"image"} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
                     {message.channel==="EMAIL"&&message.metadata?.emailHtml?<div className="communications-message-content email-rich-content" dangerouslySetInnerHTML={{__html:message.metadata.emailHtml}}/>:<span className="communications-message-content">{message.content}</span>}
                     {attachments.length > 0 && (
                       <div className={`communications-attachments${attachments.length>1?" is-gallery":""}`}>
@@ -1418,14 +1426,13 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                       {canReact&&reactionPickerMessageId===message.id&&<span className="communications-reaction-picker" role="dialog" aria-label={ui.reactionPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setReactionPickerMessageId(undefined)}}}>{reactionEmojis.map(emoji=><button type="button" key={emoji} className={businessReaction?.emoji===emoji?"selected":undefined} disabled={reactionBusyIds.has(message.id)} aria-label={`${businessReaction?.emoji===emoji?ui.removeReaction:ui.addReaction} ${emoji}`} onClick={()=>void setReaction(message,emoji)}>{emoji}</button>)}</span>}
                     </span>}
                     <small className="communications-message-meta">
-                      {message.status === "FAILED" ? sendFailureText(message.metadata?.reason, message.channel) : message.status === "DRAFT" ? ui.draft : ""}{message.status === "FAILED" || message.status === "DRAFT" ? " · " : ""}
+                      {message.status === "FAILED" ? ui.failed : ""}{message.status === "FAILED" ? " · " : ""}
                       {formatMessageDateTime(message.createdAt)}
                       {message.direction === "OUTBOUND" && message.metadata?.metaReadAt && <span className="communications-message-read" title={ui.messageRead} aria-label={ui.messageRead} role="img"></span>}
                     </small>
                     {message.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation(message.language) && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?ui.translateAgain:ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}
                     {message.channel==="EMAIL"&&message.direction==="INBOUND"&&message.metadata?.messageId&&<button type="button" className="communications-email-reply" aria-label={`${ui.replyToEmail}: ${message.metadata.subject||ui.emailWithoutSubject}`} onClick={()=>{setEmailReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.replyToEmail}</button>}
                     {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" aria-label={ui.saveAsTemplate} title={ui.saveAsTemplate} disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z"/><path d="M12 7v6M9 10h6"/></svg></button>}
-                    {message.status === "DRAFT" && <button type="button" className="communications-send-saved-draft" disabled={busyDraftIds.has(message.id)} onClick={()=>void sendSavedDraft(message)}>{busyDraftIds.has(message.id)?ui.sending:ui.sendSavedDraft}</button>}
                   </article>
                 </Fragment>
                 );
@@ -1441,7 +1448,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
                 <button type="button" disabled={busy||aiPreparing||!aiDraftText.trim()} onClick={()=>void(aiReply.phase==="RUSSIAN"?prepareAiTranslation():sendConfirmedAiReply())}>{aiPreparing?ui.aiPreparing:aiReply.phase==="RUSSIAN"?ui.prepareTranslation:ui.confirmTranslationAndSend}</button>
               </div>
             </article>}
-            {!messagesLoading && client && !messages.length && (
+            {!messagesLoading && client && !displayMessages.length && (
               <State text={ui.emptyMessages} />
             )}{" "}
             {!client && !loading && <State text={ui.selectClientHint} />}
