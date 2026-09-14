@@ -1,6 +1,6 @@
 # Yoleotard CRM — передача контекста
 
-# 2026-09-14 — Inbox: скрытые черновики, Meta story media и уведомления ошибок (локально)
+# 2026-09-14 — production deployment CRM 0.1.24: Inbox drafts, Meta story media и notifications
 
 - Системные сообщения со статусом `DRAFT` сохранены в БД и аудируемом процессе отправки, но больше не отображаются отдельными пузырями в переписке. Последний черновик выбранного канала восстанавливается в composer; быстрые переключения между каналами и фоновое обновление списка не стирают введённый текст.
 - Все ошибки раздела «Входящие», включая отказ Instagram с `PERMISSION_REQUIRED`, показываются компактным красным Mantine toast на 5 секунд. Полноширинная полоса удалена, а текст неуспешной отправки остаётся в редакторе для исправления или повтора.
@@ -8,7 +8,12 @@
 - Story media регистрируется как `MessageAttachment`, поэтому участвует в штатном Meta Data Deletion. Повторная webhook-доставка и исключение БД удаляют подготовленный лишний файл и не создают orphan uploads.
 - Failing-first и финальные тесты: `pnpm quality:check` PASS — database 9/9, web 306/306, API 474/474, typecheck и production build. `pnpm dag:test` 45/45. Playwright Inbox 7/7 PASS, включая 1920×1080, 1366×768, 390×844 и mock-сценарий отказа Instagram с сохранением текста, story preview и compact toast. Полный Playwright до последних исправлений дал 79/82 из-за трёх новых тестов; после исправлений затронутый файл повторён 7/7.
 - Реальная доставка Instagram и загрузка реального signed URL Meta остаются post-deploy smoke: ошибка Graph API code 10 требует переподключить Instagram и подтвердить `instagram_business_manage_messages`/Advanced Access в Meta. CRM не обходит отказ провайдера через другой канал.
-- Изменения находятся в изолированной ветке `codex/meta-story-media-draft` от `origin/main` (`5162e4655300dac3000fce8d89de58d727470a5e`). Версия 0.1.24 и журнал сборки подготовлены; commit, push и deployment ещё не выполнялись.
+- Runtime commit `9f0086da6551822debc1b51acb1dcb0fcee54cfa` fast-forward опубликован в `origin/main`. GitHub Actions `Quality gates` run `34844324199` и `CRM release` run `34845640750` завершились успешно; неизменяемый tag `crm-v0.1.24` указывает на точный runtime SHA.
+- Перед deployment создан и независимо проверен FULL backup `20260914T123756Z-v024-9f0086d-predeploy`: checksums PostgreSQL dump, uploads и manifest совпали, `pg_restore --list`, `tar -tzf` и JSON validation прошли. SHA-256 файла `SHA256SUMS` — `766c3a1ffe8eaec1e3723183894728ea23c94af6ccdc9e732c1e5df53fce584e`.
+- Source-only release archive SHA-256 `f7ddb6735b102e3dcae16945519a2b2bf49ad7f38a22aec6b2ca27d548f35eae` совпал локально и на сервере. Source rollback сохранён как `/home/trio/yoleotard-crm-backups/source-20260914T124240Z-pre-6a46a22.tar.gz`, SHA-256 `d99275b0bbdf2188a8b9ecba52d0fa9b09cdcb8bbea0b8492fb99baa3dd9a477`; предыдущий source-каталог — `/home/trio/yoleotard-crm-previous-20260914T124240Z`.
+- С `--no-deps` пересозданы только API `fc0b0953465e2b5a2f21865e61655de0136f5bdcd5c75b6f81fcaa7051fe8a03` и web `361fd7001389ca68a2a1257b3d50a291d6573596687af512bf63092697fab8f3`; образы: API `e6a262ba2437675f1f804600ebdd1acee61ccd0b85d75bbcd95cf56d77f21d1a`, web `6bd5d486a17ffdf8e2a0b0a04f11405546c8cc6d6dcad5b1cd3ddb2392e19820`. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались.
+- Все сервисы healthy с restart count 0; 22 миграции актуальны. До и после deployment совпали счётчики: clients 134, conversations 132, messages 1292, orders 3. `.release-commit` и `.deployed-commit` равны runtime SHA; внутренние и публичные `/` и `/api/health` отвечают HTTP 200, PostgreSQL/Redis/uploads — `up`, свежий API/web error scan — 0.
+- Авторизованный read-only smoke в новой Edge-вкладке подтвердил CRM v0.1.24, точный SHA, загрузку реальных клиентов «Входящих», отсутствие alert и горизонтального overflow; browser console — 0. Реальная отправка через Instagram и получение нового signed story URL остаются операторским provider-smoke после переподключения Instagram и подтверждения `instagram_business_manage_messages`/Advanced Access.
 
 # 2026-09-14 — production deployment CRM 0.1.23
 
