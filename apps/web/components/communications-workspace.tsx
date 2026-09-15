@@ -530,8 +530,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     try{const updated=await api("/clients/"+client.id+"/notes",{method:"PATCH",body:JSON.stringify({notes:noteText})});setClient({...client,notes:updated.notes});setClients(items=>items.map(item=>item.id===client.id?{...item,notes:updated.notes}:item));setNoteOpen(false)}
     catch(reason){setError((reason as Error).message)}finally{setBusy(false)}
   }
-  function conversationDetailPath(clientId: string, selectedChannel?: string) {
-    return `/communications/${clientId}${selectedChannel?`?channel=${encodeURIComponent(selectedChannel)}`:""}`;
+  function conversationDetailPath(clientId: string) {
+    return `/communications/${clientId}`;
   }
   function toggleSocialFilter(item: SocialChannel) {
     setSocialFilters(current=>current.includes(item)?current.filter(channel=>channel!==item):[...current,item]);
@@ -714,7 +714,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     });
     try {
       void markClientRead(c);
-      const x = await api(conversationDetailPath(c.id, socialFilters.length ? latestConversation(c)?.channel : undefined));
+      const x = await api(conversationDetailPath(c.id));
       if (
         isCurrentInboxDetailRequest(
           request,
@@ -816,7 +816,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           clientId: selected.id,
           version: ++detailVersion.current,
         };
-        const detail = await api(conversationDetailPath(selected.id, currentSocialFilters.current.length ? latestConversation(selected)?.channel : undefined));
+        const detail = await api(conversationDetailPath(selected.id));
         if (
           isCurrentInboxDetailRequest(
             request,
@@ -825,8 +825,8 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           )
         ) {
           setClient(selected);
-          const nextMessages=detail.messages||[],knownIds=new Set(currentMessages.current.map(message=>message.id)),newInbound=nextMessages.filter((message:Message)=>message.direction==="INBOUND"&&!knownIds.has(message.id)).length;
-          if(newInbound&&!stickToBottom.current)setNewMessageCount(current=>current+newInbound);
+          const nextMessages=detail.messages||[],knownIds=new Set(currentMessages.current.map(message=>message.id)),newMessages=nextMessages.filter((message:Message)=>message.status!=="DRAFT"&&!knownIds.has(message.id)).length;
+          if(newMessages&&!stickToBottom.current)setNewMessageCount(current=>current+newMessages);
           else if(stickToBottom.current)autoScrollPending.current=true;
           setMessages(nextMessages);
         }
@@ -1103,7 +1103,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       if(targetWasSelected||aiReply?.messageIds.includes(target.id)){invalidateAiOperation();setAiReply(null);setAiDraftText("")}
       const [page,detail]=await Promise.all([
         fetchClientWindow(currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current,currentConversationScope.current),
-        api(conversationDetailPath(operationClientId,currentSocialFilters.current.length?target.channel:undefined)),
+        api(conversationDetailPath(operationClientId)),
       ]) as [ClientPage,{messages?:Message[]}];
       if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;
       setClients(sortClients(page.items));setClientsHasMore(page.hasMore);setClientTotal(page.total);setChannelTotals(page.channelCounts);

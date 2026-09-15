@@ -178,3 +178,49 @@ test("поздние translation summary и AI ответы не возвращ�
   await expect(composer).toHaveValue("");
   await expect(page.getByText("Поздний AI текст")).toBeHidden();
 });
+
+for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",width:1366,height:768},{name:"mobile",width:390,height:844}]){
+  test(`внешний ответ WhatsApp появляется в сквозной истории: ${viewport.name}`,async({page},testInfo)=>{
+    await page.setViewportSize({width:viewport.width,height:viewport.height});
+    let detailRequests=0,releaseExternal=false;const detailQueries:string[]=[];
+    const history=Array.from({length:36},(_,index)=>({id:`history-${index}`,content:`История ${index}`,channel:index%2?"WHATSAPP":"FACEBOOK",direction:index%3?"INBOUND":"OUTBOUND",status:"SENT",createdAt:`2026-09-15T10:${String(index).padStart(2,"0")}:00.000Z`}));
+    const conversations=[{id:"conversation-facebook",channel:"FACEBOOK",lastMessageAt:"2026-09-15T10:34:00.000Z",unreadCount:0,unreadVersion:0,messages:[{content:"История 34",createdAt:"2026-09-15T10:34:00.000Z"}]},{id:"conversation-whatsapp",channel:"WHATSAPP",lastMessageAt:"2026-09-15T10:35:00.000Z",unreadCount:0,unreadVersion:0,messages:[{content:"История 35",createdAt:"2026-09-15T10:35:00.000Z"}]}];
+    const client={id:"merged-external",displayName:"Сквозной клиент",firstName:"Сквозной",avatarUrl:null,status:"ACTIVE",source:"WHATSAPP",preferredChannel:"WHATSAPP",orders:[],buyerSummary:{purchaseCount:0,paymentTotals:[]},linkedChannels:["FACEBOOK","WHATSAPP"],linkedAccounts:[{channel:"FACEBOOK",accountName:"FB Account"},{channel:"WHATSAPP",accountName:"+380000000000"}],mergedClients:[],conversations};
+    await page.route("**/api/**",async route=>{
+      const url=new URL(route.request().url()),path=url.pathname;
+      if(path==="/api/auth/me")return route.fulfill({json:{user:{email:"qa@yoleotard.local",displayName:"QA",role:"OWNER"}}});
+      if(path==="/api/branding")return route.fulfill({json:{}});
+      if(path==="/api/communications/templates")return route.fulfill({json:[]});
+      if(path==="/api/communications")return route.fulfill({json:{items:[client],total:1,hasMore:false,channelCounts:{FACEBOOK:1,INSTAGRAM:0,WHATSAPP:1,CHATWOOT:0,EMAIL:0}}});
+      if(path==="/api/communications/merged-external"){
+        detailRequests++;detailQueries.push(url.search);
+        const external=releaseExternal?[{id:"external-whatsapp",content:"Ответ из приложения WhatsApp",channel:"WHATSAPP",direction:"OUTBOUND",status:"SENT",createdAt:"2026-09-15T10:36:00.000Z",metadata:{source:"META"}}]:[];
+        return route.fulfill({json:{messages:[...history,...external]}});
+      }
+      if(path==="/api/clients/merged-external")return route.fulfill({json:{...client,athletes:[],workTasks:[]}});
+      if(path==="/api/ai-assistant/clients/merged-external/summaries")return route.fulfill({json:{firstMessageDate:"2026-09-15",items:[]}});
+      return route.fulfill({status:501,json:{message:`Unexpected ${route.request().method()} ${path}`}});
+    });
+    await page.goto("/?section=inbox");
+    await expect(page.getByText("История 0",{exact:true})).toBeVisible();
+    if(viewport.name!=="mobile")await page.getByRole("button",{name:"WhatsApp: 1"}).click();
+    const messages=page.locator(".communications-messages");
+    await expect(messages.locator("article")).toHaveCount(36);
+    expect(await messages.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
+    await messages.evaluate(element=>{element.scrollTop=element.scrollHeight});
+    await expect.poll(()=>messages.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+    await messages.hover();await page.mouse.wheel(0,-10000);
+    await expect.poll(()=>messages.evaluate(element=>element.scrollTop)).toBe(0);
+    const requestsBeforeExternal=detailRequests;
+    releaseExternal=true;
+    await expect.poll(()=>detailRequests,{timeout:7000}).toBeGreaterThan(requestsBeforeExternal);
+    const newMessages=page.locator(".communications-new-messages");
+    await expect(newMessages).toBeVisible({timeout:7000});
+    await newMessages.focus();await expect(newMessages).toBeFocused();await page.keyboard.press("Enter");
+    await expect(page.getByText("Ответ из приложения WhatsApp",{exact:true})).toBeVisible();
+    await expect(page.getByText("Ответ отправлен через WhatsApp",{exact:true})).toBeVisible();
+    expect(detailQueries.every(query=>!new URLSearchParams(query).has("channel"))).toBe(true);
+    expect(await page.locator("html").evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
+    await page.screenshot({path:testInfo.outputPath(`external-whatsapp-${viewport.width}x${viewport.height}.png`),fullPage:true});
+  });
+}

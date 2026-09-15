@@ -1034,7 +1034,7 @@ export const communicationsUi = {
     connectedAccount: "Аккаунт",
     openInSocialNetwork: "Открыть этот диалог в социальной сети",
     openConversationByChannel: { FACEBOOK: "Открыть переписку в Facebook", INSTAGRAM: "Открыть переписку в Instagram", CHATWOOT: "Открыть переписку в Chatwoot", EMAIL: "Открыть переписку в Gmail" },
-    externalReplyByChannel: { FACEBOOK: "Ответ отправлен через Facebook", INSTAGRAM: "Ответ отправлен через Instagram", CHATWOOT: "Ответ отправлен через Chatwoot", EMAIL: "Ответ отправлен через Gmail" },
+    externalReplyByChannel: { FACEBOOK: "Ответ отправлен через Facebook", INSTAGRAM: "Ответ отправлен через Instagram", WHATSAPP: "Ответ отправлен через WhatsApp", CHATWOOT: "Ответ отправлен через Chatwoot", EMAIL: "Ответ отправлен через Gmail" },
     externalReplyOutsideCrm: "Ответ отправлен вне CRM",
     replyToEmail: "Ответить на это письмо",
     replyingToEmail: "Ответ на письмо",

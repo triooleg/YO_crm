@@ -183,8 +183,14 @@ test("ответы отправленные вне CRM имеют подпись
   assert.match(component,/\["META","META_ECHO","CHATWOOT","GMAIL"\]\.includes\(message\.metadata\?\.source\s*\|\|\s*""\)/);
   assert.match(component,/communications-external-message-source/);
   assert.match(component,/ui\.externalReplyByChannel\[message\.channel as keyof typeof ui\.externalReplyByChannel\]/);
-  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram",\s*CHATWOOT:\s*"Ответ отправлен через Chatwoot",\s*EMAIL:\s*"Ответ отправлен через Gmail"\s*\}/);
+  assert.match(locale,/externalReplyByChannel:\s*\{\s*FACEBOOK:\s*"Ответ отправлен через Facebook",\s*INSTAGRAM:\s*"Ответ отправлен через Instagram",\s*WHATSAPP:\s*"Ответ отправлен через WhatsApp",\s*CHATWOOT:\s*"Ответ отправлен через Chatwoot",\s*EMAIL:\s*"Ответ отправлен через Gmail"\s*\}/);
   assert.match(locale,/externalReplyOutsideCrm:\s*"Ответ отправлен вне CRM"/);
+});
+test("фильтр списка клиентов не скрывает сквозную историю объединённого клиента",()=>{
+  assert.match(component,/function conversationDetailPath\(clientId: string\) \{/);
+  assert.doesNotMatch(component,/conversationDetailPath\([^)]*,[^)]*\)/);
+  assert.match(component,/const x = await api\(conversationDetailPath\(c\.id\)\)/);
+  assert.match(component,/const detail = await api\(conversationDetailPath\(selected\.id\)\)/);
 });
 test("прочтение клиентом показано возле времени с доступной русской подсказкой",()=>{
   assert.match(component,/message\.direction === "OUTBOUND" && message\.metadata\?\.metaReadAt && <span className="communications-message-read"[^>]*title=\{ui\.messageRead\}[^>]*aria-label=\{ui\.messageRead\}[^>]*><\/span>/);
@@ -240,7 +246,7 @@ test("удаление сообщения вызывает API и перечит
   assert.match(component,/`\/communications\/messages\/\$\{encodeURIComponent\(target\.id\)\}\/delete`/);
   assert.match(component,/resolveDelivery:target\.status==="DRAFT"\|\|target\.status==="FAILED"/);
   assert.match(component,/fetchClientWindow\(currentClientCount\.current,currentSearch\.current,currentSocialFilters\.current,currentOrderScope\.current,currentConversationScope\.current\)/);
-  assert.match(component,/conversationDetailPath\(operationClientId,currentSocialFilters\.current\.length\?target\.channel:undefined\)/);
+  assert.match(component,/conversationDetailPath\(operationClientId\)/);
   assert.match(component,/setClients\(sortClients\(page\.items\)\)/);
   assert.match(component,/setMessages\(detail\.messages\|\|\[\]\)/);
   assert.match(component,/target\.id===composerDraftId\.current/);
@@ -427,7 +433,7 @@ test("под поиском можно отфильтровать входящи
   assert.match(component, /socialFilters,setSocialFilters/);
   assert.match(component, /channels=\$\{encodeURIComponent\(selectedChannels\.join\(","\)\)\}/);
   assert.match(component, /conversationDetailPath/);
-  assert.match(component, /\?channel=\$\{encodeURIComponent\(selectedChannel\)\}/);
+  assert.doesNotMatch(component, /\?channel=\$\{encodeURIComponent\(selectedChannel\)\}/);
   assert.match(component, /className="communications-social-filters"/);
   assert.match(component, /aria-label=\{ui\.socialNetworkFilter\}/);
   assert.match(component, /aria-pressed=\{socialFilters\.includes\(item\)\}/);
@@ -632,7 +638,9 @@ test("при открытии переписки лента показывает
 
 test("новые сообщения не сбивают чтение истории и предлагают переход вниз", () => {
   assert.match(component,/newMessageCount,setNewMessageCount/);
-  assert.match(component,/newInbound&&!stickToBottom\.current/);
+  assert.match(component,/newMessages&&!stickToBottom\.current/);
+  assert.match(component,/nextMessages\.filter\(\(message:Message\)=>message\.status!=="DRAFT"&&!knownIds\.has\(message\.id\)\)\.length/);
+  assert.doesNotMatch(component,/message\.direction==="INBOUND"&&!knownIds\.has\(message\.id\)/);
   assert.match(component,/communications-new-messages/);
   assert.match(component,/autoScrollPending\.current=true;scrollMessagesToLatest\(\)/);
   assert.match(css,/\.communications-new-messages\{[^}]*position:sticky[^}]*bottom:12px/);
