@@ -37,9 +37,9 @@ test("expanded order preserves all four statuses with only sales and production 
   assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)",/);
 });
 
-test("expanded order exposes every numbered measurement for every real or legacy item", () => {
+test("expanded order exposes every numbered measurement only for its owning real or legacy item", () => {
   assert.match(expanded, /order\.items\.length/);
-  assert.match(expanded, /measurement:\s*order\.measurement/);
+  assert.match(expanded, /measurement:\s*ownedMeasurement\(order\.measurement, order\.athlete\)/);
   assert.match(expanded, /item\.measurement/);
   assert.match(expanded, /values=\{item\.measurement\.values\}/);
   assert.match(expanded, /aria-controls=\{measurementDetailsId\}/);
@@ -77,7 +77,8 @@ test("expanded order retains delivery, complete contact context, and activity hi
   for (const field of ["carrier", "trackingNumber", "costMinor"]) {
     assert.match(expanded, new RegExp(`order\\.shipment\\?\\.${field}`), `shipment ${field} must remain visible`);
   }
-  assert.match(expanded, /order\.activities\.map/);
+  assert.match(expanded, /visibleActivities\.map/);
+  assert.match(expanded, /order\.activities\.slice\(0, 5\)/);
   for (const field of ["summary", "createdAt"]) {
     assert.match(expanded, new RegExp(`activity\\.${field}`), `activity ${field} must remain visible`);
   }

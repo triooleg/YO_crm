@@ -9,6 +9,7 @@ import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
+import { loadProductionOrders, type ProductionOrderRepository } from "./production-context";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -58,7 +59,6 @@ export class OrdersService {
         { athlete: { is: { lastName: { contains: query, mode: "insensitive" as const } } } },
       ] } : {}) },
       orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
-      take: 100,
       select: {
         id: true, number: true, type: true, discipline: true, country: true, requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
         deliveryMinor: true, discountMinor: true,
@@ -66,8 +66,8 @@ export class OrdersService {
         paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true, productionSlot: true,
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
-        measurement: { select: { id: true, measuredAt: true, values: true } },
-        items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, measuredAt: true, values: true } } } },
+        measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } },
+        items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         payments: { select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
@@ -78,31 +78,8 @@ export class OrdersService {
     }));
   }
 
-  async productionList() {
-    return this.prisma.order.findMany({
-      where: { archivedAt: null },
-      orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
-      take: 100,
-      select: {
-        id: true,
-        number: true,
-        notes: true,
-        modelImagePath: true,
-        requiredDeliveryAt: true,
-        productionStatus: true,
-        priceMinor: true,
-        currency: true,
-        productionSlot: true,
-        client: { select: { displayName: true, country: true } },
-        items: {
-          select: {
-            quantity: true,
-            modelImagePath: true,
-            athlete: { select: { firstName: true, lastName: true } },
-          },
-        },
-      },
-    });
+  async productionList(orderId?: string) {
+    return loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId);
   }
 
 

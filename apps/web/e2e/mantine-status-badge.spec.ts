@@ -31,6 +31,13 @@ const order = {
       quantity: 1,
       priceMinor: 45000,
       productionStatus: "READY",
+      athlete: { id: "athlete-1", firstName: "Анна", lastName: "Тестова" },
+      measurement: {
+        id: "measurement-1",
+        athleteId: "athlete-1",
+        measuredAt: "2026-08-20T12:00:00.000Z",
+        values: Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`m${index + 1}`, 50 + index])),
+      },
     },
     {
       id: "item-2",
@@ -38,6 +45,13 @@ const order = {
       quantity: 1,
       priceMinor: 0,
       productionStatus: "ON_HOLD",
+      athlete: { id: "athlete-2", firstName: "Мария", lastName: "Тестова" },
+      measurement: {
+        id: "measurement-2",
+        athleteId: "athlete-2",
+        measuredAt: "2026-08-22T12:00:00.000Z",
+        values: Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`m${index + 1}`, 60 + index])),
+      },
     },
     {
       id: "item-3",
@@ -137,6 +151,28 @@ for (const viewport of [
     expect(itemPaymentGeometry.display).toBe("block");
     expect(itemPaymentGeometry.gap).toBeGreaterThanOrEqual(3);
 
+    const itemBlocks = page.locator(".orders-expanded-item-block");
+    const firstItem = itemBlocks.nth(0);
+    const secondItem = itemBlocks.nth(1);
+    await firstItem.getByRole("button", { name: "Все замеры" }).click();
+    const firstMeasurements = firstItem.locator(".orders-expanded-measurements");
+    await expect(firstMeasurements).toBeVisible();
+    await expect(firstMeasurements.locator(":scope > span")).toHaveCount(17);
+    await expect(firstMeasurements.getByText(/№17/)).toBeVisible();
+    expect(await firstMeasurements.evaluate((grid) => grid.parentElement?.classList.contains("orders-expanded-item-block"))).toBe(true);
+    await expect(firstMeasurements.locator(":scope > span small").last()).toHaveCSS("white-space", "normal");
+
+    await secondItem.getByRole("button", { name: "Все замеры" }).click();
+    await expect(firstMeasurements).toBeHidden();
+    const secondMeasurements = secondItem.locator(".orders-expanded-measurements");
+    await expect(secondMeasurements).toBeVisible();
+    expect(await secondMeasurements.evaluate((grid) => grid.previousElementSibling?.classList.contains("orders-expanded-item-row"))).toBe(true);
+    await secondMeasurements.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`mantine-statuses-${viewport.width}x${viewport.height}.png`),
+      fullPage: false,
+    });
+
     const statusControls = page.locator(".orders-expanded-statuses select");
     await expect(statusControls).toHaveCount(2);
     await expect(statusControls.nth(0)).toBeEnabled();
@@ -151,10 +187,56 @@ for (const viewport of [
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
     );
     expect(pageOverflows).toBe(false);
-    await paid.scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: testInfo.outputPath(`mantine-statuses-${viewport.width}x${viewport.height}.png`),
-      fullPage: false,
-    });
   });
 }
+
+test("чужой снимок мерок не показывается у позиции, legacy-позиции и заказа без позиций", async ({ page }) => {
+  const foreignMeasurement = {
+    id: "measurement-foreign",
+    athleteId: "athlete-foreign",
+    measuredAt: "2026-08-20T12:00:00.000Z",
+    values: { m1: 99 },
+  };
+  const mismatchedItem = structuredClone(order);
+  mismatchedItem.id = "order-mismatched-item";
+  mismatchedItem.number = "YO-26-0100";
+  mismatchedItem.items = [{
+    id: "item-mismatched",
+    name: "Чужая позиция",
+    quantity: 1,
+    priceMinor: 45000,
+    productionStatus: "READY",
+    athlete: { id: "athlete-1", firstName: "Анна", lastName: "Тестова" },
+    measurement: foreignMeasurement,
+  }];
+  const mismatchedLegacy = structuredClone(mismatchedItem);
+  mismatchedLegacy.id = "order-mismatched-legacy";
+  mismatchedLegacy.number = "YO-26-0101";
+  mismatchedLegacy.athlete = { id: "athlete-1", firstName: "Анна", lastName: "Тестова" };
+  mismatchedLegacy.measurement = foreignMeasurement;
+  delete mismatchedLegacy.items[0].measurement;
+  const mismatchedEmpty = structuredClone(mismatchedLegacy);
+  mismatchedEmpty.id = "order-mismatched-empty";
+  mismatchedEmpty.number = "YO-26-0102";
+  mismatchedEmpty.items = [];
+
+  await page.route("**/api/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    const responses = new Map<string, unknown>([
+      ["/api/auth/me", { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } }],
+      ["/api/branding", {}],
+      ["/api/orders", [mismatchedItem, mismatchedLegacy, mismatchedEmpty]],
+    ]);
+    await route.fulfill(responses.has(pathname) ? { json: responses.get(pathname) } : { status: 501, json: { error: pathname } });
+  });
+  await page.goto("/?section=orders");
+
+  for (const [number, id] of [["YO-26-0100", "order-mismatched-item"], ["YO-26-0101", "order-mismatched-legacy"], ["YO-26-0102", "order-mismatched-empty"]]) {
+    await page.getByRole("button", { name: number }).click();
+    const expanded = page.locator(`#order-details-${id}`);
+    await expect(expanded).toBeVisible();
+    await expect(expanded.getByRole("button", { name: "Все замеры" })).toHaveCount(0);
+    await expect(expanded.locator(".orders-expanded-measurements")).toHaveCount(0);
+    await page.getByRole("button", { name: number }).click();
+  }
+});

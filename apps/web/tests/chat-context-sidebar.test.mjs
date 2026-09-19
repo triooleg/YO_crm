@@ -40,7 +40,8 @@ test("следующее действие берётся из существую
 });
 
 test("основная вкладка показывает один актуальный заказ с оплатой, полный список остаётся во вкладке заказов",()=>{
-  assert.match(communications,/displayedContextOrders=contextTab==="CLIENT"\?activeOrders\.slice\(0,1\):activeOrders/);
+  assert.match(communications,/displayedContextOrders=contextTab==="CLIENT"\?orderedContextOrders\.slice\(0,1\):orderedContextOrders/);
+  assert.match(communications,/focusedContextOrder=contextOrders\.find\(order=>order\.id===initialOrderId\.current\)/);
   assert.match(communications,/orderPaidMinor/);
   assert.match(communications,/ui\.paid/);
   assert.match(communications,/ui\.balance/);

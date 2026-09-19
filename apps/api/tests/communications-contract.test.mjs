@@ -43,6 +43,7 @@ const aiGenerationLease = (
 const contextBuilder = (
   await readFile(new URL("../src/intelligence/context-builder.service.ts", import.meta.url), "utf8")
 ).replace(/\s+/g, "");
+const { withPreferredItem } = await import("../src/communications/preferred-page.ts");
 
 test("inbox list uses server pagination, full search and complete buyer aggregates", () => {
   assert.match(dto, /classCommunicationsListQueryDto/);
@@ -59,6 +60,28 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
   assert.match(service, /salesStatus:\{notIn:\["COMPLETED","CANCELLED"\]\}/);
   assert.match(service, /buyerSummary:\{purchaseCount:/);
   assert.match(service, /paymentTotals:/);
+});
+
+test("входящие догружают точного клиента за пределами первой страницы", () => {
+  assert.match(dto, /@IsOptional\(\)@IsString\(\)@Length\(1,80\)clientId\?:string/);
+  assert.match(service, /query\.clientId&&!pageClients\.some\(client=>client\.id===query\.clientId\)/);
+  assert.match(service, /where:\{id:query\.clientId,archivedAt:null\}/);
+  assert.match(service, /withPreferredItem\(pageClients,requestedClient\)/);
+  assert.match(service, /preferredItem/);
+  assert.match(service, /hasMore:\(query\.offset\?\?0\)\+pageClients\.length<total/);
+});
+
+test("выбранный клиент не меняет размер и смещение серверной страницы", () => {
+  const ordinary = Array.from({ length: 15 }, (_, index) => ({ id: `client-${index + 1}` }));
+  const result = withPreferredItem(ordinary, { id: "client-101" });
+  assert.equal(result.items.length, 15);
+  assert.equal(result.aggregateItems.length, 16);
+  assert.equal(result.preferredId, "client-101");
+  assert.deepEqual(result.items.map((item) => item.id), ordinary.map((item) => item.id));
+  assert.equal(new Set(result.aggregateItems.map((item) => item.id)).size, 16);
+  const alreadyVisible = withPreferredItem(ordinary, ordinary[4]);
+  assert.equal(alreadyVisible.preferredId, undefined);
+  assert.equal(alreadyVisible.aggregateItems.length, 15);
 });
 
 test("inbox list can be narrowed to several validated social channels", () => {

@@ -36,8 +36,8 @@ export class ClientsService {
     return clients.map(presentClientContact);
   }
 
-  async detail(id: string) {
-    const client = await this.prisma.client.findFirst({
+  async detail(id: string, orderId?: string) {
+    let client = await this.prisma.client.findFirst({
       where: { id, archivedAt: null },
       include: {
         responsibleManager: { select: { id: true, displayName: true } },
@@ -57,6 +57,10 @@ export class ClientsService {
       }
     });
     if (!client) throw new NotFoundException("Клиент не найден");
+    if (orderId && !client.orders.some(order => order.id === orderId)) {
+      const requestedOrder = await this.prisma.order.findFirst({ where: { id: orderId, clientId: id, archivedAt: null } });
+      if (requestedOrder) client = { ...client, orders: [requestedOrder, ...client.orders] };
+    }
     return presentClientContact(client);
   }
 

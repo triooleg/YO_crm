@@ -68,6 +68,7 @@ import { chatwootDeleteTarget, classifyDraftDeliveryRecovery, isSoftDeletedMessa
 import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_SUMMARY_PROVIDER_CALLS_PER_BATCH, normalizeSummaryDetailLevel, readSummaryProcessingState, runSummaryProcessingBatch, selectLatestSummaryVersions, splitSummaryMessages, SUMMARY_PROCESSING_LEASE_MS, summaryDigestProfile, summaryPlanFingerprint, summaryPromptVersion, summarySourceDigest, type SummaryDetailLevel, type SummaryMessage } from "./conversation-summary";
 import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
 import { channelAccountName, conversationOwnerSourceId, hasValidMovedEntityIds, legacyConversationOwnerSourceId, legacyMergeTargetClientId, legacySourceChannels } from "../clients/client-merge-provenance";
+import { withPreferredItem } from "./preferred-page";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -176,19 +177,25 @@ export class CommunicationsService {
     };
     const limit = query.limit ?? 15;
     const countedChannels=[ContactChannel.FACEBOOK,ContactChannel.INSTAGRAM,ContactChannel.WHATSAPP,ContactChannel.CHATWOOT,ContactChannel.EMAIL];
-    const [clients, total, metaSettings, chatwootSettings, channelTotals] = await Promise.all([this.p.client.findMany({
+    const clientListInclude = Prisma.validator<Prisma.ClientInclude>()({
+      conversations: {
+        where: { archivedAt: null, ...(selectedChannels ? { channel: { in: selectedChannels } } : {}) },
+        orderBy: { lastMessageAt: "desc" },
+        include: { messages: { where: { messageType: { not: "reaction" } }, orderBy: { createdAt: "desc" }, take: 1 } },
+      },
+    });
+    const [pageClients, total, metaSettings, chatwootSettings, channelTotals] = await Promise.all([this.p.client.findMany({
       where,
       orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }, { id: "asc" }],
-      include: {
-        conversations: {
-          where: { archivedAt: null, ...(selectedChannels ? { channel: { in: selectedChannels } } : {}) },
-          orderBy: { lastMessageAt: "desc" },
-          include: { messages: { where: { messageType: { not: "reaction" } }, orderBy: { createdAt: "desc" }, take: 1 } },
-        },
-      },
+      include: clientListInclude,
       skip: query.offset ?? 0,
       take: limit,
     }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>this.p.client.count({where:{...baseWhere,conversations:{some:{channel,archivedAt:null,...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {})}}}})))]);
+    const requestedClient = (query.offset ?? 0) === 0 && query.clientId && !pageClients.some(client => client.id === query.clientId)
+      ? await this.p.client.findFirst({ where: { id: query.clientId, archivedAt: null }, include: clientListInclude })
+      : null;
+    const preferredPage = withPreferredItem(pageClients, requestedClient);
+    const clients = preferredPage.aggregateItems;
     const hiddenPreviewConversations = clients.flatMap(client => client.conversations.filter(conversation => {
       const preview = conversation.messages[0];
       return Boolean(preview && (isSoftDeletedMessage(preview.metadata) || isDeduplicatedDraft(preview.metadata)));
@@ -224,7 +231,7 @@ export class CommunicationsService {
     const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
     const operationBySource=new Map<string,(typeof mergeOperations)[number]>();
     for(const operation of mergeOperations)if(!operationBySource.has(operation.sourceClientId))operationBySource.set(operation.sourceClientId,operation);
-    const items = clients.map(client => {
+    const aggregateItems = clients.map(client => {
       const redirects=mergeRedirects.filter(redirect=>redirect.targetClientId===client.id),rows=linkedChannelRows.filter(row=>row.clientId===client.id);
       const operations=redirects.map(redirect=>operationBySource.get(redirect.sourceClientId)).filter((operation):operation is (typeof mergeOperations)[number]=>Boolean(operation));
       const legacyEvidence=redirects.filter(redirect=>!operationBySource.has(redirect.sourceClientId)).map(redirect=>{const activity=mergeActivities.filter(item=>item.clientId===client.id).find(item=>legacyMergeTargetClientId(item.metadata,redirect.sourceClientId));return{sourceClientId:redirect.sourceClientId,targetClientId:activity?legacyMergeTargetClientId(activity.metadata,redirect.sourceClientId)||"":"",channels:activity?legacySourceChannels(activity.metadata,redirect.sourceClientId):[]}}).filter(item=>item.targetClientId&&item.channels.length);
@@ -260,7 +267,9 @@ export class CommunicationsService {
         }) || (conversation.channel === ContactChannel.CHATWOOT ? chatwootConversationInboxUrl(chatwootSettings.baseUrl, chatwootSettings.accountId, chatwootIdentityByConversation.get(conversation.id)) : ""),
       })),
     });});
-    return { items, total, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + items.length < total };
+    const preferredItem = preferredPage.preferredId ? aggregateItems.find(item => item.id === preferredPage.preferredId) : undefined;
+    const items = preferredPage.preferredId ? aggregateItems.filter(item => item.id !== preferredPage.preferredId) : aggregateItems;
+    return { items, ...(preferredItem ? { preferredItem } : {}), total, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + pageClients.length < total };
   }
   templates() {
     return this.p.messageTemplate.findMany({

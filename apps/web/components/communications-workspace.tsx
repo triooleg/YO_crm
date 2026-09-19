@@ -81,6 +81,7 @@ type ClientDetail = {
   id: string;
   displayName: string;
   athletes: ClientAthlete[];
+  orders?: Order[];
   workTasks?: { id:string; title:string; description?:string; dueAt?:string; markerColor:string; assignee?:{id:string;displayName:string}; column:{id:string;name:string;color:string;isDone:boolean} }[];
 };
 type TaskBoard = {
@@ -89,7 +90,7 @@ type TaskBoard = {
 };
 type ContextTarget = "clients" | "tasks" | "finance";
 type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
-type ClientPage = { items: Client[]; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
+type ClientPage = { items: Client[]; preferredItem?: Client; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
   externalId?: string;
@@ -306,7 +307,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [contextOpen,setContextOpen]=useState(false),
     [contextCollapsed,setContextCollapsed]=useState(false),
     [mobileClientListOpen,setMobileClientListOpen]=useState(false),
-    [contextTab,setContextTab]=useState<ContextTab>("CLIENT"),
+    [contextTab,setContextTab]=useState<ContextTab>(()=>typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("orderId")?"ORDERS":"CLIENT"),
     [conversationSummaries,setConversationSummaries]=useState<ConversationSummaryItem[]>([]),
     [summaryFirstMessageDate,setSummaryFirstMessageDate]=useState(""),
     [summaryDate,setSummaryDate]=useState(""),
@@ -321,6 +322,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   const widths = useRef({ ...defaults }),
     selectedClientId = useRef<string | undefined>(undefined),
     initialClientId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined),
+    initialOrderId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("orderId")||undefined),
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
     refreshRequestSequence = useRef(0),
@@ -501,7 +503,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&sequence===draftSequence.current)setDraftStatus("ERROR");
     }
   }
-  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope, selectedConversationScope:ConversationScope="ALL") {
+  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope, selectedConversationScope:ConversationScope="ALL", preferredClientId?:string) {
     const items: Client[] = [];
     const seenIds = new Set<string>();
     let offset = 0;
@@ -514,10 +516,12 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
       const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
       const conversationScopeParam=selectedConversationScope!=="ALL"?`&conversationScope=${encodeURIComponent(selectedConversationScope)}`:"";
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}`) as ClientPage;
+      const clientParam=offset===0&&preferredClientId?`&clientId=${encodeURIComponent(preferredClientId)}`:"";
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}${clientParam}`) as ClientPage;
       total=page.total;channelCounts=page.channelCounts||{};
-      offset += page.items.length;
+      if(page.preferredItem&&!seenIds.has(page.preferredItem.id)){seenIds.add(page.preferredItem.id);items.push(page.preferredItem)}
       for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
+      offset += page.items.length;
       hasMore = page.hasMore;
       if (!page.items.length) break;
     }
@@ -630,8 +634,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     const request = ++clientDetailRequest.current;
     setContextLoading(true);
     try {
-      const detail = await api("/clients/" + clientId) as ClientDetail;
+      const contextOrderId=clientId===initialClientId.current?initialOrderId.current:undefined;
+      const detail = await api("/clients/" + clientId+(contextOrderId?`?orderId=${encodeURIComponent(contextOrderId)}`:"")) as ClientDetail;
       if (request !== clientDetailRequest.current || selectedClientId.current !== clientId) return detail;
+      if(contextOrderId&&!detail.orders?.some(order=>order.id===contextOrderId)){setError(ui.contextOrderUnavailable);initialOrderId.current=undefined;clearInboxContextAction()}
       setClientDetail(detail);
       setSelectedAthleteId(current => detail.athletes.some(athlete => athlete.id === current) ? current : detail.athletes[0]?.id);
       return detail;
@@ -758,13 +764,14 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     setLoading(true);
     setError("");
     try {
-      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope);
+      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope,id);
       if(request!==listRequestSequence.current)return;
       const data = sortClients(page.items);
       setClients(data);
       setClientsHasMore(page.hasMore);
       setClientTotal(page.total);setChannelTotals(page.channelCounts);
       const selected = id ? data.find((x) => x.id === id) : data[0];
+      if(id&&!selected&&id===initialClientId.current){setError(ui.contextClientUnavailable);initialClientId.current=undefined;initialOrderId.current=undefined;clearInboxContextAction()}
       if (selected&&selected.id===selectedClientId.current)setClient(selected);
       else if(id&&selected)await open(selected);
       else if(!selectedClientId.current&&selected)await open(selected);
@@ -1193,7 +1200,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
   const availableChannels = client ? clientBadges(client) : [],
     active = availableChannels.find(item=>item.key===activeChannel)||{...sourceBadge({source:activeChannel} as Client),accountName:undefined as string|undefined},
     activeOrders=client?.orders||[],
-    displayedContextOrders=contextTab==="CLIENT"?activeOrders.slice(0,1):activeOrders,
+    contextOrders=clientDetail?.orders?.length?clientDetail.orders:activeOrders,
+    focusedContextOrder=contextOrders.find(order=>order.id===initialOrderId.current),
+    orderedContextOrders=focusedContextOrder?[focusedContextOrder,...contextOrders.filter(order=>order.id!==focusedContextOrder.id)]:contextOrders,
+    displayedContextOrders=contextTab==="CLIENT"?orderedContextOrders.slice(0,1):orderedContextOrders,
     nextTask=clientDetail?.workTasks?.[0],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
     channelCounts=Object.fromEntries(socialChannels.map(item=>[item,channelTotals[item]||0])) as Record<SocialChannel,number>,
@@ -1561,7 +1571,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
           {displayedContextOrders.map((o) => (
-            <article key={o.id}>
+            <article className={o.id===initialOrderId.current?"is-context":undefined} key={o.id}>
               {o.modelImagePath ? (
                 <img
                   src={
@@ -1767,3 +1777,4 @@ function InboxCountryFlag({country}:{country:string}){
   return code?<span className={`fi fi-${code}`} aria-hidden="true"/>:null;
 }
 function clientLocalTime(timezone:string){try{return new Intl.DateTimeFormat("ru-RU",{timeZone:timezone,hour:"2-digit",minute:"2-digit",timeZoneName:"shortOffset"}).format(new Date())}catch{return timezone}}
+function clearInboxContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}

@@ -63,3 +63,46 @@
 @media(max-width:1550px){.orders-search.crm-search-field{width:min(430px,42vw)}}
 @media(max-width:1100px){.orders-search.crm-search-field{width:100%;max-width:none}.orders-sort.crm-native-select{margin-left:0}}
 @media(max-width:700px){.orders-sort.crm-native-select{grid-template-columns:1fr;width:100%}.orders-sort .mantine-NativeSelect-input{width:100%;max-width:none}.orders-expanded-statuses>.crm-native-select{border-right:0}}
+/* Вариант А: компактное рабочее место внутри раскрытой строки заказа. */
+.orders-expanded-layout-a{grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;padding:8px;font-size:12px}
+.orders-expanded-layout-a>section,.orders-expanded-layout-a>nav{min-width:0}
+.orders-expanded-command-row{grid-column:1/-1;display:grid;grid-template-columns:minmax(640px,1fr) auto;gap:8px;min-width:0}
+.orders-expanded-layout-a .orders-expanded-statuses{grid-column:1/-1;grid-template-columns:repeat(4,minmax(160px,1fr))}.orders-expanded-command-row .orders-expanded-statuses{grid-column:auto}
+.orders-expanded-layout-a .orders-expanded-statuses>div,.orders-expanded-layout-a .orders-expanded-statuses>label{min-height:64px;border-left:4px solid transparent}
+.orders-expanded-layout-a .orders-expanded-status--sales{border-left-color:#7651dc!important;background:#faf8ff}
+.orders-expanded-layout-a .orders-expanded-status--payment{border-left-color:#33a466!important;background:#f6fcf8}
+.orders-expanded-layout-a .orders-expanded-status--production{border-left-color:#e8992e!important;background:#fffaf3}
+.orders-expanded-layout-a .orders-expanded-status--shipping{border-left-color:#4288d8!important;background:#f6faff}
+.orders-expanded-quick-nav{display:flex;align-items:center;align-content:center;flex-wrap:wrap;gap:6px;padding:7px;border:1px solid var(--od-border);border-radius:8px;background:#fbfaff}
+.orders-expanded-quick-nav .crm-button{flex:0 0 auto}
+.orders-expanded-meta{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:hidden;border:1px solid var(--od-border)!important;border-radius:8px;background:#fff}
+.orders-expanded-meta>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:7px 12px;padding:10px;border-right:1px solid var(--od-border)}
+.orders-expanded-meta>div:last-child{border-right:0}
+.orders-expanded-meta h3{grid-column:1/-1;margin:0 0 2px;color:#4e4657;font-size:11px;text-transform:uppercase}
+.orders-expanded-layout-a .orders-detail small{font-size:10px}.orders-expanded-layout-a .orders-detail strong{overflow-wrap:anywhere;font-size:11px}
+.orders-expanded-layout-a .orders-expanded-designs{grid-column:1/-1;padding:9px}
+.orders-expanded-item-block{border-top:1px solid #eee9f4;background:#fff}
+.orders-expanded-item-block:first-child{border-top:0}
+.orders-expanded-items .orders-expanded-item-row{display:grid;grid-template-columns:22px 44px minmax(150px,1.6fr) minmax(130px,1fr) minmax(110px,.9fr) minmax(95px,.75fr) minmax(130px,1fr);align-items:center;gap:8px;min-height:62px;border:0;font-size:11px}
+.orders-item-payment>small,.orders-item-payment>strong{display:block}.orders-item-payment>small{margin-bottom:3px}.orders-item-payment>strong{line-height:1.3}
+.orders-expanded-item-block .orders-expanded-measurements{display:grid;grid-template-columns:repeat(6,minmax(125px,1fr));gap:5px;padding:8px 8px 10px 74px;border-top:1px dashed #ded5ed;background:#fbf9fe}
+.orders-expanded-measurements>header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px}
+.orders-expanded-measurements>header strong{font-size:11px}.orders-expanded-measurements>header small{color:var(--muted);font-size:10px}
+.orders-expanded-measurements span{min-width:0;padding:6px 7px;border:1px solid #eee9f5;background:#fff}
+.orders-expanded-measurements span small{white-space:normal;overflow-wrap:anywhere;line-height:1.3}.orders-expanded-measurements span b{margin-top:3px;font-size:11px}
+.orders-expanded-operations{grid-column:1/-1;padding:9px;border:1px solid var(--od-border)!important;border-radius:8px;background:#fff}
+.orders-expanded-operations>h3{margin:0 0 7px;color:#4e4657;font-size:11px;text-transform:uppercase}
+.orders-expanded-operation-grid{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:7px}
+.orders-expanded-operation-grid article{min-width:0;padding:9px;border:1px solid #eee9f4;border-radius:7px;background:#fcfbfd}
+.orders-expanded-operation-grid h4{margin:0 0 7px;font-size:11px}.orders-expanded-operation-grid p{margin:0;color:#51485a;line-height:1.45}
+.orders-expanded-operation-grid .orders-detail{margin-top:6px}.orders-expanded-operation-grid article>small{display:block;margin-top:5px;color:var(--muted);font-size:10px}
+.orders-operation-state{display:inline-flex;margin-top:7px;padding:4px 7px;border-radius:999px;font-size:10px;font-weight:800}.orders-operation-state.warning{background:#fff0dc;color:#a8660f}.orders-operation-state.success{background:#e7f7ed;color:#257c47}
+.orders-expanded-layout-a .orders-expanded-payments{grid-column:1/9}.orders-expanded-layout-a .orders-expanded-finance{grid-column:9/-1}
+.orders-expanded-section-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.orders-expanded-section-heading h3{margin:0}.orders-expanded-section-heading .orders-secondary-action{width:auto;margin:0;padding:6px 9px}
+.orders-expanded-payments .orders-expanded-payment-history{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;margin-top:8px;padding-top:0;border-top:0}
+.orders-expanded-payments .orders-expanded-payment-history>div{grid-template-columns:90px auto 1fr}.orders-expanded-payments .orders-expanded-payment-history em{grid-column:1/-1}
+.orders-expanded-payments .orders-expanded-invoices{margin-top:8px}.orders-expanded-layout-a .orders-expanded-history{grid-column:1/-1}
+@media (max-width:1100px){.orders-expanded-layout-a .orders-expanded-statuses{grid-template-columns:repeat(2,minmax(0,1fr))}.orders-expanded-meta{grid-template-columns:1fr 1fr}.orders-expanded-meta>div:last-child{grid-column:1/-1;border-top:1px solid var(--od-border)}.orders-expanded-item-block .orders-expanded-measurements{grid-template-columns:repeat(4,minmax(125px,1fr));padding-left:8px}.orders-expanded-operation-grid{grid-template-columns:1fr 1fr}.orders-expanded-operation-grid article:first-child{grid-column:1/-1}.orders-expanded-layout-a .orders-expanded-payments{grid-column:1/8}.orders-expanded-layout-a .orders-expanded-finance{grid-column:8/-1}}
+@media (max-width:900px){.orders-dashboard-table .orders-expanded-row>td{position:sticky;left:0;width:calc(100vw - 22px)!important;max-width:calc(100vw - 22px)!important;padding-left:0!important;padding-right:0!important}.orders-expanded-layout-a{display:block;width:calc(100vw - 24px);max-width:100%;box-sizing:border-box}.orders-expanded-layout-a>section,.orders-expanded-layout-a>nav,.orders-expanded-command-row{margin-bottom:8px}.orders-expanded-command-row{display:grid;grid-template-columns:1fr}.orders-expanded-quick-nav{overflow-x:auto;flex-wrap:nowrap}.orders-expanded-meta{grid-template-columns:1fr}.orders-expanded-meta>div,.orders-expanded-meta>div:last-child{grid-column:auto;border-right:0;border-top:1px solid var(--od-border)}.orders-expanded-meta>div:first-child{border-top:0}.orders-expanded-items{max-width:100%;overflow:visible}.orders-expanded-items .orders-expanded-item-row{grid-template-columns:22px 44px minmax(0,1fr);align-items:start;min-width:0;padding:8px 0}.orders-expanded-item-row>.orders-detail,.orders-expanded-item-row>.orders-item-payment{grid-column:2/-1;min-width:0}.orders-expanded-item-block .orders-expanded-measurements{min-width:0;grid-template-columns:repeat(2,minmax(0,1fr));padding:8px}.orders-expanded-measurements>header{flex-wrap:wrap}.orders-expanded-operation-grid{grid-template-columns:1fr}.orders-expanded-operation-grid article:first-child{grid-column:auto}.orders-expanded-payments .orders-expanded-payment-history{grid-template-columns:1fr}}
+
+.finance-context-order{display:flex;align-items:center;gap:12px;margin:0 0 12px;padding:10px 12px;border:1px solid #cdbcf5;border-radius:10px;background:#f8f5ff}.finance-context-order div{display:grid;margin-right:auto}.finance-context-order small{color:var(--muted)}.finance-context-order strong{color:var(--violet)}.finance-context-order button{border:0;background:transparent;font-size:20px}.finance-order.is-context,.shipping-row.is-context{background:#f3eeff;box-shadow:inset 3px 0 var(--violet)}.production-slot-empty{clear:both;margin-top:18px;padding:12px;border:1px dashed var(--line);border-radius:10px;background:#faf8ff}.production-slot-empty button{width:100%;margin-top:8px;padding:9px;border:1px solid var(--violet);border-radius:8px;background:var(--violet);color:#fff;font-weight:700}.production-slot-empty button:disabled{opacity:.55}@media(max-width:650px){.finance-context-order{align-items:flex-start;flex-wrap:wrap}}

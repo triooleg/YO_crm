@@ -56,6 +56,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
   const mergeBusyRef = useRef(false);
   const detailRequestId=useRef(0);
   const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
+  const initialOrderId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("orderId")||undefined);
   const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
   const [auth, setAuth] = useState<boolean | null>(null),
     [clients, setClients] = useState<Client[]>([]),
@@ -117,9 +118,10 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
       setDetail(undefined);
       return;
     }
-    request(`/clients/${selected}`)
-      .then(value=>{if(requestId!==detailRequestId.current)return;setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
-      .catch((e) => {if(requestId===detailRequestId.current)setError(e.message)});
+    const contextOrderId=selected===initialClientId.current?initialOrderId.current:undefined;
+    request(`/clients/${selected}${contextOrderId?`?orderId=${encodeURIComponent(contextOrderId)}`:""}`)
+      .then(value=>{if(requestId!==detailRequestId.current)return;if(contextOrderId&&!value.orders.some((order:Order)=>order.id===contextOrderId)){setError(clientWorkspaceUi.contextOrderUnavailable);initialOrderId.current=undefined;clearClientContextAction()}setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
+      .catch((e) => {if(requestId===detailRequestId.current){if(selected===initialClientId.current){setError(clientWorkspaceUi.contextClientUnavailable);initialClientId.current=undefined;initialOrderId.current=undefined;clearClientContextAction()}else setError(e.message)}});
     request(`/clients/${selected}/merge-suggestions`).then(value=>{if(requestId===detailRequestId.current)setMergeSuggestions(value)}).catch(()=>{if(requestId===detailRequestId.current)setMergeSuggestions([])});
   }, [selected, auth]);
   useEffect(()=>{
@@ -241,6 +243,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
           </section>
           <Card
             detail={detail}
+          focusedOrderId={initialOrderId.current}
           onMeasure={() => setMeasuring(true)}
           onOrder={() => setOrdering(true)}
           onAddAthlete={() => setAddingAthlete(true)}
@@ -344,22 +347,25 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
 }
 function Card({
   detail,
+  focusedOrderId,
   onMeasure,
   onOrder,
   onAddAthlete,
   addAthleteTriggerRef,
 }: {
   detail?: Client;
+  focusedOrderId?: string;
   onMeasure: () => void;
   onOrder: () => void;
   onAddAthlete: () => void;
   addAthleteTriggerRef: React.RefObject<HTMLButtonElement | null>;
 }) {
-  const [tab, setTab] = useState("main"),
+  const [tab, setTab] = useState(focusedOrderId ? "orders" : "main"),
     [viewing, setViewing] = useState<{
       athleteName: string;
       measurement: MeasurementView;
     }>();
+  useEffect(() => { if (focusedOrderId && detail?.orders.some((order) => order.id === focusedOrderId)) setTab("orders"); }, [detail?.id, focusedOrderId]);
   if (!detail)
     return (
       <section className="phase2-card phase2-empty">
@@ -436,7 +442,7 @@ function Card({
       {tab === "orders" && (
         <div className="phase2-card-content">
           {detail.orders.length ? (
-            detail.orders.map((o) => <OrderLine o={o} key={o.id} />)
+            detail.orders.map((o) => <OrderLine o={o} key={o.id} focused={o.id === focusedOrderId} />)
           ) : (
             <Empty t="Заказов пока нет" />
           )}
@@ -719,9 +725,9 @@ function Title({
 function Empty({ t }: { t: string }) {
   return <div className="phase2-empty-line">{t}</div>;
 }
-function OrderLine({ o }: { o: Order }) {
+function OrderLine({ o, focused = false }: { o: Order; focused?: boolean }) {
   return (
-    <div className="phase2-row">
+    <div className={`phase2-row${focused ? " is-context" : ""}`}>
       {o.modelImagePath && (
         <img
           className="phase2-order-thumb"

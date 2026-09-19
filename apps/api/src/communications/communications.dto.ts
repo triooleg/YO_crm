@@ -33,6 +33,7 @@ export class ConversationQueryDto {
 export class CommunicationsListQueryDto {
   @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset = 0;
   @IsOptional() @IsInt() @Min(1) @Max(60) @Type(() => Number) limit = 15;
+  @IsOptional() @IsString() @Length(1, 80) clientId?: string;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional()
   @Transform(({ value }) => Array.isArray(value) ? value : String(value).split(",").filter(Boolean))

@@ -20,4 +20,4 @@ test("timeline recalculates only fully visible days and fills the available widt
 
 test("production bars use two text lines and visible handles",()=>{assert.match(production,/timeline-bar-text/);assert.match(styles,/\.timeline-bar-text\{[^}]*display:grid/);assert.match(styles,/\.timeline-bar b\{font-size:11px/);assert.match(styles,/\.timeline-bar small\{font-size:9px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
 
-test("production workspace loads its dedicated projection",()=>{assert.match(production,/fetch\("\/api\/orders\/production"/);assert.doesNotMatch(production,/fetch\("\/api\/orders",\{credentials:"include"\}\)/)});
+test("production workspace loads its dedicated projection",()=>{assert.match(production,/productionUrl/);assert.match(production,/\/api\/orders\/production/);assert.doesNotMatch(production,/fetch\("\/api\/orders",\{credentials:"include"\}\)/)});

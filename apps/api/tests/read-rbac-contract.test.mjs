@@ -10,6 +10,10 @@ const ordersController = await readFile(
   new URL("../src/orders/orders.controller.ts", import.meta.url),
   "utf8",
 );
+const productionContext = await readFile(
+  new URL("../src/orders/production-context.ts", import.meta.url),
+  "utf8",
+);
 const ordersService = await readFile(
   new URL("../src/orders/orders.service.ts", import.meta.url),
   "utf8",
@@ -41,13 +45,18 @@ test("production reads use a dedicated least-privilege projection", () => {
     /@Get\("production"\)\s+@Roles\(UserRole\.OWNER, UserRole\.ADMIN, UserRole\.MANAGER, UserRole\.PRODUCTION\)\s+productionList\(/,
   );
 
-  const projection = ordersService.slice(
+  const projection = productionContext.slice(
+    productionContext.indexOf("export const productionOrderSelect"),
+    productionContext.indexOf("export function includeRequestedProductionOrder"),
+  );
+  const productionMethod = ordersService.slice(
     ordersService.indexOf("async productionList("),
     ordersService.indexOf("async updateStatuses("),
   );
   assert.match(projection, /productionSlot: true/);
   assert.match(projection, /client: \{ select: \{ displayName: true, country: true \} \}/);
   assert.doesNotMatch(projection, /payments|invoices|shipment|address|postalCode|language|source|measurement|activities/);
+  assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId\)/);
 });
 
 function escapeRegExp(value) {

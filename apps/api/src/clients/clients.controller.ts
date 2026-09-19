@@ -22,8 +22,8 @@ export class ClientsController {
 
   @Get(":id")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
-  detail(@Param("id") id: string) {
-    return this.clients.detail(id);
+  detail(@Param("id") id: string, @Query("orderId") orderId?: string) {
+    return this.clients.detail(id, orderId);
   }
 
   @Get(":id/merge-suggestions")

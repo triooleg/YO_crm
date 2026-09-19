@@ -37,7 +37,7 @@ test("после добавления спортсмена карточка вы
 });
 
 test("ошибка необязательных предложений объединения не мешает открыть карточку клиента",()=>{
-  assert.match(workspace,/request\(`\/clients\/\$\{selected\}`\)/);
+  assert.match(workspace,/request\(`\/clients\/\$\{selected\}\$\{contextOrderId\?/);
   assert.match(workspace,/request\(`\/clients\/\$\{selected\}\/merge-suggestions`\)/);
   assert.doesNotMatch(workspace,/Promise\.all\(\[request\(`\/clients\/\$\{selected\}`\),request\(`\/clients\/\$\{selected\}\/merge-suggestions`\)\]\)/);
 });

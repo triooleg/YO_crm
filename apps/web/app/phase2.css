@@ -73,6 +73,7 @@ button { cursor: pointer; }
 .phase2-section-title { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 9px; }
 .phase2-section-title h3 { margin: 0; font-size: 15px; }
 .phase2-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 4px; border-bottom: 1px solid #f0ecf2; }
+.phase2-row.is-context { margin-inline: -8px; padding-inline: 12px; border-radius: 8px; background: var(--violet-soft); box-shadow: inset 3px 0 var(--violet); }
 .phase2-row > div { display: grid; gap: 4px; }
 .phase2-row em { color: var(--violet); font-style: normal; }
 .phase2-warning { color: #b76c00; font-size: 13px; }
