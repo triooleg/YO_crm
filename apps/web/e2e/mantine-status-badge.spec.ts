@@ -118,7 +118,7 @@ for (const viewport of [
     const statusUpdates = await mockOrdersApi(page);
     await page.goto("/?section=orders");
 
-    await page.getByRole("button", { name: order.number }).click();
+    await page.getByRole("button", { name: order.number, exact: true }).click();
 
     const expandedOrder = page.locator(".orders-expanded-layout-a");
     await expect(expandedOrder).toHaveCSS("font-size", "12px");
@@ -126,9 +126,9 @@ for (const viewport of [
     await expect(expandedOrder.locator(".orders-detail strong").first()).toHaveCSS("font-size", "13px");
     await expect(expandedOrder.locator(".orders-expanded-meta h3").first()).toHaveCSS("font-size", "14px");
     await expect(expandedOrder.locator(".orders-money-line.strong")).toHaveCSS("font-size", "14px");
-    await expect(expandedOrder.locator(".orders-expanded-status--sales .mantine-NativeSelect-input")).toHaveCSS("color", "rgb(22, 138, 215)");
-    await expect(page.locator(".orders-discipline-select")).toHaveCSS("color", "rgb(22, 138, 215)");
-    await expect(page.locator(".orders-deadline-button strong")).toHaveCSS("color", "rgb(22, 138, 215)");
+    await expect(expandedOrder.locator(".orders-expanded-status--sales .mantine-NativeSelect-input")).toHaveCSS("color", "rgb(17, 122, 192)");
+    await expect(page.locator(".orders-discipline-select")).toHaveCSS("color", "rgb(17, 122, 192)");
+    await expect(page.locator(".orders-deadline-button strong")).toHaveCSS("color", "rgb(17, 122, 192)");
 
     const paid = page.locator('[data-domain="payment"][data-status="PAID"]');
     const shipping = page.locator('[data-domain="shipping"][data-status="LOST"]');
@@ -168,6 +168,11 @@ for (const viewport of [
     const firstMeasurements = firstItem.locator(".orders-expanded-measurements");
     await expect(firstMeasurements).toBeVisible();
     await expect(firstMeasurements.locator(":scope > span")).toHaveCount(17);
+    await expect(firstMeasurements.locator(":scope > span.measurement-primary")).toHaveCount(4);
+    await expect(firstMeasurements.locator(":scope > span.measurement-secondary")).toHaveCount(3);
+    await expect(firstMeasurements.locator(":scope > span").nth(0)).toHaveCSS("background-color", "rgb(243, 239, 255)");
+    await expect(firstMeasurements.locator(":scope > span").nth(5)).toHaveCSS("background-color", "rgb(238, 248, 255)");
+    await expect(firstMeasurements.locator(":scope > span").nth(5).locator("small")).toHaveCSS("color", "rgb(37, 119, 169)");
     await expect(firstMeasurements.getByText(/№17/)).toBeVisible();
     expect(await firstMeasurements.evaluate((grid) => grid.parentElement?.classList.contains("orders-expanded-item-block"))).toBe(true);
     await expect(firstMeasurements.locator(":scope > span small").last()).toHaveCSS("white-space", "normal");
@@ -242,11 +247,11 @@ test("чужой снимок мерок не показывается у поз
   await page.goto("/?section=orders");
 
   for (const [number, id] of [["YO-26-0100", "order-mismatched-item"], ["YO-26-0101", "order-mismatched-legacy"], ["YO-26-0102", "order-mismatched-empty"]]) {
-    await page.getByRole("button", { name: number }).click();
+    await page.getByRole("button", { name: number, exact: true }).click();
     const expanded = page.locator(`#order-details-${id}`);
     await expect(expanded).toBeVisible();
     await expect(expanded.getByRole("button", { name: "Все замеры" })).toHaveCount(0);
     await expect(expanded.locator(".orders-expanded-measurements")).toHaveCount(0);
-    await page.getByRole("button", { name: number }).click();
+    await page.getByRole("button", { name: number, exact: true }).click();
   }
 });

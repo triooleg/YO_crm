@@ -83,6 +83,14 @@ Money is integer minor units plus an ISO currency. `priceMinor`,
 custom-order deposit is supplied by the configured percentage, defaulting to 50
 percent, with an authorized explicit override.
 
+An order owns a frozen delivery-address snapshot that is independent from the
+client profile. Saving the snapshot requires either a usable street/address
+line or an explicitly entered full address; city or country alone is not a
+delivery address. Legacy rows with `deliveryAddressSet = false` continue to
+display the current client address until an operator saves an order snapshot.
+Editing this snapshot does not mutate the client profile, shipment, statuses,
+payments or referenced measurement snapshots.
+
 ### Order Item
 
 One line inside an order, stored as `OrderItem`. It carries name, quantity,

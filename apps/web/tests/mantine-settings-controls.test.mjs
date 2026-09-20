@@ -25,7 +25,7 @@ test("shared CRM settings controls use Mantine without changing native form sema
   assert.match(controls, /CrmNativeSelect/);
   assert.match(controls, /forwardRef<HTMLButtonElement, CrmButtonProps>/);
   assert.match(controls, /forwardRef<HTMLButtonElement, CrmActionIconProps>/);
-  assert.match(controls, /forwardRef<HTMLInputElement, TextInputProps>/);
+  assert.match(controls, /forwardRef<HTMLInputElement, TextInputProps & \{ highlighted\?: boolean \}>/);
   assert.match(controls, /forwardRef<HTMLSelectElement, NativeSelectProps>/);
   assert.match(controls, /inputWrapperOrder=\{\["label", "input", "description", "error"\]\}/);
   assert.match(controls, /value="on"/);
@@ -33,6 +33,8 @@ test("shared CRM settings controls use Mantine without changing native form sema
   assert.match(controls, /useMantineTheme\(\)\.other\.crmControls/);
   assert.match(theme, /crmControls:\s*\{/);
   assert.match(theme, /controlHeight:\s*38/);
+  assert.match(theme, /highlightedFieldBackground:\s*"#eef9ff"/);
+  assert.match(theme, /editableTextColor:\s*"#117ac0"/);
   assert.doesNotMatch(compatibilityCss, /\.crm-button\s*\{[^}]*min-height/s);
   assert.doesNotMatch(compatibilityCss, /\.crm-text-input \.mantine-TextInput-input\s*\{[^}]*min-height/s);
 });

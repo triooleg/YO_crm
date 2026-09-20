@@ -7,7 +7,8 @@ import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 import { loadProductionOrders, type ProductionOrderRepository } from "./production-context";
 
@@ -60,7 +61,10 @@ export class OrdersService {
       ] } : {}) },
       orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
       select: {
-        id: true, number: true, type: true, discipline: true, country: true, requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
+        id: true, number: true, type: true, discipline: true, country: true,
+        deliveryAddressSet: true, deliveryRecipient: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
+        deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
+        requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
         deliveryMinor: true, discountMinor: true,
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
         paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true, productionSlot: true,
@@ -129,6 +133,15 @@ export class OrdersService {
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
       return updated;
     });
+  }
+  async updateDeliveryAddress(orderId: string, dto: UpdateOrderDeliveryAddressDto, actor: User) {
+    try {
+      return await this.prisma.$transaction(tx => persistOrderDeliveryAddress(tx, orderId, dto, actor.id));
+    } catch (error) {
+      if (!(error instanceof DeliveryAddressOperationError)) throw error;
+      if (error.code === DELIVERY_ADDRESS_ERROR.orderNotFound) throw new NotFoundException({ code: error.code });
+      throw new BadRequestException({ code: error.code });
+    }
   }
   async updateProductionSlot(orderId: string, dto: UpdateProductionSlotDto, actor: User) {
     const startsAt = new Date(dto.startsAt), endsAt = new Date(dto.endsAt);

@@ -67,6 +67,8 @@ export const yoleotardTheme = createTheme({
       fieldLabelColor: "var(--muted)",
       fieldLabelFontWeight: 400,
       fieldBorderColor: "var(--line)",
+      highlightedFieldBackground: "#eef9ff",
+      editableTextColor: "#117ac0",
       fieldDescriptionMarginTop: 5,
       fieldDescriptionColor: "var(--muted)",
       fieldDescriptionLineHeight: 1.4,

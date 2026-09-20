@@ -8,6 +8,7 @@ const workspace = readFileSync(new URL("../components/orders-workspace.tsx", imp
 const production = readFileSync(new URL("../components/production-workspace.tsx", import.meta.url), "utf8");
 const finance = readFileSync(new URL("../components/finance-workspace.tsx", import.meta.url), "utf8");
 const shipping = readFileSync(new URL("../components/shipping-workspace.tsx", import.meta.url), "utf8");
+const theme = readFileSync(new URL("../lib/mantine-theme.ts", import.meta.url), "utf8");
 
 const expandedStart = dashboard.indexOf("function ExpandedOrder");
 const expandedEnd = dashboard.indexOf("function QuickPayment", expandedStart);
@@ -128,11 +129,40 @@ test("variant A matches KeyCRM typography hierarchy in expanded order details", 
 });
 
 test("editable order values use the KeyCRM-style blue text cue", () => {
-  assert.match(styles, /--od-editable:#168ad7/);
+  assert.match(dashboard, /editableTextColor/);
+  assert.match(theme, /editableTextColor:\s*"#117ac0"/);
   assert.match(styles, /\.orders-discipline-select\{[^}]*color:var\(--od-editable\)/);
   assert.match(styles, /\.orders-deadline-button strong\{color:var\(--od-editable\)\}/);
   assert.match(styles, /\.orders-inline-status-control \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
   assert.match(styles, /\.orders-expanded-statuses>\.crm-native-select \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
   assert.match(styles, /\.orders-expanded-layout-a \.orders-expanded-designs header button,[^{]*\.orders-expanded-section-heading \.orders-secondary-action\{color:var\(--od-editable\)\}/);
   assert.doesNotMatch(styles, /\.orders-measurement-toggle[^}]*color:var\(--od-editable\)/);
+});
+
+test("delivery address is edited from blue order values in a dedicated modal", () => {
+  assert.match(workspace, /deliveryAddressSet\?:boolean/);
+  assert.match(dashboard, /function DeliveryAddressModal/);
+  assert.match(dashboard, /\/delivery-address/);
+  assert.match(dashboard, /useClientAddress/);
+  assert.match(dashboard, /recipientMatchesClient/);
+  assert.match(dashboard, /deliveryAddressLine1/);
+  assert.match(dashboard, /deliveryAddressText/);
+  assert.match(dashboard, /function EditableDetail/);
+  assert.match(dashboard, /<UnstyledButton/);
+  assert.match(dashboard, /className="orders-delivery-cell-button"/);
+  assert.match(expanded, /<EditableDetail label=\{ui\.address\}/);
+  assert.match(styles, /\.orders-delivery-cell-button,\.orders-editable-detail\{[^}]*color:var\(--od-editable\)/);
+  assert.match(styles, /\.orders-delivery-recipient-heading \.crm-checkbox\{[^}]*display:flex[^}]*align-items:center/);
+  assert.match(styles, /\.orders-delivery-cell-button:hover,[^{]*\.orders-editable-detail:hover\{background:#fff/);
+  assert.match(dashboard, /<Radio/);
+  assert.match(dashboard, /<CrmTextInput highlighted/);
+  assert.doesNotMatch(styles, /orders-delivery-details \.mantine-TextInput-input/);
+  assert.match(dashboard, /orderLabel\("shipping", order\.shippingStatus\)/);
+});
+
+test("the measurement grid visually separates primary and sleeve measurements", () => {
+  assert.match(dashboard, /\[1,2,3,15\]\.includes\(number\).*measurement-primary/);
+  assert.match(dashboard, /\[6,7,8\]\.includes\(number\).*measurement-secondary/);
+  assert.match(styles, /\.orders-expanded-measurements span\.measurement-primary\{[^}]*background:/);
+  assert.match(styles, /\.orders-expanded-measurements span\.measurement-secondary\{[^}]*background:/);
 });

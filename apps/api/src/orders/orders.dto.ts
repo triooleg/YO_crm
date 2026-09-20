@@ -59,6 +59,18 @@ export class UpdateOrderDeadlineDto {
 export class UpdateOrderDisciplineDto {
  @ApiProperty({ enum: Discipline }) @IsEnum(Discipline) discipline!: Discipline;
 }
+export class UpdateOrderDeliveryAddressDto {
+  @ApiProperty() @IsBoolean() useClientAddress!: boolean;
+  @ApiProperty() @IsBoolean() recipientMatchesClient!: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 160) recipient?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 240) addressLine1?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 240) addressLine2?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 120) city?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 120) region?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 32) postalCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 120) country?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 800) addressText?: string;
+}
 export class OrderMeasurementDto extends CreateMeasurementDto {
   @ApiPropertyOptional() @IsOptional() @IsString() expectedMeasurementId?: string;
 }

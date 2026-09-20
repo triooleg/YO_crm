@@ -24,6 +24,8 @@ type CrmControlTheme = {
   fieldLabelColor: string;
   fieldLabelFontWeight: number;
   fieldBorderColor: string;
+  highlightedFieldBackground: string;
+  editableTextColor: string;
   fieldDescriptionMarginTop: number;
   fieldDescriptionColor: string;
   fieldDescriptionLineHeight: number;
@@ -33,7 +35,11 @@ function useCrmControlTheme() {
   return useMantineTheme().other.crmControls as CrmControlTheme;
 }
 
-function crmInputStyles(controls: CrmControlTheme, minHeight = controls.controlHeight) {
+function crmInputStyles(
+  controls: CrmControlTheme,
+  minHeight = controls.controlHeight,
+  highlighted = false,
+) {
   return {
     label: {
       marginBottom: controls.fieldLabelMarginBottom,
@@ -43,6 +49,7 @@ function crmInputStyles(controls: CrmControlTheme, minHeight = controls.controlH
     input: {
       minHeight,
       borderColor: controls.fieldBorderColor,
+      ...(highlighted ? { backgroundColor: controls.highlightedFieldBackground } : {}),
     },
     description: {
       marginTop: controls.fieldDescriptionMarginTop,
@@ -97,8 +104,8 @@ export function CrmCheckbox({ className, label, ...props }: CheckboxProps) {
   );
 }
 
-export const CrmTextInput = forwardRef<HTMLInputElement, TextInputProps>(function CrmTextInput(
-  { className, ...props },
+export const CrmTextInput = forwardRef<HTMLInputElement, TextInputProps & { highlighted?: boolean }>(function CrmTextInput(
+  { className, highlighted, ...props },
   ref,
 ) {
   const controls = useCrmControlTheme();
@@ -107,14 +114,14 @@ export const CrmTextInput = forwardRef<HTMLInputElement, TextInputProps>(functio
       ref={ref}
       className={["crm-text-input", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
-      styles={crmInputStyles(controls)}
+      styles={crmInputStyles(controls, controls.controlHeight, highlighted)}
       {...props}
     />
   );
 });
 
-export const CrmTextarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function CrmTextarea(
-  { className, ...props },
+export const CrmTextarea = forwardRef<HTMLTextAreaElement, TextareaProps & { highlighted?: boolean }>(function CrmTextarea(
+  { className, highlighted, ...props },
   ref,
 ) {
   const controls = useCrmControlTheme();
@@ -123,7 +130,7 @@ export const CrmTextarea = forwardRef<HTMLTextAreaElement, TextareaProps>(functi
       ref={ref}
       className={["crm-textarea", className].filter(Boolean).join(" ")}
       inputWrapperOrder={["label", "input", "description", "error"]}
-      styles={crmInputStyles(controls, 80)}
+      styles={crmInputStyles(controls, 80, highlighted)}
       {...props}
     />
   );

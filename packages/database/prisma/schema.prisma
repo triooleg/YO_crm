@@ -399,6 +399,14 @@ model Order {
   type                 OrderType
   discipline           Discipline?
   country              String?
+  deliveryAddressSet   Boolean          @default(false)
+  deliveryRecipient    String?
+  deliveryAddressLine1 String?
+  deliveryAddressLine2 String?
+  deliveryCity         String?
+  deliveryRegion       String?
+  deliveryPostalCode   String?
+  deliveryAddressText  String?
   requiredDeliveryAt   DateTime?
   promisedProductionAt DateTime?
   priority             Int              @default(0)
