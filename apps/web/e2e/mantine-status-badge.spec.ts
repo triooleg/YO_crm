@@ -120,6 +120,16 @@ for (const viewport of [
 
     await page.getByRole("button", { name: order.number }).click();
 
+    const expandedOrder = page.locator(".orders-expanded-layout-a");
+    await expect(expandedOrder).toHaveCSS("font-size", "12px");
+    await expect(expandedOrder.locator(".orders-detail small").first()).toHaveCSS("font-size", "12px");
+    await expect(expandedOrder.locator(".orders-detail strong").first()).toHaveCSS("font-size", "13px");
+    await expect(expandedOrder.locator(".orders-expanded-meta h3").first()).toHaveCSS("font-size", "14px");
+    await expect(expandedOrder.locator(".orders-money-line.strong")).toHaveCSS("font-size", "14px");
+    await expect(expandedOrder.locator(".orders-expanded-status--sales .mantine-NativeSelect-input")).toHaveCSS("color", "rgb(22, 138, 215)");
+    await expect(page.locator(".orders-discipline-select")).toHaveCSS("color", "rgb(22, 138, 215)");
+    await expect(page.locator(".orders-deadline-button strong")).toHaveCSS("color", "rgb(22, 138, 215)");
+
     const paid = page.locator('[data-domain="payment"][data-status="PAID"]');
     const shipping = page.locator('[data-domain="shipping"][data-status="LOST"]');
     const production = page.locator('[data-domain="production"][data-status="READY"]');

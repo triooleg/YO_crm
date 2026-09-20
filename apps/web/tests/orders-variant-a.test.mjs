@@ -110,3 +110,29 @@ test("variant A has responsive compact styling with semantic status accents", ()
   assert.match(styles, /orders-expanded-item-block \.orders-expanded-measurements\{min-width:0;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);padding:8px\}/);
   assert.doesNotMatch(styles, /@media \(max-width:900px\)[^\n]*min-width:780px/);
 });
+
+test("variant A matches KeyCRM typography hierarchy in expanded order details", () => {
+  assert.match(styles, /\.orders-expanded-layout-a\{[^}]*font-size:12px/);
+  assert.match(styles, /\.orders-expanded-layout-a \.orders-detail small\{font-size:12px\}/);
+  assert.match(styles, /\.orders-expanded-layout-a \.orders-detail strong\{[^}]*font-size:13px/);
+  assert.match(styles, /\.orders-expanded-layout-a \.crm-status-badge\{font-size:12px\}/);
+  assert.match(styles, /\.orders-expanded-meta h3\{[^}]*font-size:14px/);
+  assert.match(styles, /\.orders-expanded-items \.orders-expanded-item-row\{[^}]*font-size:13px/);
+  assert.match(styles, /\.orders-expanded-measurements>header small\{[^}]*font-size:12px/);
+  assert.match(styles, /\.orders-expanded-measurements span b\{[^}]*font-size:13px/);
+  assert.match(styles, /\.orders-expanded-operation-grid h4\{[^}]*font-size:13px/);
+  assert.match(styles, /\.orders-expanded-operations>h3\{[^}]*font-size:14px/);
+  assert.match(styles, /\.orders-money-line\.strong\{font-size:14px/);
+  assert.match(styles, /\.orders-expanded-payment-history>div\{[^}]*font-size:12px/);
+  assert.match(styles, /\.orders-expanded-history small\{[^}]*font-size:12px/);
+});
+
+test("editable order values use the KeyCRM-style blue text cue", () => {
+  assert.match(styles, /--od-editable:#168ad7/);
+  assert.match(styles, /\.orders-discipline-select\{[^}]*color:var\(--od-editable\)/);
+  assert.match(styles, /\.orders-deadline-button strong\{color:var\(--od-editable\)\}/);
+  assert.match(styles, /\.orders-inline-status-control \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
+  assert.match(styles, /\.orders-expanded-statuses>\.crm-native-select \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
+  assert.match(styles, /\.orders-expanded-layout-a \.orders-expanded-designs header button,[^{]*\.orders-expanded-section-heading \.orders-secondary-action\{color:var\(--od-editable\)\}/);
+  assert.doesNotMatch(styles, /\.orders-measurement-toggle[^}]*color:var\(--od-editable\)/);
+});
