@@ -89,7 +89,7 @@ type TaskBoard = {
   users: { id: string; displayName: string; role: string }[];
 };
 type ContextTarget = "clients" | "tasks" | "finance";
-type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
+type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onUnreadDelta?:(delta:number)=>void; onUnreadRefresh?:()=>void; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void };
 type ClientPage = { items: Client[]; preferredItem?: Client; total: number; hasMore: boolean; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
@@ -249,7 +249,7 @@ function optionalFormFields(data: Record<string, FormDataEntryValue>, names: str
     return [name, typeof value === "string" && value.trim()?value.trim():undefined];
   }));
 }
-export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,unreadRequest,businessLogoUrl}:CommunicationsWorkspaceProps={}) {
+export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,unreadRequest,businessLogoUrl,onUnreadDelta,onUnreadRefresh}:CommunicationsWorkspaceProps={}) {
   const [clients, setClients] = useState<Client[]>([]),
     [client, setClient] = useState<Client>(),
     [activeChannel,setActiveChannel]=useState("MANUAL"),
@@ -563,6 +563,10 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         unreadVersion: conversation.unreadVersion || 0,
       }));
     if (!conversations.length) return;
+    const markedUnreadCount = c.conversations.reduce(
+      (sum, conversation) => sum + (conversation.unreadCount || 0),
+      0,
+    );
     readVersion.current++;
     const operation = ++readOperationSequence.current;
     readOperations.current.set(c.id, operation);
@@ -586,12 +590,15 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
       ),
     );
     setClient(readClient);
+    onUnreadDelta?.(-markedUnreadCount);
     try {
       await api("/communications/" + c.id + "/read", {
         method: "PATCH",
         body: JSON.stringify({ conversations }),
       });
+      onUnreadRefresh?.();
     } catch {
+      onUnreadDelta?.(markedUnreadCount);
       if (readOperations.current.get(c.id) === operation) {
         setClients((current) =>
           current.map((candidate) =>

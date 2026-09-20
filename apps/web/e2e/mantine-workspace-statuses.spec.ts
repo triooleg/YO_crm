@@ -82,6 +82,7 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
     const responses = new Map<string, unknown>([
       ["/api/auth/me", auth],
       ["/api/branding", {}],
+      ["/api/communications/unread-count", { unreadCount: 0 }],
       ["/api/shipping", { orders: shippingOrders, carriers: [{ carrier: "NOVA_GLOBAL", label: "Nova Global", enabled: true }, { carrier: "DHL", label: "DHL", enabled: true }] }],
       ["/api/orders/production", [{
         ...productionOrder,
@@ -111,7 +112,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.28");
+    await expect(page.locator(".crm-version")).toContainText("0.1.29");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);

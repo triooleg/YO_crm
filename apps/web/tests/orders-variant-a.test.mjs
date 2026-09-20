@@ -24,12 +24,12 @@ test("variant A keeps one dense order workspace with contextual navigation", () 
     "orders-expanded-history",
   ]) assert.match(expanded, new RegExp(className));
 
-  for (const callback of ["onConversation", "onClient", "onProduction", "onFinance", "onShipping"]) {
+  for (const callback of ["onConversation", "onClient", "onProduction", "onFinance", "onDelivery"]) {
     assert.match(expanded, new RegExp(callback));
   }
+  assert.doesNotMatch(dashboard, /onNavigate\("shipping"/);
   assert.match(dashboard, /onNavigate\("production", \{ orderId: order\.id \}\)/);
   assert.match(dashboard, /onNavigate\("finance", \{ orderId: order\.id \}\)/);
-  assert.match(dashboard, /onNavigate\("shipping", \{ orderId: order\.id \}\)/);
   assert.match(dashboard, /onFinance=\{canOpenOrderFinance\(role\)/);
 });
 

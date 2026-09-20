@@ -14,7 +14,7 @@ export type CrmSectionId = (typeof crmSectionIds)[number];
 
 export function parseCrmSection(value: string | string[] | undefined): CrmSectionId {
   const candidate = Array.isArray(value) ? value[0] : value;
-  return crmSectionIds.includes(candidate as CrmSectionId) ? candidate as CrmSectionId : "clients";
+  return crmSectionIds.includes(candidate as CrmSectionId) ? candidate as CrmSectionId : "inbox";
 }
 
 export function crmSectionHref(section: CrmSectionId, currentSearch = "") {

@@ -201,6 +201,14 @@ test("opening a conversation explicitly marks its unread messages as read", () =
   assert.match(service, /unreadVersion:\{increment:1\}/);
   assert.match(controller, /markRead\(id,d,r\.user\)/);
 });
+test("the application shell can request one exact unread message total", () => {
+  assert.match(controller, /@Get\("unread-count"\)@Roles\("OWNER","ADMIN","MANAGER"\)/);
+  assert.match(controller, /unreadCount\(\)\{return this\.c\.unreadCount\(\)\}/);
+  assert.match(service, /asyncunreadCount\(\)/);
+  assert.match(service, /conversation\.aggregate\(/);
+  assert.match(service, /unreadCount:\{gt:0\}/);
+  assert.match(service, /_sum:\{unreadCount:true\}/);
+});
 test("conversation detail returns the latest messages in chronological order", () => {
   const x = service.slice(service.indexOf("asyncdetail"), service.indexOf("asyncuploadAttachment"));
   const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));

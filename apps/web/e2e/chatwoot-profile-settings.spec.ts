@@ -10,6 +10,7 @@ async function mockSettingsApi(page: Page) {
     const responses = new Map<string, unknown>([
       ["/api/auth/me", { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } }],
       ["/api/branding", {}],
+      ["/api/communications/unread-count", { unreadCount: 0 }],
       ["/api/communications/integrations", {
         deliveryAvailable: true,
         meta: { enabled: false, status: "NOT_CONFIGURED", appId: "", pageId: "", pageName: "", instagramAccountId: "", instagramAppId: "", instagramStatus: "NOT_CONFIGURED", instagramSubscriptionVerifiedAt: null, lastInstagramWebhookAt: null, whatsappPhoneNumberId: "", appSecretConfigured: false, instagramAppSecretConfigured: false, verifyTokenConfigured: false, verifyTokenUnsafe: false, pageAccessTokenConfigured: false, whatsappAccessTokenConfigured: false, subscriptionVerifiedAt: null, lastWebhookAt: null, webhookUrl: "" },

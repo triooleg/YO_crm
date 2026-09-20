@@ -492,6 +492,9 @@ test("счётчик непрочитанных исчезает сразу по
   assert.match(component, /readOperations\.current\.delete\(c\.id\)/);
   assert.match(component, /pendingReads/);
   assert.match(component, /Math\.max/);
+  assert.match(component, /onUnreadDelta\?\.\(-markedUnreadCount\)/);
+  assert.match(component, /catch \{\s*onUnreadDelta\?\.\(markedUnreadCount\)/);
+  assert.match(component, /await api\("\/communications\/" \+ c\.id \+ "\/read"[\s\S]*onUnreadRefresh\?\.\(\)/);
   assert.doesNotMatch(component, /Promise\.all\(\[\s*api\("\/communications\/" \+ c\.id\)/);
 });
 

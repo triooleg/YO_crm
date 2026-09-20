@@ -95,7 +95,7 @@ for (const viewport of [
     await expect(orderForm).toBeHidden();
     await expect(newOrder).toBeFocused();
 
-    await page.getByRole("button", { name: order.number }).click();
+    await page.getByRole("button", { name: order.number, exact: true }).click();
     await expect(page.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
 
     const discipline = page.getByRole("combobox", { name: "Изменить вид спорта" });
@@ -147,8 +147,8 @@ test("фильтры и сортировка заказов сохраняют �
   await page.getByRole("button", { name: "Фильтры" }).click();
   const filters = page.getByRole("dialog", { name: "Фильтры" });
   await filters.getByLabel("Статус").selectOption("NEW_LEAD");
-  await expect(page.getByRole("button", { name: secondOrder.number })).toBeVisible();
-  await expect(page.getByRole("button", { name: order.number })).toBeHidden();
+  await expect(page.getByRole("button", { name: secondOrder.number, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: order.number, exact: true })).toBeHidden();
 
   await filters.getByLabel("Вид спорта").selectOption("RHYTHMIC_GYMNASTICS");
   await expect(page.getByText("Заказы не найдены")).toBeVisible();

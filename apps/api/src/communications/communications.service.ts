@@ -140,6 +140,13 @@ export class CommunicationsService {
   private readonly logger = new Logger(CommunicationsService.name);
   private readonly instagramOauthFailures = new WeakMap<object, { correlationId: string; stage: string }>();
   constructor(private p: PrismaService,private readonly emailTransport:EmailTransportService) {}
+  async unreadCount() {
+    const result = await this.p.conversation.aggregate({
+      where: { archivedAt: null, client: { archivedAt: null }, unreadCount: { gt: 0 } },
+      _sum: { unreadCount: true },
+    });
+    return { unreadCount: result._sum.unreadCount ?? 0 };
+  }
   async list(query: CommunicationsListQueryDto = new CommunicationsListQueryDto()) {
     const search = query.search?.trim();
     const selectedChannels=query.channels?.length?query.channels:undefined;

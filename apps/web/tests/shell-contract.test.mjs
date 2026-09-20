@@ -11,7 +11,8 @@ const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8")
   locale = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
   layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   css = await readFile(new URL("../app/phase2.css", import.meta.url), "utf8"),
-  typography = await readFile(new URL("../app/typography.css", import.meta.url), "utf8");
+  typography = await readFile(new URL("../app/typography.css", import.meta.url), "utf8"),
+  sections = await readFile(new URL("../lib/crm-sections.ts", import.meta.url), "utf8");
 
 test("основные разделы CRM используют централизованные русские подписи", () => {
   assert.match(shell, /navigationUi/);
@@ -70,5 +71,10 @@ test("font variables resolved from root declarations", async () => {
 });
 
 test("collapsed navigation keeps Russian accessible names", () => {
-  assert.match(shell, /aria-label=\{name\}/);
+  assert.match(shell, /aria-label=\{id==="inbox"&&unreadCount\?[\s\S]*:name\}/);
+});
+
+test("CRM без указанного раздела открывает Входящие, а не скрытую страницу клиентов", () => {
+  assert.match(sections, /: "inbox"/);
+  assert.match(shell, /initialSectionId="inbox"/);
 });

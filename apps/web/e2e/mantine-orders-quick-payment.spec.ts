@@ -58,7 +58,7 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const paymentRequests = await mockOrdersApi(page);
     await page.goto("/?section=orders");
-    await page.getByRole("button", { name: order.number }).click();
+    await page.getByRole("button", { name: order.number, exact: true }).click();
 
     const trigger = page.getByRole("button", { name: /Добавить оплату/ });
     await trigger.click();

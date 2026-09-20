@@ -16,8 +16,8 @@ const { parseCrmSection, crmSectionHref } = module.exports;
 test("CRM section query accepts only stable section identifiers", () => {
   assert.equal(parseCrmSection("settings"), "settings");
   assert.equal(parseCrmSection("inbox"), "inbox");
-  assert.equal(parseCrmSection("unknown"), "clients");
-  assert.equal(parseCrmSection(undefined), "clients");
+  assert.equal(parseCrmSection("unknown"), "inbox");
+  assert.equal(parseCrmSection(undefined), "inbox");
 });
 
 test("CRM section links preserve unrelated query parameters", () => {
