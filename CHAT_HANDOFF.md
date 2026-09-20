@@ -1,5 +1,14 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-09-20 — production deployment CRM 0.1.26: Заказы, вариант A
+
+- Runtime commit `fdfe389d43dae9b20cb027b388404dc26d191117` fast-forward опубликован в `origin/main`, развернут в `/home/trio/yoleotard-crm` и закреплён неизменяемым тегом `crm-v0.1.26`. GitHub CLI в этой сессии не был авторизован, поэтому GitHub Actions не проверялись; точный локальный gate перед выпуском: API 482/482, web 324/324, database 9/9, typecheck/build PASS, полный Playwright 86/86, compatibility/regression/business-security/visual reviews PASS и отдельный pre-deployment release gate PASS.
+- Перед deployment создан и независимо проверен FULL backup `20260920T004346Z-7c09e42b` production v0.1.25 (`b87e6c66faaa0971de7e395d0dd35607398acacd`): все записи `SHA256SUMS` совпали, `pg_restore --list`, чтение uploads tar и JSON manifest прошли; размер каталога backup — 90 037 851 байт. Точка отката приложения — `crm-v0.1.25`; миграций БД в 0.1.26 нет, rollback пересобирает только API/web и сохраняет PostgreSQL, Redis, uploads и историю.
+- Release archive `yoleotard-crm-0.1.26-fdfe389.tar.gz` создан непосредственно из runtime commit; размер 3 055 194 байта, SHA-256 `124fa49cdb4e1f282930f3f27495ce2e5cca5d9bb8e8cfd56dbd8c789408c01f` совпал локально и на сервере. Сервер распаковал его в отдельный release-каталог, проверил Compose и только после успешной сборки закрепил exact source и `.release-commit`/`.deployed-commit`.
+- С обязательным `--no-deps` пересобраны и пересозданы только API и web. Финальные контейнеры: API `857d9cc5154b93d600ceb95a5f4de1c52046798690c51c4e3f406b29f1ce83b`, web `a2a6ac887ea4c48e5f92fa98f4a73296861740616edc24cdb5412f0c03fc0259`. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались.
+- API/web/PostgreSQL/Redis healthy, restart count всех контейнеров 0, 22 Prisma migrations актуальны. Внутренние и публичные `/` и `/api/health` возвращают HTTP 200; PostgreSQL, Redis и uploads — `up`; свежий API/web scan не обнаружил unhandled, uncaught, panic, fatal или migration errors.
+- Авторизованный read-only smoke в существующей Edge-сессии подтвердил `CRM v0.1.26` и страницу «Заказы» варианта A на реальных данных. Проверены раскрытие заказа, четыре независимых статуса, переходы в связанные разделы, платежи, финансовые итоги, последние пять событий и раскрытие всех 17 замеров непосредственно под соответствующей позицией костюма. Browser console warnings/errors — 0; production-данные не изменялись.
+
 # 2026-09-20 — CRM 0.1.26 release-candidate: Variant A Orders review blockers closed
 
 - Перед release закрыты три блокирующих замечания обязательного аудита. Точный клиент из контекстного перехода во «Входящие» теперь возвращается отдельным `preferredItem`, не увеличивает размер серверной страницы, не меняет offset и не дублируется на следующих страницах.
