@@ -743,6 +743,15 @@ test("composer предлагает контекстные быстрые дей
   assert.match(component,/Math\.min\(e\.currentTarget\.scrollHeight,140\)/);
 });
 
+test("существующие замеры спортсмена можно скорректировать прямо из Входящих",()=>{
+  assert.match(component,/import \{ MeasurementPanel \} from "\.\/measurement-panel"/);
+  assert.match(component,/\{ui\.editMeasurements\}/);
+  assert.match(locale,/editMeasurements: "Изменить размеры"/);
+  assert.match(component,/editableInboxMeasurementValues\(editingMeasurements\.measurements\[0\]\)/);
+  assert.match(component,/athletes:\[editingMeasurements\]/);
+  assert.match(component,/onSaved=\{async\(\)=>\{setEditingMeasurements\(undefined\);await loadClientDetail\(client\.id\)\}\}/);
+});
+
 test("правая панель организована доступными вкладками клиента, заказов, заметок и файлов", () => {
   assert.match(component, /type ContextTab = "CLIENT" \| "ORDERS" \| "NOTES" \| "FILES"/);
   assert.match(component, /function ContextTabs/);

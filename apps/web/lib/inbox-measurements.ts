@@ -7,8 +7,25 @@ export type InboxMeasurement = {
   waist?: string | number | null;
   hips?: string | number | null;
   torso?: string | number | null;
-  values?: { standardHeight?: string | number | null } | null;
+  values?: Record<string, string | number | null> | null;
 };
+
+export function editableInboxMeasurementValues(snapshot?: InboxMeasurement) {
+  if (!snapshot) return {};
+  const editable: Record<string, number> = {};
+  for (const key of ["standardHeight", ...Array.from({ length: 17 }, (_, index) => `m${index + 1}`)]) {
+    const value = snapshot.values?.[key];
+    const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+    if (Number.isFinite(numeric)) editable[key] = numeric;
+  }
+  const legacyFields = { m1: snapshot.chest, m2: snapshot.waist, m3: snapshot.hips, m15: snapshot.torso } as const;
+  for (const [key, value] of Object.entries(legacyFields)) {
+    if (editable[key] != null) continue;
+    const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+    if (Number.isFinite(numeric)) editable[key] = numeric;
+  }
+  return editable;
+}
 
 export function inboxMeasurements(snapshot?: InboxMeasurement) {
   if (!snapshot) return [];

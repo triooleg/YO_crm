@@ -9,9 +9,10 @@ import {
   isCurrentInboxDetailRequest,
   isCurrentInboxRefresh,
 } from "../lib/inbox-request-guard";
-import { inboxMeasurements, type InboxMeasurement } from "../lib/inbox-measurements";
+import { editableInboxMeasurementValues, inboxMeasurements, type InboxMeasurement } from "../lib/inbox-measurements";
 import { ClientAvatar } from "./client-avatar";
 import { AddAthlete } from "./client-workspace";
+import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { TaskDialog } from "./tasks-workspace";
 import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
@@ -300,6 +301,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     [selectedAthleteId,setSelectedAthleteId]=useState<string>(),
     [contextLoading,setContextLoading]=useState(false),
     [addingAthlete,setAddingAthlete]=useState(false),
+    [editingMeasurements,setEditingMeasurements]=useState<ClientAthlete>(),
     [ordering,setOrdering]=useState(false),
     [taskBoard,setTaskBoard]=useState<TaskBoard>(),
     [tasking,setTasking]=useState(false),
@@ -705,6 +707,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
     setSelectedAthleteId(undefined);
     setContextLoading(c.status !== "LEAD");
     setAddingAthlete(false);
+    setEditingMeasurements(undefined);
     setOrdering(false);
     setTasking(false);
     setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
@@ -1573,7 +1576,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
           <ContextTabs active={contextTab} onChange={setContextTab}/>
           <div id="communications-context-tabpanel" className="communications-context-tabpanel" role="tabpanel" aria-labelledby={`communications-context-tab-${contextTab.toLowerCase()}`} data-active-tab={contextTab}>
           <section className="communications-context-profile communications-buyer-card"><ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client.avatarUrl}/><div><b>{client.displayName}</b><span className="communications-profile-channel">{active.icon} {active.label}</span>{accountUrl&&<a className="communications-profile-link" href={accountUrl} target="_blank" rel="noopener noreferrer">{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel]||ui.openInSocialNetwork} ↗</a>}<small>{client.status==="LEAD"?ui.unsavedBuyer:ui.savedBuyer}</small></div><div className="communications-profile-facts">{client.phone&&<p><span>{ui.phone}</span><b>{client.phone}</b></p>}{client.email&&<p><span>{ui.email}</span><b>{client.email}</b></p>}{client.city&&<p><span>{ui.city}</span><b>{client.city}</b></p>}{client.country&&<p><span>{ui.country}</span><b><InboxCountryFlag country={client.country}/> {client.country}</b></p>}{client.timezone&&<p><span>{ui.timezone}</span><b title={client.timezone}>{clientLocalTime(client.timezone)}</b></p>}{client.language&&<p><span>{ui.language}</span><b>{client.language}</b></p>}{client.instagramUsername&&<p><span>{ui.instagramUsername}</span><b>{instagramHandle(client.instagramUsername)}</b></p>}{client.instagram&&<p><span>{isInstagramScopedId(client.instagram)?ui.instagramSid:ui.instagram}</span><b>{client.instagram}</b></p>}{client.facebook&&<p><span>{ui.facebookSid}</span><b>{client.facebook}</b></p>}</div>{client.status==="LEAD"?<button type="button" onClick={()=>setCreating(true)}>{ui.saveBuyer}</button>:<div className="communications-purchase-summary"><span>{ui.purchaseHistory}: {client.buyerSummary?.purchaseCount||0}</span>{purchaseTotals.map(([currency,total])=><strong key={currency}>{(total/100).toFixed(2)} {currency}</strong>)}</div>}</section>
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><label key={athlete.id}><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}{athlete.measurements[0]&&<span className="communications-athlete-measurements">{inboxMeasurements(athlete.measurements[0]).map(({field,value,unit})=><span key={field}><small>{ui.measurementFields[field]}</small><b>{value} <small>{unit}</small></b></span>)}</span>}</span></label>)}</div>:<small>{ui.noAthletes}</small>}</section>}
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><div className="communications-athlete-card" key={athlete.id}><label><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}{athlete.measurements[0]&&<span className="communications-athlete-measurements">{inboxMeasurements(athlete.measurements[0]).map(({field,value,unit})=><span key={field}><small>{ui.measurementFields[field]}</small><b>{value} <small>{unit}</small></b></span>)}</span>}</span></label>{athlete.measurements[0]&&<CrmButton type="button" tone="secondary" className="communications-athlete-edit" onClick={()=>{setSelectedAthleteId(athlete.id);setEditingMeasurements(athlete)}}>{ui.editMeasurements}</CrmButton>}</div>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>₴ <span>{ui.createInvoice}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
@@ -1707,6 +1710,7 @@ export function CommunicationsWorkspace({onNavigate,searchQuery,onSearchChange,u
         }}
       />}
       {addingAthlete&&client&&<AddAthlete clientId={client.id} request={api} returnFocusRef={addAthleteTriggerRef} close={()=>setAddingAthlete(false)} done={()=>{setAddingAthlete(false);void loadClientDetail(client.id).catch(e=>setError((e as Error).message))}}/>}
+      {editingMeasurements&&client&&<MeasurementPanel client={{id:client.id,displayName:client.displayName,athletes:[editingMeasurements]}} request={api} title={ui.editMeasurements} initialValues={editableInboxMeasurementValues(editingMeasurements.measurements[0])} onClose={()=>setEditingMeasurements(undefined)} onSaved={async()=>{setEditingMeasurements(undefined);await loadClientDetail(client.id)}}/>}
       {preview && (
         <div
           className="communications-lightbox"

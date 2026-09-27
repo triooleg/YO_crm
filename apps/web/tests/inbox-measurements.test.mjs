@@ -11,7 +11,7 @@ async function load(path) {
   vm.runInNewContext(javascript,{module,exports:module.exports});
   return module.exports;
 }
-const {inboxMeasurements} = await load("../lib/inbox-measurements.ts");
+const {editableInboxMeasurementValues,inboxMeasurements} = await load("../lib/inbox-measurements.ts");
 const {navigationUi} = await load("../lib/i18n.ts");
 
 test("API snapshots show the stored height standard without claiming measured height",()=>{
@@ -24,6 +24,14 @@ test("API snapshots show the stored height standard without claiming measured he
 test("actual measured height takes priority and missing measurements stay absent",()=>{
   assert.equal(inboxMeasurements({id:"m2",measuredAt:"2026-09-01",height:"137.50",values:{standardHeight:138}})[0].field,"height");
   assert.equal(inboxMeasurements().length,0);
+});
+test("latest inbox snapshot can prefill the immutable measurement editor",()=>{
+  const values=editableInboxMeasurementValues({
+    id:"m3",
+    measuredAt:"2026-09-01",
+    values:{standardHeight:"162",m1:"82.5",m2:67,m3:"87",m15:145,ignored:"text"},
+  });
+  assert.deepEqual({...values},{standardHeight:162,m1:82.5,m2:67,m3:87,m15:145});
 });
 test("all server roles have Russian profile labels",async()=>{
   const schema=await readFile(new URL("../../../packages/database/prisma/schema.prisma",import.meta.url),"utf8");
