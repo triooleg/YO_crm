@@ -1,11 +1,20 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-09-27 — production deployment CRM 0.1.30: корректировка замеров из «Входящих»
+
+- Runtime commit `924c97cee1842c409958047a653ff8007751c55e` опубликован в `origin/main`, закреплён неизменяемым тегом `crm-v0.1.30` и развернут из точного Git archive. Миграций БД, изменений API, маршрутов и прав доступа нет; откат приложения возможен на `crm-v0.1.29` без восстановления данных.
+- Перед переключением создан и проверен FULL backup `20260927T193607Z-8d7d7c25`: `SHA256SUMS` совпали, uploads tar читается, `pg_restore --list` прошёл. Общий размер — 173 548 831 байт; SHA-256 manifest — `d463784aadf53d69b9091bc435b94e62dd5d940d3e7e70eaa720d0b198d50f9b`.
+- Release archive `/home/trio/yoleotard-crm-0.1.30-924c97c.tar.gz` имеет размер 3 080 046 байт и SHA-256 `92786e9f2eed839d0460fc49f9538c563997e777f52c0baf15f61e26eae4c5ab`, совпавший локально и на сервере. Предыдущий source сохранён как `/home/trio/yoleotard-crm-prev-20260927T194135Z-b35e8ae`; прежние API/web images закреплены rollback-тегами `rollback-0.1.29`.
+- С `--no-deps --force-recreate` пересозданы только API `adc2e1419df0ca762dfec66661098acd2c62d89b1316a7de186594e05a30a006` / image `2e8f9f369a965bd846652bee93aef150ffb3e0be56c01cfd8db9769563201773` и web `3abf6c99f683a565685552354f54ac6b05ab0d471248dba52bcfd1a275d431c2` / image `5c8c7b04752af306ce46a659dd7f0e10b10c0679b16e891a6d50fc0dbca6e6d8`. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались.
+- Все четыре сервиса healthy, restart count 0; 23 Prisma migrations актуальны. `.release-commit` и `.deployed-commit` равны runtime SHA; внутренние и публичные `/` и `/api/health` отвечают HTTP 200, PostgreSQL/Redis/uploads — `up`, fresh API/web error scan — 0. Авторизованный smoke: login 201, `/api/auth/me`, `/api/communications`, `/api/orders` — 200. За время переключения сообщения выросли с 2213 до 2216; clients 201, conversations 199 и orders 3 не изменились.
+- Live browser smoke подтвердил CRM v0.1.30 и точный SHA, кнопку «Изменить размеры» у Christabel Lim Meiling, prefill №1 = 82 и №15 = 145, доступность сохранения, отсутствие browser errors и document overflow. Проверочный Drawer закрыт без сохранения, production-данные не изменялись.
+
 # 2026-09-27 — release candidate CRM 0.1.30: корректировка текущих замеров из «Входящих»
 
 - В правой панели «Входящих» у каждого спортсмена с существующим снимком появилась кнопка «Изменить размеры». Она открывает штатный Mantine Drawer замеров сразу для выбранного спортсмена и подставляет последние `standardHeight` и `m1…m17`; для исторических записей поддержан безопасный fallback `chest/waist/hips/torso` в №1/№2/№3/№15.
 - Сохранение не обновляет старую запись: существующий защищённый endpoint создаёт новый датированный неизменяемый снимок, сохраняет прежнюю историю и после успеха перечитывает карточку клиента. API, Prisma schema, маршруты и права доступа не изменялись.
 - Failing-first unit/contract проверки закрывают преобразование значений и wiring Inbox → MeasurementPanel → refresh. Отдельный Playwright-сценарий проверяет prefill, единственный POST правильному спортсмену и адаптивный интерфейс на 1920×1080, 1366×768 и 390×844; снимки карточки и Drawer просмотрены вручную, горизонтального overflow нет.
-- Релизная версия назначена как CRM 0.1.30. Финальный `pnpm quality:check` перед фиксацией релиза повторяется после обновления версии; целевой Playwright — 3/3 PASS. Миграций БД нет.
+- Релизная версия назначена как CRM 0.1.30. До релизных метаданных полный `pnpm quality:check` прошёл: database 9/9, API 498/498, web 339/339, все typecheck и production builds; целевой Playwright — 3/3 PASS. После смены только версии и журнала релизный contract-test прошёл 21/21, а точная production Docker-сборка повторно прошла Prisma generate, Nest/TypeScript и Next.js production build. Миграций БД нет.
 
 # 2026-09-20 — release candidate CRM 0.1.29: уведомления Inbox и упрощённая навигация
 
