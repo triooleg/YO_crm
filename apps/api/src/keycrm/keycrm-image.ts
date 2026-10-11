@@ -104,7 +104,13 @@ async function pinnedResponse(url: URL, lookupFn: LookupLike, requestFn: typeof 
       method: "GET",
       headers: { accept: "image/jpeg,image/png,image/webp" },
       servername: url.hostname,
-      lookup: (_hostname, _options, callback) => callback(null, resolved.address, resolved.family),
+      lookup: (_hostname, _options, callback) => {
+        if (_options && typeof _options === "object" && _options.all) {
+          callback(null, [resolved]);
+          return;
+        }
+        callback(null, resolved.address, resolved.family);
+      },
     }, resolve);
     request.setTimeout(10_000, () => request.destroy(new Error("KEYCRM_IMAGE_TIMEOUT")));
     request.on("error", reject);

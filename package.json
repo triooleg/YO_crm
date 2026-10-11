@@ -1,6 +1,6 @@
 {
     "name":  "yoleotard-crm",
-    "version":  "0.1.35",
+    "version":  "0.1.36",
     "private":  true,
     "packageManager":  "pnpm@11.16.0",
     "engines":  {
@@ -8,7 +8,7 @@
                 },
     "scripts":  {
                     "dev":  "pnpm --parallel --filter @yoleotard-crm/api --filter @yoleotard-crm/web dev",
-                    "build":  "pnpm -r build",
+                    "build":  "pnpm db:generate && pnpm --filter @yoleotard-crm/api build && pnpm --filter @yoleotard-crm/web build",
                     "typecheck":  "pnpm -r typecheck",
                     "test":  "pnpm -r test",
                     "dag":  "node tools/dag/cli.mjs",

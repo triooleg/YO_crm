@@ -50,7 +50,7 @@ for (const viewport of [
       const runtimeErrors = await mockLoadError(page, workspace.endpoint, workspace.message);
       await page.goto(`/?section=${workspace.section}`);
 
-      await expect(page.locator(".crm-version")).toContainText("0.1.35");
+      await expect(page.locator(".crm-version")).toContainText("0.1.36");
       const alert = page.locator(workspace.root).getByRole("alert");
       await expect(alert).toHaveText(workspace.message);
       await expect(alert).toHaveClass(/mantine-Alert-root/);

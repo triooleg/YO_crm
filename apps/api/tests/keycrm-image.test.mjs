@@ -81,12 +81,13 @@ test("production HTTPS path pins the validated DNS address and preserves hostnam
   await materializeKeycrmOrderImage("https://cdn.example.test/order.png", { root, requestFn, lookupFn: publicLookup });
   assert.equal(requestOptions.servername, "cdn.example.test");
   await new Promise((resolve, reject) => requestOptions.lookup("cdn.example.test", {}, (error, address, family) => error ? reject(error) : (assert.deepEqual({ address, family }, { address: "93.184.216.34", family: 4 }), resolve())));
+  await new Promise((resolve, reject) => requestOptions.lookup("cdn.example.test", { all: true }, (error, addresses) => error ? reject(error) : (assert.deepEqual(addresses, [{ address: "93.184.216.34", family: 4 }]), resolve())));
 });
 
 test("KeyCRM APPLY persists the materialized main image without replacing a manual image", () => {
   const imageSource = readFileSync(new URL("../src/keycrm/keycrm-image.ts", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/keycrm/keycrm.service.ts", import.meta.url), "utf8");
-  assert.match(imageSource, /lookup: \(_hostname, _options, callback\) => callback\(null, resolved\.address, resolved\.family\)/);
+  assert.match(imageSource, /_options\.all[\s\S]*callback\(null, \[resolved\]\)/);
   assert.match(imageSource, /servername: url\.hostname/);
   assert.match(imageSource, /downloadPinned\(new URL\(location, url\), lookupFn, requestFn, redirects \+ 1\)/);
   assert.match(source, /await materializeKeycrmOrderImage\(mainExternalImageUrl\)/);

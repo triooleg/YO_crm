@@ -95,7 +95,7 @@ for (const viewport of [
     expect(originalFaviconHref).toBeTruthy();
     state.releaseDelayedUnread();
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.35");
+    await expect(page.locator(".crm-version")).toContainText("0.1.36");
     await expect(page).toHaveTitle("(7) CRM Yoleotard");
     await expect(page.locator('link[data-yoleotard-unread-icon="true"]')).toHaveAttribute("href", /^data:image\/svg\+xml/);
     const bell = page.locator(".crm-topbar-notifications");

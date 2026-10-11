@@ -1,5 +1,19 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-11 — release candidate CRM 0.1.36: загрузка изображений KeyCRM в Node.js 22
+
+- Повторный APPLY на production 0.1.35 выявил 491 замечание `ORDER_IMAGE_IMPORT_FAILED`; во всех случаях причина была одинаковой: `Invalid IP address: undefined`. Диагностика показала несовместимость callback закреплённого DNS-адреса с режимом `{ all: true }`, который HTTPS-клиент Node.js 22 запрашивает при соединении.
+- Callback теперь возвращает массив проверенных адресов для `all: true` и сохраняет прежнюю сигнатуру `address, family` для обычного режима. HTTPS-only, запрет приватных адресов, DNS pinning, TLS hostname/SNI, повторная проверка redirect, ограничения MIME, размера и разрешения изображения не ослаблены.
+- Failing-first тест воспроизвёл прежнюю сигнатуру и после исправления прошёл 5/5. Полный `pnpm quality:check` завершён успешно: API 610/610, web 363/363, database 11/11, typecheck и production builds PASS. Корневая build-команда сделана детерминированной: Prisma Client генерируется до последовательной сборки API и web, что устраняет гонку типов при параллельном `prisma generate`/Nest build.
+- Playwright журнала сборок прошёл 5/5 на 1920×1080, 1366×768 и 390×844: окно помещается в viewport, не создаёт горизонтальный overflow, сохраняет focus/Escape/overlay/close и раскрывает только актуальную версию. До production deployment обязательны финальные reviews, CI, новый FULL backup и exact-SHA переключение только API/web.
+
+# 2026-10-11 — production deployment CRM 0.1.35 и диагностика повторного импорта
+
+- Runtime commit `b12fd291a5f50bc09863aca039ddd084bfd6479f` опубликован в `origin/main`, развёрнут exact-SHA и закреплён тегом `crm-v0.1.35`; GitHub Actions `Quality gates` run `38162939331` завершился со статусом `success`.
+- Перед deployment создан и проверен FULL backup `20261011T181654Z-b12fd29-predeploy` в `/home/trio/yoleotard-crm-backups/20261011T181654Z-b12fd29-predeploy`: checksums совпали, PostgreSQL custom dump читается, uploads tar и manifest JSON валидны. Source rollback сохранён как `/home/trio/yoleotard-crm-backups/source-before-b12fd29.tar.gz`; release archive SHA-256 `ed2ebd3b6ab116363e4f2cc3be996df1b2642bd545e5f3c9e6cc275b54da1dcd` совпал локально и на сервере.
+- С `--no-deps` пересозданы только API и web. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались; все четыре контейнера healthy с restart count 0, все 27 миграций актуальны, внутренние и публичные `/` и `/api/health` отвечают HTTP 200, fresh API/web error scan — 0.
+- После deployment PREVIEW `cmv45hhlb0003lq5g8754tjuj` завершился: 501 проверен, 501 без изменений, ошибок нет. APPLY `cmv45iula00jtlq5gnkdwb509` завершил проход 501 заказа без дублей и без failed-записей, но оставил 491 замечание загрузки изображений и 2 замечания отсутствующего UUID пользовательского поля начала производства. Поэтому восстановление изображений на 0.1.35 не считается успешным; повторный APPLY должен выполняться только после hotfix 0.1.36 и отдельной live-проверки результата.
+
 # 2026-10-11 — production deployment CRM 0.1.34: расчёт производственного слота при импорте KeyCRM
 
 - Runtime commit `94a7485f7ee59052263a6a5f088367f99959b012` опубликован в `origin/main`, развёрнут из точного Git archive и закреплён неизменяемым тегом `crm-v0.1.34`. GitHub Actions `Quality gates` run `38157894068` и `CRM release` run `38158585810` завершились со статусом `success`.
