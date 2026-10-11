@@ -98,6 +98,22 @@ minor-unit price, optional model image, production status, athlete and
 measurement references. Pair and group orders use items to keep athletes and
 measurement snapshots separate.
 
+### Imported Order Provenance
+
+An order imported from another system carries a scoped
+`sourceSystem + sourceAccount + externalId` identity. The same scoped identity
+is used for provider-owned items and payments so a repeated synchronization is
+idempotent. `externalData` is evidence of the provider state, not permission to
+derive measurements or overwrite independent YO_crm workflow statuses.
+
+### KeyCRM Sync Run
+
+An audited server-side preview or apply run for KeyCRM orders. Apply requires a
+completed preview from the same configuration revision and date range. A run
+continues without an open browser, records per-order issues and never exposes the
+stored API token. KeyCRM buyer links are connection-scoped and follow an active
+client merge redirect to the canonical client.
+
 ### Design and Leotard
 
 There is currently no standalone `Design` or `Leotard` model. The requested or
@@ -127,11 +143,15 @@ status is an order dimension controlled by shipment flows.
 
 ### Payment
 
-An immutable receipt against an order, stored as `Payment` with minor-unit
-amount, currency, method, received time and optional reference. Payments must
-match the order currency. The order service derives `paymentStatus` from the
-sum of payments in that currency and confirms a tentative production slot when
-the required deposit is reached.
+An economically immutable receipt against an order, stored as `Payment` with
+minor-unit amount, currency, method, received time and optional reference.
+Those economic fields are never rewritten. A provider may later void or restore
+the receipt; `voidedAt` and `voidReason` are the current projection of that
+lifecycle, while every transition is retained in `AuditLog`. Voided receipts
+remain in history but are excluded from operational totals. Payments must match
+the order currency. The order service derives `paymentStatus` from active
+payments in that currency and confirms a tentative production slot when the
+required deposit is reached.
 
 `Deposit` and `Balance` are calculated concepts: the required deposit is
 `Order.depositRequiredMinor`; paid and remaining amounts derive from payments

@@ -223,6 +223,19 @@ enum BackupStorageProvider {
   S3
 }
 
+enum KeycrmSyncMode {
+  DRY_RUN
+  APPLY
+}
+
+enum KeycrmSyncStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
 model User {
   id                       String                    @id @default(cuid())
   email                    String                    @unique
@@ -242,6 +255,7 @@ model User {
   assignedTasks            WorkTask[]                @relation("TaskAssignee")
   createdTasks             WorkTask[]                @relation("TaskCreator")
   createdBackups           Backup[]                  @relation("BackupCreator")
+  keycrmSyncRuns               KeycrmSyncRun[]           @relation("KeycrmSyncRunCreator")
   createdKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeCreatedBy")
   updatedKnowledgeItems    KnowledgeItem[]           @relation("KnowledgeUpdatedBy")
   updatedAiRuntimeSettings AiRuntimeSetting[]         @relation("AiRuntimeSettingUpdatedBy")
@@ -307,6 +321,7 @@ model Client {
   incomingMergeRedirects  ClientMergeRedirect[]     @relation("MergedClientTarget")
   mergeOperationsAsSource ClientMergeOperation[]    @relation("ClientMergeOperationSource")
   mergeOperationsAsTarget ClientMergeOperation[]    @relation("ClientMergeOperationTarget")
+  keycrmLinks             KeycrmClientLink[]
 
   @@index([displayName])
   @@index([email])
@@ -401,12 +416,15 @@ model Order {
   country              String?
   deliveryAddressSet   Boolean          @default(false)
   deliveryRecipient    String?
+  deliveryRecipientPhone String?
   deliveryAddressLine1 String?
   deliveryAddressLine2 String?
   deliveryCity         String?
   deliveryRegion       String?
   deliveryPostalCode   String?
   deliveryAddressText  String?
+  deliveryServiceName    String?
+  deliveryTrackingCode  String?
   requiredDeliveryAt   DateTime?
   promisedProductionAt DateTime?
   priority             Int              @default(0)
@@ -417,13 +435,27 @@ model Order {
   depositRequiredMinor Int
   deliveryMinor        Int              @default(0)
   discountMinor        Int              @default(0)
+  taxMinor               Int              @default(0)
+  giftWrapMinor          Int              @default(0)
   productionCostMinor  Int?
   salesStatus          SalesStatus      @default(NEW_LEAD)
   productionStatus     ProductionStatus @default(NOT_SCHEDULED)
   paymentStatus        PaymentStatus    @default(UNPAID)
   shippingStatus       ShippingStatus   @default(NOT_READY)
   notes                String?
+  buyerComment           String?
+  managerComment         String?
+  giftMessage            String?
+  promocode              String?
+  isGift                 Boolean          @default(false)
   modelImagePath       String?
+  sourceSystem           String?
+  sourceAccount          String?
+  sourceLinkMode         String?
+  externalId             String?
+  externalNumber         String?
+  externalUpdatedAt      DateTime?
+  externalData           Json?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
   archivedAt           DateTime?
@@ -441,6 +473,7 @@ model Order {
   shipment   Shipment?
   agreements Agreement[]
 
+  @@unique([sourceSystem, sourceAccount, externalId])
   @@index([salesStatus, archivedAt])
   @@index([requiredDeliveryAt])
   @@index([clientId, createdAt])
@@ -456,6 +489,9 @@ model Shipment {
   shippedAt      DateTime?
   deliveredAt    DateTime?
   notes          String?
+  serviceName       String?
+  externalServiceId String?
+  externalStatus    String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   order          Order           @relation(fields: [orderId], references: [id])
@@ -472,6 +508,12 @@ model OrderItem {
   quantity         Int              @default(1)
   priceMinor       Int
   modelImagePath   String?
+  externalImageUrl String?
+  sku              String?
+  properties       Json?
+  sourceSystem     String?
+  sourceAccount    String?
+  externalId       String?
   productionStatus ProductionStatus @default(NOT_SCHEDULED)
   notes            String?
   createdAt        DateTime         @default(now())
@@ -480,6 +522,7 @@ model OrderItem {
   athlete          Athlete?         @relation(fields: [athleteId], references: [id])
   measurement      Measurement?     @relation(fields: [measurementId], references: [id])
 
+  @@unique([sourceSystem, sourceAccount, externalId])
   @@index([orderId, productionStatus])
   @@index([athleteId])
 }
@@ -493,9 +536,16 @@ model Payment {
   receivedAt  DateTime
   reference   String?
   notes       String?
+  sourceSystem   String?
+  sourceAccount  String?
+  externalId     String?
+  externalStatus String?
+  voidedAt       DateTime?
+  voidReason     String?
   createdAt   DateTime      @default(now())
   order       Order         @relation(fields: [orderId], references: [id])
 
+  @@unique([sourceSystem, sourceAccount, externalId])
   @@index([orderId, receivedAt])
 }
 
@@ -830,8 +880,8 @@ model ConversationSummary {
   updatedAt         DateTime     @updatedAt
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
 
-  @@index([conversationId, createdAt])
   @@unique([conversationId, fromDate, sourceDigest])
+  @@index([conversationId, createdAt])
 }
 
 model AiModeOverride {
@@ -1015,6 +1065,73 @@ model AppSetting {
 
   @@unique([section, key])
   @@index([section])
+}
+
+model KeycrmClientLink {
+  id            String   @id @default(cuid())
+  connectionKey String
+  keycrmBuyerId Int
+  clientId      String
+  sourcePayload Json?
+  lastSyncedAt  DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@unique([connectionKey, keycrmBuyerId])
+  @@index([lastSyncedAt])
+  @@index([clientId])
+}
+
+model KeycrmSyncRun {
+  id              String            @id @default(cuid())
+  mode            KeycrmSyncMode
+  status          KeycrmSyncStatus  @default(PENDING)
+  startedById     String
+  previewRunId    String?
+  clientRequestId String            @unique
+  configRevision  Int
+  requestedFrom   DateTime?
+  requestedTo     DateTime?
+  currentPage     Int               @default(1)
+  totalPages      Int?
+  pageSize        Int               @default(50)
+  totalRemote     Int?
+  scannedCount    Int               @default(0)
+  createdCount    Int               @default(0)
+  updatedCount    Int               @default(0)
+  skippedCount    Int               @default(0)
+  failedCount     Int               @default(0)
+  context         Json?
+  errorMessage    String?
+  attemptCount    Int               @default(0)
+  nextAttemptAt   DateTime?
+  leaseOwner      String?
+  leaseUntil      DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  startedBy       User              @relation("KeycrmSyncRunCreator", fields: [startedById], references: [id], onDelete: Restrict)
+  issues          KeycrmSyncIssue[]
+
+  @@index([status, createdAt])
+  @@index([status, nextAttemptAt, leaseUntil, createdAt])
+  @@index([previewRunId])
+}
+
+model KeycrmSyncIssue {
+  id              String        @id @default(cuid())
+  runId           String
+  externalOrderId String?
+  code            String
+  message         String
+  details         Json?
+  createdAt       DateTime      @default(now())
+  run             KeycrmSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@index([externalOrderId])
 }
 
 model ExpenseCategory {

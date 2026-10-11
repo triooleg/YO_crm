@@ -1,5 +1,6 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
+import { Badge, Progress } from "@mantine/core";
 import { settingsUi, summaryFormatUi } from "../lib/i18n";
 import { CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextarea, CrmTextInput } from "./crm/settings-controls";
 import { CrmTabList, type CrmTab } from "./crm/tab-list";
@@ -63,6 +64,9 @@ type IntegrationData = {
     passwordConfigured: boolean;
   };
 };
+type KeycrmSettingsData={enabled:boolean;endpoint:string;apiTokenConfigured:boolean;connectionStatus:string;verifiedAt:string|null;lastErrorCode:string|null;pageSize:number;defaultCurrency:string;defaultOrderType:string;configRevision:number};
+type KeycrmRun={id:string;mode:"DRY_RUN"|"APPLY";status:"PENDING"|"RUNNING"|"COMPLETED"|"PARTIAL"|"FAILED";requestedFrom:string|null;requestedTo:string|null;currentPage:number;totalPages:number|null;totalRemote:number|null;scannedCount:number;createdCount:number;updatedCount:number;skippedCount:number;failedCount:number;errorMessage:string|null;createdAt:string;completedAt:string|null;startedBy?:{displayName:string};_count?:{issues:number}};
+type KeycrmIssue={id:string;externalOrderId:string|null;code:string;message:string;createdAt:string};
 function Secret({ name, label, saved, inputRef }: { name: string; label: string; saved: boolean; inputRef?: Ref<HTMLInputElement> }) {
   return <CrmTextInput ref={inputRef} label={label} name={name} type="password" autoComplete="new-password" placeholder={saved ? settingsUi.secretSaved : settingsUi.secretNotSaved}/>;
 }
@@ -280,7 +284,28 @@ function CommunicationsSettings() {
     </section>
   );
 }
-type SettingsSection = "account" | "finance" | "communications" | "ai" | "production" | "interface";
+function KeycrmSettings(){
+  const ui=settingsUi.keycrm,[data,setData]=useState<KeycrmSettingsData>(),[runs,setRuns]=useState<KeycrmRun[]>([]),[current,setCurrent]=useState<KeycrmRun>(),[issues,setIssues]=useState<KeycrmIssue[]>([]),[error,setError]=useState(""),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[from,setFrom]=useState(""),[to,setTo]=useState("");
+  async function jsonRequest<T>(url:string,init?:RequestInit){const response=await fetch(url,{credentials:"include",...init,headers:{...(init?.body?{"Content-Type":"application/json"}:{}),...(init?.headers||{})}}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(Array.isArray(body.message)?body.message.join(", "):body.message||ui.statusError);return body as T}
+  async function load(){const [settings,history]=await Promise.all([jsonRequest<KeycrmSettingsData>("/api/keycrm/settings"),jsonRequest<KeycrmRun[]>("/api/keycrm/sync-runs?limit=20")]);setData(settings);setRuns(history);const active=history.find(run=>run.status==="PENDING"||run.status==="RUNNING")||history[0];if(active)setCurrent(active);return {settings,history}}
+  useEffect(()=>{load().catch(reason=>setError((reason as Error).message))},[]);
+  useEffect(()=>{if(!current||!(current.status==="PENDING"||current.status==="RUNNING"))return;const timer=window.setInterval(()=>{jsonRequest<KeycrmRun>(`/api/keycrm/sync-runs/${current.id}`).then(run=>{setCurrent(run);setRuns(list=>[run,...list.filter(item=>item.id!==run.id)]);if(run.status!=="PENDING"&&run.status!=="RUNNING")jsonRequest<KeycrmIssue[]>(`/api/keycrm/sync-runs/${run.id}/issues`).then(setIssues).catch(()=>undefined)}).catch(reason=>setError((reason as Error).message))},3000);return()=>window.clearInterval(timer)},[current?.id,current?.status]);
+  async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError("");setMessage("");try{const form=new FormData(event.currentTarget),apiToken=String(form.get("apiToken")||"").trim(),result=await jsonRequest<KeycrmSettingsData>("/api/keycrm/settings",{method:"PATCH",body:JSON.stringify({enabled:form.get("enabled")==="on",pageSize:Number(form.get("pageSize")),defaultCurrency:form.get("defaultCurrency"),defaultOrderType:form.get("defaultOrderType"),...(apiToken?{apiToken}:{})})});setData(result);setMessage(settingsUi.saved)}catch(reason){setError((reason as Error).message||ui.saveError)}finally{setBusy(false)}}
+  async function testConnection(){setBusy(true);setError("");setMessage("");try{const result=await jsonRequest<{connected:boolean;totalOrders:number;verifiedAt:string}>("/api/keycrm/test-connection",{method:"POST"});setMessage(`${ui.connected}. ${ui.totalOrders}: ${result.totalOrders}`);await load()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  function previewForRange(run:KeycrmRun){return run.mode==="DRY_RUN"&&(run.status==="COMPLETED"||run.status==="PARTIAL")&&run.requestedFrom===(from?new Date(`${from}T00:00:00Z`).toISOString():null)&&(to?run.requestedTo===new Date(`${to}T23:59:59Z`).toISOString():Boolean(run.requestedTo))}
+  async function start(dryRun:boolean){setBusy(true);setError("");setMessage("");setIssues([]);try{const preview=!dryRun?runs.find(previewForRange):undefined;if(!dryRun&&!preview)throw new Error(ui.previewRequired);const body={dryRun,clientRequestId:crypto.randomUUID(),...(from?{from:new Date(`${from}T00:00:00Z`).toISOString()}:{}),...(to?{to:new Date(`${to}T23:59:59Z`).toISOString()}:{}),...(preview?{previewRunId:preview.id}:{})},run=await jsonRequest<KeycrmRun>("/api/keycrm/sync-runs",{method:"POST",body:JSON.stringify(body)});setCurrent(run);setRuns(list=>[run,...list]);setMessage(dryRun?ui.running:ui.applying)}catch(reason){setError((reason as Error).message||ui.startError)}finally{setBusy(false)}}
+  async function selectRun(run:KeycrmRun){setCurrent(run);setIssues(await jsonRequest<KeycrmIssue[]>(`/api/keycrm/sync-runs/${run.id}/issues`).catch(()=>[]))}
+  if(!data)return <section id="settings-keycrm-panel" role="tabpanel" aria-labelledby="settings-keycrm-tab" className="settings-card">{error?<div className="phase2-error" role="alert">{error}</div>:<p>{ui.loading}</p>}</section>;
+  const statusLabel=(status:string)=>({PENDING:ui.pending,RUNNING:ui.running,COMPLETED:ui.completed,PARTIAL:ui.partial,FAILED:ui.failed}[status]||status),connectionLabel={VERIFIED:ui.connected,CONFIGURED:ui.configured,NOT_CONFIGURED:ui.notConfigured,ERROR:ui.connectionError,CREDENTIAL_UNREADABLE:ui.credentialUnreadable}[data.connectionStatus]||data.connectionStatus,percent=current?.totalPages?Math.min(100,Math.round(((Math.max(1,current.currentPage)-(current.status==="COMPLETED"||current.status==="PARTIAL"?0:1))/current.totalPages)*100)):0;
+  return <div id="settings-keycrm-panel" role="tabpanel" aria-labelledby="settings-keycrm-tab" className="settings-keycrm-panel">
+    <form className="settings-card" onSubmit={save} aria-busy={busy}><header className="keycrm-card-header"><div><h2>{ui.title}</h2><p>{ui.hint}</p></div><Badge color={data.connectionStatus==="VERIFIED"?"green":data.connectionStatus==="ERROR"?"red":"gray"}>{connectionLabel}</Badge></header><div className="settings-grid"><CrmTextInput label={ui.endpoint} value={data.endpoint} readOnly/><Secret name="apiToken" label={ui.token} saved={data.apiTokenConfigured}/><CrmCheckbox className="settings-keycrm-toggle" name="enabled" defaultChecked={data.enabled} label={ui.enabled}/><CrmTextInput label={ui.pageSize} name="pageSize" type="number" min="1" max="50" defaultValue={data.pageSize}/><CrmNativeSelect label={ui.defaultCurrency} name="defaultCurrency" defaultValue={data.defaultCurrency} data={["EUR","USD","UAH"]}/><CrmNativeSelect label={ui.defaultOrderType} name="defaultOrderType" defaultValue={data.defaultOrderType} data={Object.entries(ui.orderTypes).map(([value,label])=>({value,label}))}/></div><p>{ui.workflowNotice}</p><p>{ui.tokenHint}</p><div className="settings-actions"><CrmButton type="submit" disabled={busy}>{ui.save}</CrmButton><CrmButton tone="secondary" type="button" disabled={busy||!data.apiTokenConfigured} onClick={()=>void testConnection()}>{busy?ui.testing:ui.test}</CrmButton></div></form>
+    <section className="settings-card"><h2>{ui.transferTitle}</h2><p>{ui.transferHint}</p><div className="settings-grid"><CrmTextInput label={ui.from} type="date" value={from} onChange={event=>setFrom(event.target.value)}/><CrmTextInput label={ui.to} type="date" value={to} onChange={event=>setTo(event.target.value)}/></div><div className="phase2-warning" role="note">{ui.measurementsNotice}</div><div className="settings-actions"><CrmButton tone="secondary" type="button" disabled={busy||!data.enabled||data.connectionStatus!=="VERIFIED"} onClick={()=>void start(true)}>{ui.preview}</CrmButton><CrmButton type="button" disabled={busy||data.connectionStatus!=="VERIFIED"||!runs.some(previewForRange)} onClick={()=>void start(false)}>{ui.apply}</CrmButton></div></section>
+    {current&&<section className="settings-card keycrm-current"><header className="keycrm-card-header"><div><h2>{current.mode==="DRY_RUN"?ui.preview:ui.realRun}</h2><small>{new Date(current.createdAt).toLocaleString("ru-RU")}</small></div><Badge color={current.status==="COMPLETED"?"green":current.status==="PARTIAL"||current.status==="FAILED"?"red":"violet"}>{statusLabel(current.status)}</Badge></header><Progress value={percent} animated={current.status==="RUNNING"} aria-label={ui.progress}/><div className="keycrm-counters"><span>{ui.page}: <b>{current.currentPage}{current.totalPages?` / ${current.totalPages}`:""}</b></span><span>{ui.scanned}: <b>{current.scannedCount}{current.totalRemote!==null?` / ${current.totalRemote}`:""}</b></span><span>{ui.created}: <b>{current.createdCount}</b></span><span>{ui.updated}: <b>{current.updatedCount}</b></span><span>{ui.skipped}: <b>{current.skippedCount}</b></span><span>{ui.failures}: <b>{current.failedCount}</b></span></div>{current.errorMessage&&<div className="phase2-error" role="alert">{current.errorMessage}</div>}{issues.length>0&&<div className="keycrm-issues"><h3>{ui.issues}</h3>{issues.map(issue=><article key={issue.id}><b>{issue.externalOrderId?`KeyCRM #${issue.externalOrderId}`:issue.code}</b><span>{issue.message}</span></article>)}</div>}</section>}
+    <section className="settings-card"><h2>{ui.history}</h2>{runs.length===0?<p>{ui.noRuns}</p>:<div className="keycrm-history">{runs.map(run=><CrmButton tone="secondary" className={current?.id===run.id?"keycrm-history-selected":undefined} aria-pressed={current?.id===run.id} type="button" key={run.id} onClick={()=>void selectRun(run)}><span><b>{run.mode==="DRY_RUN"?ui.dryRun:ui.realRun}</b><small>{new Date(run.createdAt).toLocaleString("ru-RU")}{run.startedBy?` · ${run.startedBy.displayName}`:""}</small></span><span>{run.scannedCount} · {statusLabel(run.status)}</span></CrmButton>)}</div>}</section>
+    {message&&<div className="settings-success" role="status">{message}</div>}{error&&<div className="phase2-error" role="alert">{error}</div>}
+  </div>
+}
+type SettingsSection = "account" | "finance" | "communications" | "keycrm" | "ai" | "production" | "interface";
 export function SettingsWorkspace({role}:{role:string}) {
   const [section, setSection] = useState<SettingsSection>(
     role==="OWNER"?"account":"finance",
@@ -289,6 +314,7 @@ export function SettingsWorkspace({role}:{role:string}) {
     ...(role==="OWNER"?[{value:"account",label:settingsUi.accountTab,panelId:"settings-account-panel",tabId:"settings-account-tab"}]:[]),
     {value:"finance",label:settingsUi.finance,panelId:"settings-finance-panel",tabId:"settings-finance-tab"},
     {value:"communications",label:settingsUi.communications,panelId:"settings-communications-panel",tabId:"settings-communications-tab"},
+    ...((role==="OWNER"||role==="ADMIN")?[{value:"keycrm",label:settingsUi.keycrmTab,panelId:"settings-keycrm-panel",tabId:"settings-keycrm-tab"}]:[]),
     {value:"ai",label:settingsUi.aiTab,panelId:"settings-ai-panel",tabId:"settings-ai-tab"},
     ...((role==="OWNER"||role==="ADMIN")?[{value:"production",label:settingsUi.production,panelId:"settings-production-panel",tabId:"settings-production-tab"},{value:"interface",label:settingsUi.interface,panelId:"settings-interface-panel",tabId:"settings-interface-tab"}]:[]),
     {value:"orders",label:settingsUi.orders,disabled:true,title:settingsUi.comingSoon},
@@ -310,6 +336,8 @@ export function SettingsWorkspace({role}:{role:string}) {
         <FinanceSettings />
       ) : section === "communications" ? (
         <CommunicationsSettings />
+      ) : section === "keycrm" ? (
+        <KeycrmSettings />
       ) : section === "production" ? (
         <ProductionSettings />
       ) : section === "interface" ? (

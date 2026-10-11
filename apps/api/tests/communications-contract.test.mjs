@@ -343,7 +343,7 @@ test("inbox secondary filters and channel counters are server complete", () => {
 });
 
 test("inbox active order context includes real payment rows",()=>{
-  assert.match(service,/include:\{payments:\{orderBy:\{receivedAt:"desc"\}\}\}/);
+  assert.match(service,/include:\{payments:\{where:\{voidedAt:null\},orderBy:\{receivedAt:"desc"\}\}\}/);
 });
 
 test("composer autosave updates one owned draft instead of appending duplicates",()=>{

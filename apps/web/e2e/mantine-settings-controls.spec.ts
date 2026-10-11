@@ -24,6 +24,11 @@ async function mockSettings(page: Page) {
     chatwoot: { enabled: true, status: "CONNECTED", baseUrl: "https://chatwoot.test", accountId: "1", inboxId: "2", accessTokenConfigured: true, webhookSecretConfigured: true, webhookUrl: "https://crm.test/chatwoot" },
     email: { enabled: true, status: "CONNECTED", smtpHost: "smtp.test", smtpPort: 465, imapHost: "imap.test", imapPort: 993, username: "mail@test.local", fromAddress: "mail@test.local", signature: "YO", passwordConfigured: true },
   };
+  const keycrmSettings = { enabled: true, endpoint: "https://openapi.keycrm.app/v1", apiTokenConfigured: true, connectionStatus: "VERIFIED", verifiedAt: "2026-10-11T09:00:00.000Z", lastErrorCode: null, pageSize: 50, defaultCurrency: "EUR", defaultOrderType: "CUSTOM_ORDER", configRevision: 3 };
+  const keycrmRuns = [
+    { id: "run-current", mode: "DRY_RUN", status: "COMPLETED", requestedFrom: null, requestedTo: "2026-10-11T09:00:00.000Z", currentPage: 3, totalPages: 3, totalRemote: 124, scannedCount: 124, createdCount: 117, updatedCount: 4, skippedCount: 3, failedCount: 0, errorMessage: null, createdAt: "2026-10-11T09:00:00.000Z", completedAt: "2026-10-11T09:03:00.000Z", startedBy: { displayName: "QA Operator" }, _count: { issues: 0 } },
+    { id: "run-older", mode: "APPLY", status: "PARTIAL", requestedFrom: "2026-10-01T00:00:00.000Z", requestedTo: "2026-10-10T23:59:59.000Z", currentPage: 1, totalPages: 1, totalRemote: 12, scannedCount: 12, createdCount: 10, updatedCount: 1, skippedCount: 0, failedCount: 1, errorMessage: null, createdAt: "2026-10-10T10:00:00.000Z", completedAt: "2026-10-10T10:01:00.000Z", startedBy: { displayName: "QA Operator" }, _count: { issues: 1 } },
+  ];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -60,6 +65,10 @@ async function mockSettings(page: Page) {
       return route.fulfill({ json: { ...aiAssistant, ...body, connected: false, apiKeySource: "none" } });
     }
     if (path === "/api/communications/integrations" && request.method() === "GET") return route.fulfill({ json: integrations });
+    if (path === "/api/keycrm/settings" && request.method() === "GET") return route.fulfill({ json: keycrmSettings });
+    if (path === "/api/keycrm/sync-runs" && request.method() === "GET") return route.fulfill({ json: keycrmRuns });
+    if (path === "/api/keycrm/sync-runs/run-current/issues" && request.method() === "GET") return route.fulfill({ json: [] });
+    if (path === "/api/keycrm/sync-runs/run-older/issues" && request.method() === "GET") return route.fulfill({ json: [{ id: "issue-1", externalOrderId: "675", code: "DUPLICATE", message: "Найден возможный дубликат заказа", createdAt: "2026-10-10T10:01:00.000Z" }] });
     if (path === "/api/communications/integrations/chatwoot" && request.method() === "PATCH") {
       const body = request.postDataJSON();
       writes.push({ path, body });
@@ -75,6 +84,32 @@ async function mockSettings(page: Page) {
     return route.fulfill({ status: 501, json: { message: `Unexpected test route: ${path}` } });
   });
   return writes;
+}
+
+for (const viewport of [
+  { name: "desktop", width: 1920, height: 1080 },
+  { name: "laptop", width: 1366, height: 768 },
+  { name: "mobile", width: 390, height: 844 },
+]) {
+  test(`KeyCRM sync settings remain usable — ${viewport.name}`, async ({ page }, testInfo) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
+    await mockSettings(page);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/?section=settings");
+    await page.getByRole("tab", { name: "KeyCRM" }).click();
+    const panel = page.locator("#settings-keycrm-panel");
+    await expect(panel.getByRole("heading", { name: "Синхронизация с KeyCRM" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /Проверка/ }).first()).toHaveAttribute("aria-pressed", "true");
+    await panel.evaluate((element) => element.scrollTo({ top: 0 }));
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-settings-top-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await panel.getByRole("button", { name: /Перенос/ }).last().click();
+    await expect(panel.getByRole("button", { name: /Перенос/ }).last()).toHaveAttribute("aria-pressed", "true");
+    await expect(panel.getByText("Найден возможный дубликат заказа")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(pageErrors).toEqual([]);
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-settings-history-${viewport.width}x${viewport.height}.png`), fullPage: false });
+  });
 }
 
 test("все разделы настроек используют доступные Mantine-контролы", async ({ page }) => {

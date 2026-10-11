@@ -28,6 +28,11 @@ Order types, pipeline, ready models, designs, files, prices and deposits. The
 configured deposit percentage supplies the server-side default, with an explicit
 authorized override path.
 
+The additive KeyCRM order-import foundation is implemented locally: encrypted
+connection settings, connection test, dry-run/apply gate, resumable server-side
+history, scoped provider identities and per-order issues. Production migration,
+configuration and the first reviewed import remain a separate release action.
+
 ## Phase 4 - Production (complete and deployed)
 
 Calendar, capacity, slots, deadlines, tasks and readiness/deposit gates. Receipt

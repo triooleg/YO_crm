@@ -12,6 +12,7 @@ export type MergeMovedEntityIds = {
   agreements:string[];
   aiRuns:string[];
   activities:string[];
+  keycrmClientLinks:string[];
   aiModeOverrides:string[];
   aiRuntimeSettings:string[];
   incomingRedirects:string[];
@@ -40,7 +41,7 @@ export function parseMergeArray(value:Prisma.JsonValue|null|undefined):Record<st
 
 export function parseMovedEntityIds(value:Prisma.JsonValue|null|undefined):MergeMovedEntityIds{
   const source=parseMergeObject(value),list=(key:string)=>Array.isArray(source[key])?(source[key] as unknown[]).filter((item):item is string=>typeof item==="string"):[];
-  return{version:1,athletes:list("athletes"),orders:list("orders"),conversations:list("conversations"),messageDeliveryAttempts:list("messageDeliveryAttempts"),workTasks:list("workTasks"),customerMemories:list("customerMemories"),conversationFacts:list("conversationFacts"),agreements:list("agreements"),aiRuns:list("aiRuns"),activities:list("activities"),aiModeOverrides:list("aiModeOverrides"),aiRuntimeSettings:list("aiRuntimeSettings"),incomingRedirects:list("incomingRedirects")};
+  return{version:1,athletes:list("athletes"),orders:list("orders"),conversations:list("conversations"),messageDeliveryAttempts:list("messageDeliveryAttempts"),workTasks:list("workTasks"),customerMemories:list("customerMemories"),conversationFacts:list("conversationFacts"),agreements:list("agreements"),aiRuns:list("aiRuns"),activities:list("activities"),keycrmClientLinks:list("keycrmClientLinks"),aiModeOverrides:list("aiModeOverrides"),aiRuntimeSettings:list("aiRuntimeSettings"),incomingRedirects:list("incomingRedirects")};
 }
 
 export function hasValidMovedEntityIds(value:Prisma.JsonValue|null|undefined){
@@ -49,7 +50,7 @@ export function hasValidMovedEntityIds(value:Prisma.JsonValue|null|undefined){
   const validModes=(key:string)=>Array.isArray(source[key])&&(source[key] as unknown[]).every(item=>Boolean(item)&&typeof item==="object"&&!Array.isArray(item)&&typeof (item as Record<string,unknown>).id==="string"&&Boolean((item as Record<string,unknown>).id)&&aiModes.has(String((item as Record<string,unknown>).before))&&aiModes.has(String((item as Record<string,unknown>).after))&&isIsoDate((item as Record<string,unknown>).beforeUpdatedAt)&&isIsoDate((item as Record<string,unknown>).afterUpdatedAt))&&new Set((source[key] as {id:string}[]).map(item=>item.id)).size===(source[key] as unknown[]).length;
   const sourceModes=Array.isArray(source.sourceAiModes)?source.sourceAiModes as {id:string}[]:[],targetModes=Array.isArray(source.targetAiModes)?source.targetAiModes as {id:string}[]:[];
   const movedModeIds=Array.isArray(source.aiModeOverrides)?source.aiModeOverrides as string[]:[];
-  return source.version===1&&movedArrayFields.every(key=>validIds(source[key]))&&validModes("sourceAiModes")&&validModes("targetAiModes")&&new Set([...sourceModes,...targetModes].map(item=>item.id)).size===sourceModes.length+targetModes.length&&movedModeIds.length===sourceModes.length&&movedModeIds.every(id=>sourceModes.some(item=>item.id===id));
+  return source.version===1&&movedArrayFields.every(key=>validIds(source[key]))&&(source.keycrmClientLinks===undefined||validIds(source.keycrmClientLinks))&&validModes("sourceAiModes")&&validModes("targetAiModes")&&new Set([...sourceModes,...targetModes].map(item=>item.id)).size===sourceModes.length+targetModes.length&&movedModeIds.length===sourceModes.length&&movedModeIds.every(id=>sourceModes.some(item=>item.id===id));
 }
 
 export function hasValidClientMergeSnapshot(value:Prisma.JsonValue|null|undefined){

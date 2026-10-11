@@ -20,7 +20,7 @@ test("достижение порога предоплаты атомарно п
   assert.match(addPayment,/\$transaction\(async \(tx\)/);
   assert.match(addPayment,/pg_advisory_xact_lock/);
   assert.ok(addPayment.indexOf("pg_advisory_xact_lock")<addPayment.indexOf("order.findFirst"));
-  assert.match(addPayment,/include:\s*\{\s*payments:\s*true,\s*productionSlot:\s*true\s*\}/);
+  assert.match(addPayment,/include:\s*\{\s*payments:\s*\{\s*where:\s*\{\s*voidedAt:\s*null\s*\}\s*\},\s*productionSlot:\s*true\s*\}/);
   assert.match(addPayment,/payment\.currency === order\.currency/);
   assert.match(addPayment,/totalPaid >= order\.depositRequiredMinor/);
   assert.match(addPayment,/order\.productionSlot\?\.tentative/);

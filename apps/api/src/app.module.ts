@@ -24,10 +24,13 @@ import { EmailTransportService } from "./communications/email-transport.service"
 import { EmailSyncService } from "./communications/email-sync.service";
 import { BrandingController } from "./branding/branding.controller";
 import { BrandingService } from "./branding/branding.service";
+import { KeycrmController } from "./keycrm/keycrm.controller";
+import { KeycrmService } from "./keycrm/keycrm.service";
+import { KeycrmWorkerService } from "./keycrm/keycrm-worker.service";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
-  controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController],
-  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService],
+  controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
+  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
 })
 export class AppModule {}

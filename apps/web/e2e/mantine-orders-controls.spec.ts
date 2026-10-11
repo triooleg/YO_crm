@@ -1,4 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { join } from "node:path";
+
+const screenshotPath = (testInfo: TestInfo, name: string) =>
+  process.env.YO_CRM_VISUAL_DIR ? join(process.env.YO_CRM_VISUAL_DIR, name) : testInfo.outputPath(name);
 
 const order = {
   id: "order-mantine-1",
@@ -24,7 +28,7 @@ const order = {
     language: "ru",
     source: "MANUAL",
   },
-  items: [{ id: "item-1", name: "Купальник", quantity: 1, priceMinor: 45000, productionStatus: "READY" }],
+  items: [{ id: "item-1", name: "Купальник", quantity: 1, priceMinor: 45000, productionStatus: "READY", externalImageUrl: "https://cdn.keycrm.test/design.svg" }],
   payments: [],
   activities: [],
   invoices: [],
@@ -52,6 +56,10 @@ async function mockOrdersApi(page: Page) {
     if (method === "GET" && path === "/api/clients") return route.fulfill({ json: [{ id: order.client.id, displayName: order.client.displayName, country: order.client.country }] });
     return route.fulfill({ status: 501, json: { error: `Unexpected test route: ${method} ${path}` } });
   });
+  await page.route("https://cdn.keycrm.test/design.svg", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="180"><rect width="120" height="180" fill="#7c3aed"/><path d="M20 30h80v120H20z" fill="#facc15"/><circle cx="60" cy="85" r="28" fill="#ec4899"/></svg>',
+  }));
   return updates;
 }
 
@@ -80,7 +88,7 @@ for (const viewport of [
     await expect(clientSearch).toBeVisible();
     await expect(clientSearch).toBeFocused();
     await expect(picker.getByRole("button", { name: /Клиент Mantine/ })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`mantine-orders-client-picker-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await page.screenshot({ path: screenshotPath(testInfo, `mantine-orders-client-picker-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await page.keyboard.press("Escape");
     await expect(picker).toBeHidden();
     await expect(newOrder).toBeFocused();
@@ -97,6 +105,22 @@ for (const viewport of [
 
     await page.getByRole("button", { name: order.number, exact: true }).click();
     await expect(page.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
+    const importedDesign = page.locator('img[src="https://cdn.keycrm.test/design.svg"]').first();
+    await expect(importedDesign).toBeVisible();
+    if (viewport.name !== "mobile") {
+      await importedDesign.hover();
+      const preview = page.locator(".orders-image-preview");
+      await expect(preview).toBeVisible();
+      const bounds = await preview.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+      await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-preview-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await page.mouse.move(0, 0);
+      await expect(page.locator(".orders-image-preview")).toBeHidden();
+    }
 
     const discipline = page.getByRole("combobox", { name: "Изменить вид спорта" });
     await expect(discipline.locator("xpath=ancestor::*[contains(@class,'crm-native-select')]")).toHaveClass(/mantine-NativeSelect-root/);
@@ -119,7 +143,7 @@ for (const viewport of [
     if (viewport.name === "mobile") {
       expect(await page.locator(".orders-table-scroll").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     }
-    await page.screenshot({ path: testInfo.outputPath(`mantine-orders-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-${viewport.width}x${viewport.height}.png`), fullPage: false });
   });
 }
 

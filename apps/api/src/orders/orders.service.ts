@@ -62,18 +62,23 @@ export class OrdersService {
       orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
       select: {
         id: true, number: true, type: true, discipline: true, country: true,
-        deliveryAddressSet: true, deliveryRecipient: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
+        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
         deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
+        deliveryServiceName: true,
+        deliveryTrackingCode: true,
         requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
-        deliveryMinor: true, discountMinor: true,
+        deliveryMinor: true, discountMinor: true, taxMinor: true, giftWrapMinor: true,
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
-        paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true, createdAt: true, productionSlot: true,
+        paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true,
+        buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
+        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
+        createdAt: true, productionSlot: true,
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } },
-        items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
+        items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
-        payments: { select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
+        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
     });
     return orders.map((order) => ({
@@ -88,7 +93,7 @@ export class OrdersService {
 
 
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true } });
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
     if (!order) throw new NotFoundException("Заказ не найден");
     const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
     if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
@@ -149,7 +154,7 @@ export class OrdersService {
     return this.prisma.$transaction(async tx => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-production-settings'))");
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
-      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
       const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
       const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
@@ -168,7 +173,7 @@ export class OrdersService {
     const currency = dto.currency.toUpperCase();
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
-      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, productionSlot: true } });
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
       if (currency !== order.currency) throw new BadRequestException(`Оплата должна быть в валюте заказа: ${order.currency}`);
       const alreadyPaid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);

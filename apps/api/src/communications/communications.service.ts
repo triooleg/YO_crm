@@ -218,10 +218,10 @@ export class CommunicationsService {
       this.p.order.findMany({
         where: { clientId: { in: clientIds }, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } },
         orderBy: { createdAt: "desc" },
-        include: { payments: { orderBy: { receivedAt: "desc" } } },
+        include: { payments: { where: { voidedAt: null }, orderBy: { receivedAt: "desc" } } },
       }),
       this.p.payment.findMany({
-        where: { order: { clientId: { in: clientIds }, archivedAt: null } },
+        where: { voidedAt: null, order: { clientId: { in: clientIds }, archivedAt: null } },
         select: { amountMinor: true, currency: true, order: { select: { clientId: true } } },
       }),
       chatwootConversationIds.length ? this.p.message.findMany({
@@ -2884,7 +2884,7 @@ export class AiAssistantService {
     const client=await this.p.client.findFirst({where:{id:clientId,archivedAt:null},select:{
       displayName:true,country:true,city:true,language:true,timezone:true,
       athletes:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{firstName:true,lastName:true,discipline:true,club:true,coach:true,measurements:{orderBy:{measuredAt:"desc"},take:1,select:{measuredAt:true,unit:true,height:true,chest:true,waist:true,hips:true,torso:true,values:true}}}},
-      orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{number:true,type:true,discipline:true,requiredDeliveryAt:true,promisedProductionAt:true,priceMinor:true,currency:true,depositRequiredMinor:true,deliveryMinor:true,discountMinor:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,payments:{orderBy:{receivedAt:"asc"},select:{amountMinor:true,currency:true,method:true,receivedAt:true}},shipment:{select:{carrier:true,trackingNumber:true,costMinor:true,currency:true,shippedAt:true,deliveredAt:true}}}},
+      orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{number:true,type:true,discipline:true,requiredDeliveryAt:true,promisedProductionAt:true,priceMinor:true,currency:true,depositRequiredMinor:true,deliveryMinor:true,discountMinor:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,payments:{where:{voidedAt:null},orderBy:{receivedAt:"asc"},select:{amountMinor:true,currency:true,method:true,receivedAt:true}},shipment:{select:{carrier:true,trackingNumber:true,costMinor:true,currency:true,shippedAt:true,deliveredAt:true}}}},
     }});
     if(!client)throw new NotFoundException("Клиент не найден");
     return{
