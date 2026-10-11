@@ -71,7 +71,7 @@ async function mockSettings(page: Page) {
     if (path === "/api/keycrm/sync-runs" && request.method() === "GET") return route.fulfill({ json: keycrmRuns });
     if (path === "/api/keycrm/sync-runs/run-current/issues" && request.method() === "GET") return route.fulfill({ json: [] });
     if (path === "/api/keycrm/sync-runs/run-older/issues" && request.method() === "GET") return route.fulfill({ json: [
-      { id: "issue-1", externalOrderId: "675", code: "DUPLICATE", message: "Найден возможный дубликат заказа", createdAt: "2026-10-10T10:01:00.000Z" },
+      { id: "issue-1", externalOrderId: "675", code: "MISSING_PRODUCTION_ITEMS", message: "UNLOCALIZED_PROVIDER_MESSAGE", createdAt: "2026-10-10T10:01:00.000Z" },
       { id: "issue-2", externalOrderId: "675", code: "CLIENT_MERGE_SUGGESTION", message: "Найдена похожая карточка клиента", createdAt: "2026-10-10T10:01:00.000Z", details: { kind: "CLIENT_MERGE_SUGGESTION", importedClientId: "client-imported", keycrmBuyerId: "415", candidates: [{ clientId: "client-existing", displayName: "Вероника Петрова", reasons: ["EMAIL", "PHONE"] }] } },
     ] });
     if (path === "/api/communications/integrations/chatwoot" && request.method() === "PATCH") {
@@ -115,7 +115,11 @@ for (const viewport of [
     await page.screenshot({ path: screenshotPath(testInfo, `keycrm-settings-top-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await panel.getByRole("button", { name: /Перенос/ }).last().click();
     await expect(panel.getByRole("button", { name: /Перенос/ }).last()).toHaveAttribute("aria-pressed", "true");
-    await expect(panel.getByText("Найден возможный дубликат заказа")).toBeVisible();
+    const productionIssue = panel.getByText("KeyCRM не передал товары заказа. Начало производства не рассчитано: количество костюмов требует проверки оператором.");
+    await expect(productionIssue).toBeVisible();
+    await expect(panel.getByText("UNLOCALIZED_PROVIDER_MESSAGE")).toHaveCount(0);
+    await productionIssue.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-production-issue-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await panel.getByRole("button", { name: /Объединить карточки/ }).click();
     const mergeDialog = page.getByRole("dialog", { name: "Подтвердите объединение клиентов" });
     await expect(mergeDialog).toBeVisible();

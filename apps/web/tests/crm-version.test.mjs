@@ -58,11 +58,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.33");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.34");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.33\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.33\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.34\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.34\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.34 описывает расчёт производства по стандартной дате KeyCRM", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.34"'), i18n.indexOf('version: "0.1.33"'));
+  assert.match(release, /shipping\.shipping_date/);
+  assert.match(release, /3 календарных дня/);
+  assert.match(release, /1 изделие — 6 дней/);
+  assert.match(release, /2 изделия — 8 дней/);
+  assert.match(release, /crm-v0\.1\.33/);
+  assert.match(changelog, /## \[0\.1\.34\] - 2026-10-11/);
 });
 
 test("журнал 0.1.33 описывает автоматический курс платежа и безопасный откат", () => {

@@ -6,7 +6,14 @@ import vm from "node:vm";
 import { OrderType } from "@prisma/client";
 import ts from "typescript";
 import { KeycrmClient } from "../src/keycrm/keycrm-client.ts";
-import { hasUsableDeliveryAddress, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "../src/keycrm/keycrm-sync-policy.ts";
+import {
+  hasUsableDeliveryAddress,
+  keycrmCostumeCount,
+  keycrmProductionDurationDays,
+  matchedShippingCarrier,
+  nextDepositRequired,
+  normalizedPhoneDigits,
+} from "../src/keycrm/keycrm-sync-policy.ts";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays } from "../src/orders/production-rules.ts";
 
 const nativeRequire = createRequire(import.meta.url);
@@ -21,7 +28,7 @@ function loadKeycrmService(imageHooks = {}) {
     if (specifier === "./keycrm-client") return { KeycrmClient: class KeycrmClient {}, KEYCRM_API_URL: "https://openapi.keycrm.app/v1" };
     if (specifier === "./keycrm-normalizer") return { normalizeKeycrmOrder: value => value };
     if (specifier === "./keycrm-image") return { materializeKeycrmOrderImage: imageHooks.materialize ?? (async () => "keycrm-test.jpg"), removeMaterializedKeycrmOrderImage: imageHooks.remove ?? (async () => true) };
-    if (specifier === "./keycrm-sync-policy") return { hasUsableDeliveryAddress, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits };
+    if (specifier === "./keycrm-sync-policy") return { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits };
     if (specifier === "../orders/production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays };
     if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency ? payment.appliedAmountMinor ?? 0 : 0 };
     if (specifier === "./keycrm.dto") return {};
@@ -284,11 +291,109 @@ test("первый импорт создаёт provider-owned производс
   const order = normalizedOrder({ production: { startsAt: new Date("2026-09-20T00:00:00Z"), requiredDeliveryAt: new Date("2026-09-30T00:00:00Z") } });
   await service.syncProductionSlot(tx, order, persisted, 0, "owner-1", "run-1");
   assert.equal(created[0].startsAt.toISOString(), "2026-09-20T00:00:00.000Z");
-  assert.equal(created[0].endsAt.toISOString(), "2026-09-28T00:00:00.000Z");
+  assert.equal(created[0].endsAt.toISOString(), "2026-09-27T00:00:00.000Z");
   assert.equal(created[0].tentative, true);
   assert.equal(created[0].sourceSystem, "KEYCRM");
   assert.equal(audits[0].action, "CREATE");
   assert.equal(activities[0].type, "KEYCRM_PRODUCTION_SLOT_SYNCED");
+});
+
+test("длительность производства KeyCRM зависит от общего количества костюмов", () => {
+  assert.deepEqual(
+    [1, 2, 3, 4, 5].map(keycrmProductionDurationDays),
+    [6, 8, 11, 14, 17],
+  );
+  assert.equal(keycrmCostumeCount([{ quantity: 2 }, { quantity: 2 }]), 4);
+  assert.equal(keycrmCostumeCount([]), 0);
+});
+
+test("при пустом начале производства слот рассчитывается от даты отправки и количества костюмов", async () => {
+  const KeycrmService = loadKeycrmService();
+  const created = [];
+  const tx = {
+    productionSlot: { findUnique: async () => null, create: async ({ data }) => { const row = { id: "slot-calculated", ...data }; created.push(row); return row; } },
+    auditLog: { create: async () => undefined },
+    activity: { create: async () => undefined },
+  };
+  const service = new KeycrmService({});
+  const order = normalizedOrder({
+    production: { startsAt: null, requiredDeliveryAt: new Date("2027-01-18T00:00:00Z") },
+    items: [
+      { externalId: "item-1", name: "Leotard A", quantity: 2, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] },
+      { externalId: "item-2", name: "Leotard B", quantity: 1, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] },
+    ],
+  });
+  await service.syncProductionSlot(tx, order, { id: "order-1", clientId: "client-1", depositRequiredMinor: 5000 }, 0, "owner-1", "run-1");
+  assert.equal(created[0].endsAt.toISOString(), "2027-01-15T00:00:00.000Z");
+  assert.equal(created[0].startsAt.toISOString(), "2027-01-04T00:00:00.000Z");
+});
+
+test("повторная синхронизация пересчитывает только существующий provider-owned слот без дубля", async () => {
+  const KeycrmService = loadKeycrmService();
+  let current = {
+    id: "slot-existing",
+    orderId: "order-1",
+    startsAt: new Date("2027-01-01T00:00:00Z"),
+    endsAt: new Date("2027-01-02T00:00:00Z"),
+    capacity: 4,
+    tentative: false,
+    locked: false,
+    sourceSystem: "KEYCRM",
+    sourceAccount: "connection-1",
+    externalId: "order-1",
+  };
+  const updates = [], audits = [], activities = [];
+  const tx = {
+    productionSlot: {
+      findUnique: async () => current,
+      create: async () => { throw new Error("existing slot must not be duplicated"); },
+      update: async ({ data }) => {
+        updates.push(data);
+        current = { ...current, ...data };
+        return current;
+      },
+    },
+    auditLog: { create: async ({ data }) => audits.push(data) },
+    activity: { create: async ({ data }) => activities.push(data) },
+  };
+  const service = new KeycrmService({});
+  const imported = (quantity) => normalizedOrder({
+    production: { startsAt: null, requiredDeliveryAt: new Date("2027-01-18T00:00:00Z") },
+    items: [{ externalId: "item-1", name: "Leotard", quantity, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }],
+  });
+
+  await service.syncProductionSlot(tx, imported(2), { id: "order-1", clientId: "client-1", depositRequiredMinor: 5000 }, 5000, "owner-1", "run-1");
+  await service.syncProductionSlot(tx, imported(2), { id: "order-1", clientId: "client-1", depositRequiredMinor: 5000 }, 5000, "owner-1", "run-1");
+  await service.syncProductionSlot(tx, imported(3), { id: "order-1", clientId: "client-1", depositRequiredMinor: 5000 }, 5000, "owner-1", "run-1");
+
+  assert.equal(updates.length, 3);
+  assert.equal(updates[0].startsAt.toISOString(), "2027-01-07T00:00:00.000Z");
+  assert.equal(updates[1].startsAt.toISOString(), "2027-01-07T00:00:00.000Z");
+  assert.equal(updates[2].startsAt.toISOString(), "2027-01-04T00:00:00.000Z");
+  assert.equal(current.endsAt.toISOString(), "2027-01-15T00:00:00.000Z");
+  assert.equal(current.capacity, 4);
+  assert.equal(current.tentative, false);
+  assert.deepEqual(audits.map((entry) => entry.action), ["UPDATE", "UPDATE", "UPDATE"]);
+  assert.equal(activities.length, 3);
+});
+
+test("заказ KeyCRM без товаров не получает вычисленный производственный слот", async () => {
+  const KeycrmService = loadKeycrmService();
+  const issues = [];
+  const tx = {
+    productionSlot: { findUnique: async () => null, create: async () => { throw new Error("slot must not be created"); } },
+    keycrmSyncIssue: { create: async ({ data }) => issues.push(data) },
+  };
+  const service = new KeycrmService({});
+  await service.syncProductionSlot(
+    tx,
+    normalizedOrder({ production: { startsAt: null, requiredDeliveryAt: new Date("2027-01-18T00:00:00Z") }, items: [] }),
+    { id: "order-1", clientId: "client-1", depositRequiredMinor: 5000 },
+    0,
+    "owner-1",
+    "run-1",
+  );
+  assert.equal(issues[0].code, "MISSING_PRODUCTION_ITEMS");
 });
 
 test("список замечаний не обрезает предложения объединения первыми 200 строками", async () => {
@@ -301,10 +406,13 @@ test("список замечаний не обрезает предложени
   assert.deepEqual(JSON.parse(JSON.stringify(query.orderBy)), [{ createdAt: "asc" }, { id: "asc" }]);
 });
 
-test("ручной или locked производственный слот не перезаписывается и создаёт issue", async () => {
+test("ручной, locked или принадлежащий другому provider scope слот не перезаписывается", async () => {
   const KeycrmService = loadKeycrmService();
   for (const slot of [
     { id: "manual", sourceSystem: null, sourceAccount: null, externalId: null, locked: false },
+    { id: "other-source", sourceSystem: "OTHER", sourceAccount: "connection-1", externalId: "order-1", locked: false },
+    { id: "other-account", sourceSystem: "KEYCRM", sourceAccount: "connection-2", externalId: "order-1", locked: false },
+    { id: "other-order", sourceSystem: "KEYCRM", sourceAccount: "connection-1", externalId: "order-2", locked: false },
     { id: "locked", sourceSystem: "KEYCRM", sourceAccount: "connection-1", externalId: "order-1", locked: true },
   ]) {
     const issues = [];

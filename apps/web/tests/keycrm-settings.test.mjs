@@ -21,6 +21,8 @@ test("весь новый пользовательский текст KeyCRM в�
   assert.match(i18n, /title:\s*"Синхронизация с KeyCRM"/);
   assert.match(i18n, /preview:\s*"Проверить без переноса"/);
   assert.match(i18n, /apply:\s*"Перенести и синхронизировать"/);
+  assert.match(i18n, /MISSING_PRODUCTION_ITEMS:\s*"KeyCRM не передал товары заказа/);
+  assert.match(workspace, /ui\.issueMessages\[issue\.code as keyof typeof ui\.issueMessages\]\|\|issue\.message/);
 });
 
 test("предложения объединения отделены от ошибок и запускают только ручное объединение", () => {

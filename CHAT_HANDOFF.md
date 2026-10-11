@@ -1,5 +1,13 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-11 — local implementation: расчёт начала производства при импорте KeyCRM
+
+- Если необязательное поле KeyCRM «Початок виробництва» пустое, YO_crm теперь рассчитывает provider-owned производственный слот от ожидаемой даты доставки; при отсутствии соответствующего custom field используется штатное поле KeyCRM `shipping.shipping_date` без UUID. `shipping_date_actual` сохранено только как fallback совместимости ответа.
+- Конец производства равен дате отправки минус 3 календарных дня. Длительность назад считается по общему количеству изделий: 1 = 6 дней, 2 = 8 дней, каждое следующее изделие добавляет 3 дня. Количество — сумма `quantity` всех позиций, а не число строк.
+- Явно заданное начало производства остаётся приоритетным. Заказ без товаров не получает выдуманный слот и создаёт замечание `MISSING_PRODUCTION_ITEMS`; ручные, locked и принадлежащие другому источнику слоты не перезаписываются. Общие настройки и функция расчёта производства YO_crm не изменялись.
+- Failing-first подтверждён: новые проверки сначала падали из-за отсутствующих helper и fallback даты. После реализации целевые KeyCRM normalization/runtime suites прошли 61/61, настройки KeyCRM web — 6/6. Полный `pnpm quality:check` прошёл: database 11/11, API 602/602, web 351/351, typecheck и production builds PASS; `pnpm dag:test` — 45/45.
+- Playwright-сценарий настроек KeyCRM прошёл 3/3 на 1920×1080, 1366×768 и 390×844; скриншоты локализованного замечания просмотрены, обрезки и горизонтального overflow нет. Compatibility, regression, business/security и visual reviews завершены PASS; финальный release-gate — `ALLOW_LOCAL_CANDIDATE`. Commit, push, deployment и live PREVIEW/APPLY KeyCRM не выполнялись.
+
 # 2026-10-11 — production deployment CRM 0.1.33: автоматический официальный курс при оплате
 
 - Runtime commit `ea4ff057767cccb104f71a772a5eafef9e138152` опубликован в `origin/main`, развёрнут из точного Git archive и закреплён неизменяемым тегом `crm-v0.1.33`. GitHub Actions `Quality gates` run `38154082008` и `CRM release` run `38154807796` завершились со статусом `success`.

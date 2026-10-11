@@ -153,7 +153,8 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
   const productionStart = customFieldDate(raw.custom_fields, options.productionStartFieldUuid, "Початок виробництва");
   const expectedDelivery = customFieldDate(raw.custom_fields, options.expectedDeliveryFieldUuid, "Очікувана дата доставки");
   const productionStartsAt = productionStart.value;
-  const requiredDeliveryAt = expectedDelivery.value;
+  const shippingDate = keycrmDate(raw.shipping?.shipping_date ?? raw.shipping?.shipping_date_actual);
+  const requiredDeliveryAt = expectedDelivery.value ?? shippingDate;
   return {
     sourceSystem: SOURCE_SYSTEM,
     sourceAccount: options.connectionKey,

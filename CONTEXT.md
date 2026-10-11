@@ -118,6 +118,13 @@ operator merge suggestion; they are never merged automatically. Ambiguity
 without a stable buyer ID remains fail closed. One completed-payment currency
 may correct a stale historical source currency only before the order is linked;
 later currency changes are blocked to preserve its financial history.
+When KeyCRM does not provide the optional custom production-start field, an
+imported production slot is calculated from the configured expected-delivery
+custom field or, as fallback, KeyCRM's standard `shipping.shipping_date`. The production
+end is three calendar days before that date. The backward duration is six days
+for one costume, eight for two, and three additional days for every costume
+after the second. Costume count is the sum of order-item quantities. Missing
+items remain an operator issue instead of being treated as one costume.
 
 ### Design and Leotard
 
@@ -135,6 +142,8 @@ reach the required deposit. The
 configured duration seeds the initial slot. Manual slot changes enforce date
 ordering, shipping lead and the deposit gate through
 `apps/api/src/orders/production-rules.ts` and `orders.service.ts`.
+The KeyCRM import calculation above is provider-specific and does not change
+these general production settings or manual scheduling rules.
 
 `Production Schedule` means the set of production slots. `Production Stage`
 means `ProductionStatus`; it is not a separate entity.

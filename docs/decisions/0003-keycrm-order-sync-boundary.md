@@ -58,6 +58,21 @@ remain in raw provider evidence; if a matching Payment already exists its
 cancellation lifecycle is still applied, but a missing foreign-currency
 cancellation does not materialize a new Payment. All voided receipts remain
 excluded from active projections.
+
+The KeyCRM production-start custom field is optional. When it is absent, the
+importer may calculate a provider-owned slot only when both a delivery/shipping
+date and at least one product quantity are present. The expected-delivery custom
+field takes precedence; otherwise the standard KeyCRM
+`shipping.shipping_date` field is used without a custom-field UUID.
+`shipping_date_actual` remains a response-compatibility fallback. Production ends three
+calendar days before that date. Working backward uses six calendar days for one
+costume, eight for two, and three additional days for every costume after the
+second. The costume count is the sum of item quantities, not the number of
+product rows. An explicit KeyCRM production start remains authoritative. Empty
+items fail closed with an operator issue. This provider rule does not alter the
+general YO_crm duration or shipping-lead settings, and it never overwrites a
+manual, locked or differently owned production slot.
+
 If a provider cancellation lowers the active total below the deposit for an
 already confirmed production slot, synchronization does not silently roll
 production backward: it records an operator issue and activity. Repeated

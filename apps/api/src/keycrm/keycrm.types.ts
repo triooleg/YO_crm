@@ -66,6 +66,7 @@ export type KeycrmOrder = {
     shipping_receive_point?: string | null;
     recipient_full_name?: string | null;
     recipient_phone?: string | null;
+    shipping_date?: string | null;
     shipping_date_actual?: string | null;
     deliveryService?: { id?: number | null; name?: string | null } | null;
     delivery_service?: { id?: number | null; name?: string | null } | null;

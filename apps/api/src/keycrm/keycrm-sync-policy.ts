@@ -17,6 +17,23 @@ export function normalizedPhoneDigits(phone: string | null) {
   return digits.length >= 7 ? digits : null;
 }
 
+export function keycrmCostumeCount(items: ReadonlyArray<{ quantity: number }>) {
+  return items.reduce((total, item) => {
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      throw new Error("Количество костюмов KeyCRM должно быть положительным целым числом");
+    }
+    return total + item.quantity;
+  }, 0);
+}
+
+export function keycrmProductionDurationDays(costumeCount: number) {
+  if (!Number.isInteger(costumeCount) || costumeCount < 1) {
+    throw new Error("Для расчёта производства нужен хотя бы один костюм");
+  }
+  if (costumeCount === 1) return 6;
+  return 8 + (costumeCount - 2) * 3;
+}
+
 export function matchedShippingCarrier(serviceName: string | null): "NOVA_POSHTA" | "NOVA_GLOBAL" | "UKRPOSHTA" | "DHL" | null {
   const normalized = serviceName?.trim().toLowerCase().replace(/[._-]+/g, " ") ?? "";
   if (!normalized) return null;

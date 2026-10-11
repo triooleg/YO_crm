@@ -6,8 +6,8 @@ import { decryptSecret, encryptSecret } from "../secret-box";
 import { KeycrmClient, KEYCRM_API_URL } from "./keycrm-client";
 import { normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-normalizer";
 import { materializeKeycrmOrderImage, removeMaterializedKeycrmOrderImage } from "./keycrm-image";
-import { hasUsableDeliveryAddress, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
-import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays } from "../orders/production-rules";
+import { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
+import { subtractUtcDays } from "../orders/production-rules";
 import { appliedPaymentMinor } from "../finance/exchange-rates";
 import type { CreateKeycrmSyncRunDto, UpdateKeycrmSettingsDto } from "./keycrm.dto";
 
@@ -743,13 +743,13 @@ export class KeycrmService {
       await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "INCOMPLETE_PRODUCTION_DATES", message: "KeyCRM передал начало производства без ожидаемой даты доставки. Производственный слот не создан: конечная дата не выдумывается." } });
       return null;
     }
-    const settings = await tx.appSetting.findMany({ where: { section: "production", key: { in: ["defaultDurationDays", "shippingLeadDays"] } } });
-    const values = Object.fromEntries(settings.map((setting) => [setting.key, setting.value]));
-    const durationDays = productionSetting(values.defaultDurationDays, DEFAULT_PRODUCTION_DURATION_DAYS, 1, 90);
-    const shippingLeadDays = productionSetting(values.shippingLeadDays, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
-    const calculated = productionWindow(production.requiredDeliveryAt, durationDays, shippingLeadDays);
-    const startsAt = production.startsAt ?? calculated.startsAt;
-    const endsAt = subtractUtcDays(production.requiredDeliveryAt, shippingLeadDays);
+    const costumeCount = keycrmCostumeCount(order.items);
+    if (!production.startsAt && costumeCount === 0) {
+      await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "MISSING_PRODUCTION_ITEMS", message: "KeyCRM не передал товары заказа. Начало производства не рассчитано: количество костюмов требует проверки оператором." } });
+      return null;
+    }
+    const endsAt = subtractUtcDays(production.requiredDeliveryAt, 3);
+    const startsAt = production.startsAt ?? subtractUtcDays(endsAt, keycrmProductionDurationDays(costumeCount));
     if (endsAt < startsAt) {
       await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "INVALID_PRODUCTION_DATES", message: "Дата начала производства KeyCRM позже допустимой даты окончания с учётом резерва доставки. Слот не изменён." } });
       return null;

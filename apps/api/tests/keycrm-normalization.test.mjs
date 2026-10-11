@@ -84,6 +84,33 @@ test("производственные даты используют UUID или
   assert.throws(() => normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 2, uuid: "OR_1001", name: "Початок виробництва", type: "text", value: "2026-02-01" }] }, options), /тип date/);
 });
 
+test("штатная shipping_date KeyCRM используется без UUID, когда ожидаемая дата из custom field не заполнена", () => {
+  const base = {
+    id: 22,
+    source_id: 1,
+    created_at: "2026-01-02 03:04:05",
+    grand_total: 10,
+    buyer: { id: 1, full_name: "Client" },
+    shipping: { shipping_date: "2027-01-18" },
+  };
+  const fromShipping = normalizeKeycrmOrder(base, options);
+  assert.equal(fromShipping.production.requiredDeliveryAt?.toISOString(), "2027-01-18T00:00:00.000Z");
+  assert.equal(fromShipping.delivery.shippedAt, null);
+
+  const customWins = normalizeKeycrmOrder({
+    ...base,
+    custom_fields: [{ id: 5, uuid: "DELIVERY", name: "Очікувана дата доставки", type: "date", value: "2027-01-20" }],
+  }, { ...options, expectedDeliveryFieldUuid: "DELIVERY" });
+  assert.equal(customWins.production.requiredDeliveryAt?.toISOString(), "2027-01-20T00:00:00.000Z");
+
+  const legacyResponse = normalizeKeycrmOrder({
+    ...base,
+    shipping: { shipping_date_actual: "2027-01-19T00:00:00.000000Z" },
+  }, options);
+  assert.equal(legacyResponse.production.requiredDeliveryAt?.toISOString(), "2027-01-19T00:00:00.000Z");
+  assert.equal(legacyResponse.delivery.shippedAt?.toISOString(), "2027-01-19T00:00:00.000Z");
+});
+
 test("недокументированный ID предложения не используется как ID строки заказа", () => {
   const base = {
     source_id: 12,
