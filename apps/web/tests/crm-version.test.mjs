@@ -58,11 +58,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.34");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.35");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.34\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.34\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.35\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.35\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.35 описывает восстановление повторного импорта KeyCRM", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.35"'), i18n.indexOf('version: "0.1.34"'));
+  assert.match(release, /покупател/i);
+  assert.match(release, /изображен/i);
+  assert.match(release, /производств/i);
+  assert.match(release, /сортиров/i);
+  assert.match(release, /crm-v0\.1\.34/);
+  assert.match(changelog, /## \[0\.1\.35\] - 2026-10-11/);
 });
 
 test("журнал 0.1.34 описывает расчёт производства по стандартной дате KeyCRM", () => {

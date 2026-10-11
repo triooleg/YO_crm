@@ -37,7 +37,11 @@ export type KeycrmOrder = {
     price_sold?: number | string | null;
     quantity?: number | string | null;
     comment?: string | null;
-    picture?: string | null;
+    picture?: string | {
+      url?: string | null;
+      original_file_url?: string | null;
+      thumbnail?: string | null;
+    } | unknown[] | null;
     properties?: Array<{ name?: string | null; value?: string | number | null }> | null;
     product_status_id?: number | null;
     offer?: { id?: number | null; product_id?: number | null; sku?: string | null } | null;

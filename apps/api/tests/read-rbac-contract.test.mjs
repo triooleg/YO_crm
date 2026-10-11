@@ -56,7 +56,7 @@ test("production reads use a dedicated least-privilege projection", () => {
   assert.match(projection, /productionSlot: true/);
   assert.match(projection, /client: \{ select: \{ displayName: true, country: true \} \}/);
   assert.doesNotMatch(projection, /payments|invoices|shipment|address|postalCode|language|source|measurement|activities/);
-  assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId\)/);
+  assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to\)/);
 });
 
 function escapeRegExp(value) {

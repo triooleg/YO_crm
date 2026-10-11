@@ -182,6 +182,15 @@ test("фильтры и сортировка заказов сохраняют �
   const orderNumbers = page.locator(".orders-order-number");
   await expect(orderNumbers).toHaveCount(2);
 
+  const clientHeader = page.getByRole("columnheader", { name: /№ \/ Клиент/ });
+  const clientSort = page.getByRole("button", { name: "Сортировать по столбцу: № / Клиент" });
+  await clientSort.click();
+  await expect(clientHeader).toHaveAttribute("aria-sort", "ascending");
+  await expect(orderNumbers).toHaveText([secondOrder.number, order.number]);
+  await clientSort.click();
+  await expect(clientHeader).toHaveAttribute("aria-sort", "descending");
+  await expect(orderNumbers).toHaveText([order.number, secondOrder.number]);
+
   await page.getByRole("button", { name: "Фильтры" }).click();
   const filters = page.getByRole("dialog", { name: "Фильтры" });
   await filters.getByLabel("Статус").selectOption("NEW_LEAD");
@@ -218,8 +227,8 @@ for (const viewport of [
     await expect(page.getByRole("columnheader", { name: "Дизайны" })).toBeHidden();
 
     await dialog.getByRole("button", { name: "Ниже" }).first().click();
-    await expect(page.locator("thead th.orders-col").nth(0)).toHaveText("Кол-во");
-    await expect(page.locator("thead th.orders-col").nth(1)).toHaveText("№ / Клиент");
+    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("Кол-во");
+    await expect(page.locator("thead th.orders-col").nth(1).locator(".orders-sort-heading span")).toHaveText("№ / Клиент");
 
     const deadlineRow = dialog.locator('[data-column-id="deadline"]');
     const paymentRow = dialog.locator('[data-column-id="payment"]');
@@ -243,7 +252,7 @@ for (const viewport of [
     await page.getByRole("button", { name: "Столбцы" }).click();
     const persistedDialog = page.getByRole("dialog", { name: "Столбцы" });
     await expect(persistedDialog.getByRole("checkbox", { name: "Дизайны" })).not.toBeChecked();
-    await expect(page.locator("thead th.orders-col").nth(0)).toHaveText("Кол-во");
+    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("Кол-во");
     await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
       "orders-col-quantity", "orders-col-client", "orders-col-discipline", "orders-col-payment", "orders-col-deadline", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
     ]);

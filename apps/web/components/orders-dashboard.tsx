@@ -13,6 +13,7 @@ import { repairMojibake } from "../lib/text-encoding.mjs";
 import { canOpenOrderFinance } from "../lib/order-context";
 import { orderMeasurementState } from "../lib/order-measurement-state";
 import { paginateOrders } from "../lib/order-pagination";
+import { defaultOrderSort, nextOrderSort, SORTABLE_ORDER_COLUMNS, sortOrders } from "../lib/order-sort.mjs";
 import { orderDeliveryErrorMessage } from "../lib/order-delivery-errors";
 import { hasUsableDeliveryAddress } from "../lib/order-delivery-address";
 import { MeasurementPanel, measurementFieldLabels } from "./measurement-panel";
@@ -20,6 +21,8 @@ import { OrderPanel } from "./order-panel";
 import { type Order } from "./orders-workspace";
 
 type ColumnId = keyof typeof ui.columnsMap;
+type SortColumnId = Exclude<ColumnId, "menu">;
+type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "work" | "ready" | "completed" | "overdue";
 type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void };
 type Preview = { src: string; left: number; top: number; width: number };
@@ -42,7 +45,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [disciplineFilter, setDisciplineFilter] = useState("all");
-  const [sort, setSort] = useState("created");
+  const [sort, setSort] = useState<SortState>({ column: "created", direction: "desc" });
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string>();
   const [statusPending, setStatusPending] = useState<Set<string>>(new Set());
@@ -145,11 +148,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     return true;
   }), [orders, quickFilter, statusFilter, disciplineFilter]);
 
-  const sorted = useMemo(() => [...filtered].sort((a, b) => {
-    if (sort === "deadline") return days(a) - days(b);
-    if (sort === "balance") return balance(b) - balance(a);
-    if (sort === "client") return a.client.displayName.localeCompare(b.client.displayName, "ru");
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  const sorted = useMemo<Order[]>(() => sortOrders(filtered, sort, (order: Order, column: string) => {
+    if (column === "discipline") return discipline(order.discipline).label;
+    if (column === "designs") return designCount(order) > 1 ? `${ui.viewAll} (${designCount(order)})` : order.items[0]?.name || order.notes || ui.designMissing;
+    if (column === "status") return `${orderLabel("sales", order.salesStatus)}|${orderLabel("production", order.productionStatus)}`;
+    if (column === "nextAction") { const action = nextOrderAction(order); return `${action.label}|${action.detail || ""}`; }
+    if (column === "delivery") return `${countryLabel(deliveryCountry(order)) || ui.addressMissing}|${deliveryPlace(order)}|${orderLabel("shipping", order.shippingStatus)}`;
+    return undefined;
   }), [filtered, sort]);
   const orderPage = paginateOrders(sorted, page, PAGE_SIZE);
   const totalPages = orderPage.totalPages;
@@ -254,7 +259,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
         </div>}
       </div>
       <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.deposit], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{value}</small></button>)}</div>
-      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort} onChange={(event) => setSort(event.target.value)} data={[{ value: "created", label: ui.sortCreated }, { value: "deadline", label: ui.sortDeadline }, { value: "balance", label: ui.sortBalance }, { value: "client", label: ui.sortClient }]} />
+      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => setSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
     </div>
@@ -271,7 +276,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     <div className="orders-table-wrap orders-table-scroll">
       <table className="orders-table orders-dashboard-table">
         <colgroup><col className="orders-controls" />{visibleColumns.map((id) => <col key={id} className={`orders-col orders-col-${id}`} />)}</colgroup>
-        <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th>)}</tr></thead>
+        <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => id === "menu" ? <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th> : <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }} aria-sort={sort.column === id ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button className="orders-sort-heading" onClick={() => setSort((current) => nextOrderSort(current, id) as SortState)} aria-label={`${ui.sortByColumn}: ${ui.columnsMap[id]}`} title={`${ui.sortByColumn}: ${ui.columnsMap[id]}`}><span>{ui.columnsMap[id]}</span><b aria-hidden="true">{sort.column === id ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</b></button></th>)}</tr></thead>
         <tbody>
           {loading && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><span className="orders-loader" />{ui.loading}</td></tr>}
           {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}

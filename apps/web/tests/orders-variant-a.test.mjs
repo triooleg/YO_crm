@@ -44,7 +44,8 @@ test("contextual links resolve the exact order in every destination and fail vis
     assert.match(source, errorPattern);
     assert.match(source, clearPattern);
   }
-  assert.match(production, /production\?orderId=/);
+  assert.match(production, /\/api\/orders\/production\?\$\{params\.toString\(\)\}/);
+  assert.match(production, /params\.set\("orderId",contextId\)/);
   assert.match(production, /setSearch\(order\.number\)/);
   assert.match(finance, /finance-order\$\{focusedOrderId===order\.id\?" is-context":""\}/);
   assert.match(shipping, /shipping-row\$\{selected\?\.id===o\.id\?" is-context":""\}/);

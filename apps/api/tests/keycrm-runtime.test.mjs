@@ -164,6 +164,51 @@ test("несколько клиентов без точного заказа с�
   assert.equal(createdLinks[0].clientId, "client-keycrm-68");
 });
 
+test("повторный импорт активирует каждого покупателя, указанного в заказе", async () => {
+  const KeycrmService = loadKeycrmService();
+  const archivedAt = new Date("2026-10-10T10:00:00.000Z");
+  const clientUpdates = [];
+  const linkUpdates = [];
+  const audits = [];
+  const linkedClient = {
+    id: "client-keycrm-68", archivedAt, email: null, phone: null, country: null,
+    city: null, address: null, postalCode: null,
+  };
+  const tx = {
+    clientMergeRedirect: { findUnique: async () => null },
+    client: {
+      update: async ({ data }) => { clientUpdates.push(data); return { ...linkedClient, ...data }; },
+      findUniqueOrThrow: async () => linkedClient,
+    },
+    keycrmClientLink: {
+      findUnique: async () => ({
+        id: "link-68", clientId: linkedClient.id, connectionKey: "connection-1",
+        keycrmBuyerId: 68, rolledBackAt: archivedAt, client: linkedClient,
+      }),
+      update: async ({ data }) => { linkUpdates.push(data); return { id: "link-68", ...data }; },
+    },
+    auditLog: { create: async ({ data }) => { audits.push(data); } },
+  };
+
+  const clientId = await new KeycrmService({}).resolveClient(tx, normalizedOrder({
+    client: { ...normalizedOrder().client, keycrmBuyerId: 68, email: "buyer@example.com" },
+  }), "owner-1");
+
+  assert.equal(clientId, linkedClient.id);
+  assert.equal(clientUpdates.length, 1);
+  assert.equal(clientUpdates[0].archivedAt, null);
+  assert.equal(clientUpdates[0].email, "buyer@example.com");
+  assert.equal(linkUpdates[0].rolledBackAt, null);
+  assert.deepEqual(audits.map(item => item.entityType), ["Client", "KeycrmClientLink"]);
+});
+
+test("rollback-снимок включает исходного и канонического клиента объединённой карточки", async () => {
+  const KeycrmService = loadKeycrmService();
+  const service = new KeycrmService({});
+  const tx = { clientMergeRedirect: { findUnique: async ({ where }) => where.sourceClientId === "source" ? { targetClientId: "target" } : null } };
+  assert.deepEqual(JSON.parse(JSON.stringify(await service.rollbackClientIds(tx, ["source", "direct"]))), ["direct", "source", "target"]);
+});
+
 test("неоднозначный контакт без стабильного buyer ID остаётся fail closed", async () => {
   const KeycrmService = loadKeycrmService();
   const tx = {
@@ -855,7 +900,8 @@ test("повторный APPLY после rollback явно реактивиру
   const source = readFileSync(new URL("../src/keycrm/keycrm.service.ts", import.meta.url), "utf8");
   assert.match(source, /externallyLinked && !externallyLinked\.archivedAt && !order\.externalUpdatedAt/);
   assert.match(source, /externallyLinked\?\.archivedAt \? \{ archivedAt: null \}/);
-  assert.match(source, /linked && !linked\.rolledBackAt/);
+  assert.match(source, /if \(linked\) \{/);
+  assert.match(source, /activateImportedClient/);
   assert.match(source, /rolledBackAt: null/);
 });
 

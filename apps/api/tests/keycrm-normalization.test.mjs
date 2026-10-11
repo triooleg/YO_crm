@@ -145,6 +145,28 @@ test("внешнее изображение принимается только 
   assert.equal(order.items[0].externalImageUrl, null);
 });
 
+test("изображение товара KeyCRM принимается из актуального объекта picture", () => {
+  const base = {
+    id: 23,
+    source_id: 1,
+    created_at: "2026-01-02 03:04:05",
+    grand_total: 20,
+    buyer: { id: 1, full_name: "Client" },
+  };
+  const full = normalizeKeycrmOrder({
+    ...base,
+    products: [{ id: 3, name: "Model", price: 10, quantity: 1, picture: { url: "https://cdn.example.com/full.jpg", thumbnail: "https://cdn.example.com/thumb.jpg" } }],
+  }, options);
+  const thumbnail = normalizeKeycrmOrder({
+    ...base,
+    id: 24,
+    products: [{ id: 4, name: "Model", price: 10, quantity: 1, picture: { thumbnail: "https://cdn.example.com/thumb-only.jpg" } }],
+  }, options);
+
+  assert.equal(full.items[0].externalImageUrl, "https://cdn.example.com/full.jpg");
+  assert.equal(thumbnail.items[0].externalImageUrl, "https://cdn.example.com/thumb-only.jpg");
+});
+
 test("статусы неоплаченных и отмененных платежей сохраняются для сверки истории", () => {
   const order = normalizeKeycrmOrder({
     id: 10,

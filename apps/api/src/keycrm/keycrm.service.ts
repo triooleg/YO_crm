@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { OrderType, Prisma, type User } from "@prisma/client";
+import { OrderType, Prisma, type Client, type User } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret } from "../secret-box";
@@ -442,9 +442,10 @@ export class KeycrmService {
         ? await tx.keycrmClientLink.findUnique({ where: { connectionKey_keycrmBuyerId: { connectionKey: order.sourceAccount, keycrmBuyerId: order.client.keycrmBuyerId } } })
         : null;
       const matchingClientIds = await this.findMatchingClientIds(tx, order.client.email, order.client.phone);
+      const rollbackClientIds = await this.rollbackClientIds(tx, [existing?.clientId, buyerLinkBefore?.clientId, ...matchingClientIds].filter((id): id is string => Boolean(id)));
       const beforeScope: RollbackScope = {
         orderId: existing?.id ?? null,
-        clientIds: [...new Set([existing?.clientId, buyerLinkBefore?.clientId, ...matchingClientIds].filter((id): id is string => Boolean(id)))].sort(),
+        clientIds: rollbackClientIds,
         connectionKey: order.sourceAccount,
         keycrmBuyerId: order.client.keycrmBuyerId,
       };
@@ -611,15 +612,12 @@ export class KeycrmService {
     const buyerId = order.client.keycrmBuyerId;
     if (buyerId) {
       const linked = await tx.keycrmClientLink.findUnique({ where: { connectionKey_keycrmBuyerId: { connectionKey: order.sourceAccount, keycrmBuyerId: buyerId } }, include: { client: true } });
-      if (linked && !linked.rolledBackAt) {
+      if (linked) {
         const canonicalClientId = await this.resolveCanonicalClientId(tx, linked.clientId);
         const canonicalClient = canonicalClientId === linked.clientId ? linked.client : await tx.client.findUniqueOrThrow({ where: { id: canonicalClientId } });
-        const fill = clientFillData(canonicalClient, order.client);
-        if (Object.entries(fill).some(([key, value]) => value && canonicalClient[key as keyof typeof canonicalClient] !== value)) {
-          const updatedClient = await tx.client.update({ where: { id: canonicalClientId }, data: fill });
-          await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Client", entityId: canonicalClientId, before: canonicalClient, after: updatedClient } });
-        }
-        await tx.keycrmClientLink.update({ where: { id: linked.id }, data: { sourcePayload: order.client.sourcePayload as Prisma.InputJsonValue, lastSyncedAt: new Date() } });
+        await this.activateImportedClient(tx, canonicalClient, order.client, actorId);
+        const updatedLink = await tx.keycrmClientLink.update({ where: { id: linked.id }, data: { sourcePayload: order.client.sourcePayload as Prisma.InputJsonValue, lastSyncedAt: new Date(), rolledBackAt: null } });
+        if (linked.rolledBackAt) await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "KeycrmClientLink", entityId: linked.id, before: { clientId: linked.clientId, rolledBackAt: linked.rolledBackAt }, after: { clientId: updatedLink.clientId, rolledBackAt: updatedLink.rolledBackAt } } });
         return canonicalClientId;
       }
     }
@@ -646,7 +644,7 @@ export class KeycrmService {
   private async willCreateClient(tx: Prisma.TransactionClient, order: NormalizedKeycrmOrder) {
     if (order.client.keycrmBuyerId) {
       const linked = await tx.keycrmClientLink.findUnique({ where: { connectionKey_keycrmBuyerId: { connectionKey: order.sourceAccount, keycrmBuyerId: order.client.keycrmBuyerId } }, select: { id: true, rolledBackAt: true } });
-      if (linked && !linked.rolledBackAt) return false;
+      if (linked) return false;
     }
     const matches = await this.findMatchingClientIds(tx, order.client.email, order.client.phone);
     return matches.length !== 1;
@@ -708,23 +706,35 @@ export class KeycrmService {
   private async attachBuyerToExistingClient(tx: Prisma.TransactionClient, order: NormalizedKeycrmOrder, actorId: string, initialClientId: string) {
     const clientId = await this.resolveCanonicalClientId(tx, initialClientId);
     const client = await tx.client.findUniqueOrThrow({ where: { id: clientId } });
-    const fill = clientFillData(client, order.client);
-    if (Object.entries(fill).some(([key, value]) => value && client[key as keyof typeof client] !== value)) {
-      const updated = await tx.client.update({ where: { id: clientId }, data: fill });
-      await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Client", entityId: clientId, before: client, after: updated } });
-    }
+    await this.activateImportedClient(tx, client, order.client, actorId);
     if (order.client.keycrmBuyerId) {
       const identity = { connectionKey: order.sourceAccount, keycrmBuyerId: order.client.keycrmBuyerId };
       const existingLink = await tx.keycrmClientLink.findUnique({ where: { connectionKey_keycrmBuyerId: identity } });
       const canonicalLinkedClientId = existingLink ? await this.resolveCanonicalClientId(tx, existingLink.clientId) : null;
       if (existingLink && !existingLink.rolledBackAt && canonicalLinkedClientId !== clientId) throw new ConflictException("Покупатель KeyCRM уже связан с другой карточкой клиента");
-      if (existingLink) await tx.keycrmClientLink.update({ where: { id: existingLink.id }, data: { ...(existingLink.rolledBackAt ? { clientId } : {}), sourcePayload: order.client.sourcePayload as Prisma.InputJsonValue, lastSyncedAt: new Date(), rolledBackAt: null } });
+      if (existingLink) {
+        const updatedLink = await tx.keycrmClientLink.update({ where: { id: existingLink.id }, data: { ...(existingLink.rolledBackAt ? { clientId } : {}), sourcePayload: order.client.sourcePayload as Prisma.InputJsonValue, lastSyncedAt: new Date(), rolledBackAt: null } });
+        if (existingLink.rolledBackAt || existingLink.clientId !== updatedLink.clientId) await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "KeycrmClientLink", entityId: existingLink.id, before: { clientId: existingLink.clientId, rolledBackAt: existingLink.rolledBackAt }, after: { clientId: updatedLink.clientId, rolledBackAt: updatedLink.rolledBackAt } } });
+      }
       else {
         const link = await tx.keycrmClientLink.create({ data: { ...identity, clientId, sourcePayload: order.client.sourcePayload as Prisma.InputJsonValue } });
         await tx.auditLog.create({ data: { actorId, action: "CREATE", entityType: "KeycrmClientLink", entityId: link.id, after: { ...identity, clientId } } });
       }
     }
     return clientId;
+  }
+
+  private async activateImportedClient(tx: Prisma.TransactionClient, client: Client, incoming: NormalizedKeycrmOrder["client"], actorId: string) {
+    const data = { ...clientFillData(client, incoming), ...(client.archivedAt ? { archivedAt: null } : {}) };
+    if (!Object.entries(data).some(([key, value]) => (client as unknown as Record<string, unknown>)[key] !== value)) return;
+    const updated = await tx.client.update({ where: { id: client.id as string }, data });
+    await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Client", entityId: client.id as string, before: client, after: updated } });
+  }
+
+  private async rollbackClientIds(tx: Prisma.TransactionClient, clientIds: string[]) {
+    const unique = [...new Set(clientIds)];
+    const canonical = await Promise.all(unique.map((clientId) => this.resolveCanonicalClientId(tx, clientId)));
+    return [...new Set([...unique, ...canonical])].sort();
   }
 
   private async findPotentialMatch(db: Pick<Prisma.TransactionClient, "client" | "order" | "$queryRaw">, order: NormalizedKeycrmOrder) {

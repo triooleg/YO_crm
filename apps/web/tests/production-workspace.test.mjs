@@ -21,3 +21,9 @@ test("timeline recalculates only fully visible days and fills the available widt
 test("production bars use two text lines and visible handles",()=>{assert.match(production,/timeline-bar-text/);assert.match(styles,/\.timeline-bar-text\{[^}]*display:grid/);assert.match(styles,/\.timeline-bar b\{font-size:11px/);assert.match(styles,/\.timeline-bar small\{font-size:9px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
 
 test("production workspace loads its dedicated projection",()=>{assert.match(production,/productionUrl/);assert.match(production,/\/api\/orders\/production/);assert.doesNotMatch(production,/fetch\("\/api\/orders",\{credentials:"include"\}\)/)});
+
+test("production workspace requests a bounded visible date range",()=>{assert.match(production,/new URLSearchParams\(\{from:toLocalIso\(base\),to:toLocalIso\(rangeEnd\)\}\)/);assert.match(production,/Math\.max\(dayCount,186\)/)});
+
+test("production workspace ignores stale period responses",()=>{assert.match(production,/loadSequence=useRef\(0\)/);assert.match(production,/new AbortController\(\)/);assert.match(production,/sequence!==loadSequence\.current/);assert.match(production,/controller\.abort\(\)/)});
+
+test("month counters distinguish years and follow the selected period",()=>{assert.match(production,/start\.getMonth\(\)===m\.getMonth\(\)&&start\.getFullYear\(\)===m\.getFullYear\(\)/);assert.match(production,/new Date\(base\.getFullYear\(\),base\.getMonth\(\)\+i,1\)/);assert.match(production,/m\.getMonth\(\)===base\.getMonth\(\)&&m\.getFullYear\(\)===base\.getFullYear\(\)/);assert.match(production,/aria-current=\{active\?"date":undefined\}/)});

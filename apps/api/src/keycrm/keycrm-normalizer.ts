@@ -90,7 +90,11 @@ function itemQuantity(value: unknown) {
   return quantity;
 }
 
-function externalImageUrl(value: unknown) {
+function externalImageUrl(value: unknown): string | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const picture = value as { url?: unknown; original_file_url?: unknown; thumbnail?: unknown };
+    return externalImageUrl(picture.url) ?? externalImageUrl(picture.original_file_url) ?? externalImageUrl(picture.thumbnail);
+  }
   if (typeof value !== "string" || !value.trim()) return null;
   try {
     const url = new URL(value.trim());

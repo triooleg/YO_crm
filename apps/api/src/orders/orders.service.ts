@@ -89,8 +89,19 @@ export class OrdersService {
     }));
   }
 
-  async productionList(orderId?: string) {
-    return loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId);
+  async productionList(orderId?: string, from?: string, to?: string) {
+    try {
+      return await loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId, from, to);
+    } catch (error) {
+      const code = error && typeof error === "object" && "message" in error ? String(error.message) : "";
+      if (code === "INVALID_PRODUCTION_RANGE") {
+        throw new BadRequestException("Некорректный период производства");
+      }
+      if (code === "PRODUCTION_RESULT_LIMIT_EXCEEDED") {
+        throw new BadRequestException("В выбранном периоде более 1000 активных заказов. Сократите период");
+      }
+      throw error;
+    }
   }
 
 
