@@ -80,6 +80,9 @@
 .settings-grid .crm-text-input,
 .settings-grid .crm-native-select,
 .settings-grid .crm-textarea { min-width: 0; }
+.settings-grid .crm-checkbox { display: flex; align-items: center; gap: 8px; align-self: center; }
+.settings-grid .crm-checkbox .mantine-Checkbox-root { flex: 0 0 auto; }
+.settings-grid .crm-checkbox .mantine-Checkbox-input { width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; border-radius: 4px; }
 .settings-grid .crm-text-input .mantine-InputWrapper-label,
 .settings-grid .crm-native-select .mantine-InputWrapper-label,
 .settings-grid .crm-textarea .mantine-InputWrapper-label { display: inline-flex; gap: 3px; }

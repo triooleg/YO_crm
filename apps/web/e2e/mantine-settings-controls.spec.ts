@@ -100,6 +100,11 @@ for (const viewport of [
     await page.getByRole("tab", { name: "KeyCRM" }).click();
     const panel = page.locator("#settings-keycrm-panel");
     await expect(panel.getByRole("heading", { name: "Синхронизация с KeyCRM" })).toBeVisible();
+    const keycrmToggleBox = await panel.locator('input[name="enabled"]').evaluate((input) => {
+      const box = input.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+    expect(keycrmToggleBox).toEqual({ width: 18, height: 18 });
     await expect(panel.getByRole("button", { name: /Проверка/ }).first()).toHaveAttribute("aria-pressed", "true");
     await panel.evaluate((element) => element.scrollTo({ top: 0 }));
     await page.screenshot({ path: screenshotPath(testInfo, `keycrm-settings-top-${viewport.width}x${viewport.height}.png`), fullPage: false });
@@ -134,7 +139,6 @@ test("все разделы настроек используют доступн
   await expect(page.locator('input[name="baseUrl"]')).toHaveClass(/mantine-TextInput-input/);
   await expect(page.locator('textarea[name="signature"]')).toHaveClass(/mantine-Textarea-input/);
   await expect(page.locator('input[name="enabled"]').first()).toHaveClass(/mantine-Checkbox-input/);
-
   await tabs.getByRole("tab", { name: "AI-помощник" }).click();
   await expect(page.locator('select[name="model"]')).toHaveClass(/mantine-NativeSelect-input/);
   await expect(page.locator('textarea[name="systemPrompt"]')).toHaveClass(/mantine-Textarea-input/);
