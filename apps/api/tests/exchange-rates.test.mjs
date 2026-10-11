@@ -10,7 +10,7 @@ const exchangeModule = { exports: {} };
 const nest = class extends Error {};
 const localRequire = specifier => specifier === "@nestjs/common" ? { BadRequestException: nest, ConflictException: nest, Injectable: () => target => target, ServiceUnavailableException: nest } : specifier === "../prisma.service" ? { PrismaService: class {} } : {};
 vm.runInNewContext(javascript, { module: exchangeModule, exports: exchangeModule.exports, require: localRequire, Buffer, AbortController, fetch, setTimeout, clearTimeout, console });
-const { buildRateForPair, convertMinorWithRate, ExchangeRatesService, fetchOfficialRates, parseDecimalRational, parseEcbCsv, parseNbuResponse } = exchangeModule.exports;
+const { appliedPaymentMinor, buildPaymentConversion, buildRateForPair, convertMinorWithRate, ExchangeRatesService, fetchOfficialRates, parseDecimalRational, parseEcbCsv, parseNbuResponse } = exchangeModule.exports;
 export const exchangeExports = exchangeModule.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -24,6 +24,24 @@ test("minor units use exact rational and round half-up", () => {
   assert.equal(convertMinorWithRate(1, { numerator: "1", denominator: "2" }), 1);
   assert.equal(convertMinorWithRate(20000, { numerator: "11715", denominator: "10000" }), 23430);
   assert.throws(() => convertMinorWithRate(Number.MAX_SAFE_INTEGER, { numerator: "2", denominator: "1" }), /диапазон/);
+});
+
+test("payment conversion preserves the received amount and applies its official order-currency equivalent", () => {
+  const cache = {
+    version: 1, provider: "NBU", officialUrl: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew", effectiveDate: "2026-10-12", fetchedAt: "2026-10-11T15:35:00.000Z",
+    rates: [
+      { baseCurrency: "EUR", quoteCurrency: "UAH", decimal: "50.3138", numerator: "251569", denominator: "5000", sourceSeriesOrValcode: "EUR" },
+      { baseCurrency: "USD", quoteCurrency: "UAH", decimal: "44.8894", numerator: "224447", denominator: "5000", sourceSeriesOrValcode: "USD" },
+    ],
+  };
+  const conversion = plain(buildPaymentConversion(cache, 10000, "USD", "EUR", new Date("2026-10-11T15:40:00.000Z")));
+  assert.equal(conversion.appliedAmountMinor, 8922);
+  assert.equal(conversion.appliedCurrency, "EUR");
+  assert.equal(conversion.snapshot.provider, "NBU");
+  assert.equal(conversion.snapshot.effectiveDate, "2026-10-12");
+  assert.equal(appliedPaymentMinor({ amountMinor: 10000, currency: "USD", ...conversion }, "EUR"), 8922);
+  assert.equal(appliedPaymentMinor({ amountMinor: 5000, currency: "EUR" }, "EUR"), 5000);
+  assert.equal(appliedPaymentMinor({ amountMinor: 5000, currency: "USD" }, "EUR"), 0);
 });
 
 test("ECB parser accepts only the expected EUR/USD observation", () => {
@@ -80,6 +98,30 @@ test("official refresh accepts a weekend observation but rejects an implausibly 
     () => fetchOfficialRates("NBU", responseFor("02.10.2026"), new Date("2026-10-12T08:00:00.000Z")),
     /дата.*устарела/i,
   );
+});
+
+test("NBU accepts its published next-day rate but rejects a later future date", async () => {
+  const responseFor = exchangedate => async url => {
+    const eur = String(url).endsWith("EUR");
+    return { ok: true, text: async () => JSON.stringify([{ rate: eur ? 50.3138 : 44.8894, cc: eur ? "EUR" : "USD", exchangedate }]) };
+  };
+  await assert.doesNotReject(
+    () => fetchOfficialRates("NBU", responseFor("12.10.2026"), new Date("2026-10-11T15:35:00.000Z")),
+  );
+  await assert.rejects(
+    () => fetchOfficialRates("NBU", responseFor("13.10.2026"), new Date("2026-10-11T15:35:00.000Z")),
+    /дата.*будущ/i,
+  );
+});
+
+test("NBU next-day validation follows the Europe/Kyiv calendar after local midnight", async () => {
+  const responseFor = exchangedate => async url => {
+    const eur = String(url).endsWith("EUR");
+    return { ok: true, text: async () => JSON.stringify([{ rate: eur ? 50.3138 : 44.8894, cc: eur ? "EUR" : "USD", exchangedate }]) };
+  };
+  const afterKyivMidnight = new Date("2026-10-11T21:30:00.000Z");
+  await assert.doesNotReject(() => fetchOfficialRates("NBU", responseFor("13.10.2026"), afterKyivMidnight));
+  await assert.rejects(() => fetchOfficialRates("NBU", responseFor("14.10.2026"), afterKyivMidnight), /дата.*будущ/i);
 });
 
 test("failed official response is rejected instead of producing a partial cache", async () => {

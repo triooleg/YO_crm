@@ -21,3 +21,8 @@ test("повторная синхронизация не меняет эконо
   const paidUpdate = keycrm.slice(keycrm.indexOf("if (payment.isPaid)"), keycrm.indexOf("const activePayments"));
   assert.doesNotMatch(paidUpdate, /update:\s*\{[^}]*amountMinor|update:\s*\{[^}]*currency|update:\s*\{[^}]*receivedAt/s);
 });
+
+test("KeyCRM и финансовая сводка используют применённую сумму валютного платежа", () => {
+  assert.match(keycrm, /select:\s*\{\s*amountMinor:\s*true,\s*currency:\s*true,\s*appliedAmountMinor:\s*true,\s*appliedCurrency:\s*true\s*\}/);
+  assert.match(finance, /appliedPaymentMinor\(payment,\s*currency\)/);
+});

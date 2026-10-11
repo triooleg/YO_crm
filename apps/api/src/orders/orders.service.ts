@@ -5,6 +5,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
+import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
@@ -35,7 +36,7 @@ async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly exchangeRates: ExchangeRatesService) {}
 
   async defaults() {
     const [setting, duration, lead] = await Promise.all([
@@ -79,7 +80,7 @@ export class OrdersService {
         measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } },
         items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
-        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
+        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
     });
     return orders.map((order) => ({
@@ -98,7 +99,7 @@ export class OrdersService {
     if (!order) throw new NotFoundException("Заказ не найден");
     const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
     if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
-      const paidMinor = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
       if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
     }
     const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus };
@@ -171,7 +172,7 @@ export class OrdersService {
       if (order.requiredDeliveryAt && violatesShippingLead(endsAt, order.requiredDeliveryAt, shippingLeadDays)) {
         throw new BadRequestException(`Производство должно завершиться минимум за ${shippingLeadDays} дн. до отправки`);
       }
-      const paid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const paid = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
       const tentative = resolveProductionSlotTentative(paid, order.depositRequiredMinor, dto.tentative);
       if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
       const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false,sourceSystem:null,sourceAccount:null,externalId:null} });
@@ -180,23 +181,34 @@ export class OrdersService {
     });
   }
   async addPayment(orderId: string, dto: AddOrderPaymentDto, actor: User) {
-    const currency = dto.currency.toUpperCase();
+    const currency = dto.currency.toUpperCase() as ExchangeRateCurrency;
+    const orderBrief = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { currency: true } });
+    if (!orderBrief) throw new NotFoundException("Заказ не найден");
+    if (currency !== orderBrief.currency) await this.exchangeRates.currentOrRefresh(actor);
     return this.prisma.$transaction(async (tx) => {
+      if (currency !== orderBrief.currency) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
-      if (currency !== order.currency) throw new BadRequestException(`Оплата должна быть в валюте заказа: ${order.currency}`);
-      const alreadyPaid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
-      const totalPaid = alreadyPaid + dto.amountMinor;
+      if (order.currency !== orderBrief.currency) throw new ConflictException("Валюта заказа изменилась. Повторите добавление оплаты");
+      let conversion: ReturnType<typeof buildPaymentConversion> | null = null;
+      if (currency !== order.currency) {
+        const cacheSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateCache" } } });
+        try { conversion = buildPaymentConversion(parseExchangeRateCache(cacheSetting?.value), dto.amountMinor, currency, order.currency as ExchangeRateCurrency); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? `Не удалось пересчитать оплату: ${error.message}` : "Не удалось пересчитать оплату"); }
+      }
+      const appliedAmountMinor = conversion?.appliedAmountMinor ?? dto.amountMinor;
+      const alreadyPaid = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
+      const totalPaid = alreadyPaid + appliedAmountMinor;
       const paymentStatus = totalPaid >= order.priceMinor ? "PAID" : totalPaid >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
       const confirmsProductionSlot = totalPaid >= order.depositRequiredMinor && order.productionSlot?.tentative;
-      const payment = await tx.payment.create({ data: { orderId, amountMinor: dto.amountMinor, currency, method: dto.method, receivedAt: new Date(dto.receivedAt), reference: dto.reference?.trim() || null, notes: dto.notes?.trim() || null } });
+      const payment = await tx.payment.create({ data: { orderId, amountMinor: dto.amountMinor, currency, appliedAmountMinor: conversion?.appliedAmountMinor, appliedCurrency: conversion?.appliedCurrency, exchangeRateSnapshot: conversion?.snapshot as Prisma.InputJsonValue | undefined, method: dto.method, receivedAt: new Date(dto.receivedAt), reference: dto.reference?.trim() || null, notes: dto.notes?.trim() || null } });
       const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(confirmsProductionSlot && order.productionStatus === "NOT_SCHEDULED" ? { productionStatus: "SCHEDULED" } : {}) } });
-      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PAYMENT_RECEIVED", summary: `Получена оплата ${(dto.amountMinor / 100).toFixed(2)} ${currency}`, metadata: { paymentId: payment.id, method: dto.method } } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PAYMENT_RECEIVED", summary: `Получена оплата ${(dto.amountMinor / 100).toFixed(2)} ${currency}`, metadata: { paymentId: payment.id, method: dto.method, appliedAmountMinor, appliedCurrency: order.currency, exchangeRateSnapshot: conversion?.snapshot } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Payment", entityId: payment.id, after: payment } });
       if (confirmsProductionSlot && order.productionSlot) {
         const slot = await tx.productionSlot.update({ where: { orderId }, data: { tentative: false } });
-        await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_CONFIRMED", summary: "Производственный слот подтверждён после получения предоплаты", metadata: { paymentId: payment.id, depositRequiredMinor: order.depositRequiredMinor, currency, productionStatus: updatedOrder.productionStatus } } });
+        await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_CONFIRMED", summary: "Производственный слот подтверждён после получения предоплаты", metadata: { paymentId: payment.id, depositRequiredMinor: order.depositRequiredMinor, currency: order.currency, paymentCurrency: currency, productionStatus: updatedOrder.productionStatus } } });
         await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });
         if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
       }

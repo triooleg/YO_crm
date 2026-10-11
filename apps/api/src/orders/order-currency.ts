@@ -1,4 +1,4 @@
-import { assertEffectiveDateFresh, buildRateForPair, convertMinorWithRate, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
+import { assertExchangeRateCacheFresh, buildRateForPair, convertMinorWithRate, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import type { Prisma } from "@prisma/client";
 
 const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -32,7 +32,7 @@ export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, or
   try { cache = parseExchangeRateCache(cacheSetting?.value); } catch { throw new OrderCurrencyChangeError("RATE_CACHE_INVALID", "Официальные курсы недоступны; обновите курсы в настройках"); }
   const selectedProvider = provider(providerSetting?.value);
   try {
-    assertEffectiveDateFresh(cache.effectiveDate, now);
+    assertExchangeRateCacheFresh(cache, now);
   } catch {
     throw new OrderCurrencyChangeError("RATE_CACHE_STALE", "Официальные курсы устарели; обновите курсы в настройках");
   }

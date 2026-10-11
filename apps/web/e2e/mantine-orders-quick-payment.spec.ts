@@ -96,6 +96,7 @@ for (const viewport of [
     await trigger.click();
     const populated = page.getByRole("dialog", { name: `${"ОПЛАТА ПО ЗАКАЗУ"} ${order.number}` });
     await populated.getByLabel("Сумма").fill("123,45");
+    await populated.getByLabel("Валюта платежа").selectOption("USD");
     await populated.getByLabel("Способ оплаты").selectOption("CARD");
     await populated.getByLabel("Дата оплаты").fill("2026-09-13");
     await populated.getByLabel("Номер / ссылка").fill("PAY-123");
@@ -106,7 +107,7 @@ for (const viewport of [
     await expect.poll(() => paymentRequests.length).toBe(2);
     expect(paymentRequests[1]).toEqual({
       amountMinor: 12345,
-      currency: "EUR",
+      currency: "USD",
       method: "CARD",
       receivedAt: new Date("2026-09-13T12:00:00").toISOString(),
       reference: "PAY-123",

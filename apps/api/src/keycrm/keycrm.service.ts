@@ -8,6 +8,7 @@ import { normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-norma
 import { materializeKeycrmOrderImage, removeMaterializedKeycrmOrderImage } from "./keycrm-image";
 import { hasUsableDeliveryAddress, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays } from "../orders/production-rules";
+import { appliedPaymentMinor } from "../finance/exchange-rates";
 import type { CreateKeycrmSyncRunDto, UpdateKeycrmSettingsDto } from "./keycrm.dto";
 
 const SECTION = "integration.keycrm";
@@ -541,8 +542,8 @@ export class KeycrmService {
           await tx.payment.update({ where: { id: previous.id }, data: { externalStatus: payment.externalStatus } });
         }
       }
-      const activePayments = await tx.payment.findMany({ where: { orderId: persisted.id, voidedAt: null }, select: { amountMinor: true, currency: true } });
-      const paidMinor = activePayments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const activePayments = await tx.payment.findMany({ where: { orderId: persisted.id, voidedAt: null }, select: { amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true } });
+      const paidMinor = activePayments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
       const derivedPaymentStatus = paidMinor >= order.priceMinor && order.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
       if (persisted.paymentStatus !== derivedPaymentStatus) persisted = await tx.order.update({ where: { id: persisted.id }, data: { paymentStatus: derivedPaymentStatus } });
       await this.syncProductionSlot(tx, order, persisted, paidMinor, actorId, runId);

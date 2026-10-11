@@ -537,6 +537,9 @@ model Payment {
   receivedAt  DateTime
   reference   String?
   notes       String?
+  appliedAmountMinor Int?
+  appliedCurrency    String?
+  exchangeRateSnapshot Json?
   sourceSystem   String?
   sourceAccount  String?
   externalId     String?

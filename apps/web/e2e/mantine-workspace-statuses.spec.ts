@@ -114,7 +114,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.32");
+    await expect(page.locator(".crm-version")).toContainText("0.1.33");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);

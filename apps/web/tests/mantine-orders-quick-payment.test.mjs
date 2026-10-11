@@ -18,9 +18,11 @@ test("быстрая оплата использует общие Mantine-кон
   assert.doesNotMatch(payment, /bindDialogKeyboard/);
 });
 
-test("быстрая оплата сохраняет прежний API-контракт", () => {
+test("быстрая оплата сохраняет API-контракт и передаёт выбранную валюту", () => {
   assert.match(source, /amountMinor:\s*Math\.round\(value \* 100\)/);
-  assert.match(source, /currency:\s*order\.currency/);
+  assert.match(source, /useState\(order\.currency\)/);
+  assert.match(source, /paymentCurrency/);
+  assert.match(source, /JSON\.stringify\(\{ amountMinor:[\s\S]*currency,/);
   assert.match(source, /receivedAt:\s*new Date\(`\$\{receivedAt\}T12:00:00`\)\.toISOString\(\)/);
   assert.match(source, /reference:\s*reference\.trim\(\) \|\| undefined/);
   assert.match(source, /notes:\s*notes\.trim\(\) \|\| undefined/);

@@ -30,7 +30,7 @@ type Order = {
   notes?: string;
   priceMinor: number;
   currency: string;
-  payments?: { amountMinor: number; currency: string }[];
+  payments?: { amountMinor: number; currency: string; appliedAmountMinor?: number; appliedCurrency?: string }[];
 };
 type Attachment = { type: string; url?: string; stickerId?: string; name?: string; mimeType?: string };
 type UploadedAttachment = { path: string; name: string; mimeType: string; sizeBytes: number };
@@ -234,7 +234,7 @@ function showInboxErrorNotification(message:string){
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
-function orderPaidMinor(order:Order){return (order.payments||[]).filter(payment=>payment.currency===order.currency).reduce((total,payment)=>total+payment.amountMinor,0)}
+function orderPaidMinor(order:Order){return (order.payments||[]).reduce((total,payment)=>total+(payment.currency===order.currency?payment.amountMinor:payment.appliedCurrency===order.currency?payment.appliedAmountMinor||0:0),0)}
 function messageDayKey(value:string){const date=new Date(value);return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
 function localDateKey(value:string|Date){const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Kyiv",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(value)),part=(type:Intl.DateTimeFormatPartTypes)=>parts.find(item=>item.type===type)?.value||"";return `${part("year")}-${part("month")}-${part("day")}`}
 function formatMessageDay(value:string){return new Date(value).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}

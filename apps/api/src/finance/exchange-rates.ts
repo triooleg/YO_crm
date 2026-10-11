@@ -22,6 +22,17 @@ export type ExchangeRateCache = {
   fetchedAt: string;
   rates: ExchangeRateObservation[];
 };
+export type PaymentConversionSnapshot = {
+  from: ExchangeRateCurrency;
+  to: ExchangeRateCurrency;
+  provider: ExchangeRateProvider;
+  officialUrl: string;
+  effectiveDate: string;
+  fetchedAt: string;
+  rate: RationalRate;
+  sourceRates: string[];
+  sourceObservations: ExchangeRateObservation[];
+};
 
 const PROVIDER_INFO = {
   ECB: {
@@ -38,12 +49,28 @@ const NBU_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
 export const MAX_EFFECTIVE_DATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+const BUSINESS_TIME_ZONE = "Europe/Kyiv";
 
-export function assertEffectiveDateFresh(effectiveDate: string, now: Date) {
+function businessCalendarDate(now: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: BUSINESS_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const value = (type: "year" | "month" | "day") => parts.find(part => part.type === type)?.value;
+  const year = value("year"), month = value("month"), day = value("day");
+  if (!year || !month || !day) throw new Error("Не удалось определить календарную дату курса");
+  return `${year}-${month}-${day}`;
+}
+
+export function assertEffectiveDateFresh(effectiveDate: string, now: Date, maxFutureCalendarDays = 0) {
   const effectiveAt = Date.parse(`${effectiveDate}T00:00:00.000Z`);
-  const currentAt = now.getTime();
-  if (!Number.isFinite(effectiveAt) || effectiveAt > currentAt + 60_000) throw new Error("Дата официального курса находится в будущем");
-  if (currentAt - effectiveAt > MAX_EFFECTIVE_DATE_AGE_MS) throw new Error("Дата официального курса устарела");
+  const currentCalendarAt = Date.parse(`${businessCalendarDate(now)}T00:00:00.000Z`);
+  if (!Number.isFinite(effectiveAt) || effectiveAt > currentCalendarAt + maxFutureCalendarDays * CALENDAR_DAY_MS) throw new Error("Дата официального курса находится в будущем");
+  if (currentCalendarAt - effectiveAt > MAX_EFFECTIVE_DATE_AGE_MS) throw new Error("Дата официального курса устарела");
+}
+
+export function assertExchangeRateCacheFresh(cache: ExchangeRateCache, now = new Date()) {
+  assertEffectiveDateFresh(cache.effectiveDate, now, cache.provider === "NBU" ? 1 : 0);
+  const fetchedAt = Date.parse(cache.fetchedAt);
+  if (!Number.isFinite(fetchedAt) || fetchedAt > now.getTime() + 60_000 || now.getTime() - fetchedAt > MAX_EFFECTIVE_DATE_AGE_MS) throw new Error("Кэш официальных курсов устарел");
 }
 
 function gcd(left: bigint, right: bigint) {
@@ -138,6 +165,27 @@ export function buildRateForPair(cache: ExchangeRateCache, from: ExchangeRateCur
   throw new Error(`Источник ${cache.provider} не поддерживает конвертацию ${from}/${to}`);
 }
 
+export function buildPaymentConversion(cache: ExchangeRateCache, amountMinor: number, from: ExchangeRateCurrency, to: ExchangeRateCurrency, now = new Date()) {
+  assertExchangeRateCacheFresh(cache, now);
+  const rate = buildRateForPair(cache, from, to);
+  const sourceObservations = rate.sourceRates.map(pair => {
+    const [baseCurrency, quoteCurrency] = pair.split("/");
+    const observation = cache.rates.find(candidate => candidate.baseCurrency === baseCurrency && candidate.quoteCurrency === quoteCurrency);
+    if (!observation) throw new Error("Кэш официальных курсов не содержит исходное наблюдение");
+    return { ...observation };
+  });
+  const snapshot: PaymentConversionSnapshot = {
+    from, to, provider: cache.provider, officialUrl: cache.officialUrl, effectiveDate: cache.effectiveDate, fetchedAt: cache.fetchedAt,
+    rate: { numerator: rate.numerator, denominator: rate.denominator }, sourceRates: rate.sourceRates, sourceObservations,
+  };
+  return { appliedAmountMinor: convertMinorWithRate(amountMinor, rate), appliedCurrency: to, snapshot };
+}
+
+export function appliedPaymentMinor(payment: { amountMinor: number; currency: string; appliedAmountMinor?: number | null; appliedCurrency?: string | null }, orderCurrency: string) {
+  if (payment.currency === orderCurrency) return payment.amountMinor;
+  return payment.appliedCurrency === orderCurrency && Number.isSafeInteger(payment.appliedAmountMinor) && (payment.appliedAmountMinor ?? -1) >= 0 ? payment.appliedAmountMinor! : 0;
+}
+
 function isProvider(value: unknown): value is ExchangeRateProvider { return value === "ECB" || value === "NBU"; }
 
 export function parseExchangeRateCache(value: unknown): ExchangeRateCache {
@@ -181,7 +229,8 @@ export async function fetchOfficialRates(provider: ExchangeRateProvider, fetcher
   try { eurPayload = JSON.parse(eurText); usdPayload = JSON.parse(usdText); } catch { throw new Error("НБУ вернул некорректный JSON"); }
   const eur = parseNbuResponse(eurPayload, "EUR"), usd = parseNbuResponse(usdPayload, "USD");
   if (eur.effectiveDate !== usd.effectiveDate) throw new Error("НБУ вернул курсы на разные даты");
-  assertEffectiveDateFresh(eur.effectiveDate, now);
+  // NBU may publish tomorrow's official rate during the preceding calendar day.
+  assertEffectiveDateFresh(eur.effectiveDate, now, 1);
   return { version: 1, provider, officialUrl: PROVIDER_INFO.NBU.officialUrl, effectiveDate: eur.effectiveDate, fetchedAt: now.toISOString(), rates: [
     { baseCurrency: "EUR", quoteCurrency: "UAH", decimal: eur.decimal, numerator: eur.numerator, denominator: eur.denominator, sourceSeriesOrValcode: "EUR" },
     { baseCurrency: "USD", quoteCurrency: "UAH", decimal: usd.decimal, numerator: usd.numerator, denominator: usd.denominator, sourceSeriesOrValcode: "USD" },
@@ -212,6 +261,19 @@ export class ExchangeRatesService {
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "AppSetting", entityId: setting.id, before: before as Prisma.InputJsonValue | undefined, after: { ...setting, exchangeRateCacheInvalidated: true } } });
       return { provider, ...PROVIDER_INFO[provider], cache: null };
     });
+  }
+
+  async currentOrRefresh(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {
+    const current = await this.status();
+    try {
+      if (!current.cache) throw new Error("Кэш курсов отсутствует");
+      assertExchangeRateCacheFresh(current.cache, now);
+      return current.cache;
+    } catch {
+      const refreshed = await this.refresh(actor, fetcher, now);
+      if (!refreshed.cache) throw new ServiceUnavailableException("Официальные курсы недоступны");
+      return refreshed.cache;
+    }
   }
 
   async refresh(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {

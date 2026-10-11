@@ -58,11 +58,22 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.32");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.33");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.32\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.32\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.33\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.33\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.33 описывает автоматический курс платежа и безопасный откат", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.33"'), i18n.indexOf('version: "0.1.32"'));
+  assert.match(release, /EUR, USD или UAH/);
+  assert.match(release, /официальн/i);
+  assert.match(release, /исходн/i);
+  assert.match(release, /Europe\/Kyiv/);
+  assert.match(release, /crm-v0\.1\.32/);
+  assert.match(release, /FULL backup/);
+  assert.match(changelog, /## \[0\.1\.33\] - 2026-10-11/);
 });
 
 test("журнал 0.1.32 описывает безопасный импорт изображений и rollback", () => {

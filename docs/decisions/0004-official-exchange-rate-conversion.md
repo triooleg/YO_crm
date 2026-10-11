@@ -21,6 +21,21 @@ than seven calendar days old. This bounded tolerance covers ordinary weekends
 and official holiday gaps without allowing a newly fetched but historically
 stale observation to become valid.
 
+NBU may publish the official rate for the next calendar day during the
+preceding day. YO_crm accepts that one-day-ahead NBU observation, but rejects a
+later future date. ECB observations remain limited to the current or an earlier
+calendar day.
+
+When an operator records a payment in a currency different from the order
+currency, YO_crm automatically reuses a fresh cache or refreshes the selected
+official source before the write. The payment keeps the received amount and
+currency unchanged. A separate applied amount in the order currency and an
+immutable exchange-rate snapshot preserve the exact provider, official URL,
+effective date, fetch time, rational rate and source observations used for the
+calculation. Order balance, deposit gates, production-slot confirmation and
+invoice payment checks use that applied amount. A same-currency payment does
+not need or store a conversion.
+
 Changing an order currency is an explicit, audited transaction. It locks the
 order and converts every monetary field on the order and its items together.
 The activity and audit records retain the exact numerator, denominator,

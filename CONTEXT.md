@@ -130,7 +130,8 @@ approved data-model decision.
 
 The dated capacity reservation for an order, stored as `ProductionSlot` with
 `startsAt`, `endsAt`, `capacity`, `tentative` and `locked`. A slot remains
-tentative until payments in the order currency reach the required deposit. The
+tentative until active payments, converted to the order currency when needed,
+reach the required deposit. The
 configured duration seeds the initial slot. Manual slot changes enforce date
 ordering, shipping lead and the deposit gate through
 `apps/api/src/orders/production-rules.ts` and `orders.service.ts`.
@@ -153,10 +154,13 @@ minor-unit amount, currency, method, received time and optional reference.
 Those economic fields are never rewritten. A provider may later void or restore
 the receipt; `voidedAt` and `voidReason` are the current projection of that
 lifecycle, while every transition is retained in `AuditLog`. Voided receipts
-remain in history but are excluded from operational totals. Payments must match
-the order currency. The order service derives `paymentStatus` from active
-payments in that currency and confirms a tentative production slot when the
-required deposit is reached.
+remain in history but are excluded from operational totals. A payment may use a
+supported currency different from the order currency. In that case its original
+minor-unit amount and currency remain immutable, while the amount applied to the
+order and an immutable official exchange-rate snapshot are stored with the
+payment. The order service derives `paymentStatus` from active amounts applied in
+the order currency and confirms a tentative production slot when the required
+deposit is reached.
 
 `Deposit` and `Balance` are calculated concepts: the required deposit is
 `Order.depositRequiredMinor`; paid and remaining amounts derive from payments

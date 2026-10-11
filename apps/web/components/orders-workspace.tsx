@@ -5,7 +5,7 @@ import { ordersUi } from "../lib/i18n";
 import { repairMojibake } from "../lib/text-encoding.mjs";
 import { MeasurementPanel } from "./measurement-panel";
 
-type Payment={id:string;amountMinor:number;currency:string;method:string;receivedAt:string;reference?:string;notes?:string};
+type Payment={id:string;amountMinor:number;currency:string;appliedAmountMinor?:number;appliedCurrency?:string;exchangeRateSnapshot?:unknown;method:string;receivedAt:string;reference?:string;notes?:string};
 type Activity={id:string;type:string;summary:string;createdAt:string};
 type OrderItem={id:string;name:string;quantity:number;priceMinor:number;modelImagePath?:string;externalImageUrl?:string;sku?:string;properties?:unknown;productionStatus:string;athlete?:{id:string;firstName:string;lastName?:string};measurement?:{id:string;athleteId:string;measuredAt:string;values?:Record<string,number>}};
 type InvoiceLink={id:string;number:string;status:string;language:string;totalMinor:number;issueDate:string};
@@ -157,7 +157,7 @@ function Stat({label,value,danger}:{label:string;value:number;danger?:boolean}){
 function Badge({text}:{text:string}){return <span className="orders-badge">{text}</span>}
 function Detail({l,v}:{l:string;v:string}){return <div><small>{l}</small><strong>{v}</strong></div>}
 function athlete(o:Order){return o.athlete?[o.athlete.firstName,o.athlete.lastName].filter(Boolean).join(" "):"Не указан"}
-function paid(o:Order){return o.payments.filter(p=>p.currency===o.currency).reduce((s,p)=>s+p.amountMinor,0)}
+function paid(o:Order){return o.payments.reduce((s,p)=>s+(p.currency===o.currency?p.amountMinor:p.appliedCurrency===o.currency?p.appliedAmountMinor||0:0),0)}
 function money(v:number,c:string){return new Intl.NumberFormat("ru-RU",{style:"currency",currency:c}).format(v/100)}
 function days(o:Order){return o.requiredDeliveryAt?Math.ceil((new Date(o.requiredDeliveryAt).getTime()-Date.now())/86400000):9999}
 function deliveryDate(o:Order){return o.requiredDeliveryAt?new Intl.DateTimeFormat("ru-RU",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(o.requiredDeliveryAt)):"Не указан"}

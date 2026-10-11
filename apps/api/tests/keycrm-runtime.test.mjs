@@ -23,6 +23,7 @@ function loadKeycrmService(imageHooks = {}) {
     if (specifier === "./keycrm-image") return { materializeKeycrmOrderImage: imageHooks.materialize ?? (async () => "keycrm-test.jpg"), removeMaterializedKeycrmOrderImage: imageHooks.remove ?? (async () => true) };
     if (specifier === "./keycrm-sync-policy") return { hasUsableDeliveryAddress, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits };
     if (specifier === "../orders/production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays };
+    if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency ? payment.appliedAmountMinor ?? 0 : 0 };
     if (specifier === "./keycrm.dto") return {};
     return nativeRequire(specifier);
   };
