@@ -1,4 +1,4 @@
-import { PaymentStatus, ProductionStatus, type Prisma } from "@prisma/client";
+import { OrderType, PaymentStatus, ProductionStatus, type Prisma } from "@prisma/client";
 
 export const ORDER_DETAILS_ERROR = {
   orderNotFound: "ORDER_DETAILS_ORDER_NOT_FOUND",
@@ -60,8 +60,9 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
   const calculatedPaymentStatus = totalPaid === 0 ? PaymentStatus.UNPAID : totalPaid >= input.priceMinor ? PaymentStatus.PAID : totalPaid >= depositRequiredMinor ? PaymentStatus.DEPOSIT_PAID : PaymentStatus.PARTIALLY_PAID;
   const paymentStatus = order.paymentStatus === PaymentStatus.REFUNDED || order.paymentStatus === PaymentStatus.CANCELLED ? order.paymentStatus : calculatedPaymentStatus;
   const terminalPaymentStatus = order.paymentStatus === PaymentStatus.REFUNDED || order.paymentStatus === PaymentStatus.CANCELLED;
-  const confirmsProductionSlot = Boolean(!terminalPaymentStatus && order.productionSlot?.tentative && depositRequiredMinor > 0 && totalPaid >= depositRequiredMinor);
-  if (order.productionSlot && !order.productionSlot.tentative && input.priceMinor > order.priceMinor && totalPaid < depositRequiredMinor) {
+  const productionOrder = order.type !== OrderType.READY_MODEL && order.type !== OrderType.ACCESSORY;
+  const confirmsProductionSlot = Boolean(productionOrder && !terminalPaymentStatus && order.productionSlot?.tentative && depositRequiredMinor > 0 && totalPaid >= depositRequiredMinor);
+  if (productionOrder && order.productionSlot && !order.productionSlot.tentative && input.priceMinor > order.priceMinor && totalPaid < depositRequiredMinor) {
     throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.depositWouldUnconfirmProduction);
   }
   const orderData = {

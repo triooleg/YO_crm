@@ -29,7 +29,8 @@ test("загрузка производства делает второй огр
   assert.equal(calls[0][1].take, 1001);
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.startsAt.lte.toISOString(), "2027-03-31T23:59:59.999Z");
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.endsAt.gte.toISOString(), "2026-10-01T00:00:00.000Z");
-  assert.deepEqual(calls[1][1].where, { id: exact.id, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
+  assert.deepEqual(calls[0][1].where.type.notIn, ["READY_MODEL", "ACCESSORY"]);
+  assert.deepEqual(calls[1][1].where, { id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
   assert.equal(calls[1][1].select, productionOrderSelect);
   for (const forbidden of ["payments", "invoices", "shipment", "address", "postalCode", "measurement", "activities"]) {
     assert.equal(forbidden in productionOrderSelect, false);
@@ -92,4 +93,15 @@ test("точный завершённый или отменённый заказ
   };
   assert.deepEqual(await loadProductionOrders(repository, "terminal-order"), []);
   assert.deepEqual(calls[0].where.salesStatus.notIn, ["COMPLETED", "CANCELLED"]);
+});
+
+test("быстрая продажа не попадает в производство даже по прямой ссылке", async () => {
+  const calls = [];
+  const repository = {
+    findMany: async (query) => { calls.push(query); return []; },
+    findFirst: async (query) => { calls.push(query); return null; },
+  };
+  assert.deepEqual(await loadProductionOrders(repository, "ready-sale"), []);
+  assert.deepEqual(calls[0].where.type.notIn, ["READY_MODEL", "ACCESSORY"]);
+  assert.deepEqual(calls[1].where.type.notIn, ["READY_MODEL", "ACCESSORY"]);
 });

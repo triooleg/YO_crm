@@ -1,4 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import type { OrderType, Prisma } from "@prisma/client";
+
+const NON_PRODUCTION_ORDER_TYPES: OrderType[] = ["READY_MODEL", "ACCESSORY"];
 
 export const productionOrderSelect = {
   id: true,
@@ -44,7 +46,7 @@ export async function loadProductionOrders(repository: ProductionOrderRepository
   const endsAt = productionDate(to, defaultTo, true);
   if (endsAt < startsAt || endsAt.getTime() - startsAt.getTime() > MAX_PRODUCTION_RANGE_DAYS * 24 * 60 * 60 * 1000) throw new Error("INVALID_PRODUCTION_RANGE");
   const orders = await repository.findMany({
-    where: { archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, OR: [
+    where: { archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, OR: [
       { productionSlot: { is: { startsAt: { lte: endsAt }, endsAt: { gte: startsAt } } } },
       { requiredDeliveryAt: { gte: startsAt, lte: endsAt } },
       { productionSlot: { is: null }, requiredDeliveryAt: null },
@@ -55,6 +57,6 @@ export async function loadProductionOrders(repository: ProductionOrderRepository
   });
   if (orders.length > PRODUCTION_RESULT_LIMIT) throw new Error("PRODUCTION_RESULT_LIMIT_EXCEEDED");
   if (!orderId || orders.some((order) => order.id === orderId)) return orders;
-  const requested = await repository.findFirst({ where: { id: orderId, archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
+  const requested = await repository.findFirst({ where: { id: orderId, archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
   return includeRequestedProductionOrder(orders, requested);
 }

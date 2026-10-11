@@ -1,6 +1,12 @@
+import type { OrderType } from "@prisma/client";
+
 export const DEFAULT_PRODUCTION_DURATION_DAYS = 7;
 export const DEFAULT_SHIPPING_LEAD_DAYS = 2;
 const DAY_MS = 86_400_000;
+
+export function requiresProduction(type: OrderType) {
+  return type !== "READY_MODEL" && type !== "ACCESSORY";
+}
 
 export function subtractUtcDays(value: Date, days: number) {
   return new Date(value.getTime() - days * DAY_MS);

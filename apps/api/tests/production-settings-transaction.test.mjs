@@ -14,7 +14,11 @@ function transaction({ previousLead = 2, slots = [] } = {}) {
         return setting;
       },
     },
-    productionSlot: { findMany: async (query) => { writes.query = query; return slots; } },
+    productionSlot: { findMany: async (query) => {
+      writes.query = query;
+      const excludedTypes = query.where.order.type?.notIn ?? [];
+      return slots.filter(slot => !excludedTypes.includes(slot.order.type));
+    } },
     auditLog: { create: async ({ data }) => { writes.audits.push(data); return data; } },
   };
   return { tx, writes };
@@ -34,4 +38,11 @@ test("valid duration and lead are written and audited together", async () => {
   assert.deepEqual(result.map(setting => [setting.key, setting.value]), [["defaultDurationDays", 14], ["shippingLeadDays", 2]]);
   assert.equal(writes.settings.length, 2);
   assert.equal(writes.audits.length, 2);
+});
+
+test("historical quick-sale slots do not block a production shipping reserve increase", async () => {
+  const { tx, writes } = transaction({ slots: [{ endsAt: new Date("2026-09-19T00:00:00.000Z"), order: { number: "YO-26-0002", type: "READY_MODEL", requiredDeliveryAt: new Date("2026-09-20T00:00:00.000Z") } }] });
+  await saveProductionSettingsTransaction(tx, { defaultDurationDays: 14, shippingLeadDays: 3 }, "owner");
+  assert.deepEqual(writes.query.where.order.type.notIn, ["READY_MODEL", "ACCESSORY"]);
+  assert.equal(writes.settings.length, 2);
 });

@@ -9,7 +9,7 @@ function fixture({
   order: overrides = {},
   failAudit = false,
 } = {}) {
-  const state = { order: { id: "order-1", clientId: "client-1", notes: "Старое описание", priceMinor: 20000, depositRequiredMinor: 10000, currency: "EUR", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", modelImagePath: "old.jpg", archivedAt: null, items, payments: [], productionSlot: null, ...overrides }, activities: [], audits: [] };
+  const state = { order: { id: "order-1", clientId: "client-1", type: "CUSTOM_ORDER", notes: "Старое описание", priceMinor: 20000, depositRequiredMinor: 10000, currency: "EUR", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", modelImagePath: "old.jpg", archivedAt: null, items, payments: [], productionSlot: null, ...overrides }, activities: [], audits: [] };
   const transaction = async (callback) => {
     const draft = structuredClone(state);
     const tx = {
@@ -87,6 +87,22 @@ test("достаточная предоплата подтверждает tenta
   await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Заказ", priceMinor: 20000 }, "owner-1"));
   assert.equal(testState.state.order.productionSlot.tentative, false);
   assert.deepEqual(testState.state.activities.map((activity) => activity.type), ["PRODUCTION_SLOT_CONFIRMED", "ORDER_DETAILS_UPDATED"]);
+});
+
+test("изменение быстрой продажи не подтверждает исторический производственный слот", async () => {
+  const testState = fixture({ order: { type: "READY_MODEL", depositRequiredMinor: 0, payments: [{ amountMinor: 20000, currency: "EUR" }], productionSlot: { id: "slot-1", tentative: true } } });
+  await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Готовая модель", priceMinor: 20000 }, "owner-1"));
+  assert.equal(testState.state.order.productionSlot.tentative, true);
+  assert.equal(testState.state.order.productionStatus, "NOT_SCHEDULED");
+  assert.deepEqual(testState.state.activities.map((activity) => activity.type), ["ORDER_DETAILS_UPDATED"]);
+});
+
+test("исторически подтверждённый слот не блокирует изменение цены быстрой продажи", async () => {
+  const testState = fixture({ order: { type: "READY_MODEL", payments: [{ amountMinor: 10000, currency: "EUR" }], productionSlot: { id: "slot-1", tentative: false } } });
+  await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Готовая модель дороже", priceMinor: 30000 }, "owner-1"));
+  assert.equal(testState.state.order.priceMinor, 30000);
+  assert.equal(testState.state.order.productionSlot.tentative, false);
+  assert.deepEqual(testState.state.activities.map((activity) => activity.type), ["ORDER_DETAILS_UPDATED"]);
 });
 
 test("нулевая требуемая предоплата без платежа не подтверждает производственный слот", async () => {

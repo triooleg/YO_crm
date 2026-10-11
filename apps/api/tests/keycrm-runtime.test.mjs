@@ -14,7 +14,7 @@ import {
   nextDepositRequired,
   normalizedPhoneDigits,
 } from "../src/keycrm/keycrm-sync-policy.ts";
-import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays } from "../src/orders/production-rules.ts";
+import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, subtractUtcDays } from "../src/orders/production-rules.ts";
 
 const nativeRequire = createRequire(import.meta.url);
 
@@ -29,7 +29,7 @@ function loadKeycrmService(imageHooks = {}) {
     if (specifier === "./keycrm-normalizer") return { normalizeKeycrmOrder: value => value };
     if (specifier === "./keycrm-image") return { materializeKeycrmOrderImage: imageHooks.materialize ?? (async () => "keycrm-test.jpg"), removeMaterializedKeycrmOrderImage: imageHooks.remove ?? (async () => true) };
     if (specifier === "./keycrm-sync-policy") return { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits };
-    if (specifier === "../orders/production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, subtractUtcDays };
+    if (specifier === "../orders/production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, subtractUtcDays };
     if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency ? payment.appliedAmountMinor ?? 0 : 0 };
     if (specifier === "./keycrm.dto") return {};
     return nativeRequire(specifier);
@@ -98,6 +98,27 @@ test("повторная синхронизация обновляет стан�
   assert.equal(nextDepositRequired(10000, 20000, OrderType.CUSTOM_ORDER, 15000), 15000);
   assert.equal(nextDepositRequired(7000, 20000, OrderType.CUSTOM_ORDER, 15000), 7000);
   assert.equal(nextDepositRequired(0, 20000, OrderType.READY_MODEL, 0), 0);
+});
+
+test("KeyCRM не создаёт производственный слот для быстрой продажи", async () => {
+  const KeycrmService = loadKeycrmService();
+  let reads = 0;
+  const tx = {
+    productionSlot: {
+      findUnique: async () => { reads++; return null; },
+      create: async () => { throw new Error("SLOT_MUST_NOT_BE_CREATED"); },
+      update: async () => { throw new Error("SLOT_MUST_NOT_BE_UPDATED"); },
+    },
+    keycrmSyncIssue: { create: async () => undefined },
+    activity: { create: async () => undefined },
+    auditLog: { create: async () => undefined },
+  };
+  const order = normalizedOrder({
+    type: OrderType.CUSTOM_ORDER,
+    production: { startsAt: new Date("2026-10-10T00:00:00Z"), requiredDeliveryAt: new Date("2026-10-20T00:00:00Z") },
+  });
+  assert.equal(await new KeycrmService({}).syncProductionSlot(tx, order, { id: "ready-1", clientId: "client-1", depositRequiredMinor: 0, type: OrderType.READY_MODEL }, 10000, "owner-1", "run-1"), null);
+  assert.equal(reads, 0);
 });
 
 test("город или страна без строки адреса не считаются готовым адресом доставки", () => {

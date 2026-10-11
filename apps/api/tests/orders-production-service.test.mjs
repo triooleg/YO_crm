@@ -26,7 +26,13 @@ const requireForOrders = specifier => {
   if (specifier === "./order-image-name") return { isOrderImageName: () => true };
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
-  if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7 };
+  if (specifier === "./production-rules") return {
+    DEFAULT_PRODUCTION_DURATION_DAYS: 21,
+    DEFAULT_SHIPPING_LEAD_DAYS: 7,
+    productionSetting: (_value, fallback) => fallback,
+    requiresProduction: type => type !== "READY_MODEL" && type !== "ACCESSORY",
+    violatesShippingLead: () => true,
+  };
   if (specifier === "./production-context") return { loadProductionOrders: (...args) => productionLoader(...args) };
   if (specifier === "sharp") return () => ({});
   return nativeRequire(specifier);
@@ -43,4 +49,22 @@ test("некорректный или чрезмерный период прои
     productionLoader = async () => { throw new Error(code); };
     await assert.rejects(() => service.productionList(undefined, "2026-10-01", "2027-10-03"), error => error instanceof BadRequestException && error.status === 400);
   }
+});
+
+test("исторический слот не блокирует изменение срока быстрой продажи", async () => {
+  const writes = [];
+  const tx = {
+    $executeRawUnsafe: async () => undefined,
+    order: {
+      findFirst: async () => ({ id: "order-1", clientId: "client-1", type: "READY_MODEL", productionSlot: { endsAt: new Date("2026-10-20T00:00:00Z") } }),
+      update: async ({ data }) => { writes.push(data); return { id: "order-1", ...data }; },
+    },
+    appSetting: { findUnique: async () => ({ value: 7 }) },
+    activity: { create: async () => undefined },
+    auditLog: { create: async () => undefined },
+  };
+  const service = new OrdersService({ $transaction: callback => callback(tx) }, {});
+  await service.updateDeadline("order-1", { requiredDeliveryAt: "2026-10-21T00:00:00Z" }, { id: "owner-1" });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].requiredDeliveryAt.toISOString(), "2026-10-21T00:00:00.000Z");
 });

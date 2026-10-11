@@ -11,7 +11,7 @@ import { uploadsRoot } from "../uploads";
 import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
-import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
+import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 import { loadProductionOrders, type ProductionOrderRepository } from "./production-context";
 import { isOrderImageName } from "./order-image-name";
 import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
@@ -115,6 +115,9 @@ export class OrdersService {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
       if (!order) throw new NotFoundException("Заказ не найден");
+      if (dto.productionStatus && dto.productionStatus !== "NOT_SCHEDULED" && !requiresProduction(order.type)) {
+        throw new BadRequestException("Готовые модели и аксессуары не планируются в производство");
+      }
       const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
       if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
         const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
@@ -136,7 +139,7 @@ export class OrdersService {
       if (!order) throw new NotFoundException("Заказ не найден");
       const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
       const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
-      if (order.productionSlot && violatesShippingLead(order.productionSlot.endsAt, requiredDeliveryAt, shippingLeadDays)) {
+      if (requiresProduction(order.type) && order.productionSlot && violatesShippingLead(order.productionSlot.endsAt, requiredDeliveryAt, shippingLeadDays)) {
         throw new BadRequestException(`Дата отправки должна быть минимум на ${shippingLeadDays} дн. позже окончания производства`);
       }
       const updated = await tx.order.update({ where: { id: orderId }, data: { requiredDeliveryAt } });
@@ -218,6 +221,7 @@ export class OrdersService {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
+      if (!requiresProduction(order.type)) throw new BadRequestException("Готовые модели и аксессуары не планируются в производство");
       const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
       const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
       if (order.requiredDeliveryAt && violatesShippingLead(endsAt, order.requiredDeliveryAt, shippingLeadDays)) {
@@ -252,7 +256,7 @@ export class OrdersService {
       const alreadyPaid = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
       const totalPaid = alreadyPaid + appliedAmountMinor;
       const paymentStatus = totalPaid >= order.priceMinor ? "PAID" : totalPaid >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
-      const confirmsProductionSlot = totalPaid >= order.depositRequiredMinor && order.productionSlot?.tentative;
+      const confirmsProductionSlot = requiresProduction(order.type) && totalPaid >= order.depositRequiredMinor && order.productionSlot?.tentative;
       const payment = await tx.payment.create({ data: { orderId, amountMinor: dto.amountMinor, currency, appliedAmountMinor: conversion?.appliedAmountMinor, appliedCurrency: conversion?.appliedCurrency, exchangeRateSnapshot: conversion?.snapshot as Prisma.InputJsonValue | undefined, method: dto.method, receivedAt: new Date(dto.receivedAt), reference: dto.reference?.trim() || null, notes: dto.notes?.trim() || null } });
       const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(confirmsProductionSlot && order.productionStatus === "NOT_SCHEDULED" ? { productionStatus: "SCHEDULED" } : {}) } });
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PAYMENT_RECEIVED", summary: `Получена оплата ${(dto.amountMinor / 100).toFixed(2)} ${currency}`, metadata: { paymentId: payment.id, method: dto.method, appliedAmountMinor, appliedCurrency: order.currency, exchangeRateSnapshot: conversion?.snapshot } } });
@@ -364,7 +368,7 @@ export class OrdersService {
       }
       const number = await nextOrderNumber(tx);
       const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
-      if (order.requiredDeliveryAt) {
+      if (order.requiredDeliveryAt && requiresProduction(order.type)) {
         const defaultDurationDays = productionSetting(durationSetting?.value, DEFAULT_PRODUCTION_DURATION_DAYS, 1, 90);
         const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
         const { startsAt, endsAt } = productionWindow(order.requiredDeliveryAt, defaultDurationDays, shippingLeadDays);

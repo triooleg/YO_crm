@@ -91,6 +91,12 @@ display the current client address until an operator saves an order snapshot.
 Editing this snapshot does not mutate the client profile, shipment, statuses,
 payments or referenced measurement snapshots.
 
+`READY_MODEL` and `ACCESSORY` are quick sales of existing stock. They never
+require a production slot, regardless of whether the sale came from the site,
+Instagram, Facebook, WhatsApp or another channel. Channel/source does not imply
+the order type: a custom order received through social media still follows the
+normal production workflow.
+
 ### Order Item
 
 One line inside an order, stored as `OrderItem`. It carries name, quantity,
@@ -144,6 +150,8 @@ ordering, shipping lead and the deposit gate through
 `apps/api/src/orders/production-rules.ts` and `orders.service.ts`.
 The KeyCRM import calculation above is provider-specific and does not change
 these general production settings or manual scheduling rules.
+Ready-model and accessory orders are excluded from this schedule even if a
+legacy record still has historical production-slot data.
 
 `Production Schedule` means the set of production slots. `Production Stage`
 means `ProductionStatus`; it is not a separate entity.

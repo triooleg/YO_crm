@@ -7,7 +7,7 @@ import { KeycrmClient, KEYCRM_API_URL } from "./keycrm-client";
 import { normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-normalizer";
 import { materializeKeycrmOrderImage, removeMaterializedKeycrmOrderImage } from "./keycrm-image";
 import { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
-import { subtractUtcDays } from "../orders/production-rules";
+import { requiresProduction, subtractUtcDays } from "../orders/production-rules";
 import { appliedPaymentMinor } from "../finance/exchange-rates";
 import type { CreateKeycrmSyncRunDto, UpdateKeycrmSettingsDto } from "./keycrm.dto";
 
@@ -553,7 +553,7 @@ export class KeycrmService {
       const derivedPaymentStatus = paidMinor >= persisted.priceMinor && persisted.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
       if (persisted.paymentStatus !== derivedPaymentStatus) persisted = await tx.order.update({ where: { id: persisted.id }, data: { paymentStatus: derivedPaymentStatus } });
       await this.syncProductionSlot(tx, order, persisted, paidMinor, actorId, runId);
-      let slot = await tx.productionSlot.findUnique({ where: { orderId: persisted.id } });
+      let slot = requiresProduction(persisted.type) ? await tx.productionSlot.findUnique({ where: { orderId: persisted.id } }) : null;
       if (slot?.tentative && paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor) {
         const previousSlot = slot;
         slot = await tx.productionSlot.update({ where: { orderId: persisted.id }, data: { tentative: false } });
@@ -751,7 +751,8 @@ export class KeycrmService {
     return orders.length > 1 ? { order: null, ambiguous: true } : { order: orders[0] ?? null, ambiguous: false };
   }
 
-  private async syncProductionSlot(tx: Prisma.TransactionClient, order: NormalizedKeycrmOrder, persisted: { id: string; clientId: string; depositRequiredMinor: number }, paidMinor: number, actorId: string, runId: string) {
+  private async syncProductionSlot(tx: Prisma.TransactionClient, order: NormalizedKeycrmOrder, persisted: { id: string; clientId: string; depositRequiredMinor: number; type: OrderType }, paidMinor: number, actorId: string, runId: string) {
+    if (!requiresProduction(persisted.type)) return null;
     const production = order.production;
     if (!production?.startsAt && !production?.requiredDeliveryAt) return null;
     if (!production.requiredDeliveryAt) {

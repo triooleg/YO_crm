@@ -18,3 +18,12 @@ test("изменение слота сериализуется с платежо
 });
 
 test("order deadline is edited with activity and audit",()=>{assert.match(controller,/deadline/);assert.match(service,/ORDER_DEADLINE_UPDATED/);assert.match(service,/requiredDeliveryAt/);assert.match(service,/auditLog\.create/)});
+
+test("быстрые продажи нельзя вручную или автоматически поставить в производство",()=>{
+  const updateStatuses=service.slice(service.indexOf("async updateStatuses"),service.indexOf("async updateDeadline"));
+  const updateSlot=service.slice(service.indexOf("async updateProductionSlot"),service.indexOf("async addPayment"));
+  const createOrder=service.slice(service.indexOf("async create("));
+  assert.match(updateStatuses,/requiresProduction\(order\.type\)/);
+  assert.match(updateSlot,/requiresProduction\(order\.type\)/);
+  assert.match(createOrder,/order\.requiredDeliveryAt && requiresProduction\(order\.type\)/);
+});
