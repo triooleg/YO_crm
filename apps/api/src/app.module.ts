@@ -12,6 +12,7 @@ import { OrdersController } from "./orders/orders.controller";
 import { OrdersService } from "./orders/orders.service";
 import { FinanceController } from "./finance/finance.controller";
 import { FinanceService } from "./finance/finance.service";
+import { ExchangeRatesService } from "./finance/exchange-rates";
 import { ShippingController } from "./shipping/shipping.controller";
 import { ShippingService } from "./shipping/shipping.service";
 import { AiAssistantController, ChatwootWebhookController, CommunicationFilesController, CommunicationMetaFilesController, CommunicationsController, MetaWebhookController } from "./communications/communications.controller";
@@ -31,6 +32,6 @@ import { KeycrmWorkerService } from "./keycrm/keycrm-worker.service";
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
   controllers: [HealthController, AuthController, ClientsController, OrdersController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
-  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
+  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, FinanceService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
 })
 export class AppModule {}

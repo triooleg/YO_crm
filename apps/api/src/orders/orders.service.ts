@@ -7,8 +7,9 @@ import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
+import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 import { loadProductionOrders, type ProductionOrderRepository } from "./production-context";
 
@@ -69,7 +70,7 @@ export class OrdersService {
         requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
         deliveryMinor: true, discountMinor: true, taxMinor: true, giftWrapMinor: true,
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
-        paymentStatus: true, shippingStatus: true, modelImagePath: true, notes: true,
+        paymentStatus: true, shippingStatus: true, modelImagePath: true, externalImageUrl: true, notes: true,
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
         sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
         createdAt: true, productionSlot: true,
@@ -128,6 +129,15 @@ export class OrdersService {
       return updated;
     });
   }
+  async updateCurrency(orderId: string, dto: UpdateOrderCurrencyDto, actor: User) {
+    try {
+      return await this.prisma.$transaction(tx => changeOrderCurrencyTransaction(tx, orderId, dto.currency, actor.id));
+    } catch (error) {
+      if (!(error instanceof OrderCurrencyChangeError)) throw error;
+      if (error.code === "ORDER_NOT_FOUND") throw new NotFoundException({ code: error.code, message: error.message });
+      throw new BadRequestException({ code: error.code, message: error.message });
+    }
+  }
   async updateDiscipline(orderId: string, dto: UpdateOrderDisciplineDto, actor: User) {
     return this.prisma.$transaction(async tx => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
@@ -164,7 +174,7 @@ export class OrdersService {
       const paid = order.payments.filter((payment) => payment.currency === order.currency).reduce((sum, payment) => sum + payment.amountMinor, 0);
       const tentative = resolveProductionSlotTentative(paid, order.depositRequiredMinor, dto.tentative);
       if (!tentative && paid < order.depositRequiredMinor) throw new BadRequestException("До получения предоплаты слот может быть только предварительным");
-      const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false} });
+      const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false,sourceSystem:null,sourceAccount:null,externalId:null} });
       await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_UPDATED",summary:"Обновлён производственный слот",metadata:{startsAt,endsAt,tentative,locked:dto.locked??false}}});
       await tx.auditLog.create({data:{actorId:actor.id,action:order.productionSlot?"UPDATE":"CREATE",entityType:"ProductionSlot",entityId:slot.id,before:order.productionSlot??undefined,after:slot}});return slot;
     });

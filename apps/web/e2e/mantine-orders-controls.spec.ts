@@ -28,7 +28,8 @@ const order = {
     language: "ru",
     source: "MANUAL",
   },
-  items: [{ id: "item-1", name: "Купальник", quantity: 1, priceMinor: 45000, productionStatus: "READY", externalImageUrl: "https://cdn.keycrm.test/design.svg" }],
+  modelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg",
+  items: [{ id: "item-1", name: "Купальник", quantity: 1, priceMinor: 45000, productionStatus: "READY", modelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", externalImageUrl: "https://cdn.keycrm.test/design.svg" }],
   payments: [],
   activities: [],
   invoices: [],
@@ -52,6 +53,11 @@ async function mockOrdersApi(page: Page) {
     if (method === "GET" && path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA", role: "OWNER" } } });
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
     if (method === "GET" && path === "/api/orders") return route.fulfill({ json: [currentOrder] });
+    if (method === "GET" && path === "/api/finance/exchange-rates") return route.fulfill({ json: { provider: "ECB", officialUrl: "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html", supportedPairs: ["EUR/USD", "EUR/UAH", "USD/UAH"], cache: { effectiveDate: "2026-10-10", fetchedAt: "2026-10-10T12:00:00.000Z", rates: [{ baseCurrency: "EUR", quoteCurrency: "USD", decimal: "1.16" }] } } });
+    if (method === "GET" && path === "/api/orders/images/keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg") return route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="180"><rect width="120" height="180" fill="#7c3aed"/><path d="M20 30h80v120H20z" fill="#facc15"/><circle cx="60" cy="85" r="28" fill="#ec4899"/></svg>',
+    });
     if (method === "GET" && path === `/api/clients/${order.client.id}`) return route.fulfill({ json: { ...order.client, athletes: [] } });
     if (method === "GET" && path === "/api/clients") return route.fulfill({ json: [{ id: order.client.id, displayName: order.client.displayName, country: order.client.country }] });
     return route.fulfill({ status: 501, json: { error: `Unexpected test route: ${method} ${path}` } });
@@ -105,7 +111,7 @@ for (const viewport of [
 
     await page.getByRole("button", { name: order.number, exact: true }).click();
     await expect(page.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
-    const importedDesign = page.locator('img[src="https://cdn.keycrm.test/design.svg"]').first();
+    const importedDesign = page.locator('img[src="/api/orders/images/keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg"]').first();
     await expect(importedDesign).toBeVisible();
     if (viewport.name !== "mobile") {
       await importedDesign.hover();
@@ -121,6 +127,14 @@ for (const viewport of [
       await page.mouse.move(0, 0);
       await expect(page.locator(".orders-image-preview")).toBeHidden();
     }
+
+    await page.getByRole("button", { name: "Изменить валюту" }).click();
+    const currencyDialog = page.getByRole("dialog", { name: new RegExp(order.number) });
+    await expect(currencyDialog).toBeVisible();
+    await expect(page.getByRole("link", { name: "Открыть источник" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Закрыть" })).toBeVisible();
+    await page.screenshot({ path: screenshotPath(testInfo, `order-currency-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await currencyDialog.getByRole("button", { name: "Отмена" }).click();
 
     const discipline = page.getByRole("combobox", { name: "Изменить вид спорта" });
     await expect(discipline.locator("xpath=ancestor::*[contains(@class,'crm-native-select')]")).toHaveClass(/mantine-NativeSelect-root/);

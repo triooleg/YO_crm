@@ -58,11 +58,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.31");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.32");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.31\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.31\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.32\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.32\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.32 описывает безопасный импорт изображений и rollback", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.32"'), i18n.indexOf('version: "0.1.31"'));
+  assert.match(release, /главную картинку/i);
+  assert.match(release, /ручн/i);
+  assert.match(release, /НБУ или ЕЦБ/);
+  assert.match(release, /rollback/i);
+  assert.match(release, /crm-v0\.1\.31/);
+  assert.match(changelog, /## \[0\.1\.32\] - 2026-10-11/);
 });
 
 test("журнал 0.1.18 описывает Mantine-контролы, точный SHA backup и безопасный откат",()=>{

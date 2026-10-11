@@ -112,7 +112,12 @@ An audited server-side preview or apply run for KeyCRM orders. Apply requires a
 completed preview from the same configuration revision and date range. A run
 continues without an open browser, records per-order issues and never exposes the
 stored API token. KeyCRM buyer links are connection-scoped and follow an active
-client merge redirect to the canonical client.
+client merge redirect to the canonical client. Ambiguous contact matches with a
+stable provider buyer ID create a distinct provider-scoped client plus an
+operator merge suggestion; they are never merged automatically. Ambiguity
+without a stable buyer ID remains fail closed. One completed-payment currency
+may correct a stale historical source currency only before the order is linked;
+later currency changes are blocked to preserve its financial history.
 
 ### Design and Leotard
 
@@ -163,6 +168,16 @@ status, but the current schema has no standalone refund transaction model.
 An order document stored as `Invoice`, with number, status, language, currency,
 issue/due dates, seller/customer/item snapshots and `totalMinor`. Invoice status
 does not replace payment status.
+
+### Official Exchange Rate
+
+An administrator-selected ECB or NBU observation cached in `AppSetting` with
+its official URL, effective date, fetch time and exact rational value. NBU
+supports the EUR/USD/UAH matrix through EUR/UAH and USD/UAH; ECB supports only
+EUR/USD. An explicit order-currency change converts all order and item monetary
+fields atomically and records the complete rate provenance. Orders with payment
+or invoice history, monetary shipment costs or KeyCRM ownership fail closed and
+are not rewritten.
 
 ## Communication
 

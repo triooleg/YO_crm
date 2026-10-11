@@ -449,6 +449,7 @@ model Order {
   promocode              String?
   isGift                 Boolean          @default(false)
   modelImagePath       String?
+  externalImageUrl     String?
   sourceSystem           String?
   sourceAccount          String?
   sourceLinkMode         String?
@@ -1076,6 +1077,7 @@ model KeycrmClientLink {
   lastSyncedAt  DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  rolledBackAt  DateTime?
   client        Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
 
   @@unique([connectionKey, keycrmBuyerId])
@@ -1110,14 +1112,40 @@ model KeycrmSyncRun {
   leaseUntil      DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
+  rolledBackAt    DateTime?
+  rollbackActorId String?
+  rollbackEligible Boolean           @default(false)
+  rollbackBlockedReason String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   startedBy       User              @relation("KeycrmSyncRunCreator", fields: [startedById], references: [id], onDelete: Restrict)
   issues          KeycrmSyncIssue[]
+  mutations       KeycrmSyncMutation[]
 
   @@index([status, createdAt])
   @@index([status, nextAttemptAt, leaseUntil, createdAt])
   @@index([previewRunId])
+}
+
+model KeycrmSyncMutation {
+  id                String        @id @default(cuid())
+  runId             String
+  sequence          Int
+  externalOrderId   String
+  orderId           String
+  kind              String
+  beforeSnapshot    Json?
+  afterSnapshot     Json
+  createdClientId   String?
+  rolledBackAt      DateTime?
+  rollbackEligible  Boolean       @default(false)
+  rollbackBlockedReason String?
+  createdAt         DateTime      @default(now())
+  run               KeycrmSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, externalOrderId])
+  @@unique([runId, sequence])
+  @@index([orderId])
 }
 
 model KeycrmSyncIssue {
@@ -1194,11 +1222,15 @@ model ProductionSlot {
   tentative Boolean  @default(true)
   locked    Boolean  @default(false)
   notes     String?
+  sourceSystem  String?
+  sourceAccount String?
+  externalId    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   order     Order    @relation(fields: [orderId], references: [id])
 
   @@index([startsAt, endsAt])
+  @@unique([sourceSystem, sourceAccount, externalId])
 }
 
 model Activity {

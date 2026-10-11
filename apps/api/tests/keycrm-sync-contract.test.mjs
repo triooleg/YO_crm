@@ -21,6 +21,10 @@ test("схема хранит происхождение импортирова�
   assert.match(schema, /deliveryTrackingCode\s+String\?/);
   assert.match(schema, /externalStatus\s+String\?/);
   assert.match(schema, /voidedAt\s+DateTime\?/);
+  assert.match(schema, /model KeycrmSyncMutation/);
+  assert.match(schema, /sequence\s+Int/);
+  assert.match(schema, /@@unique\(\[runId, sequence\]\)/);
+  assert.match(schema, /rolledBackAt\s+DateTime\?/);
 });
 
 test("админский API поддерживает настройки и preview/apply, а шаги выполняет только серверный worker", () => {
@@ -29,6 +33,7 @@ test("админский API поддерживает настройки и prev
   assert.match(controller, /@Patch\("settings"\)/);
   assert.match(controller, /@Post\("test-connection"\)/);
   assert.match(controller, /@Post\("sync-runs"\)/);
+  assert.match(controller, /@Post\("sync-runs\/:id\/rollback"\)/);
   assert.doesNotMatch(controller, /sync-runs\/:id\/step/);
   assert.match(controller, /@Roles\(UserRole\.OWNER, UserRole\.ADMIN\)/g);
   assert.match(appModule, /KeycrmController/);
@@ -61,14 +66,21 @@ test("повторная синхронизация опирается на вн
   assert.match(service, /before: existing \?\? undefined, after: persisted/);
   assert.match(service, /leaseOwner: null, leaseUntil: null/);
   assert.match(service, /findPotentialMatch/);
+  assert.match(service, /orderBy:\s*\{ sequence: "desc" \}/);
   assert.match(service, /AMBIGUOUS_EXISTING_ORDER/);
   assert.match(service, /MATCHED_EXISTING_ORDER/);
+  assert.match(service, /CLIENT_MERGE_SUGGESTION/);
+  assert.match(service, /kind:\s*"ORDER_MATCH"/);
+  assert.match(service, /kind:\s*"CLIENT_MERGE_SUGGESTION"/);
   assert.match(service, /sourceLinkMode: "MATCHED_EXISTING"/);
   assert.match(service, /existing\.sourceLinkMode === "MATCHED_EXISTING"/);
-  assert.match(service, /clientId: clients\[0\], archivedAt: null/);
+  assert.match(service, /clientId: clients\.length === 1 \? clients\[0\] : \{ in: clients \}/);
+  assert.doesNotMatch(service, /LIMIT 3/);
   assert.match(service, /action: "LINK"/);
   assert.match(providerUpdate, /sourceSystem: SOURCE_SYSTEM/);
   assert.match(providerUpdate, /sourceAccount: order\.sourceAccount/);
+  assert.match(providerUpdate, /externalImageUrl: order\.items\.find/);
+  assert.doesNotMatch(providerUpdate, /modelImagePath:\s*order\.items/);
   assert.match(providerUpdate, /externalId: order\.externalId/);
   assert.match(providerUpdate, /deliveryServiceName: order\.delivery\.serviceName/);
   assert.match(providerUpdate, /deliveryTrackingCode: order\.delivery\.trackingCode/);
@@ -79,7 +91,7 @@ test("повторная синхронизация опирается на вн
   assert.match(service, /lockedBefore\.configRevision \+ 1/);
   assert.match(service, /Нельзя менять настройки KeyCRM во время активной синхронизации/);
   assert.match(service, /existing\s*\?\s*await this\.attachBuyerToExistingClient/);
-  assert.match(service, /MATCHED_ORDER_CURRENCY_CHANGED/);
+  assert.match(service, /ORDER_CURRENCY_CHANGED/);
   assert.match(service, /persistConnectionState[\s\S]*?KEYCRM_SYNC_CONFIGURATION/);
   const shippingCarrier = schema.match(/enum ShippingCarrier\s*\{([^}]*)\}/)?.[1] || "";
   assert.doesNotMatch(shippingCarrier, /\bOTHER\b/);

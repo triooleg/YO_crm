@@ -9,6 +9,8 @@ export class UpdateKeycrmSettingsDto {
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(50) pageSize?: number;
   @ApiPropertyOptional({ enum: ["EUR", "USD", "UAH"] }) @IsOptional() @IsString() @Length(3, 3) @IsIn(["EUR", "USD", "UAH"]) defaultCurrency?: string;
   @ApiPropertyOptional({ enum: OrderType }) @IsOptional() @IsEnum(OrderType) defaultOrderType?: OrderType;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 100) productionStartFieldUuid?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 100) expectedDeliveryFieldUuid?: string;
 }
 
 export class CreateKeycrmSyncRunDto {

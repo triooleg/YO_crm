@@ -6,7 +6,7 @@ import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
 
@@ -21,6 +21,7 @@ export class OrdersController {
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }
   @Patch(":id/statuses") @Roles("OWNER", "ADMIN", "MANAGER") updateStatuses(@Param("id") id: string, @Body() dto: UpdateOrderStatusesDto, @Req() req: Request & { user: User }) { return this.orders.updateStatuses(id, dto, req.user); }
   @Patch(":id/deadline") @Roles("OWNER", "ADMIN", "MANAGER") updateDeadline(@Param("id") id: string, @Body() dto: UpdateOrderDeadlineDto, @Req() req: Request & { user: User }) { return this.orders.updateDeadline(id, dto, req.user); }
+  @Patch(":id/currency") @Roles("OWNER", "ADMIN", "MANAGER") updateCurrency(@Param("id") id: string, @Body() dto: UpdateOrderCurrencyDto, @Req() req: Request & { user: User }) { return this.orders.updateCurrency(id, dto, req.user); }
   @Patch(":id/discipline") @Roles("OWNER", "ADMIN", "MANAGER") updateDiscipline(@Param("id") id: string, @Body() dto: UpdateOrderDisciplineDto, @Req() req: Request & { user: User }) { return this.orders.updateDiscipline(id, dto, req.user); }
   @Patch(":id/delivery-address") @Roles(...ORDER_DELIVERY_ADDRESS_ROLES) updateDeliveryAddress(@Param("id") id: string, @Body() dto: UpdateOrderDeliveryAddressDto, @Req() req: Request & { user: User }) { return this.orders.updateDeliveryAddress(id, dto, req.user); }
   @Patch(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") updateProductionSlot(@Param("id") id: string, @Body() dto: UpdateProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.updateProductionSlot(id, dto, req.user); }

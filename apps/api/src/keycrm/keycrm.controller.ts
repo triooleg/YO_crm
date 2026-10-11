@@ -34,4 +34,7 @@ export class KeycrmController {
   @Get("sync-runs/:id/issues")
   issues(@Param("id") id: string) { return this.keycrm.issues(id); }
 
+  @Post("sync-runs/:id/rollback")
+  rollback(@Param("id") id: string, @Req() req: Request & { user: User }) { return this.keycrm.rollback(id, req.user); }
+
 }

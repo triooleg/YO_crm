@@ -25,9 +25,10 @@ async function mockSettings(page: Page) {
     email: { enabled: true, status: "CONNECTED", smtpHost: "smtp.test", smtpPort: 465, imapHost: "imap.test", imapPort: 993, username: "mail@test.local", fromAddress: "mail@test.local", signature: "YO", passwordConfigured: true },
   };
   const keycrmSettings = { enabled: true, endpoint: "https://openapi.keycrm.app/v1", apiTokenConfigured: true, connectionStatus: "VERIFIED", verifiedAt: "2026-10-11T09:00:00.000Z", lastErrorCode: null, pageSize: 50, defaultCurrency: "EUR", defaultOrderType: "CUSTOM_ORDER", configRevision: 3 };
+  const exchangeRates = { provider: "NBU", officialUrl: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json", supportedPairs: ["EUR/USD", "EUR/UAH", "USD/UAH"], cache: { effectiveDate: "2026-10-10", fetchedAt: "2026-10-10T12:00:00.000Z", rates: [{ baseCurrency: "EUR", quoteCurrency: "UAH", decimal: "48.1234" }, { baseCurrency: "USD", quoteCurrency: "UAH", decimal: "41.2345" }, { baseCurrency: "EUR", quoteCurrency: "USD", decimal: "1.167059" }] } };
   const keycrmRuns = [
-    { id: "run-current", mode: "DRY_RUN", status: "COMPLETED", requestedFrom: null, requestedTo: "2026-10-11T09:00:00.000Z", currentPage: 3, totalPages: 3, totalRemote: 124, scannedCount: 124, createdCount: 117, updatedCount: 4, skippedCount: 3, failedCount: 0, errorMessage: null, createdAt: "2026-10-11T09:00:00.000Z", completedAt: "2026-10-11T09:03:00.000Z", startedBy: { displayName: "QA Operator" }, _count: { issues: 0 } },
-    { id: "run-older", mode: "APPLY", status: "PARTIAL", requestedFrom: "2026-10-01T00:00:00.000Z", requestedTo: "2026-10-10T23:59:59.000Z", currentPage: 1, totalPages: 1, totalRemote: 12, scannedCount: 12, createdCount: 10, updatedCount: 1, skippedCount: 0, failedCount: 1, errorMessage: null, createdAt: "2026-10-10T10:00:00.000Z", completedAt: "2026-10-10T10:01:00.000Z", startedBy: { displayName: "QA Operator" }, _count: { issues: 1 } },
+    { id: "run-current", mode: "DRY_RUN", status: "COMPLETED", requestedFrom: null, requestedTo: "2026-10-11T09:00:00.000Z", currentPage: 3, totalPages: 3, totalRemote: 124, scannedCount: 124, createdCount: 117, updatedCount: 4, skippedCount: 3, failedCount: 0, errorMessage: null, createdAt: "2026-10-11T09:00:00.000Z", completedAt: "2026-10-11T09:03:00.000Z", rolledBackAt: null, rollbackEligible: false, rollbackBlockedReason: null, startedBy: { displayName: "QA Operator" }, _count: { issues: 0 } },
+    { id: "run-older", mode: "APPLY", status: "PARTIAL", requestedFrom: "2026-10-01T00:00:00.000Z", requestedTo: "2026-10-10T23:59:59.000Z", currentPage: 1, totalPages: 1, totalRemote: 12, scannedCount: 12, createdCount: 10, updatedCount: 1, skippedCount: 0, failedCount: 1, errorMessage: null, createdAt: "2026-10-10T10:00:00.000Z", completedAt: "2026-10-10T10:01:00.000Z", rolledBackAt: null, rollbackEligible: true, rollbackBlockedReason: null, startedBy: { displayName: "QA Operator" }, _count: { issues: 2 } },
   ];
 
   await page.route("**/api/**", async (route) => {
@@ -48,6 +49,7 @@ async function mockSettings(page: Page) {
       return route.fulfill({ json: { ...branding, ...body, logoUrl: body.removeLogo ? null : branding.logoUrl } });
     }
     if (path === "/api/finance/settings" && request.method() === "GET") return route.fulfill({ json: production });
+    if (path === "/api/finance/exchange-rates" && request.method() === "GET") return route.fulfill({ json: exchangeRates });
     if (path === "/api/finance/settings" && request.method() === "PATCH") {
       const body = request.postDataJSON();
       writes.push({ path, body });
@@ -68,7 +70,10 @@ async function mockSettings(page: Page) {
     if (path === "/api/keycrm/settings" && request.method() === "GET") return route.fulfill({ json: keycrmSettings });
     if (path === "/api/keycrm/sync-runs" && request.method() === "GET") return route.fulfill({ json: keycrmRuns });
     if (path === "/api/keycrm/sync-runs/run-current/issues" && request.method() === "GET") return route.fulfill({ json: [] });
-    if (path === "/api/keycrm/sync-runs/run-older/issues" && request.method() === "GET") return route.fulfill({ json: [{ id: "issue-1", externalOrderId: "675", code: "DUPLICATE", message: "Найден возможный дубликат заказа", createdAt: "2026-10-10T10:01:00.000Z" }] });
+    if (path === "/api/keycrm/sync-runs/run-older/issues" && request.method() === "GET") return route.fulfill({ json: [
+      { id: "issue-1", externalOrderId: "675", code: "DUPLICATE", message: "Найден возможный дубликат заказа", createdAt: "2026-10-10T10:01:00.000Z" },
+      { id: "issue-2", externalOrderId: "675", code: "CLIENT_MERGE_SUGGESTION", message: "Найдена похожая карточка клиента", createdAt: "2026-10-10T10:01:00.000Z", details: { kind: "CLIENT_MERGE_SUGGESTION", importedClientId: "client-imported", keycrmBuyerId: "415", candidates: [{ clientId: "client-existing", displayName: "Вероника Петрова", reasons: ["EMAIL", "PHONE"] }] } },
+    ] });
     if (path === "/api/communications/integrations/chatwoot" && request.method() === "PATCH") {
       const body = request.postDataJSON();
       writes.push({ path, body });
@@ -111,6 +116,16 @@ for (const viewport of [
     await panel.getByRole("button", { name: /Перенос/ }).last().click();
     await expect(panel.getByRole("button", { name: /Перенос/ }).last()).toHaveAttribute("aria-pressed", "true");
     await expect(panel.getByText("Найден возможный дубликат заказа")).toBeVisible();
+    await panel.getByRole("button", { name: /Объединить карточки/ }).click();
+    const mergeDialog = page.getByRole("dialog", { name: "Подтвердите объединение клиентов" });
+    await expect(mergeDialog).toBeVisible();
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-merge-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await mergeDialog.getByRole("button", { name: "Отмена" }).click();
+    await panel.getByRole("button", { name: "Откатить неудачный перенос" }).click();
+    const rollbackDialog = page.getByRole("dialog", { name: "Подтвердите откат переноса" });
+    await expect(rollbackDialog).toBeVisible();
+    await page.screenshot({ path: screenshotPath(testInfo, `keycrm-rollback-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await rollbackDialog.getByRole("button", { name: "Отмена" }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(pageErrors).toEqual([]);
     await page.screenshot({ path: screenshotPath(testInfo, `keycrm-settings-history-${viewport.width}x${viewport.height}.png`), fullPage: false });
@@ -242,8 +257,14 @@ for (const viewport of [
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-account-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await page.locator("#settings-account-panel").screenshot({ path: screenshotPath(testInfo, `mantine-account-panel-${viewport.width}x${viewport.height}.png`) });
     await settingsTabs.getByRole("tab", { name: "Финансы" }).click();
+    const financePanel = page.locator("#settings-finance-panel");
+    await expect(financePanel.getByRole("link", { name: "Открыть официальный источник" })).toBeVisible();
+    await expect(financePanel.getByText("EUR/USD, EUR/UAH, USD/UAH")).toBeVisible();
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-finance-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
-    await page.locator("#settings-finance-panel").screenshot({ path: screenshotPath(testInfo, `mantine-finance-panel-${viewport.width}x${viewport.height}.png`) });
+    await financePanel.screenshot({ path: screenshotPath(testInfo, `mantine-finance-panel-${viewport.width}x${viewport.height}.png`) });
+    const exchangeCard = financePanel.locator("section.settings-card").filter({ hasText: "Официальные курсы валют" });
+    await exchangeCard.scrollIntoViewIfNeeded();
+    await exchangeCard.screenshot({ path: screenshotPath(testInfo, `mantine-exchange-rates-${viewport.width}x${viewport.height}.png`) });
     await settingsTabs.getByRole("tab", { name: "Каналы связи" }).click();
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-communications-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await page.locator("#settings-communications-panel").screenshot({ path: screenshotPath(testInfo, `mantine-communications-panel-${viewport.width}x${viewport.height}.png`) });

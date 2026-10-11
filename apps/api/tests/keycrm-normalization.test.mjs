@@ -44,7 +44,11 @@ test("заказ нормализуется вместе с клиентом, т
     products: [{ id: 91, name: "custom leotard", sku: "YO-1", price: 330, quantity: 1, picture: "https://example.com/model.jpg", comment: "Груди 57" }],
     payments: [{ id: 5, amount: 165, actual_currency: "EUR", payment_method_id: 8, status: "paid", payment_date: "2026-09-16 11:25:00" }],
     shipping: { shipping_address_country: "United Arab Emirates", shipping_address_city: "Dubai", shipping_receive_point: "Office 2", recipient_full_name: "Veronika", recipient_phone: "+971500000000", tracking_code: "TRACK-1", shipping_date_actual: "2026-09-30T00:00:00.000000Z" },
-    custom_fields: [{ id: 1, uuid: "OR_1", name: "Номер макету", type: "number", value: 486 }],
+    custom_fields: [
+      { id: 1, uuid: "OR_1", name: "Номер макету", type: "number", value: 486 },
+      { id: 2, uuid: "OR_1001", name: "Початок виробництва", type: "date", value: "2026-09-20" },
+      { id: 5, uuid: "OR_1004", name: "Очікувана дата доставки", type: "date", value: "2026-09-30" },
+    ],
   }, { ...options, sourceNames: { "12": "Сайт Yoleotard" } });
 
   assert.equal(order.externalId, "675");
@@ -64,6 +68,20 @@ test("заказ нормализуется вместе с клиентом, т
   assert.equal(order.delivery.recipientPhone, "+971500000000");
   assert.equal(order.shippingStatus, "NOT_READY");
   assert.equal(order.customFields[0].name, "Номер макету");
+  assert.equal(order.production.startsAt?.toISOString(), "2026-09-20T00:00:00.000Z");
+  assert.equal(order.production.requiredDeliveryAt?.toISOString(), "2026-09-30T00:00:00.000Z");
+});
+
+test("производственные даты используют UUID или точное имя с явным fallback и строгим date-контрактом", () => {
+  const base = { id: 21, source_id: 1, created_at: "2026-01-02 03:04:05", grand_total: 10, buyer: { id: 1, full_name: "Client" } };
+  const byNameOnly = normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 99, uuid: "OTHER", name: "Початок виробництва", type: "date", value: "2026-02-01" }] }, options);
+  assert.equal(byNameOnly.production.startsAt?.toISOString(), "2026-02-01T00:00:00.000Z");
+  assert.deepEqual(byNameOnly.production.exactNameFallbacks, ["Початок виробництва"]);
+  const configuredMissing = normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 99, uuid: "OTHER", name: "Початок виробництва", type: "date", value: "2026-02-01" }] }, { ...options, productionStartFieldUuid: "EXPECTED" });
+  assert.equal(configuredMissing.production.startsAt, null);
+  assert.deepEqual(configuredMissing.production.exactNameFallbacks, []);
+  assert.throws(() => normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 2, uuid: "OR_1001", name: "Початок виробництва", type: "date", value: "01.02.2026" }] }, options), /Початок виробництва/);
+  assert.throws(() => normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 2, uuid: "OR_1001", name: "Початок виробництва", type: "text", value: "2026-02-01" }] }, options), /тип date/);
 });
 
 test("недокументированный ID предложения не используется как ID строки заказа", () => {
@@ -81,6 +99,10 @@ test("недокументированный ID предложения не ис
   assert.throws(
     () => normalizeKeycrmOrder({ ...base, id: 677, products: [{ name: "Model", price: 10, quantity: 1.5 }] }, options),
     /Количество товара/,
+  );
+  assert.throws(
+    () => normalizeKeycrmOrder({ ...base, id: 678, products: [{ id: 1, name: "Model", price: -1, quantity: 1 }] }, options),
+    /Цена товара 1 не может быть отрицательной/,
   );
 });
 
@@ -125,15 +147,61 @@ test("оплаченная транзакция без даты отклоняе
   }, options), /дату оплаты/);
 });
 
-test("валюта оплаты должна совпадать с валютой заказа", () => {
-  assert.throws(() => normalizeKeycrmOrder({
+test("единственная валюта проведённых оплат уточняет валюту исторического заказа", () => {
+  const order = normalizeKeycrmOrder({
     id: 12,
     source_id: 1,
     created_at: "2026-01-02 03:04:05",
     grand_total: 100,
     buyer: { id: 1, full_name: "Client" },
     payments: [{ id: 4, amount: 50, status: "paid", payment_date: "2026-01-02 04:00:00", actual_currency: "USD" }],
-  }, options), /не совпадает с валютой заказа/);
+  }, options);
+  assert.equal(order.currency, "USD");
+  assert.equal(order.payments[0].currency, "USD");
+});
+
+test("несколько валют проведённых оплат отклоняются без догадок", () => {
+  assert.throws(() => normalizeKeycrmOrder({
+    id: 13,
+    source_id: 1,
+    created_at: "2026-01-02 03:04:05",
+    grand_total: 100,
+    buyer: { id: 1, full_name: "Client" },
+    payments: [
+      { id: 5, amount: 50, status: "paid", payment_date: "2026-01-02 04:00:00", actual_currency: "USD" },
+      { id: 6, amount: 50, status: "paid", payment_date: "2026-01-02 05:00:00", actual_currency: "EUR" },
+    ],
+  }, options), /несколько валют проведённых оплат/);
+});
+
+test("отменённая оплата в другой валюте остаётся в raw payload и не блокирует заказ", () => {
+  const raw = {
+    id: 14,
+    source_id: 1,
+    created_at: "2026-01-02 03:04:05",
+    grand_total: 100,
+    buyer: { id: 1, full_name: "Client" },
+    payments: [
+      { id: 7, amount: 50, status: "paid", payment_date: "2026-01-02 04:00:00", actual_currency: "EUR" },
+      { id: 8, amount: 50, status: "canceled", actual_currency: "UAH" },
+    ],
+  };
+  const order = normalizeKeycrmOrder(raw, options);
+  assert.equal(order.currency, "EUR");
+  assert.deepEqual(order.payments.map((payment) => payment.externalId), ["7", "8"]);
+  assert.equal(order.payments[1].materializeIfMissing, false);
+  assert.equal(order.externalData, raw);
+});
+
+test("некорректная валюта отменённой оплаты не маскируется как чужая валюта", () => {
+  assert.throws(() => normalizeKeycrmOrder({
+    id: 15,
+    source_id: 1,
+    created_at: "2026-01-02 03:04:05",
+    grand_total: 100,
+    buyer: { id: 1, full_name: "Client" },
+    payments: [{ id: 9, amount: 50, status: "canceled", actual_currency: "EURO" }],
+  }, options), /ISO 4217/);
 });
 
 test("одинаковые ID разных подключений остаются в разных областях", () => {

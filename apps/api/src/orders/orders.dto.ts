@@ -56,6 +56,9 @@ export class UpdateProductionSlotDto {
 export class UpdateOrderDeadlineDto {
  @ApiProperty() @IsDateString() requiredDeliveryAt!: string;
 }
+export class UpdateOrderCurrencyDto {
+ @ApiProperty({ enum: ["EUR", "USD", "UAH"] }) @IsString() @IsIn(["EUR", "USD", "UAH"]) currency!: "EUR" | "USD" | "UAH";
+}
 export class UpdateOrderDisciplineDto {
  @ApiProperty({ enum: Discipline }) @IsEnum(Discipline) discipline!: Discipline;
 }

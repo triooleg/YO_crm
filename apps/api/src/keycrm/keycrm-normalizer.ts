@@ -106,13 +106,41 @@ function currencyCode(value: unknown, label: string) {
   return currency;
 }
 
+function customFieldDate(fields: KeycrmOrder["custom_fields"], uuid: string | undefined, label: string) {
+  const byUuid = uuid ? (fields ?? []).filter((field) => field.uuid === uuid) : [];
+  const matches = uuid ? byUuid : (fields ?? []).filter((field) => field.name === label);
+  if (matches.length > 1) throw new Error(`${label}: KeyCRM передал поле повторно`);
+  const field = matches[0];
+  if (!field || field.value === null || field.value === undefined || field.value === "") return { value: null, exactNameFallback: false };
+  if (field.type !== "date") throw new Error(`${label}: ожидается тип date`);
+  if (typeof field.value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(field.value.trim())) throw new Error(`${label}: ожидается дата YYYY-MM-DD`);
+  const parsed = new Date(`${field.value.trim()}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== field.value.trim()) throw new Error(`${label}: некорректная календарная дата`);
+  return { value: parsed, exactNameFallback: !uuid };
+}
+
+function nonNegativeMoneyToMinor(value: unknown, label: string) {
+  const minor = keycrmMoneyToMinor(value);
+  if (minor < 0) throw new Error(`${label} не может быть отрицательной`);
+  return minor;
+}
+
 export type NormalizedKeycrmOrder = ReturnType<typeof normalizeKeycrmOrder>;
 
-export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey: string; defaultCurrency: string; sourceNames: Record<string, string>; sourceCurrencies?: Record<string, string>; defaultOrderType?: OrderType }) {
+export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey: string; defaultCurrency: string; sourceNames: Record<string, string>; sourceCurrencies?: Record<string, string>; defaultOrderType?: OrderType; productionStartFieldUuid?: string; expectedDeliveryFieldUuid?: string }) {
   if (!Number.isInteger(raw.id) || raw.id <= 0) throw new Error("У заказа KeyCRM отсутствует корректный ID");
   const sourceId = raw.source_id === null || raw.source_id === undefined ? null : String(raw.source_id);
   if (sourceId && !options.sourceCurrencies?.[sourceId]) throw new Error(`Для источника KeyCRM #${sourceId} не указана валюта`);
-  const currency = currencyCode(sourceId ? options.sourceCurrencies?.[sourceId] : options.defaultCurrency, "Валюта заказа KeyCRM");
+  const sourceCurrency = currencyCode(sourceId ? options.sourceCurrencies?.[sourceId] : options.defaultCurrency, "Валюта заказа KeyCRM");
+  const paidCurrencies = new Set(
+    (raw.payments ?? [])
+      .filter((payment) => payment.status?.trim().toLowerCase() === "paid")
+      .map((payment) => currencyCode(payment.actual_currency || sourceCurrency, `Валюта оплаты KeyCRM #${payment.id ?? "?"}`)),
+  );
+  if (paidCurrencies.size > 1) {
+    throw new Error("KeyCRM передал несколько валют проведённых оплат для одного заказа");
+  }
+  const currency = paidCurrencies.values().next().value ?? sourceCurrency;
   const priceMinor = keycrmRequiredMoneyToMinor(raw.grand_total, "Полная стоимость заказа");
   const sourceName = options.sourceNames[String(raw.source_id)] ?? `KeyCRM source #${raw.source_id}`;
   const buyerName = raw.buyer?.full_name?.trim() || `Клиент KeyCRM #${raw.buyer?.id ?? raw.id}`;
@@ -122,6 +150,10 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
   const addressParts = [addressLine1, addressLine2, raw.shipping?.shipping_address_city, raw.shipping?.shipping_address_region, raw.shipping?.shipping_address_zip, raw.shipping?.shipping_address_country].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
   const orderedAt = keycrmDate(raw.ordered_at ?? raw.created_at);
   if (!orderedAt) throw new Error("KeyCRM не передал дату создания заказа");
+  const productionStart = customFieldDate(raw.custom_fields, options.productionStartFieldUuid, "Початок виробництва");
+  const expectedDelivery = customFieldDate(raw.custom_fields, options.expectedDeliveryFieldUuid, "Очікувана дата доставки");
+  const productionStartsAt = productionStart.value;
+  const requiredDeliveryAt = expectedDelivery.value;
   return {
     sourceSystem: SOURCE_SYSTEM,
     sourceAccount: options.connectionKey,
@@ -148,7 +180,8 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
     promocode: raw.promocode?.trim() || null,
     isGift: Boolean(raw.is_gift),
     orderedAt,
-    requiredDeliveryAt: null,
+    requiredDeliveryAt,
+    production: { startsAt: productionStartsAt, requiredDeliveryAt, exactNameFallbacks: [productionStart.exactNameFallback ? "Початок виробництва" : null, expectedDelivery.exactNameFallback ? "Очікувана дата доставки" : null].filter((value): value is string => Boolean(value)) },
     client: {
       keycrmBuyerId: raw.buyer?.id ?? null,
       displayName: buyerName,
@@ -185,23 +218,26 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
       name: item.name?.trim() || item.sku?.trim() || `Товар KeyCRM ${index + 1}`,
       sku: item.sku?.trim() || item.offer?.sku?.trim() || null,
       quantity: itemQuantity(item.quantity),
-      priceMinor: keycrmMoneyToMinor(item.price_sold ?? item.price),
+      priceMinor: nonNegativeMoneyToMinor(item.price_sold ?? item.price, `Цена товара ${index + 1}`),
       notes: item.comment?.trim() || null,
       externalImageUrl: externalImageUrl(item.picture),
       properties: item.properties ?? [],
     })),
-    payments: (raw.payments ?? []).filter((payment) => payment.id).map((payment) => {
+    payments: (raw.payments ?? []).filter((payment) => payment.id).flatMap((payment) => {
+      const externalStatus = payment.status?.trim().toLowerCase() || "unknown";
+      const isPaid = externalStatus === "paid";
       const receivedAt = keycrmDate(payment.payment_date ?? payment.created_at);
-      if (payment.status === "paid" && !receivedAt) throw new Error(`KeyCRM не передал дату оплаты #${payment.id}`);
+      if (isPaid && !receivedAt) throw new Error(`KeyCRM не передал дату оплаты #${payment.id}`);
       const paymentCurrency = currencyCode(payment.actual_currency || currency, `Валюта оплаты KeyCRM #${payment.id}`);
-      if (paymentCurrency !== currency) throw new Error(`Валюта оплаты KeyCRM #${payment.id} не совпадает с валютой заказа`);
-      return {
+      if (isPaid && paymentCurrency !== currency) throw new Error(`Валюта оплаты KeyCRM #${payment.id} не совпадает с валютой заказа`);
+      return [{
         sourceSystem: SOURCE_SYSTEM,
         sourceAccount: options.connectionKey,
         externalId: String(payment.id),
-        externalStatus: payment.status?.trim().toLowerCase() || "unknown",
-        isPaid: payment.status === "paid",
-        amountMinor: payment.status === "paid"
+        externalStatus,
+        isPaid,
+        materializeIfMissing: isPaid || paymentCurrency === currency,
+        amountMinor: isPaid
           ? keycrmRequiredMoneyToMinor(payment.amount, `Оплата KeyCRM #${payment.id}`, false)
           : keycrmRequiredMoneyToMinor(payment.amount, `Оплата KeyCRM #${payment.id}`),
         currency: paymentCurrency,
@@ -209,7 +245,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
         receivedAt,
         reference: payment.transaction_uuid?.trim() || null,
         notes: [payment.description?.trim(), payment.payment_method_id ? `KeyCRM method #${payment.payment_method_id}` : null].filter(Boolean).join(" · ") || null,
-      };
+      }];
     }),
     customFields: raw.custom_fields ?? [],
     externalData: raw,

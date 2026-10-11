@@ -5,13 +5,14 @@ export const productionOrderSelect = {
   number: true,
   notes: true,
   modelImagePath: true,
+  externalImageUrl: true,
   requiredDeliveryAt: true,
   productionStatus: true,
   priceMinor: true,
   currency: true,
   productionSlot: true,
   client: { select: { displayName: true, country: true } },
-  items: { select: { quantity: true, modelImagePath: true, athlete: { select: { firstName: true, lastName: true } } } },
+  items: { select: { quantity: true, modelImagePath: true, externalImageUrl: true, athlete: { select: { firstName: true, lastName: true } } } },
 } satisfies Prisma.OrderSelect;
 
 export function includeRequestedProductionOrder<T extends { id: string }>(orders: readonly T[], requested?: T | null) {

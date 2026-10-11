@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const auth = { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } };
+const currentYearMonth = new Date().toISOString().slice(0, 7);
+const productionDate = (day: number) => `${currentYearMonth}-${String(day).padStart(2, "0")}`;
 
 const shippingOrders = [
   {
@@ -39,15 +41,15 @@ const productionOrder = {
   id: "production-hold",
   number: "YO-26-0103",
   notes: "Купальник",
-  requiredDeliveryAt: "2026-09-25T12:00:00.000Z",
+  requiredDeliveryAt: `${productionDate(25)}T12:00:00.000Z`,
   productionStatus: "ON_HOLD",
   priceMinor: 32000,
   currency: "EUR",
   client: { displayName: "Анна", country: "Ukraine" },
   items: [{ quantity: 1 }],
   productionSlot: {
-    startsAt: "2026-09-01T12:00:00.000Z",
-    endsAt: "2026-09-03T12:00:00.000Z",
+    startsAt: `${productionDate(1)}T12:00:00.000Z`,
+    endsAt: `${productionDate(3)}T12:00:00.000Z`,
     capacity: 1,
     tentative: true,
     locked: false,
@@ -112,7 +114,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.31");
+    await expect(page.locator(".crm-version")).toContainText("0.1.32");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -164,7 +166,7 @@ test("Незакреплённый производственный слот с�
   const beforeDrag = await dragTimelineBar(page, 80);
 
   await expect.poll(() => slotUpdates.length).toBe(1);
-  expect(slotUpdates[0]).toMatchObject({ startsAt: "2026-09-03", endsAt: "2026-09-05" });
+  expect(slotUpdates[0]).toMatchObject({ startsAt: productionDate(3), endsAt: productionDate(5) });
   const afterDrag = await page.locator(".timeline-bar").boundingBox();
   expect(afterDrag?.x).toBeGreaterThan(beforeDrag.x);
   await expect(page.locator(".phase2-error")).toHaveCount(0);
@@ -218,9 +220,9 @@ for (const viewport of [
     await expect(status).toHaveText("Приостановлен");
     await expect(status).toHaveCSS("background-color", "rgb(255, 240, 210)");
     const start = page.locator('.production-slot-card input[type="date"]').first();
-    await start.fill("2026-09-02");
+    await start.fill(productionDate(2));
     await expect.poll(() => slotUpdates.length).toBe(1);
-    expect(slotUpdates[0]).toMatchObject({ startsAt: "2026-09-02" });
+    expect(slotUpdates[0]).toMatchObject({ startsAt: productionDate(2) });
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     expect(consoleErrors).toEqual([]);
