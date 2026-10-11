@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
@@ -8,11 +8,14 @@ import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
 import { loadProductionOrders, type ProductionOrderRepository } from "./production-context";
+import { isOrderImageName } from "./order-image-name";
+import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
+import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "./order-details";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -78,7 +81,7 @@ export class OrdersService {
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } },
-        items: { select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
+        items: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
@@ -106,16 +109,17 @@ export class OrdersService {
 
 
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
-    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
-    if (!order) throw new NotFoundException("Заказ не найден");
-    const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
-    if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
-      const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
-      if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
-    }
     const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus };
     if (!Object.values(data).some(Boolean)) throw new BadRequestException("Укажите хотя бы один статус");
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
+      if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
+        const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
+        if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
+      }
       const updated = await tx.order.update({ where: { id: orderId }, data });
       const summary = "Изменены рабочие статусы заказа";
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_STATUSES_UPDATED", summary, metadata: data } });
@@ -160,6 +164,42 @@ export class OrdersService {
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
       return updated;
     });
+  }
+  async updateModelImage(orderId: string, dto: UpdateOrderModelImageDto, actor: User) {
+    if (!isOrderImageName(dto.modelImagePath)) throw new BadRequestException("Некорректное имя изображения заказа");
+    try {
+      const image = await stat(join(uploadsRoot(), "order-models", dto.modelImagePath));
+      if (!image.isFile()) throw new Error("not a file");
+    } catch {
+      throw new NotFoundException("Изображение заказа не найдено");
+    }
+    try {
+      return await this.prisma.$transaction((tx) => persistOrderModelImage(tx, orderId, dto, actor.id));
+    } catch (error) {
+      if (!(error instanceof OrderModelImageOperationError)) throw error;
+      if (error.code === ORDER_MODEL_IMAGE_ERROR.orderNotFound) throw new NotFoundException({ code: error.code, message: "Заказ не найден" });
+      if (error.code === ORDER_MODEL_IMAGE_ERROR.changed) throw new ConflictException({ code: error.code, message: "Изображение уже изменено другим пользователем. Обновите заказ и повторите действие" });
+      throw new BadRequestException({ code: error.code, message: "Позиция не принадлежит заказу" });
+    }
+  }
+  async updateDetails(orderId: string, dto: UpdateOrderDetailsDto, actor: User) {
+    if (dto.modelImagePath) {
+      if (!isOrderImageName(dto.modelImagePath)) throw new BadRequestException("Некорректное имя изображения заказа");
+      try {
+        const image = await stat(join(uploadsRoot(), "order-models", dto.modelImagePath));
+        if (!image.isFile()) throw new Error("not a file");
+      } catch { throw new NotFoundException("Изображение заказа не найдено"); }
+    }
+    try {
+      return await this.prisma.$transaction((tx) => persistOrderDetails(tx, orderId, dto, actor.id));
+    } catch (error) {
+      if (!(error instanceof OrderDetailsOperationError)) throw error;
+      if (error.code === ORDER_DETAILS_ERROR.orderNotFound) throw new NotFoundException({ code: error.code, message: "Заказ не найден" });
+      if (error.code === ORDER_DETAILS_ERROR.descriptionRequired) throw new BadRequestException({ code: error.code, message: "Добавьте описание заказа" });
+      if (error.code === ORDER_DETAILS_ERROR.depositWouldUnconfirmProduction) throw new BadRequestException({ code: error.code, message: "Сначала внесите оплату до новой суммы предоплаты либо измените условия предоплаты" });
+      if (error.code === ORDER_DETAILS_ERROR.changed) throw new ConflictException({ code: error.code, message: "Описание или цена уже изменены другим пользователем. Обновите заказ и повторите действие" });
+      throw new ConflictException({ code: error.code, message: "Изображение уже изменено другим пользователем. Обновите заказ и повторите действие" });
+    }
   }
   async updateDeliveryAddress(orderId: string, dto: UpdateOrderDeliveryAddressDto, actor: User) {
     try {

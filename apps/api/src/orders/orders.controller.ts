@@ -6,9 +6,11 @@ import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDisciplineDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
+import { isOrderImageName } from "./order-image-name";
+import { ORDER_MODEL_IMAGE_ROLES } from "./order-model-image";
 
 @Controller("orders")
 @UseGuards(SessionGuard, RolesGuard)
@@ -23,12 +25,14 @@ export class OrdersController {
   @Patch(":id/deadline") @Roles("OWNER", "ADMIN", "MANAGER") updateDeadline(@Param("id") id: string, @Body() dto: UpdateOrderDeadlineDto, @Req() req: Request & { user: User }) { return this.orders.updateDeadline(id, dto, req.user); }
   @Patch(":id/currency") @Roles("OWNER", "ADMIN", "MANAGER") updateCurrency(@Param("id") id: string, @Body() dto: UpdateOrderCurrencyDto, @Req() req: Request & { user: User }) { return this.orders.updateCurrency(id, dto, req.user); }
   @Patch(":id/discipline") @Roles("OWNER", "ADMIN", "MANAGER") updateDiscipline(@Param("id") id: string, @Body() dto: UpdateOrderDisciplineDto, @Req() req: Request & { user: User }) { return this.orders.updateDiscipline(id, dto, req.user); }
+  @Patch(":id/model-image") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateModelImage(@Param("id") id: string, @Body() dto: UpdateOrderModelImageDto, @Req() req: Request & { user: User }) { return this.orders.updateModelImage(id, dto, req.user); }
+  @Patch(":id/details") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateDetails(@Param("id") id: string, @Body() dto: UpdateOrderDetailsDto, @Req() req: Request & { user: User }) { return this.orders.updateDetails(id, dto, req.user); }
   @Patch(":id/delivery-address") @Roles(...ORDER_DELIVERY_ADDRESS_ROLES) updateDeliveryAddress(@Param("id") id: string, @Body() dto: UpdateOrderDeliveryAddressDto, @Req() req: Request & { user: User }) { return this.orders.updateDeliveryAddress(id, dto, req.user); }
   @Patch(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") updateProductionSlot(@Param("id") id: string, @Body() dto: UpdateProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.updateProductionSlot(id, dto, req.user); }
   @Post(":id/payments") @Roles("OWNER", "ADMIN", "MANAGER") addPayment(@Param("id") id: string, @Body() dto: AddOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.addPayment(id, dto, req.user); }
   @Post(":id/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addMeasurement(@Param("id") id: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addMeasurement(id, dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {
-    if (!/^[a-f0-9-]+\.(jpg|png|webp)$/.test(name)) return res.status(404).end();
+    if (!isOrderImageName(name)) return res.status(404).end();
     return res.sendFile(join(uploadsRoot(), "order-models", name));
   }
 }

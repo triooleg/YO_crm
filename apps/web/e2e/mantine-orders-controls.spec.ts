@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 const screenshotPath = (testInfo: TestInfo, name: string) =>
   process.env.YO_CRM_VISUAL_DIR ? join(process.env.YO_CRM_VISUAL_DIR, name) : testInfo.outputPath(name);
+const testPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=", "base64");
 
 const order = {
   id: "order-mantine-1",
@@ -35,21 +36,24 @@ const order = {
   invoices: [],
 };
 
-async function mockOrdersApi(page: Page) {
+async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }) {
   let currentOrder = structuredClone(order);
-  const updates: { path: string; body: Record<string, string> }[] = [];
+  const updates: { path: string; body: Record<string, unknown> }[] = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
     if (method === "PATCH" && path.startsWith(`/api/orders/${order.id}/`)) {
-      const body = route.request().postDataJSON() as Record<string, string>;
+      if (path.endsWith("/details") && detailsFailure) return route.fulfill({ status: detailsFailure.status, json: { message: detailsFailure.message } });
+      const body = route.request().postDataJSON() as Record<string, unknown>;
       updates.push({ path, body });
-      currentOrder = { ...currentOrder, ...body };
-      if (body.requiredDeliveryAt) currentOrder.requiredDeliveryAt = `${body.requiredDeliveryAt}T12:00:00.000Z`;
+      if (path.endsWith("/details")) currentOrder = { ...currentOrder, notes: body.description as string, priceMinor: body.priceMinor as number, modelImagePath: (body.modelImagePath as string | undefined) ?? currentOrder.modelImagePath };
+      else currentOrder = { ...currentOrder, ...body } as typeof currentOrder;
+      if (body.requiredDeliveryAt) currentOrder.requiredDeliveryAt = `${body.requiredDeliveryAt as string}T12:00:00.000Z`;
       await route.fulfill({ json: currentOrder });
       return;
     }
+    if (method === "POST" && path === "/api/orders/model-image") return route.fulfill({ json: { path: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg" } });
     if (method === "GET" && path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA", role: "OWNER" } } });
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
     if (method === "GET" && path === "/api/orders") return route.fulfill({ json: [currentOrder] });
@@ -57,6 +61,10 @@ async function mockOrdersApi(page: Page) {
     if (method === "GET" && path === "/api/orders/images/keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg") return route.fulfill({
       contentType: "image/svg+xml",
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="180"><rect width="120" height="180" fill="#7c3aed"/><path d="M20 30h80v120H20z" fill="#facc15"/><circle cx="60" cy="85" r="28" fill="#ec4899"/></svg>',
+    });
+    if (method === "GET" && path === "/api/orders/images/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg") return route.fulfill({
+      contentType: "image/png",
+      body: testPng,
     });
     if (method === "GET" && path === `/api/clients/${order.client.id}`) return route.fulfill({ json: { ...order.client, athletes: [] } });
     if (method === "GET" && path === "/api/clients") return route.fulfill({ json: [{ id: order.client.id, displayName: order.client.displayName, country: order.client.country }] });
@@ -68,6 +76,18 @@ async function mockOrdersApi(page: Page) {
   }));
   return updates;
 }
+
+test("ошибка параллельного редактирования остаётся в окне заказа", async ({ page }) => {
+  await mockOrdersApi(page, { status: 409, message: "Описание или цена уже изменены другим пользователем" });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("button", { name: "Изменить заказ" }).click();
+  const dialog = page.getByRole("dialog", { name: "Изменить заказ" });
+  await dialog.getByLabel("Описание заказа").fill("Конфликтующая правка");
+  await dialog.getByRole("button", { name: "Сохранить заказ" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Описание или цена уже изменены другим пользователем")).toBeVisible();
+});
 
 for (const viewport of [
   { name: "desktop", width: 1920, height: 1080 },
@@ -128,6 +148,26 @@ for (const viewport of [
       await expect(page.locator(".orders-image-preview")).toBeHidden();
     }
 
+    await expect(page.getByRole("button", { name: "Изменить изображение позиции: Купальник" })).toBeVisible();
+    await page.getByRole("button", { name: "Изменить заказ" }).click();
+    const editDialog = page.getByRole("dialog", { name: "Изменить заказ" });
+    await expect(editDialog).toBeVisible();
+    const description = editDialog.getByLabel("Описание заказа");
+    await expect(description).toBeFocused();
+    await description.fill("Обновлённый тестовый заказ");
+    await editDialog.getByLabel("Общая цена заказа, EUR").fill("475,50");
+    await editDialog.locator('input[type="file"]').setInputFiles({ name: "updated.png", mimeType: "image/png", buffer: testPng });
+    await page.screenshot({ path: screenshotPath(testInfo, `order-edit-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    await editDialog.getByRole("button", { name: "Сохранить заказ" }).click();
+    await expect(editDialog).toBeHidden();
+    const detailUpdate = updates.find((update) => update.path.endsWith("/details"));
+    expect(detailUpdate).toEqual({ path: `/api/orders/${order.id}/details`, body: { description: "Обновлённый тестовый заказ", priceMinor: 47550, expectedDescription: "Тестовый заказ", expectedPriceMinor: 45000, modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+    const fileChooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Изменить изображение позиции: Купальник" }).click();
+    await (await fileChooser).setFiles({ name: "item-updated.png", mimeType: "image/png", buffer: testPng });
+    await expect.poll(() => updates.find((update) => update.path.endsWith("/model-image"))).toEqual({ path: `/api/orders/${order.id}/model-image`, body: { itemId: "item-1", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+
     await page.getByRole("button", { name: "Изменить валюту" }).click();
     const currencyDialog = page.getByRole("dialog", { name: new RegExp(order.number) });
     await expect(currencyDialog).toBeVisible();
@@ -147,8 +187,9 @@ for (const viewport of [
       setter?.call(input, "2026-10-25");
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await expect.poll(() => updates.length).toBe(2);
-    expect(updates).toEqual([
+    const inlineUpdates = () => updates.filter((update) => update.path.endsWith("/discipline") || update.path.endsWith("/deadline"));
+    await expect.poll(() => inlineUpdates().length).toBe(2);
+    expect(inlineUpdates()).toEqual([
       { path: `/api/orders/${order.id}/discipline`, body: { discipline: "FIGURE_SKATING" } },
       { path: `/api/orders/${order.id}/deadline`, body: { requiredDeliveryAt: "2026-10-25" } },
     ]);

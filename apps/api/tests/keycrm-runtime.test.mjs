@@ -680,12 +680,14 @@ test("ручные позиции и неоднозначные оплаты с�
   const KeycrmService = loadKeycrmService();
   const issues = [];
   const writes = { item: 0, payment: 0 };
+  let orderUpdateData;
   const existing = { id: "order-local", number: "YO-26-0001", clientId: "client-1", sourceLinkMode: "MATCHED_EXISTING", sourceSystem: "KEYCRM", currency: "EUR", externalUpdatedAt: new Date("2026-10-01T00:00:00Z"), depositRequiredMinor: 5000, priceMinor: 10000, type: OrderType.CUSTOM_ORDER, paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED" };
-  const persisted = { ...existing, externalUpdatedAt: new Date("2026-10-02T00:00:00Z") };
+  const refreshedExisting = { ...existing, depositRequiredMinor: 5500, priceMinor: 11000, modelImagePath: "manual-after-discovery.jpg" };
+  const persisted = { ...refreshedExisting, externalUpdatedAt: new Date("2026-10-02T00:00:00Z") };
   const tx = {
     $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined,
     $queryRaw: async () => [],
-    order: { findUnique: async () => existing, update: async () => persisted },
+    order: { findUnique: async ({ where }) => where.id ? refreshedExisting : existing, update: async ({ data }) => { orderUpdateData = data; return persisted; } },
     clientMergeRedirect: { findUnique: async () => null },
     client: { findUniqueOrThrow: async () => ({ id: "client-1", email: null, phone: null, country: null, city: null, address: null, postalCode: null }) },
     orderItem: { count: async () => 1, findUnique: async () => null, upsert: async () => { writes.item++; }, create: async () => { writes.item++; } },
@@ -697,14 +699,18 @@ test("ручные позиции и неоднозначные оплаты с�
     keycrmSyncIssue: { findFirst: async () => null, create: async ({ data }) => { issues.push(data); } },
     productionSlot: { findUnique: async () => null },
     shipment: { findUnique: async () => null },
-    activity: { create: async () => undefined }, auditLog: { create: async () => undefined },
+    activity: { findFirst: async () => ({ id: "manual-price-change" }), create: async () => undefined }, auditLog: { create: async () => undefined },
   };
   const service = new KeycrmService({ $transaction: callback => callback(tx) });
   const result = await service.importOrder(normalizedOrder({
-    items: [{ externalId: "item-1", name: "Provider item", quantity: 1, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }],
+    priceMinor: 12000,
+    items: [{ externalId: "item-1", name: "Provider item", quantity: 1, priceMinor: 10000, notes: null, sku: null, externalImageUrl: "https://cdn.example.test/provider-new.jpg", properties: [] }],
     payments: [{ externalId: "pay-1", amountMinor: 5000, currency: "EUR", isPaid: true, receivedAt: new Date("2026-10-01T10:00:00Z"), method: "OTHER", reference: null, notes: null, externalStatus: "paid" }],
   }), "owner-1", "run-1");
   assert.equal(result, "UPDATED");
+  assert.equal(orderUpdateData.priceMinor, undefined);
+  assert.equal(orderUpdateData.depositRequiredMinor, 5500);
+  assert.equal(orderUpdateData.modelImagePath, undefined);
   assert.deepEqual(writes, { item: 0, payment: 0 });
   assert.deepEqual(issues.map(issue => issue.code), ["MATCHED_ORDER_ITEMS_PRESERVED", "AMBIGUOUS_EXISTING_PAYMENT"]);
 });
@@ -768,7 +774,7 @@ test("foreign-currency cancellation гасит существующую опла
       update: async ({ data }) => (paymentRow = { ...paymentRow, ...data }),
     },
     productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
-    activity: { create: async () => undefined }, auditLog: { create: async () => undefined },
+    activity: { findFirst: async () => null, create: async () => undefined }, auditLog: { create: async () => undefined },
     keycrmSyncIssue: { findFirst: async () => null, create: async () => undefined },
   };
   const service = new KeycrmService({ $transaction: callback => callback(tx) });
@@ -898,7 +904,7 @@ test("rollback snapshot охватывает клиента, provider link и п
 
 test("повторный APPLY после rollback явно реактивирует order и buyer link", () => {
   const source = readFileSync(new URL("../src/keycrm/keycrm.service.ts", import.meta.url), "utf8");
-  assert.match(source, /externallyLinked && !externallyLinked\.archivedAt && !order\.externalUpdatedAt/);
+  assert.match(source, /discoveredExternalLink && !discoveredExternalLink\.archivedAt && !order\.externalUpdatedAt/);
   assert.match(source, /externallyLinked\?\.archivedAt \? \{ archivedAt: null \}/);
   assert.match(source, /if \(linked\) \{/);
   assert.match(source, /activateImportedClient/);
@@ -993,6 +999,7 @@ test("повторный sync восстанавливает главное из
     $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined, $queryRaw: async () => [],
     order: {
       findUnique: async ({ where }) => where.number ? null : orderRow || null,
+      count: async ({ where }) => orderRow?.modelImagePath === where.modelImagePath ? 1 : 0,
       create: async ({ data }) => (orderRow = { id: "order-image", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", ...data }),
       update: async ({ data }) => (orderRow = { ...orderRow, ...data }),
     },
@@ -1004,7 +1011,7 @@ test("повторный sync восстанавливает главное из
       upsert: async ({ create, update }) => itemRow ? (itemRow = { ...itemRow, ...update }) : (itemRow = { id: "item-image", ...create }),
     },
     payment: { findUnique: async () => null, findMany: async () => [] }, productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
-    activity: { create: async () => undefined }, auditLog: { create: async () => undefined }, keycrmSyncIssue: { findFirst: async () => null, create: async () => undefined },
+    activity: { findFirst: async () => null, create: async () => undefined }, auditLog: { create: async () => undefined }, keycrmSyncIssue: { findFirst: async () => null, create: async () => undefined },
   };
   const prisma = { $transaction: callback => callback(tx), keycrmSyncIssue: { create: async () => undefined } };
   const service = new KeycrmService(prisma);

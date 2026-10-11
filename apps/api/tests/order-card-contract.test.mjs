@@ -14,6 +14,9 @@ test("карточка заказа получает историю и сохр�
   assert.match(service,/activities:\s*\{\s*select/);
   assert.match(service,/ORDER_STATUSES_UPDATED/);
   assert.match(service,/entityType:\s*"Order"/);
+  const statusUpdate=service.slice(service.indexOf("async updateStatuses("),service.indexOf("async updateDeadline("));
+  assert.match(statusUpdate,/pg_advisory_xact_lock\(hashtext\(\$1\)\)/);
+  assert.ok(statusUpdate.indexOf("pg_advisory_xact_lock") < statusUpdate.indexOf("tx.order.findFirst"));
 });
 
 test("вид спорта заказа изменяется отдельной проверяемой мутацией",()=>{

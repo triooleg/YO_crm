@@ -84,6 +84,10 @@ test("повторная синхронизация опирается на вн
   assert.match(providerUpdate, /externalId: order\.externalId/);
   assert.match(providerUpdate, /deliveryServiceName: order\.delivery\.serviceName/);
   assert.match(providerUpdate, /deliveryTrackingCode: order\.delivery\.trackingCode/);
+  assert.match(providerUpdate, /preserveManualPrice/);
+  assert.match(service, /metadata: \{ path: \["priceChanged"\], equals: true \}/);
+  assert.match(service, /paidMinor >= persisted\.priceMinor/);
+  assert.match(service, /pg_advisory_xact_lock\(hashtext\(\$1\)\)[\s\S]*?order\.findUnique\(\{ where: \{ id: discoveredExisting\.id \} \}\)/);
   assert.match(service, /regexp_replace\(COALESCE\("phone", ''\)/);
   assert.match(service, /KEYCRM_SYNC_CONFIGURATION/);
   assert.match(service, /async createRun[\s\S]*?\$transaction[\s\S]*?KEYCRM_SYNC_CONFIGURATION/);

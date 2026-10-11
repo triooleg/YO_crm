@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Min, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, Min, ValidateIf, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
@@ -8,6 +8,21 @@ export class UploadModelImageDto {
   @ApiProperty() @IsString() @Length(1, 150) name!: string;
   @ApiProperty() @IsString() mime!: string;
   @ApiProperty() @IsString() data!: string;
+}
+
+export class UpdateOrderModelImageDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() itemId?: string;
+  @ApiProperty() @IsString() @Length(1, 150) modelImagePath!: string;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
+}
+
+export class UpdateOrderDetailsDto {
+  @ApiProperty() @IsString() @Length(1, 300) description!: string;
+  @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) priceMinor!: number;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedDescription!: string | null;
+  @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) expectedPriceMinor!: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 150) modelImagePath?: string;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
 }
 
 export class CreateOrderItemDto {

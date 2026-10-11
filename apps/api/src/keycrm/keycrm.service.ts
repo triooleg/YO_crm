@@ -423,17 +423,19 @@ export class KeycrmService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `${SOURCE_SYSTEM}:${order.sourceAccount}:${order.externalId}`);
       if (importedModelImagePath) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `KEYCRM_IMAGE:${importedModelImagePath}`);
-      const externallyLinked = await tx.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
-      const needsImageRepair = Boolean(externallyLinked && shouldReplaceImportedImage(externallyLinked.modelImagePath, importedModelImagePath));
-      if (externallyLinked && !externallyLinked.archivedAt && !order.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
-      if (externallyLinked && !externallyLinked.archivedAt && order.externalUpdatedAt && externallyLinked.externalUpdatedAt && order.externalUpdatedAt <= externallyLinked.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
-      const match = externallyLinked ? { order: null, ambiguous: false } : await this.findPotentialMatch(tx, order);
+      const discoveredExternalLink = await tx.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
+      const needsImageRepair = Boolean(discoveredExternalLink && shouldReplaceImportedImage(discoveredExternalLink.modelImagePath, importedModelImagePath));
+      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && !order.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
+      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && order.externalUpdatedAt && discoveredExternalLink.externalUpdatedAt && order.externalUpdatedAt <= discoveredExternalLink.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
+      const match = discoveredExternalLink ? { order: null, ambiguous: false } : await this.findPotentialMatch(tx, order);
       if (match.ambiguous) {
         await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "AMBIGUOUS_EXISTING_ORDER", message: "Найдено несколько подходящих клиентов или заказов. Заказ KeyCRM пропущен без изменения данных." } });
         return "SKIPPED" as const;
       }
-      const existing = externallyLinked ?? match.order;
-      if (existing) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", existing.id);
+      const discoveredExisting = discoveredExternalLink ?? match.order;
+      if (discoveredExisting) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", discoveredExisting.id);
+      const existing = discoveredExisting ? await tx.order.findUnique({ where: { id: discoveredExisting.id } }) : null;
+      const externallyLinked = discoveredExternalLink ? existing : null;
       if (existing && existing.currency !== order.currency) {
         await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "ORDER_CURRENCY_CHANGED", message: `KeyCRM передал валюту ${order.currency}, но заказ ${existing.number} и его история сохранены в ${existing.currency}. Заказ пропущен без изменений.` } });
         return "SKIPPED" as const;
@@ -463,10 +465,13 @@ export class KeycrmService {
         persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number: order.number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {
-        const depositRequiredMinor = nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
+        const manualPriceOverride = Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, select: { id: true } }));
+        const depositRequiredMinor = manualPriceOverride
+          ? existing.depositRequiredMinor
+          : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
         const replaceOrderImage = shouldReplaceImportedImage(existing.modelImagePath, importedModelImagePath);
         if (replaceOrderImage && existing.modelImagePath && IMPORTED_IMAGE_NAME.test(existing.modelImagePath)) replacedImagePaths.add(existing.modelImagePath);
-        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId), ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
+        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId, manualPriceOverride), ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
         if (!externallyLinked) await tx.auditLog.create({ data: { actorId, action: "LINK", entityType: "Order", entityId: persisted.id, before: existing, after: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       }
       const matchedExistingOrder = Boolean(existing && (!externallyLinked || existing.sourceLinkMode === "MATCHED_EXISTING"));
@@ -545,7 +550,7 @@ export class KeycrmService {
       }
       const activePayments = await tx.payment.findMany({ where: { orderId: persisted.id, voidedAt: null }, select: { amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true } });
       const paidMinor = activePayments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
-      const derivedPaymentStatus = paidMinor >= order.priceMinor && order.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
+      const derivedPaymentStatus = paidMinor >= persisted.priceMinor && persisted.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
       if (persisted.paymentStatus !== derivedPaymentStatus) persisted = await tx.order.update({ where: { id: persisted.id }, data: { paymentStatus: derivedPaymentStatus } });
       await this.syncProductionSlot(tx, order, persisted, paidMinor, actorId, runId);
       let slot = await tx.productionSlot.findUnique({ where: { orderId: persisted.id } });
@@ -587,7 +592,7 @@ export class KeycrmService {
       }
         return existing ? "UPDATED" as const : "CREATED" as const;
       });
-      if (result === "SKIPPED" && importedModelImagePath) await this.cleanupImportedImage(importedModelImagePath);
+      if (importedModelImagePath) await this.cleanupImportedImage(importedModelImagePath);
       if (result !== "SKIPPED") for (const replacedImagePath of replacedImagePaths) await this.cleanupImportedImage(replacedImagePath);
       return result;
     } catch (error) {
@@ -926,11 +931,11 @@ function orderProviderWrite(order: NormalizedKeycrmOrder, clientId: string) {
   };
 }
 
-function existingOrderProviderUpdate(order: NormalizedKeycrmOrder, clientId: string) {
+function existingOrderProviderUpdate(order: NormalizedKeycrmOrder, clientId: string, preserveManualPrice: boolean) {
   return {
     clientId,
     externalImageUrl: order.items.find((item) => item.externalImageUrl)?.externalImageUrl ?? null,
-    priceMinor: order.priceMinor,
+    ...(!preserveManualPrice ? { priceMinor: order.priceMinor } : {}),
     currency: order.currency,
     deliveryMinor: order.deliveryMinor,
     discountMinor: order.discountMinor,

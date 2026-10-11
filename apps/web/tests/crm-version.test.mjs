@@ -58,11 +58,19 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.36");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.37");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.36\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.36\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.37\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.37\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.37 описывает исправление выдачи изображений KeyCRM", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.37"'), i18n.indexOf('version: "0.1.36"'));
+  assert.match(release, /keycrm-<32 hex>\.jpg/);
+  assert.match(release, /защищённ/iu);
+  assert.match(release, /crm-v0\.1\.36/);
+  assert.match(changelog, /## \[0\.1\.37\] - 2026-10-11/);
 });
 
 test("журнал 0.1.36 описывает исправление загрузки изображений KeyCRM в Node.js 22", () => {
