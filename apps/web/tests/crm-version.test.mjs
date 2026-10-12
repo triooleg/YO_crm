@@ -58,11 +58,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.40");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.41");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.40\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.40\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.41\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.41\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.41 описывает полноразмерный график, hover и отправленные слоты", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.41"'), i18n.indexOf('version: "0.1.40"'));
+  assert.match(release, /всю доступную высоту/iu);
+  assert.match(release, /ближайшей дате отправки/iu);
+  assert.match(release, /Наведение/iu);
+  assert.match(release, /Отправлено/iu);
+  assert.match(release, /crm-v0\.1\.40/);
+  assert.match(changelog, /## \[0\.1\.41\] - 2026-10-12/);
 });
 
 test("журнал 0.1.40 описывает новый план производства и безопасный откат", () => {

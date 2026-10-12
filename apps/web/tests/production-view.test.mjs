@@ -3,10 +3,14 @@ import test from "node:test";
 
 import {
   buildProductionMetrics,
+  groupProductionOrdersBySchedule,
   orderMatchesProductionFilters,
   paymentPresentation,
+  productionOrderIsShipped,
   productionRange,
+  productionSlotTimingPresentation,
   shippingPresentation,
+  sortProductionOrdersByShippingProximity,
 } from "../lib/production-view.ts";
 
 const order = (overrides = {}) => ({
@@ -54,6 +58,14 @@ test("отправка различает план, накладную и фак
   assert.deepEqual(shippingPresentation(order({ shippingStatus: "LOST", shippedAt: "2026-10-20" })), { code: "lost", date: "2026-10-20" });
 });
 
+test("отправленный производственный слот определяется фактом или статусом отправки", () => {
+  assert.equal(productionOrderIsShipped(order({ shippedAt: "2026-10-20" })), true);
+  assert.equal(productionOrderIsShipped(order({ shippingStatus: "SHIPPED", shippedAt: null })), true);
+  assert.equal(productionOrderIsShipped(order({ shippingStatus: "IN_TRANSIT", shippedAt: null })), true);
+  assert.equal(productionOrderIsShipped(order({ shippingStatus: "DELIVERED", deliveredAt: "2026-10-22" })), true);
+  assert.equal(productionOrderIsShipped(order({ hasTrackingNumber: true, shippingStatus: "LABEL_CREATED" })), false);
+});
+
 test("KPI имеют явный знаменатель и считают загрузку слотами", () => {
   const orders = [
     order(),
@@ -79,4 +91,42 @@ test("поиск и фильтры работают по клиенту, стр�
   assert.equal(orderMatchesProductionFilters(candidate, { query: "elvis", payment: "unpaid", production: "SCHEDULED", shipping: "tracking", slot: "tentative", deadline: "all" }), true);
   assert.equal(orderMatchesProductionFilters(order({ requiredDeliveryAt: "2026-10-10" }), { query: "", payment: "all", production: "all", shipping: "all", slot: "all", deadline: "overdue" }, new Date("2026-10-12")), true);
   assert.equal(orderMatchesProductionFilters(order({ requiredDeliveryAt: "2026-10-10", shippedAt: "2026-10-09" }), { query: "", payment: "all", production: "all", shipping: "all", slot: "all", deadline: "overdue" }, new Date("2026-10-12")), false);
+});
+
+test("сортировка по отправке ставит ближайшие к сегодня даты первыми и не меняет исходный список", () => {
+  const orders = [
+    order({ id: "future-10", number: "KC-650", requiredDeliveryAt: "2026-10-22" }),
+    order({ id: "missing", number: "KC-651", requiredDeliveryAt: undefined }),
+    order({ id: "past-1", number: "KC-652", requiredDeliveryAt: "2026-10-11" }),
+    order({ id: "today", number: "KC-653", requiredDeliveryAt: "2026-10-12" }),
+    order({ id: "future-2", number: "KC-654", requiredDeliveryAt: "2026-10-14" }),
+  ];
+
+  assert.deepEqual(
+    sortProductionOrdersByShippingProximity(orders, new Date("2026-10-12T12:00:00")).map(({ id }) => id),
+    ["today", "past-1", "future-2", "future-10", "missing"],
+  );
+  assert.deepEqual(orders.map(({ id }) => id), ["future-10", "missing", "past-1", "today", "future-2"]);
+});
+
+test("сортировка отправки использует shippedAt, а deliveredAt не подменяет дату отправки", () => {
+  const orders = [
+    order({ id: "planned", requiredDeliveryAt: "2026-10-14" }),
+    order({ id: "delivered", requiredDeliveryAt: "2026-10-30", shippedAt: "2026-10-11", deliveredAt: "2026-10-12" }),
+  ];
+  assert.deepEqual(sortProductionOrdersByShippingProximity(orders, new Date("2026-10-12")).map(({ id }) => id), ["delivered", "planned"]);
+});
+
+test("hover слота различает остаток, сегодняшний срок, просрочку и завершённое производство", () => {
+  assert.deepEqual(productionSlotTimingPresentation(order({ productionSlot: { startsAt: "2026-10-10", endsAt: "2026-10-15" } }), new Date("2026-10-12")), { duration: 6, code: "remaining", days: 3 });
+  assert.deepEqual(productionSlotTimingPresentation(order({ productionSlot: { startsAt: "2026-10-10", endsAt: "2026-10-12" } }), new Date("2026-10-12")), { duration: 3, code: "remaining", days: 0 });
+  assert.deepEqual(productionSlotTimingPresentation(order({ productionSlot: { startsAt: "2026-10-08", endsAt: "2026-10-10" } }), new Date("2026-10-12")), { duration: 3, code: "overdue", days: 2 });
+  assert.deepEqual(productionSlotTimingPresentation(order({ productionStatus: "READY", productionSlot: { startsAt: "2026-10-01", endsAt: "2026-10-05" } }), new Date("2026-10-12")), { duration: 5, code: "completed", days: 0 });
+  assert.deepEqual(productionSlotTimingPresentation(order({ shippingStatus: "SHIPPED", productionStatus: "SCHEDULED", productionSlot: { startsAt: "2026-10-01", endsAt: "2026-10-05" } }), new Date("2026-10-12")), { duration: 5, code: "completed", days: 0 });
+});
+
+test("режим графика сохраняет запланированные заказы выше незапланированных", () => {
+  const orders = [order({ id: "unscheduled-1", productionSlot: undefined }), order({ id: "scheduled-1" }), order({ id: "unscheduled-2", productionSlot: undefined }), order({ id: "scheduled-2" })];
+  assert.deepEqual(groupProductionOrdersBySchedule(orders).map(({ id }) => id), ["scheduled-1", "scheduled-2", "unscheduled-1", "unscheduled-2"]);
+  assert.deepEqual(orders.map(({ id }) => id), ["unscheduled-1", "scheduled-1", "unscheduled-2", "scheduled-2"]);
 });

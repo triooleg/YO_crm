@@ -56,6 +56,32 @@ test("выбранный заказ открывает нижнюю панель
   assert.match(planner, /production-details-actions/);
   assert.match(workspace, /onOpenOrder\(selectedOrder\.id\)/);
   assert.match(shell, /onOpenOrder=\{orderId=>navigate\("orders",\{orderId\}\)\}/);
+  assert.match(workspace, /production-board-shell/);
+  assert.match(styles, /\.production-board-shell\{[^}]*position:relative[^}]*flex:1/);
+  assert.match(styles, /\.production-board\{[^}]*height:100%/);
+  assert.match(styles, /\.production-order-details\{[^}]*position:absolute[^}]*bottom:/);
+  assert.match(styles, /\.production-board-shell\.has-selection \.production-board-canvas:after\{content:"";display:block;height:154px\}/);
+  assert.match(styles, /@media\(max-width:1200px\)[\s\S]*\.production-board-shell\.has-selection \.production-board-canvas:after\{height:min\(calc\(70dvh \+ 48px\),608px\)\}/);
+});
+
+test("производственный график можно упорядочить по ближайшей дате отправки", () => {
+  assert.match(workspace, /sortProductionOrdersByShippingProximity/);
+  assert.match(workspace, /sortMode/);
+  assert.match(planner, /productionUi\.sortShippingProximity/);
+});
+
+test("при наведении слот показывает краткие сроки выполнения", () => {
+  assert.match(planner, /HoverCard/);
+  assert.match(planner, /production-slot-preview/);
+  assert.match(planner, /productionUi\.totalDuration/);
+  assert.match(planner, /productionUi\.remainingProduction/);
+});
+
+test("уже отправленный заказ показывается одной серой полосой на весь слот", () => {
+  assert.match(planner, /productionOrderIsShipped/);
+  assert.match(planner, /timeline-shipped-segment/);
+  assert.match(planner, /productionUi\.shippingShipped/);
+  assert.match(styles, /\.production-flow-bar\.is-sent/);
 });
 
 test("удаление касается только выбранного слота и требует подтверждения", () => {

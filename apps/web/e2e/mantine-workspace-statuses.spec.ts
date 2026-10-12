@@ -167,7 +167,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.40");
+    await expect(page.locator(".crm-version")).toContainText("0.1.41");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -190,8 +190,30 @@ test("производственный план соответствует ут�
   await expect(page.locator(".timeline-production-segment").first()).toBeVisible();
   await expect(page.locator(".timeline-shipping-segment").first()).toBeVisible();
   await expect(page.locator(".shipping-date-marker").first()).toBeVisible();
+  const boardWithoutSelection = await page.locator(".production-board").evaluate((board) => {
+    const box = board.getBoundingClientRect();
+    return { height: box.height, bottom: box.bottom, viewportHeight: innerHeight };
+  });
+  expect(boardWithoutSelection.height).toBeGreaterThan(450);
+  expect(boardWithoutSelection.viewportHeight - boardWithoutSelection.bottom).toBeLessThanOrEqual(20);
+  await page.screenshot({ path: testInfo.outputPath("production-full-board-1703x895.png"), fullPage: false });
+
+  await page.getByRole("combobox", { name: "Порядок заказов" }).click();
+  await page.getByRole("option", { name: "Ближайшая дата отправки" }).click();
+  await expect(page.locator(".production-order-main strong").first()).toHaveText("KC-640");
+
+  await page.locator(".timeline-bar").first().hover();
+  const slotPreview = page.locator(".production-slot-preview");
+  await expect(slotPreview).toBeVisible();
+  await expect(slotPreview).toContainText("Дата начала");
+  await expect(slotPreview).toContainText("Дата завершения");
+  await expect(slotPreview).toContainText("Общий срок");
+  await expect(slotPreview).toContainText(/До завершения|Просрочено/);
+  await page.screenshot({ path: testInfo.outputPath("production-slot-hover-1703x895.png"), fullPage: false });
+
   await page.locator(".production-order-summary").first().click();
   await expect(page.locator(".production-order-details")).toBeVisible();
+  await expect(page.locator(".production-lifecycle")).toBeVisible();
   await expect(page.locator(".production-lifecycle")).toContainText("Приостановлено");
   const geometry = await page.locator(".production-board").evaluate((board) => {
     const box = board.getBoundingClientRect();
@@ -200,7 +222,7 @@ test("производственный план соответствует ут�
     const details = document.querySelector(".production-order-details")?.getBoundingClientRect();
     const rowLabel = board.querySelector(".production-order-main small");
     const rowFont = rowLabel ? Number.parseFloat(getComputedStyle(rowLabel).fontSize) : 0;
-    return { width: box.width, height: box.height, leftWidth: left?.width ?? 0, rowHeight, rowFont, detailsBottom: details?.bottom ?? 0, viewportWidth: innerWidth, viewportHeight: innerHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    return { width: box.width, height: box.height, leftWidth: left?.width ?? 0, rowHeight, rowFont, detailsTop: details?.top ?? 0, detailsBottom: details?.bottom ?? 0, boardBottom: box.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
   });
   expect(geometry.width).toBeGreaterThan(1600);
   expect(geometry.height).toBeGreaterThanOrEqual(320);
@@ -209,6 +231,9 @@ test("производственный план соответствует ут�
   expect(geometry.rowHeight).toBeLessThanOrEqual(42);
   expect(geometry.rowFont).toBeGreaterThanOrEqual(10);
   expect(geometry.detailsBottom).toBeLessThanOrEqual(geometry.viewportHeight);
+  expect(geometry.detailsBottom).toBeLessThanOrEqual(geometry.boardBottom);
+  expect(geometry.detailsTop).toBeGreaterThan(0);
+  expect(geometry.height).toBeCloseTo(boardWithoutSelection.height, 0);
   expect(geometry.overflow).toBe(0);
   expect(consoleErrors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("production-redesign-1703x895.png"), fullPage: false });
@@ -224,13 +249,33 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 
     await expect(page.locator(".production-order-details")).toBeVisible();
     const visual = await page.locator(".production-page").evaluate((root) => {
       const label = root.querySelector(".production-order-main small");
+      const period = root.querySelector(".production-period-controls")?.getBoundingClientRect();
+      const actions = root.querySelector(".production-heading-actions")?.getBoundingClientRect();
+      const heading = root.querySelector(".production-heading");
       return {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         rowFont: label ? Number.parseFloat(getComputedStyle(label).fontSize) : 0,
+        periodLeft: period?.left ?? 0,
+        periodRight: period?.right ?? 0,
+        actionsLeft: actions?.left ?? 0,
+        actionsRight: actions?.right ?? 0,
+        headingDisplay: heading ? getComputedStyle(heading).display : "",
+        headingWidth: heading?.getBoundingClientRect().width ?? 0,
+        periodMarginLeft: period ? getComputedStyle(root.querySelector(".production-period-controls")!).marginLeft : "",
+        periodFlex: period ? getComputedStyle(root.querySelector(".production-period-controls")!).flex : "",
       };
     });
     expect(visual.overflow).toBe(0);
     expect(visual.rowFont).toBeGreaterThanOrEqual(10);
+    if (viewport.width === 390) {
+      expect(visual.headingDisplay).toBe("grid");
+      expect(visual.headingWidth).toBeLessThanOrEqual(370);
+      expect(visual.periodMarginLeft).toBe("0px");
+      expect(visual.periodLeft).toBeLessThanOrEqual(12);
+      expect(visual.periodRight).toBeLessThanOrEqual(380);
+      expect(visual.actionsLeft).toBeLessThanOrEqual(12);
+      expect(visual.actionsRight).toBeLessThanOrEqual(380);
+    }
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`production-redesign-${viewport.width}x${viewport.height}.png`), fullPage: false });
   });
@@ -346,7 +391,27 @@ test("панель производственного слота показыв�
   expect(consoleErrors).toEqual([]);
 });
 
-test("отправленный заказ с накладной получает зелёный слот, а количество больше одного видно слева", async ({ page }) => {
+test("на планшете последний заказ можно прокрутить выше наложенной панели", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await mockWorkspaceApi(page, { denseProduction: true });
+  await page.goto("/?section=production");
+  await page.locator(".timeline-bar").first().click();
+
+  const scroll = page.locator(".production-board-scroll");
+  await scroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const lastRow = page.locator(".production-order-row").last();
+  await expect(lastRow).toBeVisible();
+  const geometry = await page.evaluate(() => {
+    const row = document.querySelector(".production-order-row:last-child")?.getBoundingClientRect();
+    const details = document.querySelector(".production-order-details")?.getBoundingClientRect();
+    const scroll = document.querySelector(".production-board-scroll");
+    return row && details && scroll ? { rowBottom: row.bottom, detailsTop: details.top, scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight, paddingBottom: getComputedStyle(scroll).paddingBottom } : null;
+  });
+  expect(geometry).not.toBeNull();
+  expect(geometry!.rowBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry!.detailsTop);
+});
+
+test("отправленный заказ получает серый слот со статусом на всю линию, а количество больше одного видно слева", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { shippedProductionOrder: true });
   await page.goto("/?section=production");
@@ -354,9 +419,11 @@ test("отправленный заказ с накладной получает
   const row = page.locator(".production-order-row").filter({ hasText: "YO-26-0103" });
   await expect(row.locator(".production-order-description")).toContainText("3 шт.");
   await expect(row.locator(".production-order-main")).toContainText("🇨🇿 Czech Republic");
-  await expect(row.locator(".timeline-bar")).toHaveClass(/shipped/);
-  await expect(row.locator(".timeline-bar")).toHaveClass(/shipped/);
-  await expect(row.locator(".timeline-tracking-indicator")).toHaveText("трек ✓");
+  await expect(row.locator(".timeline-bar")).toHaveClass(/is-sent/);
+  await expect(row.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
+  await expect(row.locator(".timeline-payment-segment")).toHaveCount(0);
+  await expect(row.locator(".timeline-production-segment")).toHaveCount(0);
+  await expect(row.locator(".timeline-tracking-indicator")).toHaveCount(0);
 });
 
 for (const viewport of [
@@ -371,8 +438,7 @@ for (const viewport of [
 
     const row = page.locator(".production-order-row").filter({ hasText: "YO-26-0103" });
     await expect(row.locator(".production-order-description em")).toHaveCount(0);
-    await expect(row.locator(".timeline-bar")).toHaveClass(/shipped/);
-    await expect(row.locator(".timeline-bar")).toHaveClass(/shipped/);
+    await expect(row.locator(".timeline-bar")).toHaveClass(/is-tracked/);
     await expect(row.locator(".timeline-tracking-indicator")).toHaveText("трек ✓");
     await expect(row.locator(".timeline-bar")).toBeVisible();
     expect(await row.locator(".timeline-tracking-indicator").evaluate((indicator) => {
@@ -385,21 +451,23 @@ for (const viewport of [
   });
 }
 
-test("legacy накладная KeyCRM также окрашивает отправленный слот", async ({ page }) => {
+test("legacy статус отправки KeyCRM также показывает серый отправленный слот", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { legacyShippedProductionOrder: true });
   await page.goto("/?section=production");
 
-  await expect(page.locator(".timeline-bar")).toHaveClass(/shipped/);
+  await expect(page.locator(".timeline-bar")).toHaveClass(/is-sent/);
+  await expect(page.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
 });
 
-test("отправленный статус без накладной не окрашивает слот и не показывает отсутствующую страну", async ({ page }) => {
+test("отправленный статус без накладной всё равно показывает серый слот и не показывает отсутствующую страну", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { shippedWithoutTracking: true });
   await page.goto("/?section=production");
 
   const row = page.locator(".production-order-row").filter({ hasText: "YO-26-0103" });
-  await expect(row.locator(".timeline-bar")).not.toHaveClass(/shipped/);
+  await expect(row.locator(".timeline-bar")).toHaveClass(/is-sent/);
+  await expect(row.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
   await expect(row.locator(".timeline-tracking-indicator")).toHaveCount(0);
   await expect(row.locator(".production-order-main")).toContainText("Страна не указана");
 });

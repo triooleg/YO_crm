@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { Modal } from "@mantine/core";
 import { productionUi } from "../lib/i18n";
 import { clearOrderContextUrl, orderContextId, resolveOrderContext } from "../lib/order-context";
-import { buildProductionMetrics, orderMatchesProductionFilters, productionAddDays, productionDayDiff, productionIso, productionLocalDate, productionRange, type ProductionFilters, type ProductionOrderView, type ProductionRangeMode, type ProductionSlotView } from "../lib/production-view";
+import { buildProductionMetrics, groupProductionOrdersBySchedule, orderMatchesProductionFilters, productionAddDays, productionDayDiff, productionIso, productionLocalDate, productionRange, sortProductionOrdersByShippingProximity, type ProductionFilters, type ProductionOrderView, type ProductionRangeMode, type ProductionSlotView, type ProductionSortMode } from "../lib/production-view";
 import { CrmAlert } from "./crm/alert";
 import { CrmButton } from "./crm/settings-controls";
 import { ProductionFiltersBar, ProductionHeader, ProductionKpis, ProductionOrderDetails, ProductionTimeline } from "./production-planner-view";
@@ -29,6 +29,7 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   const [productionSettings, setProductionSettings] = useState<ProductionSettings | null>(null);
   const [filters, setFilters] = useState<ProductionFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortMode, setSortMode] = useState<ProductionSortMode>("schedule");
   const [capacityPerDay, setCapacity] = useState(3);
   const [previewWidth, setPreviewWidth] = useState(600);
   const [selected, setSelected] = useState<string>();
@@ -75,7 +76,10 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   useEffect(() => { const capacity = Number(localStorage.getItem("production-capacity")); if (capacity >= 1 && capacity <= 10) setCapacity(capacity); const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY)); if (Number.isFinite(width) && width >= 200 && width <= 1200) setPreviewWidth(width); }, []);
 
   const activeOrders = useMemo(() => orders.filter((order) => order.productionStatus !== "CANCELLED"), [orders]);
-  const visibleOrders = useMemo(() => activeOrders.filter((order) => orderMatchesProductionFilters(order, filters)), [activeOrders, filters]);
+  const visibleOrders = useMemo(() => {
+    const filtered = activeOrders.filter((order) => orderMatchesProductionFilters(order, filters));
+    return sortMode === "shippingProximity" ? sortProductionOrdersByShippingProximity(filtered) : groupProductionOrdersBySchedule(filtered);
+  }, [activeOrders, filters, sortMode]);
   const metrics = useMemo(() => buildProductionMetrics(activeOrders, base, range.days, capacityPerDay, productionSettings?.defaultDurationDays ?? 7), [activeOrders, base, range.days, capacityPerDay, productionSettings]);
   const selectedOrder = orders.find((order) => order.id === selected), periodEnd = productionAddDays(base, range.days - 1);
   const periodFocus = productionAddDays(base, Math.floor((range.days - 1) / 2));
@@ -140,21 +144,23 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   return <main className="production-page">
     <ProductionHeader periodLabel={periodLabel} mode={mode} onMode={setMode} onPrevious={() => setBase(productionAddDays(base, -range.shiftDays))} onNext={() => setBase(productionAddDays(base, range.shiftDays))} onToday={() => setBase(startOfCalendarWeek(new Date()))} onCreateOrder={onCreateOrder} canCreateOrder={canManageOrders}/>
     <ProductionKpis metrics={metrics} capacity={capacityPerDay}/>
-    <ProductionFiltersBar filters={filters} opened={filtersOpen} capacity={capacityPerDay} previewWidth={previewWidth} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)}/>
+    <ProductionFiltersBar filters={filters} opened={filtersOpen} sortMode={sortMode} capacity={capacityPerDay} previewWidth={previewWidth} onSortMode={setSortMode} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)}/>
     {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
-    <ProductionTimeline orders={visibleOrders} days={days} base={base} dayWidth={range.dayWidth} capacity={capacityPerDay} selectedId={selected} onSelect={(orderId) => setSelected((current) => current === orderId ? undefined : orderId)} onDrag={drag} onToggleLock={(order) => order.productionSlot && void saveSlot(order, { ...order.productionSlot, locked: !order.productionSlot.locked })} onSchedule={autoSchedule} onPreview={setPreview}/>
-    {selectedOrder && (
-      <ProductionOrderDetails
-        order={selectedOrder}
-        onClose={() => {
-          setSlotDeleteOpen(false);
-          setSelected(undefined);
-        }}
-        onOpenOrder={onOpenOrder && canManageOrders ? () => onOpenOrder(selectedOrder.id) : undefined}
-        onSaveSlot={(slot) => void saveSlot(selectedOrder, slot)}
-        onDeleteSlot={() => setSlotDeleteOpen(true)}
-      />
-    )}
+    <div className={`production-board-shell${selectedOrder ? " has-selection" : ""}`}>
+      <ProductionTimeline orders={visibleOrders} days={days} base={base} dayWidth={range.dayWidth} capacity={capacityPerDay} selectedId={selected} onSelect={(orderId) => setSelected((current) => current === orderId ? undefined : orderId)} onDrag={drag} onToggleLock={(order) => order.productionSlot && void saveSlot(order, { ...order.productionSlot, locked: !order.productionSlot.locked })} onSchedule={autoSchedule} onPreview={setPreview}/>
+      {selectedOrder && (
+        <ProductionOrderDetails
+          order={selectedOrder}
+          onClose={() => {
+            setSlotDeleteOpen(false);
+            setSelected(undefined);
+          }}
+          onOpenOrder={onOpenOrder && canManageOrders ? () => onOpenOrder(selectedOrder.id) : undefined}
+          onSaveSlot={(slot) => void saveSlot(selectedOrder, slot)}
+          onDeleteSlot={() => setSlotDeleteOpen(true)}
+        />
+      )}
+    </div>
     {preview && <div className="production-image-preview" style={{ left: Math.min(preview.x + 18, window.innerWidth - Math.min(previewWidth, window.innerWidth - 36) - 18), top: Math.min(preview.y + 18, window.innerHeight - 280), width: Math.min(previewWidth, window.innerWidth - 36) }}><img src={preview.src} alt={productionUi.enlargedModel}/><div><b>{preview.country}</b><span>{preview.quantity} {productionUi.pieces}</span><strong>{preview.total}</strong></div></div>}
     <Modal opened={slotDeleteOpen} onClose={() => !slotDeleting && setSlotDeleteOpen(false)} title={productionUi.deleteSlotTitle} aria-label={productionUi.deleteSlotTitle} closeButtonProps={{ "aria-label": productionUi.close, disabled: slotDeleting }} closeOnClickOutside={!slotDeleting} closeOnEscape={!slotDeleting} returnFocus centered size={460}><p>{productionUi.deleteSlotHint}</p><div className="production-delete-slot-confirm"><CrmButton tone="secondary" disabled={slotDeleting} onClick={() => setSlotDeleteOpen(false)}>{productionUi.cancel}</CrmButton><CrmButton color="red" loading={slotDeleting} onClick={() => void deleteSlot()}>{productionUi.deleteSlotConfirm}</CrmButton></div></Modal>
   </main>;

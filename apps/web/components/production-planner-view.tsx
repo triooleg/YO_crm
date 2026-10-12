@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { ActionIcon, Collapse, Menu, NumberInput, SegmentedControl, Select, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Collapse, HoverCard, Menu, NumberInput, SegmentedControl, Select, TextInput, Tooltip } from "@mantine/core";
 import { labels, productionUi } from "../lib/i18n";
 import {
   paymentPresentation,
@@ -9,12 +9,15 @@ import {
   productionIso,
   productionLocalDate,
   productionOrderImage,
+  productionOrderIsShipped,
   productionOrderQuantity,
+  productionSlotTimingPresentation,
   shippingPresentation,
   type ProductionFilters,
   type ProductionOrderView,
   type ProductionRangeMode,
   type ProductionSlotView,
+  type ProductionSortMode,
 } from "../lib/production-view";
 import { CrmButton } from "./crm/settings-controls";
 import { CrmStatusBadge } from "./crm/status-badge";
@@ -111,11 +114,13 @@ export function ProductionKpis({ metrics, capacity }: {
   </section>;
 }
 
-export function ProductionFiltersBar({ filters, opened, capacity, previewWidth, onCapacity, onPreviewWidth, onToggle, onChange, onReset }: {
+export function ProductionFiltersBar({ filters, opened, sortMode, capacity, previewWidth, onSortMode, onCapacity, onPreviewWidth, onToggle, onChange, onReset }: {
   filters: ProductionFilters;
   opened: boolean;
+  sortMode: ProductionSortMode;
   capacity: number;
   previewWidth: number;
+  onSortMode: (mode: ProductionSortMode) => void;
   onCapacity: (value: number) => void;
   onPreviewWidth: (value: number) => void;
   onToggle: () => void;
@@ -126,6 +131,7 @@ export function ProductionFiltersBar({ filters, opened, capacity, previewWidth, 
     <div className="production-filter-primary">
       <TextInput value={filters.query} onChange={(event) => onChange({ ...filters, query: event.currentTarget.value })} placeholder={productionUi.search} aria-label={productionUi.search} leftSection="⌕"/>
       <CrmButton tone="secondary" aria-expanded={opened} onClick={onToggle}>☷ {productionUi.filters}</CrmButton>
+      <label className="production-sort-control"><span>{productionUi.sortOrders}</span><Select aria-label={productionUi.sortOrders} value={sortMode} onChange={(value) => onSortMode((value || "schedule") as ProductionSortMode)} allowDeselect={false} data={[{ value: "schedule", label: productionUi.sortSchedule }, { value: "shippingProximity", label: productionUi.sortShippingProximity }]}/></label>
       <label className="production-capacity-control"><span>{productionUi.loadTitle}</span><Select aria-label={productionUi.slotsPerDay} value={String(capacity)} onChange={(value) => value && onCapacity(Number(value))} allowDeselect={false} data={[1, 2, 3, 4, 5, 6].map((value) => ({ value: String(value), label: `${value} ${productionUi.slotsPerDay}` }))}/></label>
     </div>
     <Collapse expanded={opened}><div className="production-filter-grid">
@@ -176,8 +182,9 @@ export function ProductionTimeline({ orders, days, base, dayWidth, capacity, sel
           <div className="production-day-row"><div/><>{days.map((day) => { const today = productionIso(day) === productionIso(new Date()); const weekend = day.getDay() === 0 || day.getDay() === 6; return <span key={productionIso(day)} className={`${today ? "today" : ""} ${weekend ? "weekend" : ""}`}><small>{new Intl.DateTimeFormat("ru-RU", { weekday: "short" }).format(day)}</small><b>{day.getDate()}</b>{today && <em>{productionUi.today}</em>}</span>; })}</></div>
           <div className="production-load-row"><div>{productionUi.loadTitle} · {capacity}/{productionUi.daysShort}</div>{dailyLoad.map((value, index) => <span key={index} className={value > capacity ? "over" : value === capacity ? "full" : ""}><i style={{ width: `${Math.min(100, value / capacity * 100)}%` }}/><small>{value}/{capacity}</small></span>)}</div>
         </div>
-        {scheduled.map((order) => <TimelineOrderRow key={order.id} order={order} days={days} base={base} selected={selectedId === order.id} onSelect={() => onSelect(order.id)} onDrag={onDrag} onToggleLock={() => onToggleLock(order)} onPreview={onPreview}/>) }
-        {unscheduled.map((order) => <div className={`production-order-row is-unscheduled ${selectedId === order.id ? "is-selected" : ""}`} key={order.id}><OrderSummary order={order} onSelect={() => onSelect(order.id)}/><CrmButton className="production-schedule-order" tone="secondary" onClick={() => onSchedule(order)}>+ {productionUi.schedule}</CrmButton></div>)}
+        {orders.map((order) => order.productionSlot
+          ? <TimelineOrderRow key={order.id} order={order} days={days} base={base} selected={selectedId === order.id} onSelect={() => onSelect(order.id)} onDrag={onDrag} onToggleLock={() => onToggleLock(order)} onPreview={onPreview}/>
+          : <div className={`production-order-row is-unscheduled ${selectedId === order.id ? "is-selected" : ""}`} key={order.id}><OrderSummary order={order} onSelect={() => onSelect(order.id)}/><CrmButton className="production-schedule-order" tone="secondary" onClick={() => onSchedule(order)}>+ {productionUi.schedule}</CrmButton></div>)}
         {!orders.length && <div className="production-empty-state">{productionUi.noOrders}</div>}
       </div>
     </div>
@@ -200,18 +207,22 @@ function TimelineOrderRow({ order, days, base, selected, onSelect, onDrag, onTog
   const shipping = shippingPresentation(order);
   const shippingDay = shipping.date ? productionDayDiff(shipping.date, base) : undefined;
   const payment = paymentPresentation(order);
-  const duration = productionDayDiff(slot.endsAt, slot.startsAt) + 1;
+  const isSent = productionOrderIsShipped(order);
+  const timing = productionSlotTimingPresentation(order)!;
+  const duration = timing.duration;
   const shippingGap = shippingDay === undefined ? undefined : shippingDay - end;
   return <div className={`production-order-row ${selected ? "is-selected" : ""}`}>
     <OrderSummary order={order} onSelect={onSelect} onPreview={onPreview}/>
-    {end >= 0 && start < days.length && <button type="button" className={`timeline-bar production-flow-bar ${slot.tentative ? "tentative" : ""} ${slot.locked ? "locked" : ""} ${order.hasTrackingNumber ? "shipped" : ""}`} style={{ gridColumn: `${Math.max(0, start) + 2}/${Math.min(days.length, end + 1) + 2}` }} onClick={(event) => { if (event.currentTarget.dataset.dragged !== "true") onSelect(); }} onPointerDown={(event) => onDrag(order, "move", event)} aria-label={`${order.number}: ${paymentLabel(payment.code)}, ${productionUi.productionSegment}, ${shippingLabel(shipping.code)}`}>
-      <span className="resize left" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "left", event); }}/>
-      <span className={`timeline-payment-segment is-${payment.code}`}>▣ <b>{paymentLabel(payment.code)}</b></span>
-      <span className="timeline-production-segment">♙ <b>{productionUi.productionSegment}</b><small>{duration} {productionUi.daysShort}</small></span>
-      {slot.locked && <span className="timeline-lock-indicator" aria-label={productionUi.slotLocked}>🔒</span>}
-      {order.hasTrackingNumber && <span className="timeline-tracking-indicator">{productionUi.trackingAvailable}</span>}
-      <span className="resize right" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "right", event); }}/>
-    </button>}
+    {end >= 0 && start < days.length && <HoverCard withinPortal shadow="md" openDelay={350} closeDelay={100} position="top" withArrow>
+      <HoverCard.Target><button type="button" className={`timeline-bar production-flow-bar ${slot.tentative ? "tentative" : ""} ${slot.locked ? "locked" : ""} ${isSent ? "is-sent" : order.hasTrackingNumber ? "is-tracked" : ""}`} style={{ gridColumn: `${Math.max(0, start) + 2}/${Math.min(days.length, end + 1) + 2}` }} onClick={(event) => { if (event.currentTarget.dataset.dragged !== "true") onSelect(); }} onPointerDown={(event) => onDrag(order, "move", event)} aria-label={isSent ? `${order.number}: ${productionUi.shippingShipped}` : `${order.number}: ${paymentLabel(payment.code)}, ${productionUi.productionSegment}, ${shippingLabel(shipping.code)}`}>
+        <span className="resize left" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "left", event); }}/>
+        {isSent ? <span className="timeline-shipped-segment"><b>{productionUi.shippingShipped}</b></span> : <><span className={`timeline-payment-segment is-${payment.code}`}>▣ <b>{paymentLabel(payment.code)}</b></span><span className="timeline-production-segment">♙ <b>{productionUi.productionSegment}</b><small>{duration} {productionUi.daysShort}</small></span></>}
+        {slot.locked && <span className="timeline-lock-indicator" aria-label={productionUi.slotLocked}>🔒</span>}
+        {!isSent && order.hasTrackingNumber && <span className="timeline-tracking-indicator">{productionUi.trackingAvailable}</span>}
+        <span className="resize right" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "right", event); }}/>
+      </button></HoverCard.Target>
+      <HoverCard.Dropdown className="production-slot-preview"><strong>{order.number} · {order.client.displayName}</strong><dl><div><dt>{productionUi.startDate}</dt><dd>{formatDate(slot.startsAt)}</dd></div><div><dt>{productionUi.endDate}</dt><dd>{formatDate(slot.endsAt)}</dd></div><div><dt>{productionUi.totalDuration}</dt><dd>{duration} {productionUi.daysShort}</dd></div><div><dt>{timing.code === "completed" ? productionUi.productionCompleted : timing.code === "overdue" ? productionUi.productionOverdue : productionUi.remainingProduction}</dt><dd>{timing.days} {productionUi.daysShort}</dd></div></dl></HoverCard.Dropdown>
+    </HoverCard>}
     {shippingGap !== undefined && shippingGap > 0 && end >= 0 && shippingDay !== undefined && <span className={`timeline-shipping-segment is-${shipping.code}`} style={{ gridColumn: `${Math.max(0, end + 1) + 2}/${Math.min(days.length, shippingDay + 1) + 2}` }}><b>🚚</b><span>{productionUi.shippingSegment}</span></span>}
     {shippingDay !== undefined && shippingDay >= 0 && shippingDay < days.length && <Tooltip label={`${shippingLabel(shipping.code)}: ${formatDate(shipping.date)}`}><span className={`shipping-date-marker is-${shipping.code}`} style={{ gridColumn: `${shippingDay + 2}/${shippingDay + 3}` }}><b>🚚</b><small>{productionLocalDate(shipping.date!).getDate()}</small></span></Tooltip>}
     <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon className="timeline-row-menu" variant="subtle" aria-label={`${order.number}: ${productionUi.filters}`}>⋮</ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item onClick={onSelect}>{productionUi.selectedOrder}</Menu.Item><Menu.Item onClick={onToggleLock}>{slot.locked ? productionUi.unlockSlot : productionUi.lockSlot}</Menu.Item></Menu.Dropdown></Menu>

@@ -1,4 +1,5 @@
 export type ProductionRangeMode = "day" | "week" | "month" | "twoMonths";
+export type ProductionSortMode = "schedule" | "shippingProximity";
 
 export type ProductionSlotView = {
   startsAt: string;
@@ -105,6 +106,39 @@ export function shippingPresentation(order: Pick<ProductionOrderView, "requiredD
   if (order.hasTrackingNumber) return { code: "tracking" as const, date: order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : null };
   if (order.requiredDeliveryAt) return { code: "planned" as const, date: productionIso(order.requiredDeliveryAt) };
   return { code: "none" as const, date: null };
+}
+
+export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shippedAt" | "deliveredAt" | "shippingStatus">) {
+  return Boolean(order.shippedAt || order.deliveredAt || ["SHIPPED", "IN_TRANSIT", "DELIVERED", "RETURNED", "LOST"].includes(order.shippingStatus));
+}
+
+export function sortProductionOrdersByShippingProximity(orders: ProductionOrderView[], today: Date = new Date()) {
+  const reference = productionLocalDate(today).getTime();
+  return orders.map((order, index) => ({ order, index, date: order.shippedAt ? productionIso(order.shippedAt) : order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : null }))
+    .sort((left, right) => {
+      if (!left.date && !right.date) return left.index - right.index;
+      if (!left.date) return 1;
+      if (!right.date) return -1;
+      const leftTime = productionLocalDate(left.date).getTime();
+      const rightTime = productionLocalDate(right.date).getTime();
+      return Math.abs(leftTime - reference) - Math.abs(rightTime - reference) || leftTime - rightTime || left.index - right.index;
+    })
+    .map(({ order }) => order);
+}
+
+export function groupProductionOrdersBySchedule(orders: ProductionOrderView[]) {
+  return [...orders.filter((order) => order.productionSlot), ...orders.filter((order) => !order.productionSlot)];
+}
+
+export function productionSlotTimingPresentation(order: Pick<ProductionOrderView, "productionStatus" | "productionSlot" | "shippedAt" | "deliveredAt" | "shippingStatus">, today: Date = new Date()) {
+  const slot = order.productionSlot;
+  if (!slot) return null;
+  const duration = productionDayDiff(slot.endsAt, slot.startsAt) + 1;
+  if (order.productionStatus === "READY" || productionOrderIsShipped(order)) return { duration, code: "completed" as const, days: 0 };
+  const remaining = productionDayDiff(slot.endsAt, today);
+  return remaining >= 0
+    ? { duration, code: "remaining" as const, days: remaining }
+    : { duration, code: "overdue" as const, days: Math.abs(remaining) };
 }
 
 export function buildProductionMetrics(orders: ProductionOrderView[], base: Date, days: number, capacityPerDay: number, requiredWindowDays: number) {
