@@ -1,6 +1,6 @@
 import type { OrderType, Prisma } from "@prisma/client";
 
-const NON_PRODUCTION_ORDER_TYPES: OrderType[] = ["READY_MODEL", "ACCESSORY"];
+const NON_PRODUCTION_ORDER_TYPES: OrderType[] = ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"];
 
 export const productionOrderSelect = {
   id: true,

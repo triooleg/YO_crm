@@ -47,13 +47,19 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
       if (path.endsWith("/details") && detailsFailure) return route.fulfill({ status: detailsFailure.status, json: { message: detailsFailure.message } });
       const body = route.request().postDataJSON() as Record<string, unknown>;
       updates.push({ path, body });
-      if (path.endsWith("/details")) currentOrder = { ...currentOrder, notes: body.description as string, priceMinor: body.priceMinor as number, modelImagePath: (body.modelImagePath as string | undefined) ?? currentOrder.modelImagePath };
+      if (path.endsWith("/currency")) {
+        currentOrder = { ...currentOrder, currency: body.currency as string, priceMinor: 52200, depositRequiredMinor: 26100 };
+        await route.fulfill({ json: { order: currentOrder, conversion: { provider: "ECB" } } });
+        return;
+      }
+      if (path.endsWith("/details")) currentOrder = { ...currentOrder, currency: (body.currency as string | undefined) ?? currentOrder.currency, notes: body.description as string, priceMinor: body.priceMinor as number, modelImagePath: (body.modelImagePath as string | undefined) ?? currentOrder.modelImagePath };
       else currentOrder = { ...currentOrder, ...body } as typeof currentOrder;
       if (body.requiredDeliveryAt) currentOrder.requiredDeliveryAt = `${body.requiredDeliveryAt as string}T12:00:00.000Z`;
       await route.fulfill({ json: currentOrder });
       return;
     }
     if (method === "POST" && path === "/api/orders/model-image") return route.fulfill({ json: { path: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg" } });
+    if (method === "PATCH" && path === "/api/orders/archive") { const body=route.request().postDataJSON() as Record<string,unknown>; updates.push({path,body}); return route.fulfill({json:{archived:1,orderIds:[order.id]}}); }
     if (method === "GET" && path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA", role: "OWNER" } } });
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
     if (method === "GET" && path === "/api/orders") return route.fulfill({ json: [currentOrder] });
@@ -83,10 +89,23 @@ test("ошибка параллельного редактирования ос�
   await page.getByRole("button", { name: order.number, exact: true }).click();
   await page.getByRole("button", { name: "Изменить заказ" }).click();
   const dialog = page.getByRole("dialog", { name: "Изменить заказ" });
-  await dialog.getByLabel("Описание заказа").fill("Конфликтующая правка");
+  await dialog.getByLabel("Описание изделия").fill("Конфликтующая правка");
   await dialog.getByRole("button", { name: "Сохранить заказ" }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Описание или цена уже изменены другим пользователем")).toBeVisible();
+});
+
+test("смена валюты без ручной правки цены отправляется атомарно вместе с заказом", async ({ page }) => {
+  const updates = await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("button", { name: "Изменить заказ" }).click();
+  const dialog = page.getByRole("dialog", { name: "Изменить заказ" });
+  await dialog.getByLabel("Валюта").selectOption("USD");
+  await dialog.getByRole("button", { name: "Сохранить заказ" }).click();
+  await expect(dialog).toBeHidden();
+  expect(updates.some((update) => update.path.endsWith("/currency"))).toBe(false);
+  expect(updates.find((update) => update.path.endsWith("/details"))?.body).toMatchObject({ currency: "USD", expectedCurrency: "EUR", priceDirty: false, priceMinor: 45000, expectedPriceMinor: 45000 });
 });
 
 for (const viewport of [
@@ -152,17 +171,32 @@ for (const viewport of [
     await page.getByRole("button", { name: "Изменить заказ" }).click();
     const editDialog = page.getByRole("dialog", { name: "Изменить заказ" });
     await expect(editDialog).toBeVisible();
-    const description = editDialog.getByLabel("Описание заказа");
-    await expect(description).toBeFocused();
+    const description = editDialog.getByLabel("Описание изделия");
+    await expect(editDialog.getByLabel("Тип заказа")).toBeFocused();
     await description.fill("Обновлённый тестовый заказ");
-    await editDialog.getByLabel("Общая цена заказа, EUR").fill("475,50");
+    await editDialog.getByLabel("Валюта").selectOption("USD");
+    await editDialog.getByLabel("Общая цена").fill("475,50");
     await editDialog.locator('input[type="file"]').setInputFiles({ name: "updated.png", mimeType: "image/png", buffer: testPng });
+    await expect(editDialog.getByRole("button", { name: "Отмена" })).toBeInViewport();
+    await expect(editDialog.getByRole("button", { name: "Сохранить заказ" })).toBeInViewport();
     await page.screenshot({ path: screenshotPath(testInfo, `order-edit-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     await editDialog.getByRole("button", { name: "Сохранить заказ" }).click();
     await expect(editDialog).toBeHidden();
     const detailUpdate = updates.find((update) => update.path.endsWith("/details"));
-    expect(detailUpdate).toEqual({ path: `/api/orders/${order.id}/details`, body: { description: "Обновлённый тестовый заказ", priceMinor: 47550, expectedDescription: "Тестовый заказ", expectedPriceMinor: 45000, modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+    expect(updates.some((update) => update.path.endsWith("/currency"))).toBe(false);
+    expect(detailUpdate).toEqual({ path: `/api/orders/${order.id}/details`, body: { currency: "USD", expectedCurrency: "EUR", priceDirty: true, type: "CUSTOM_ORDER", expectedType: "CUSTOM_ORDER", description: "Обновлённый тестовый заказ", priceMinor: 47550, expectedDescription: "Тестовый заказ", expectedPriceMinor: 45000, requiredDeliveryAt: "2026-10-20", expectedRequiredDeliveryAt: "2026-10-20T12:00:00.000Z", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+    await page.getByRole("button", { name: "Изменить дизайн" }).click();
+    const designDialog = page.getByRole("dialog", { name: "Изменить дизайн" });
+    await expect(designDialog.getByLabel("Описание дизайна")).toHaveValue("Купальник");
+    await designDialog.getByLabel("Описание дизайна").fill("Купальник с рукавами");
+    await designDialog.getByLabel("Количество").fill("2");
+    await designDialog.getByLabel("Цена за единицу, USD").fill("250.00");
+    await page.screenshot({ path: screenshotPath(testInfo, `order-design-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    expect(await designDialog.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false);
+    await designDialog.getByRole("button", { name: "Сохранить дизайн" }).click();
+    await expect(designDialog).toBeHidden();
+    expect(updates.find((update) => update.path.endsWith("/items/item-1"))).toEqual({ path: `/api/orders/${order.id}/items/item-1`, body: { name: "Купальник с рукавами", quantity: 2, priceMinor: 25000, expectedName: "Купальник", expectedQuantity: 1, expectedPriceMinor: 45000, expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
     const fileChooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "Изменить изображение позиции: Купальник" }).click();
     await (await fileChooser).setFiles({ name: "item-updated.png", mimeType: "image/png", buffer: testPng });
@@ -199,6 +233,12 @@ for (const viewport of [
       expect(await page.locator(".orders-table-scroll").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     }
     await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await page.getByRole("checkbox", { name: "Выбрать заказ" }).check();
+    await page.getByRole("button", { name: "Удалить выбранные" }).click();
+    const archiveDialog=page.getByRole("dialog", { name: "Удаление заказов" });
+    await expect(archiveDialog).toContainText("Оплаты, сообщения и история сохранятся");
+    await page.screenshot({ path: screenshotPath(testInfo, `order-archive-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await archiveDialog.getByRole("button", { name: "Отмена" }).click();
   });
 }
 

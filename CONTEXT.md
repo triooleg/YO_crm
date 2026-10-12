@@ -91,11 +91,15 @@ display the current client address until an operator saves an order snapshot.
 Editing this snapshot does not mutate the client profile, shipment, statuses,
 payments or referenced measurement snapshots.
 
-`READY_MODEL` and `ACCESSORY` are quick sales of existing stock. They never
+`READY_MODEL`, `ACCESSORY`, `WEBSITE_SALE` and `STOCK_SALE` are quick sales of existing stock. They never
 require a production slot, regardless of whether the sale came from the site,
 Instagram, Facebook, WhatsApp or another channel. Channel/source does not imply
-the order type: a custom order received through social media still follows the
-normal production workflow.
+the order type during normal order creation: a custom order received through
+social media still follows the normal production workflow. The owner-approved
+administrative correction is a bounded exception for legacy imported data: it
+may reclassify only the exact previewed snapshot of active KeyCRM orders whose
+own provider source resolves to WEBSITE and that already have a tracking number. Any concurrent change invalidates the
+preview and requires a new review before apply.
 
 ### Order Item
 

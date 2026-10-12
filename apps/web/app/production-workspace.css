@@ -10,8 +10,11 @@
 .timeline-bar-text{position:relative;z-index:1;display:grid;min-width:0;gap:2px;text-align:left}.timeline-bar-text b,.timeline-bar-text small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-bar b{font-size:11px}.timeline-bar small{font-size:9px}
 
 /* Calendar header, load and order rows share one responsive fixed-width grid. */
-.production-timeline{overflow-x:auto;overflow-y:hidden}
+.production-timeline{overflow:visible}
 .production-canvas{min-width:0;width:var(--timeline-width)}
+.timeline-calendar-header{position:sticky;top:0;z-index:8;background:#fff;box-shadow:0 7px 14px #28163b12}
 .timeline-months,.timeline-days,.timeline-load,.timeline-row,.timeline-unscheduled{grid-template-columns:var(--order-column-width) repeat(var(--timeline-days),40px)}
 .timeline-row::before{left:var(--order-column-width)}
 .production-slot-card .production-slot-status{margin-top:14px}
+.production-slot-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#faf8ff}.production-slot-summary>div{display:grid;gap:3px;min-width:0}.production-slot-summary small{color:var(--muted);font-size:10px}.production-slot-summary strong{overflow-wrap:anywhere;font-size:12px}.production-slot-summary-note{grid-column:1/-1;padding-top:8px;border-top:1px solid var(--line)}.production-slot-actions{display:grid;gap:8px;margin-top:18px}.production-open-order,.production-delete-slot{float:none!important;width:100%;margin-top:0}.production-delete-slot-confirm{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+@media(max-width:800px){.production-timeline{max-height:calc(100dvh - 120px);overflow:auto}.timeline-calendar-header{top:0}}

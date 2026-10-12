@@ -14,19 +14,24 @@ const exchangeModule = { exports: {} };
 vm.runInNewContext(compile("../src/finance/exchange-rates.ts"), { module: exchangeModule, exports: exchangeModule.exports, require: specifier => specifier === "@nestjs/common" ? common : specifier === "../prisma.service" ? { PrismaService: class {} } : nativeRequire(specifier), Buffer, AbortController, fetch, setTimeout, clearTimeout, console, Intl });
 
 const ordersModule = { exports: {} };
+let changeCurrencyImpl = async () => ({});
+let persistDetailsImpl = async () => ({});
 const orderRequire = specifier => {
   if (specifier === "@nestjs/common") return common;
   if (specifier === "../prisma.service") return { PrismaService: class {} };
   if (specifier === "../finance/exchange-rates") return exchangeModule.exports;
   if (specifier === "../communications/inbound-routing") return { presentClientContact: value => value };
+  if (specifier === "../keycrm/keycrm-normalizer") return { keycrmSourceChannel: () => "UNKNOWN" };
   if (specifier === "../uploads") return { uploadsRoot: "uploads" };
   if (specifier === "./orders.dto") return {};
+  if (specifier === "./order-archive") return { archiveOrdersTransaction: async () => ({}), OrderArchiveError: class extends Error {}, ORDER_ARCHIVE_ERROR: {} };
   if (specifier === "./order-delivery-address") return { DELIVERY_ADDRESS_ERROR: {}, DeliveryAddressOperationError: class extends Error {}, persistOrderDeliveryAddress: async () => ({}) };
-  if (specifier === "./order-currency") return { changeOrderCurrencyTransaction: async () => ({}), OrderCurrencyChangeError: class extends Error {} };
+  if (specifier === "./order-currency") return { changeOrderCurrencyTransaction: (...args) => changeCurrencyImpl(...args), OrderCurrencyChangeError: class extends Error {} };
   if (specifier === "./order-image-name") return { isOrderImageName: () => true };
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
-  if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
-  if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: type => type !== "READY_MODEL" && type !== "ACCESSORY", resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
+  if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: (...args) => persistDetailsImpl(...args) };
+  if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type), resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({ metadata: async () => ({}), jpeg: () => ({ toBuffer: async () => Buffer.alloc(0) }) });
   return nativeRequire(specifier);
@@ -51,6 +56,37 @@ const cache = {
     { baseCurrency: "USD", quoteCurrency: "UAH", decimal: "44.8894", numerator: "224447", denominator: "5000", sourceSeriesOrValcode: "USD" },
   ],
 };
+
+test("редактирование валюты и заказа выполняется в одной транзакции с явным priceDirty", async () => {
+  const tx = { marker: "same-transaction" };
+  const expectedDeadline = "2026-10-20T12:00:00.000Z";
+  let persisted;
+  changeCurrencyImpl = async (receivedTx, orderId, currency, actorId, _now, expectedState) => {
+    assert.equal(receivedTx, tx);
+    assert.equal(orderId, "order-1");
+    assert.equal(currency, "USD");
+    assert.equal(actorId, "owner-1");
+    assert.equal(expectedState.currency, "EUR");
+    return { order: { id: orderId, currency: "USD", type: "CUSTOM_ORDER", notes: "Старое описание", priceMinor: 52200, requiredDeliveryAt: new Date(expectedDeadline), modelImagePath: "old.jpg" }, conversion: { provider: "ECB" } };
+  };
+  persistDetailsImpl = async (receivedTx, orderId, details, actorId) => {
+    assert.equal(receivedTx, tx);
+    persisted = { orderId, details, actorId };
+    return details;
+  };
+  const service = new OrdersService({ $transaction: callback => callback(tx) }, {});
+  await service.updateDetails("order-1", {
+    currency: "USD", expectedCurrency: "EUR", priceDirty: false,
+    type: "CUSTOM_ORDER", expectedType: "CUSTOM_ORDER",
+    description: "Новое описание", expectedDescription: "Старое описание",
+    priceMinor: 45000, expectedPriceMinor: 45000,
+    requiredDeliveryAt: "2026-10-21T12:00:00.000Z", expectedRequiredDeliveryAt: expectedDeadline,
+    expectedModelImagePath: "old.jpg",
+  }, { id: "owner-1" });
+  assert.equal(persisted.details.priceMinor, 52200);
+  assert.equal(persisted.details.expectedPriceMinor, 52200);
+  assert.equal(persisted.details.expectedCurrency, "USD");
+});
 
 test("валютная оплата атомарно сохраняет официальный снимок и подтверждает 50% производственный слот", async () => {
   const writes = { payment: undefined, order: undefined, slot: undefined, activities: [], audits: [], refreshes: 0 };

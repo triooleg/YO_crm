@@ -5,7 +5,7 @@ export const DEFAULT_SHIPPING_LEAD_DAYS = 2;
 const DAY_MS = 86_400_000;
 
 export function requiresProduction(type: OrderType) {
-  return type !== "READY_MODEL" && type !== "ACCESSORY";
+  return !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type);
 }
 
 export function subtractUtcDays(value: Date, days: number) {

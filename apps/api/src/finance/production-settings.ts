@@ -16,7 +16,7 @@ export async function saveProductionSettingsTransaction(tx: any, dto: UpdateProd
   const previousLeadSetting = before.find((setting: { key: string }) => setting.key === "shippingLeadDays");
   const previousLead = typeof previousLeadSetting?.value === "number" && Number.isInteger(previousLeadSetting.value) && previousLeadSetting.value >= 0 && previousLeadSetting.value <= 30 ? previousLeadSetting.value : 2;
   if (dto.shippingLeadDays > previousLead) {
-    const slots = await tx.productionSlot.findMany({ where: { order: { archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY"] }, productionStatus: { not: "CANCELLED" }, requiredDeliveryAt: { not: null } } }, include: { order: { select: { number: true, requiredDeliveryAt: true } } } });
+    const slots = await tx.productionSlot.findMany({ where: { order: { archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, productionStatus: { not: "CANCELLED" }, requiredDeliveryAt: { not: null } } }, include: { order: { select: { number: true, requiredDeliveryAt: true } } } });
     const invalid = slots.find((slot: { endsAt: Date; order: { number: string; requiredDeliveryAt: Date | null } }) => slot.order.requiredDeliveryAt && slot.endsAt > new Date(slot.order.requiredDeliveryAt.getTime() - dto.shippingLeadDays * DAY_MS));
     if (invalid) throw new BadRequestException(`Нельзя увеличить резерв: график заказа ${invalid.order.number} заканчивается слишком поздно`);
   }

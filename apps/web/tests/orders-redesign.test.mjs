@@ -34,6 +34,11 @@ test("Orders redesign keeps real controls and deterministic guidance", () => {
   assert.match(dashboard, /onClick=\{\(\) => void load\(\)\}/);
 });
 
+test("быстрые продажи не предлагают передачу в производство", () => {
+  assert.match(dashboard, /NON_PRODUCTION_ORDER_TYPES = new Set\(\["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"\]\)/);
+  assert.match(dashboard, /!NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\) && order\.productionStatus === "NOT_SCHEDULED"/);
+});
+
 test("Orders list projection supplies the redesigned table without per-row requests", () => {
   for (const field of ["discipline: true", "deliveryMinor: true", "discountMinor: true", "phone: true", "email: true"]) {
     assert.match(api, new RegExp(field));

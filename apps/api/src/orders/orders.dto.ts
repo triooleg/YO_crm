@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, Min, ValidateIf, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, Min, ValidateIf, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
@@ -10,13 +10,65 @@ export class UploadModelImageDto {
   @ApiProperty() @IsString() data!: string;
 }
 
+export class ArchiveOrdersDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  orderIds!: string[];
+}
+
+export class WebsiteSalesCorrectionCandidateDto {
+  @ApiProperty() @IsString() orderId!: string;
+  @ApiProperty() @IsDateString() expectedUpdatedAt!: string;
+  @ApiProperty({ enum: OrderType }) @IsEnum(OrderType) expectedType!: OrderType;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsDateString() expectedProductionSlotUpdatedAt!: string | null;
+  @ApiProperty() @IsString() expectedSourceId!: string;
+  @ApiProperty() @IsString() expectedSourceName!: string;
+}
+
+export class WebsiteSalesCorrectionDto {
+  @ApiProperty() @IsBoolean() dryRun!: boolean;
+  @ApiPropertyOptional({ type: [WebsiteSalesCorrectionCandidateDto] })
+  @ValidateIf(value => !value.dryRun)
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5000)
+  @ValidateNested({ each: true })
+  @Type(() => WebsiteSalesCorrectionCandidateDto)
+  candidates?: WebsiteSalesCorrectionCandidateDto[];
+}
+
+export class DeleteProductionSlotDto {
+  @ApiProperty() @IsDateString() expectedUpdatedAt!: string;
+}
+
 export class UpdateOrderModelImageDto {
   @ApiPropertyOptional() @IsOptional() @IsString() itemId?: string;
   @ApiProperty() @IsString() @Length(1, 150) modelImagePath!: string;
   @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
 }
 
+export class UpdateOrderItemDetailsDto {
+  @ApiProperty() @IsString() @Length(1, 300) name!: string;
+  @ApiProperty() @IsInt() @Min(1) @Max(1000) quantity!: number;
+  @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) priceMinor!: number;
+  @ApiProperty() @IsString() @Length(1, 300) expectedName!: string;
+  @ApiProperty() @IsInt() @Min(1) @Max(1000) expectedQuantity!: number;
+  @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) expectedPriceMinor!: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 150) modelImagePath?: string;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
+}
+
 export class UpdateOrderDetailsDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsIn(["EUR", "USD", "UAH"]) currency?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsIn(["EUR", "USD", "UAH"]) expectedCurrency?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() priceDirty?: boolean;
+  @ApiPropertyOptional({ enum: OrderType }) @IsOptional() @IsEnum(OrderType) type?: OrderType;
+  @ApiPropertyOptional({ enum: OrderType }) @IsOptional() @IsEnum(OrderType) expectedType?: OrderType;
+  @ApiPropertyOptional({ nullable: true }) @ValidateIf((_, value) => value !== undefined && value !== null) @IsDateString() requiredDeliveryAt?: string | null;
+  @ApiPropertyOptional({ nullable: true }) @ValidateIf((_, value) => value !== undefined && value !== null) @IsDateString() expectedRequiredDeliveryAt?: string | null;
   @ApiProperty() @IsString() @Length(1, 300) description!: string;
   @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) priceMinor!: number;
   @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedDescription!: string | null;

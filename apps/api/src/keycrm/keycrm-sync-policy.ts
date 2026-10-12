@@ -1,7 +1,7 @@
 import { OrderType } from "@prisma/client";
 
 function defaultDepositRequired(priceMinor: number, type: OrderType) {
-  return type === OrderType.READY_MODEL || type === OrderType.ACCESSORY ? 0 : Math.round(priceMinor / 2);
+  return new Set<OrderType>([OrderType.READY_MODEL, OrderType.ACCESSORY, OrderType.WEBSITE_SALE, OrderType.STOCK_SALE]).has(type) ? 0 : Math.round(priceMinor / 2);
 }
 
 export function nextDepositRequired(existingDeposit: number, existingPrice: number, existingType: OrderType, importedDeposit: number) {

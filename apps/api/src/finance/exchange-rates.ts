@@ -48,6 +48,7 @@ const ECB_URL = "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.
 const NBU_URL = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew?json&valcode=";
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
+const PRISMA_INT_MAX = 2_147_483_647n;
 export const MAX_EFFECTIVE_DATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 const BUSINESS_TIME_ZONE = "Europe/Kyiv";
@@ -100,7 +101,7 @@ export function convertMinorWithRate(amountMinor: number, rate: RationalRate) {
   const numerator = BigInt(rate.numerator), denominator = BigInt(rate.denominator);
   if (numerator <= 0n || denominator <= 0n) throw new Error("Курс должен быть положительным");
   const converted = (BigInt(amountMinor) * numerator * 2n + denominator) / (denominator * 2n);
-  if (converted > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Результат конвертации вне допустимого диапазона");
+  if (converted > PRISMA_INT_MAX) throw new Error("Результат конвертации вне допустимого диапазона");
   return Number(converted);
 }
 

@@ -19,18 +19,21 @@ const requireForOrders = specifier => {
   if (specifier === "../prisma.service") return { PrismaService: class {} };
   if (specifier === "../finance/exchange-rates") return {};
   if (specifier === "../communications/inbound-routing") return { presentClientContact: value => value };
+  if (specifier === "../keycrm/keycrm-normalizer") return { keycrmSourceChannel: () => "UNKNOWN" };
   if (specifier === "../uploads") return { uploadsRoot: "uploads" };
   if (specifier === "./orders.dto") return {};
+  if (specifier === "./order-archive") return { archiveOrdersTransaction: async () => ({}), OrderArchiveError: class extends Error {}, ORDER_ARCHIVE_ERROR: {} };
   if (specifier === "./order-delivery-address") return { DELIVERY_ADDRESS_ERROR: {}, DeliveryAddressOperationError: class extends Error {}, persistOrderDeliveryAddress: async () => ({}) };
   if (specifier === "./order-currency") return { changeOrderCurrencyTransaction: async () => ({}), OrderCurrencyChangeError: class extends Error {} };
   if (specifier === "./order-image-name") return { isOrderImageName: () => true };
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
+  if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
   if (specifier === "./production-rules") return {
     DEFAULT_PRODUCTION_DURATION_DAYS: 21,
     DEFAULT_SHIPPING_LEAD_DAYS: 7,
     productionSetting: (_value, fallback) => fallback,
-    requiresProduction: type => type !== "READY_MODEL" && type !== "ACCESSORY",
+    requiresProduction: type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type),
     violatesShippingLead: () => true,
   };
   if (specifier === "./production-context") return { loadProductionOrders: (...args) => productionLoader(...args) };

@@ -10,6 +10,8 @@ import {
 
 test("готовые модели и аксессуары не требуют планирования производства", () => {
   assert.equal(requiresProduction("READY_MODEL"), false);
+  assert.equal(requiresProduction("WEBSITE_SALE"), false);
+  assert.equal(requiresProduction("STOCK_SALE"), false);
   assert.equal(requiresProduction("ACCESSORY"), false);
   for (const type of ["CUSTOM_ORDER", "COPY_MODEL", "MODIFIED_MODEL", "PAIR", "GROUP_ORDER", "REPEAT_ORDER"]) {
     assert.equal(requiresProduction(type), true, type);

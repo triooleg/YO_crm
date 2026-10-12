@@ -9,14 +9,25 @@ export class OrderCurrencyChangeError extends Error {
 }
 
 type CurrencyTransaction = Prisma.TransactionClient;
+export type OrderCurrencyExpectedState = {
+  currency: string;
+  type: string;
+  description: string | null;
+  priceMinor: number;
+  requiredDeliveryAt: string | null;
+  modelImagePath: string | null;
+};
 
 function provider(value: unknown) { return value === "ECB" || value === "NBU" ? value : "NBU"; }
 
-export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, orderId: string, targetCurrency: ExchangeRateCurrency, actorId: string, now = new Date()) {
+export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, orderId: string, targetCurrency: ExchangeRateCurrency, actorId: string, now = new Date(), expected?: OrderCurrencyExpectedState) {
   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
   const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, invoices: true, expenses: true, shipment: true, items: true } });
   if (!order) throw new OrderCurrencyChangeError("ORDER_NOT_FOUND", "Заказ не найден");
+  if (expected && (order.currency !== expected.currency || order.type !== expected.type || (order.notes ?? null) !== expected.description || order.priceMinor !== expected.priceMinor || (order.requiredDeliveryAt?.toISOString() ?? null) !== expected.requiredDeliveryAt || (order.modelImagePath ?? null) !== expected.modelImagePath)) {
+    throw new OrderCurrencyChangeError("ORDER_CHANGED", "Заказ уже изменён другим пользователем");
+  }
   if (order.currency === targetCurrency) return { order, conversion: null };
   if (!(["EUR", "USD", "UAH"] as string[]).includes(order.currency)) throw new OrderCurrencyChangeError("ORDER_CURRENCY_UNSUPPORTED", `Текущая валюта заказа ${order.currency} не поддерживается`);
   if (order.payments.length) throw new OrderCurrencyChangeError("PAYMENT_HISTORY_EXISTS", "Нельзя изменить валюту заказа с историей оплат");
@@ -40,8 +51,13 @@ export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, or
   let rate;
   try { rate = buildRateForPair(cache, order.currency as ExchangeRateCurrency, targetCurrency); } catch (error) { throw new OrderCurrencyChangeError("PAIR_NOT_SUPPORTED", error instanceof Error ? error.message : "Валютная пара не поддерживается"); }
   const converted: Record<string, number | null> = {};
-  for (const field of MONEY_FIELDS) converted[field] = order[field] === null ? null : convertMinorWithRate(order[field], rate);
-  const convertedItems = order.items.map((item: { id: string; priceMinor: number }) => ({ id: item.id, priceMinor: convertMinorWithRate(item.priceMinor, rate) }));
+  let convertedItems: { id: string; priceMinor: number }[];
+  try {
+    for (const field of MONEY_FIELDS) converted[field] = order[field] === null ? null : convertMinorWithRate(order[field], rate);
+    convertedItems = order.items.map((item: { id: string; priceMinor: number }) => ({ id: item.id, priceMinor: convertMinorWithRate(item.priceMinor, rate) }));
+  } catch {
+    throw new OrderCurrencyChangeError("AMOUNT_OUT_OF_RANGE", "После пересчёта сумма выходит за допустимый диапазон");
+  }
   for (const item of convertedItems) await tx.orderItem.update({ where: { id: item.id }, data: { priceMinor: item.priceMinor } });
   const updated = await tx.order.update({ where: { id: orderId }, data: { currency: targetCurrency, ...converted } });
   const sourceObservations = rate.sourceRates.map(pair => {

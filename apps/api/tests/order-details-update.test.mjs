@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "../src/orders/order-details.ts";
+import vm from "node:vm";
+import ts from "typescript";
+
+const source = readFileSync(new URL("../src/orders/order-details.ts", import.meta.url), "utf8");
+const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const detailsModule = { exports: {} };
+const paymentStatus = { UNPAID: "UNPAID", PARTIALLY_PAID: "PARTIALLY_PAID", DEPOSIT_PAID: "DEPOSIT_PAID", PAID: "PAID", REFUNDED: "REFUNDED", CANCELLED: "CANCELLED" };
+const productionStatus = { NOT_SCHEDULED: "NOT_SCHEDULED", SCHEDULED: "SCHEDULED" };
+const requiresProduction = type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type);
+vm.runInNewContext(javascript, { module: detailsModule, exports: detailsModule.exports, require: specifier => specifier === "@prisma/client" ? { OrderType: {}, PaymentStatus: paymentStatus, ProductionStatus: productionStatus } : specifier === "./production-rules" ? { DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: (value, fallback) => Number.isInteger(value) ? value : fallback, requiresProduction, violatesShippingLead: () => false } : undefined, BigInt, Date, Math });
+const { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } = detailsModule.exports;
 
 const expected = { expectedDescription: "Старое описание", expectedPriceMinor: 20000, expectedModelImagePath: "old.jpg" };
 
@@ -19,7 +30,11 @@ function fixture({
         update: async ({ data }) => { draft.order = { ...draft.order, ...data }; return structuredClone(draft.order); },
       },
       orderItem: { update: async ({ where, data }) => { const index = draft.order.items.findIndex((item) => item.id === where.id); draft.order.items[index] = { ...draft.order.items[index], ...data }; return structuredClone(draft.order.items[index]); } },
-      productionSlot: { update: async ({ data }) => { draft.order.productionSlot = { ...draft.order.productionSlot, ...data }; return structuredClone(draft.order.productionSlot); } },
+      productionSlot: {
+        update: async ({ data }) => { draft.order.productionSlot = { ...draft.order.productionSlot, ...data }; return structuredClone(draft.order.productionSlot); },
+        delete: async () => { const deleted = structuredClone(draft.order.productionSlot); draft.order.productionSlot = null; return deleted; },
+      },
+      appSetting: { findUnique: async () => null },
       activity: { create: async ({ data }) => draft.activities.push(data) },
       auditLog: { create: async ({ data }) => { if (failAudit) throw new Error("audit unavailable"); draft.audits.push(data); } },
     };
@@ -97,6 +112,24 @@ test("изменение быстрой продажи не подтвержда
   assert.deepEqual(testState.state.activities.map((activity) => activity.type), ["ORDER_DETAILS_UPDATED"]);
 });
 
+for (const type of ["WEBSITE_SALE", "STOCK_SALE"]) {
+  test(`тип ${type} удаляет производственный слот и исключает заказ из планирования`, async () => {
+    const testState = fixture({ order: { productionStatus: "SCHEDULED", productionSlot: { id: "slot-1", tentative: false, startsAt: new Date("2026-10-01"), endsAt: new Date("2026-10-07") } } });
+    await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Быстрая продажа", priceMinor: 20000, type, expectedType: "CUSTOM_ORDER" }, "owner-1"));
+    assert.equal(testState.state.order.type, type);
+    assert.equal(testState.state.order.productionStatus, "NOT_SCHEDULED");
+    assert.equal(testState.state.order.productionSlot, null);
+    assert.deepEqual(testState.state.activities.map((activity) => activity.type), ["PRODUCTION_SLOT_DELETED", "ORDER_DETAILS_UPDATED"]);
+  });
+}
+
+test("переход быстрой продажи в производство восстанавливает предоплату до расчёта статуса оплаты", async () => {
+  const testState = fixture({ order: { type: "WEBSITE_SALE", depositRequiredMinor: 0, paymentStatus: "DEPOSIT_PAID", payments: [{ amountMinor: 5000, currency: "EUR" }] } });
+  await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Индивидуальный заказ", priceMinor: 30000, type: "CUSTOM_ORDER", expectedType: "WEBSITE_SALE" }, "owner-1"));
+  assert.equal(testState.state.order.depositRequiredMinor, 15000);
+  assert.equal(testState.state.order.paymentStatus, "PARTIALLY_PAID");
+});
+
 test("исторически подтверждённый слот не блокирует изменение цены быстрой продажи", async () => {
   const testState = fixture({ order: { type: "READY_MODEL", payments: [{ amountMinor: 10000, currency: "EUR" }], productionSlot: { id: "slot-1", tentative: false } } });
   await testState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Готовая модель дороже", priceMinor: 30000 }, "owner-1"));
@@ -151,6 +184,13 @@ test("описание из пробелов отклоняется до зап�
 test("устаревшие описание или цена блокируют параллельную правку", async () => {
   const testState = fixture();
   await assert.rejects(() => testState.transaction((tx) => persistOrderDetails(tx, "order-1", { expectedDescription: "Чужое", expectedPriceMinor: 20000, expectedModelImagePath: "old.jpg", description: "Новая", priceMinor: 20000 }, "owner-1")), (error) => error instanceof OrderDetailsOperationError && error.code === ORDER_DETAILS_ERROR.changed);
+});
+
+test("тип и срок нельзя изменить без ожидаемого исходного значения", async () => {
+  const typeState = fixture();
+  await assert.rejects(() => typeState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Заказ", priceMinor: 20000, type: "WEBSITE_SALE" }, "owner-1")), (error) => error instanceof OrderDetailsOperationError && error.code === ORDER_DETAILS_ERROR.changed);
+  const deadlineState = fixture();
+  await assert.rejects(() => deadlineState.transaction((tx) => persistOrderDetails(tx, "order-1", { ...expected, description: "Заказ", priceMinor: 20000, requiredDeliveryAt: "2026-10-20T00:00:00.000Z" }, "owner-1")), (error) => error instanceof OrderDetailsOperationError && error.code === ORDER_DETAILS_ERROR.changed);
 });
 
 test("замена главного изображения без исходного значения блокируется", async () => {

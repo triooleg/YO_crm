@@ -53,12 +53,14 @@ const productionOrder = {
     capacity: 1,
     tentative: true,
     locked: false,
+    updatedAt: "2026-10-10T12:00:00.000Z",
   },
 };
 
 async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean; productionLoadError?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
+  const slotDeletes: unknown[] = [];
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -75,6 +77,11 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
     if (request.method() === "PATCH" && pathname === "/api/orders/production-hold/production-slot") {
       slotUpdates.push(request.postDataJSON());
       await route.fulfill({ json: request.postDataJSON() });
+      return;
+    }
+    if (request.method() === "DELETE" && pathname === "/api/orders/production-hold/production-slot") {
+      slotDeletes.push(request.postDataJSON());
+      await route.fulfill({ json: { deleted: true, orderId: "production-hold", productionStatus: "NOT_SCHEDULED" } });
       return;
     }
     if (request.method() === "GET" && pathname === "/api/orders/defaults" && options.productionLoadError) {
@@ -101,7 +108,7 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
     }
     await route.fulfill({ json: responses.get(pathname) });
   });
-  return { shippingUpdates, slotUpdates, consoleErrors };
+  return { shippingUpdates, slotUpdates, slotDeletes, consoleErrors };
 }
 
 for (const viewport of [
@@ -114,7 +121,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.37");
+    await expect(page.locator(".crm-version")).toContainText("0.1.38");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -170,6 +177,27 @@ test("Незакреплённый производственный слот с�
   const afterDrag = await page.locator(".timeline-bar").boundingBox();
   expect(afterDrag?.x).toBeGreaterThan(beforeDrag.x);
   await expect(page.locator(".phase2-error")).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("панель производственного слота показывает заказ, открывает его и безопасно удаляет только слот", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const { slotDeletes, consoleErrors } = await mockWorkspaceApi(page);
+  await page.goto("/?section=production");
+  await expect(page.locator(".timeline-calendar-header")).toHaveCSS("position", "sticky");
+  await page.locator(".timeline-bar").click();
+  const sidebar = page.locator(".production-slot-card");
+  await expect(sidebar).toContainText("YO-26-0103");
+  await expect(sidebar).toContainText("Анна");
+  await expect(sidebar).toContainText("320,00");
+  await expect(sidebar.getByRole("button", { name: "Открыть заказ" })).toBeVisible();
+  await sidebar.getByRole("button", { name: "Удалить слот" }).click();
+  const confirm = page.getByRole("dialog", { name: "Удаление производственного слота" });
+  await expect(confirm).toContainText("заказ останется в CRM со всей историей");
+  await confirm.getByRole("button", { name: "Удалить слот" }).click();
+  await expect.poll(() => slotDeletes.length).toBe(1);
+  expect(slotDeletes[0]).toEqual({ expectedUpdatedAt: "2026-10-10T12:00:00.000Z" });
+  await expect(page.locator(".timeline-bar")).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
 });
 

@@ -16,7 +16,32 @@ test("resize handles stay on bar edges and shipping gap stays in the same row",(
 
 test("timeline grid starts after a content-aware order column and matches fixed-width day cells",()=>{assert.match(styles,/\.timeline-row::before\{left:var\(--order-column-width\)\}/);assert.match(styles,/var\(--order-column-width\) repeat\(var\(--timeline-days\),40px\)/);assert.match(styles,/width:var\(--timeline-width\)/);assert.doesNotMatch(styles,/var\(--timeline-days\) \* 40px/);assert.match(production,/MIN_ORDER_COLUMN_WIDTH=155/);assert.match(production,/MAX_ORDER_COLUMN_WIDTH=420/)});
 
-test("timeline recalculates only fully visible days and fills the available width",()=>{assert.match(production,/ResizeObserver/);assert.match(production,/timelineRef/);assert.match(production,/Math\.floor\(available\/DAY_CELL_WIDTH\)/);assert.match(production,/width-nextDayCount\*DAY_CELL_WIDTH/);assert.match(production,/--timeline-width/);assert.match(production,/--timeline-days/);assert.match(styles,/\.production-timeline\{overflow-x:auto;overflow-y:hidden\}/);assert.doesNotMatch(production,/const DAY=86400000, DAYS=35/)});
+test("timeline recalculates only fully visible days and fills the available width",()=>{assert.match(production,/ResizeObserver/);assert.match(production,/timelineRef/);assert.match(production,/Math\.floor\(available\/DAY_CELL_WIDTH\)/);assert.match(production,/width-nextDayCount\*DAY_CELL_WIDTH/);assert.match(production,/--timeline-width/);assert.match(production,/--timeline-days/);assert.match(styles,/\.production-timeline\{overflow:visible/);assert.doesNotMatch(production,/const DAY=86400000, DAYS=35/)});
+
+test("calendar dates stay visible while production rows scroll",()=>{
+  assert.match(production,/<div className="timeline-calendar-header">[\s\S]*?<div className="timeline-months">[\s\S]*?<div className="timeline-days">[\s\S]*?<div className="timeline-load">/);
+  assert.match(styles,/\.timeline-calendar-header\{position:sticky;top:0;z-index:8/);
+  assert.match(styles,/@media\(max-width:800px\)\{[\s\S]*?\.production-timeline\{[^}]*overflow:auto/);
+});
+
+test("production slot card opens the selected order",()=>{
+  assert.match(production,/onOpenOrder\?:\(orderId:string\)=>void/);
+  assert.match(production,/onClick=\{\(\)=>onOpenOrder\?\.\(selectedOrder\.id\)\}/);
+  assert.match(production,/productionUi\.openOrder/);
+  assert.match(production,/production-slot-summary/);
+  assert.match(production,/selectedOrder\?\.items\.reduce/);
+  assert.match(production,/selectedOrder\.priceMinor/);
+  assert.match(shell,/<ProductionWorkspace onOpenOrder=\{orderId=>navigate\("orders",\{orderId\}\)\}\/?>/);
+});
+
+test("production slot card deletes only the selected slot after confirmation",()=>{
+  assert.match(production,/productionUi\.deleteSlot/);
+  assert.match(production,/productionUi\.deleteSlotTitle/);
+  assert.match(production,/method:\s*"DELETE"/);
+  assert.match(production,/`\/api\/orders\/\$\{selectedOrder\.id\}\/production-slot`/);
+  assert.match(production,/productionStatus:\s*"NOT_SCHEDULED"/);
+  assert.match(production,/<Modal[\s\S]*?productionUi\.deleteSlotConfirm/);
+});
 
 test("production bars use two text lines and visible handles",()=>{assert.match(production,/timeline-bar-text/);assert.match(styles,/\.timeline-bar-text\{[^}]*display:grid/);assert.match(styles,/\.timeline-bar b\{font-size:11px/);assert.match(styles,/\.timeline-bar small\{font-size:9px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
 

@@ -1,4 +1,5 @@
 import { OrderType, PaymentStatus, ProductionStatus, type Prisma } from "@prisma/client";
+import { DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, requiresProduction, violatesShippingLead } from "./production-rules";
 
 export const ORDER_DETAILS_ERROR = {
   orderNotFound: "ORDER_DETAILS_ORDER_NOT_FOUND",
@@ -6,17 +7,23 @@ export const ORDER_DETAILS_ERROR = {
   changed: "ORDER_DETAILS_CHANGED",
   descriptionRequired: "ORDER_DETAILS_DESCRIPTION_REQUIRED",
   depositWouldUnconfirmProduction: "ORDER_DETAILS_DEPOSIT_WOULD_UNCONFIRM_PRODUCTION",
+  productionDeadlineConflict: "ORDER_DETAILS_PRODUCTION_DEADLINE_CONFLICT",
 } as const;
 
 type OrderDetailsErrorCode = (typeof ORDER_DETAILS_ERROR)[keyof typeof ORDER_DETAILS_ERROR];
 
 export type OrderDetailsInput = {
+  expectedCurrency?: string;
   description: string;
   priceMinor: number;
   expectedDescription: string | null;
   expectedPriceMinor: number;
   modelImagePath?: string;
   expectedModelImagePath: string | null;
+  type?: OrderType;
+  expectedType?: OrderType;
+  requiredDeliveryAt?: string | null;
+  expectedRequiredDeliveryAt?: string | null;
 };
 
 export class OrderDetailsOperationError extends Error {
@@ -46,7 +53,11 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
     },
   });
   if (!order) throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.orderNotFound);
-  if ((order.notes ?? null) !== input.expectedDescription || order.priceMinor !== input.expectedPriceMinor) {
+  if ((input.type !== undefined && input.expectedType === undefined) || (input.requiredDeliveryAt !== undefined && input.expectedRequiredDeliveryAt === undefined)) {
+    throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.changed);
+  }
+  const currentDeadline = order.requiredDeliveryAt?.toISOString() ?? null;
+  if ((order.notes ?? null) !== input.expectedDescription || order.priceMinor !== input.expectedPriceMinor || (input.expectedCurrency !== undefined && order.currency !== input.expectedCurrency) || (input.expectedType !== undefined && order.type !== input.expectedType) || (input.expectedRequiredDeliveryAt !== undefined && currentDeadline !== input.expectedRequiredDeliveryAt)) {
     throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.changed);
   }
   if (input.modelImagePath && (order.modelImagePath ?? null) !== input.expectedModelImagePath) {
@@ -55,23 +66,38 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
 
   const description = input.description.trim();
   if (!description) throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.descriptionRequired);
-  const depositRequiredMinor = proportionalDeposit(order.priceMinor, order.depositRequiredMinor, input.priceMinor);
+  let depositRequiredMinor = proportionalDeposit(order.priceMinor, order.depositRequiredMinor, input.priceMinor);
   const totalPaid = order.payments.reduce((sum, payment) => sum + paidMinor(payment, order.currency), 0);
-  const calculatedPaymentStatus = totalPaid === 0 ? PaymentStatus.UNPAID : totalPaid >= input.priceMinor ? PaymentStatus.PAID : totalPaid >= depositRequiredMinor ? PaymentStatus.DEPOSIT_PAID : PaymentStatus.PARTIALLY_PAID;
-  const paymentStatus = order.paymentStatus === PaymentStatus.REFUNDED || order.paymentStatus === PaymentStatus.CANCELLED ? order.paymentStatus : calculatedPaymentStatus;
   const terminalPaymentStatus = order.paymentStatus === PaymentStatus.REFUNDED || order.paymentStatus === PaymentStatus.CANCELLED;
-  const productionOrder = order.type !== OrderType.READY_MODEL && order.type !== OrderType.ACCESSORY;
+  const nextType = input.type ?? order.type;
+  const productionOrder = requiresProduction(nextType);
+  if (productionOrder && !requiresProduction(order.type)) {
+    const depositSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "orders", key: "depositPercent" } } });
+    const depositPercent = typeof depositSetting?.value === "number" && Number.isInteger(depositSetting.value) && depositSetting.value >= 0 && depositSetting.value <= 100 ? depositSetting.value : 50;
+    depositRequiredMinor = Number((BigInt(input.priceMinor) * BigInt(depositPercent) + 50n) / 100n);
+  }
+  const calculatedPaymentStatus = totalPaid === 0 ? PaymentStatus.UNPAID : totalPaid >= input.priceMinor ? PaymentStatus.PAID : totalPaid >= depositRequiredMinor ? PaymentStatus.DEPOSIT_PAID : PaymentStatus.PARTIALLY_PAID;
+  const paymentStatus = terminalPaymentStatus ? order.paymentStatus : calculatedPaymentStatus;
+  const becameNonProduction = input.type !== undefined && input.type !== order.type && !productionOrder;
+  const requiredDeliveryAt = input.requiredDeliveryAt === undefined ? order.requiredDeliveryAt : input.requiredDeliveryAt ? new Date(input.requiredDeliveryAt) : null;
+  if (productionOrder && order.productionSlot && requiredDeliveryAt) {
+    const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
+    const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
+    if (violatesShippingLead(order.productionSlot.endsAt, requiredDeliveryAt, shippingLeadDays)) throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.productionDeadlineConflict);
+  }
   const confirmsProductionSlot = Boolean(productionOrder && !terminalPaymentStatus && order.productionSlot?.tentative && depositRequiredMinor > 0 && totalPaid >= depositRequiredMinor);
   if (productionOrder && order.productionSlot && !order.productionSlot.tentative && input.priceMinor > order.priceMinor && totalPaid < depositRequiredMinor) {
     throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.depositWouldUnconfirmProduction);
   }
   const orderData = {
+    type: nextType,
+    requiredDeliveryAt,
     notes: description,
     priceMinor: input.priceMinor,
     depositRequiredMinor,
     paymentStatus,
     ...(input.modelImagePath ? { modelImagePath: input.modelImagePath } : {}),
-    ...(confirmsProductionSlot && order.productionStatus === ProductionStatus.NOT_SCHEDULED ? { productionStatus: ProductionStatus.SCHEDULED } : {}),
+    ...(becameNonProduction ? { productionStatus: ProductionStatus.NOT_SCHEDULED } : confirmsProductionSlot && order.productionStatus === ProductionStatus.NOT_SCHEDULED ? { productionStatus: ProductionStatus.SCHEDULED } : {}),
   };
 
   const primaryItem = order.items[0];
@@ -84,13 +110,18 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
     await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "OrderItem", entityId: primaryItem.id, before: { name: primaryItem.name, priceMinor: primaryItem.priceMinor, modelImagePath: primaryItem.modelImagePath }, after: { name: updatedItem.name, priceMinor: updatedItem.priceMinor, modelImagePath: updatedItem.modelImagePath } } });
   }
 
+  if (becameNonProduction && order.productionSlot) {
+    const deletedSlot = await tx.productionSlot.delete({ where: { orderId } });
+    await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_DELETED", summary: "Производственный слот удалён после изменения типа заказа", metadata: { slotId: deletedSlot.id, previousType: order.type, type: nextType } } });
+    await tx.auditLog.create({ data: { actorId, action: "DELETE", entityType: "ProductionSlot", entityId: deletedSlot.id, before: order.productionSlot } });
+  }
   const updatedOrder = await tx.order.update({ where: { id: orderId }, data: orderData });
   if (confirmsProductionSlot && order.productionSlot) {
     const slot = await tx.productionSlot.update({ where: { orderId }, data: { tentative: false } });
     await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });
     await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_CONFIRMED", summary: "Производственный слот подтверждён после изменения цены заказа", metadata: { depositRequiredMinor, paidMinor: totalPaid, currency: order.currency } } });
   }
-  await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DETAILS_UPDATED", summary: "Изменены описание, цена или изображение заказа", metadata: { description, priceMinor: input.priceMinor, priceChanged: order.priceMinor !== input.priceMinor, depositRequiredMinor, modelImagePath: input.modelImagePath ?? order.modelImagePath, paymentStatus } } });
+  await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DETAILS_UPDATED", summary: "Изменены данные заказа", metadata: { description, type: nextType, typeChanged: order.type !== nextType, requiredDeliveryAt, priceMinor: input.priceMinor, priceChanged: order.priceMinor !== input.priceMinor, depositRequiredMinor, modelImagePath: input.modelImagePath ?? order.modelImagePath, paymentStatus } } });
   await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updatedOrder } });
   return updatedOrder;
 }

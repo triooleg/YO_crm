@@ -50,7 +50,7 @@ function normalizedPhone(value: string | string[] | null | undefined) {
   return /^\+?\d{7,15}$/.test(compact) ? compact : candidate;
 }
 
-function sourceChannel(name: string | undefined): ContactChannel {
+export function keycrmSourceChannel(name: string | undefined): ContactChannel {
   const value = (name ?? "").toLowerCase();
   if (value.includes("instagram")) return "INSTAGRAM";
   if (value.includes("facebook")) return "FACEBOOK";
@@ -193,7 +193,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
       firstName: buyerName,
       email: normalizedEmail(raw.buyer?.email),
       phone: normalizedPhone(raw.buyer?.phone),
-      source: sourceChannel(sourceName),
+      source: keycrmSourceChannel(sourceName),
       country: raw.shipping?.shipping_address_country?.trim() || null,
       city: raw.shipping?.shipping_address_city?.trim() || null,
       address: addressLine1,

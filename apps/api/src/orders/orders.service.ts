@@ -8,7 +8,8 @@ import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, ArchiveOrdersDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, WebsiteSalesCorrectionDto } from "./orders.dto";
+import { archiveOrdersTransaction, OrderArchiveError, ORDER_ARCHIVE_ERROR } from "./order-archive";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, resolveProductionSlotTentative, violatesShippingLead } from "./production-rules";
@@ -16,9 +17,23 @@ import { loadProductionOrders, type ProductionOrderRepository } from "./producti
 import { isOrderImageName } from "./order-image-name";
 import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
 import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "./order-details";
+import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistOrderItemDetails } from "./order-item-details";
+import { keycrmSourceChannel } from "../keycrm/keycrm-normalizer";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
+function keycrmSourceNames(context: Prisma.JsonValue | null | undefined) {
+  if (!context || typeof context !== "object" || Array.isArray(context)) return {} as Record<string,string>;
+  const value=(context as Record<string,unknown>).sourceNames;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string,string>;
+  return Object.fromEntries(Object.entries(value).filter((entry):entry is [string,string]=>typeof entry[1]==="string"));
+}
+function keycrmOrderSource(externalData: Prisma.JsonValue | null, sourceNames: Record<string,string>) {
+  if (!externalData || typeof externalData !== "object" || Array.isArray(externalData)) return {id:"",name:""};
+  const sourceId=(externalData as Record<string,unknown>).source_id;
+  const id=sourceId===null||sourceId===undefined?"":String(sourceId);
+  return {id,name:sourceNames[id]??""};
+}
 function calculateDepositMinor(priceMinor: number, percent: number) {
   const scaled = BigInt(priceMinor) * BigInt(percent);
   return Number((scaled + 50n) / 100n);
@@ -107,6 +122,48 @@ export class OrdersService {
     }
   }
 
+  async archiveOrders(dto: ArchiveOrdersDto, actor: User) {
+    try {
+      return await this.prisma.$transaction((tx) => archiveOrdersTransaction(tx, dto.orderIds, actor.id));
+    } catch (error) {
+      if (!(error instanceof OrderArchiveError)) throw error;
+      if (error.code === ORDER_ARCHIVE_ERROR.emptySelection) throw new BadRequestException("Выберите хотя бы один заказ");
+      throw new ConflictException("Один или несколько выбранных заказов уже недоступны. Обновите список и повторите действие");
+    }
+  }
+  async correctWebsiteSales(dto: WebsiteSalesCorrectionDto, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-website-sales-correction'))");
+      const latestSync = await tx.keycrmSyncRun.findFirst({ where: { status: { in: ["COMPLETED", "PARTIAL"] } }, orderBy: { createdAt: "desc" }, select: { context: true } });
+      const sourceNames = keycrmSourceNames(latestSync?.context);
+      const eligibleWhere = { archivedAt: null, type: { not: "WEBSITE_SALE" as const }, sourceSystem: "KEYCRM", OR: [{ AND: [{ deliveryTrackingCode: { not: null } }, { deliveryTrackingCode: { not: "" } }] }, { shipment: { is: { AND: [{ trackingNumber: { not: null } }, { trackingNumber: { not: "" } }] } } }] };
+      const requestedIds = dto.candidates?.map(candidate => candidate.orderId) ?? [];
+      if (!dto.dryRun && (requestedIds.length === 0 || new Set(requestedIds).size !== requestedIds.length)) throw new BadRequestException("Повторите предварительную проверку заказов");
+      if (!dto.dryRun) for (const orderId of [...requestedIds].sort()) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const possibleOrders = await tx.order.findMany({ where: { ...eligibleWhere, ...(!dto.dryRun ? { id: { in: requestedIds } } : {}) }, include: { productionSlot: true, shipment: true }, take: 10001, orderBy: { id: "asc" } });
+      const orders = possibleOrders.filter(order => keycrmSourceChannel(keycrmOrderSource(order.externalData, sourceNames).name) === "WEBSITE");
+      if (orders.length > 5000) throw new BadRequestException("Найдено более 5000 заказов. Выполните коррекцию после уточнения выборки");
+      if (dto.dryRun) return { dryRun: true, matched: orders.length, updated: 0, orderNumbers: orders.map(order => order.number), candidates: orders.map(order => { const source=keycrmOrderSource(order.externalData,sourceNames); return { orderId: order.id, expectedUpdatedAt: order.updatedAt.toISOString(), expectedType: order.type, expectedProductionSlotUpdatedAt: order.productionSlot?.updatedAt.toISOString() ?? null, expectedSourceId: source.id, expectedSourceName: source.name } }) };
+      const expected = new Map(dto.candidates!.map(candidate => [candidate.orderId, candidate]));
+      const stale = orders.length !== requestedIds.length || orders.some(order => {
+        const candidate = expected.get(order.id);
+        const source=keycrmOrderSource(order.externalData,sourceNames);
+        return !candidate || candidate.expectedUpdatedAt !== order.updatedAt.toISOString() || candidate.expectedType !== order.type || candidate.expectedProductionSlotUpdatedAt !== (order.productionSlot?.updatedAt.toISOString() ?? null) || candidate.expectedSourceId !== source.id || candidate.expectedSourceName !== source.name;
+      });
+      if (stale) throw new ConflictException("Список заказов изменился. Повторите предварительную проверку");
+      for (const order of orders) {
+        if (order.productionSlot) {
+          await tx.productionSlot.delete({ where: { orderId: order.id } });
+          await tx.auditLog.create({ data: { actorId: actor.id, action: "DELETE", entityType: "ProductionSlot", entityId: order.productionSlot.id, before: order.productionSlot } });
+        }
+        const updated = await tx.order.update({ where: { id: order.id }, data: { type: "WEBSITE_SALE", productionStatus: "NOT_SCHEDULED" } });
+        await tx.activity.create({ data: { clientId: order.clientId, orderId: order.id, type: "ORDER_WEBSITE_SALE_CORRECTED", summary: "Тип заказа исправлен на «Продажа с сайта»", metadata: { hadProductionSlot: Boolean(order.productionSlot), trackingNumber: order.shipment?.trackingNumber ?? order.deliveryTrackingCode } } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: order.id, before: { type: order.type, productionStatus: order.productionStatus }, after: { type: updated.type, productionStatus: updated.productionStatus } } });
+      }
+      return { dryRun: false, matched: orders.length, updated: orders.length, orderNumbers: orders.slice(0, 20).map(order => order.number), candidates: [] };
+    });
+  }
+
 
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
     const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus };
@@ -116,7 +173,7 @@ export class OrdersService {
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
       if (!order) throw new NotFoundException("Заказ не найден");
       if (dto.productionStatus && dto.productionStatus !== "NOT_SCHEDULED" && !requiresProduction(order.type)) {
-        throw new BadRequestException("Готовые модели и аксессуары не планируются в производство");
+        throw new BadRequestException("Быстрые продажи и готовые изделия не планируются в производство");
       }
       const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
       if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
@@ -193,15 +250,63 @@ export class OrdersService {
         if (!image.isFile()) throw new Error("not a file");
       } catch { throw new NotFoundException("Изображение заказа не найдено"); }
     }
+    if (dto.currency !== undefined && (dto.expectedCurrency === undefined || dto.priceDirty === undefined || dto.expectedType === undefined || dto.expectedRequiredDeliveryAt === undefined)) {
+      throw new BadRequestException({ code: ORDER_DETAILS_ERROR.changed, message: "Для изменения валюты обновите заказ и повторите действие" });
+    }
     try {
-      return await this.prisma.$transaction((tx) => persistOrderDetails(tx, orderId, dto, actor.id));
+      return await this.prisma.$transaction(async tx => {
+        let detailsInput = dto;
+        if (dto.currency !== undefined && dto.currency !== dto.expectedCurrency) {
+          const converted = await changeOrderCurrencyTransaction(tx, orderId, dto.currency as ExchangeRateCurrency, actor.id, new Date(), {
+            currency: dto.expectedCurrency!,
+            type: dto.expectedType!,
+            description: dto.expectedDescription,
+            priceMinor: dto.expectedPriceMinor,
+            requiredDeliveryAt: dto.expectedRequiredDeliveryAt ?? null,
+            modelImagePath: dto.expectedModelImagePath,
+          });
+          detailsInput = {
+            ...dto,
+            priceMinor: dto.priceDirty ? dto.priceMinor : converted.order.priceMinor,
+            expectedCurrency: converted.order.currency,
+            expectedType: converted.order.type,
+            expectedDescription: converted.order.notes ?? null,
+            expectedPriceMinor: converted.order.priceMinor,
+            expectedRequiredDeliveryAt: converted.order.requiredDeliveryAt?.toISOString() ?? null,
+            expectedModelImagePath: converted.order.modelImagePath ?? null,
+          };
+        }
+        return persistOrderDetails(tx, orderId, detailsInput, actor.id);
+      });
     } catch (error) {
+      if (error instanceof OrderCurrencyChangeError) {
+        if (error.code === "ORDER_NOT_FOUND") throw new NotFoundException({ code: error.code, message: error.message });
+        if (error.code === "ORDER_CHANGED") throw new ConflictException({ code: error.code, message: "Заказ уже изменён другим пользователем. Обновите заказ и повторите действие" });
+        throw new BadRequestException({ code: error.code, message: error.message });
+      }
       if (!(error instanceof OrderDetailsOperationError)) throw error;
       if (error.code === ORDER_DETAILS_ERROR.orderNotFound) throw new NotFoundException({ code: error.code, message: "Заказ не найден" });
       if (error.code === ORDER_DETAILS_ERROR.descriptionRequired) throw new BadRequestException({ code: error.code, message: "Добавьте описание заказа" });
       if (error.code === ORDER_DETAILS_ERROR.depositWouldUnconfirmProduction) throw new BadRequestException({ code: error.code, message: "Сначала внесите оплату до новой суммы предоплаты либо измените условия предоплаты" });
+      if (error.code === ORDER_DETAILS_ERROR.productionDeadlineConflict) throw new BadRequestException({ code: error.code, message: "Срок отправки раньше допустимого завершения производства" });
       if (error.code === ORDER_DETAILS_ERROR.changed) throw new ConflictException({ code: error.code, message: "Описание или цена уже изменены другим пользователем. Обновите заказ и повторите действие" });
       throw new ConflictException({ code: error.code, message: "Изображение уже изменено другим пользователем. Обновите заказ и повторите действие" });
+    }
+  }
+  async updateItemDetails(orderId: string, itemId: string, dto: UpdateOrderItemDetailsDto, actor: User) {
+    if (dto.modelImagePath) {
+      if (!isOrderImageName(dto.modelImagePath)) throw new BadRequestException("Некорректное имя изображения заказа");
+      try { const image=await stat(join(uploadsRoot(),"order-models",dto.modelImagePath)); if(!image.isFile())throw new Error("not a file"); }
+      catch { throw new NotFoundException("Изображение заказа не найдено"); }
+    }
+    try { return await this.prisma.$transaction(tx=>persistOrderItemDetails(tx,orderId,itemId,dto,actor.id)); }
+    catch(error){
+      if(!(error instanceof OrderItemDetailsError))throw error;
+      if(error.code===ORDER_ITEM_DETAILS_ERROR.orderNotFound)throw new NotFoundException("Заказ не найден");
+      if(error.code===ORDER_ITEM_DETAILS_ERROR.itemNotFound)throw new NotFoundException("Дизайн заказа не найден");
+      if(error.code===ORDER_ITEM_DETAILS_ERROR.depositWouldUnconfirmProduction)throw new BadRequestException("Сначала внесите оплату до новой суммы предоплаты");
+      if(error.code===ORDER_ITEM_DETAILS_ERROR.totalTooLarge)throw new BadRequestException("Итоговая сумма заказа превышает допустимый предел");
+      throw new ConflictException("Дизайн уже изменён другим пользователем. Обновите заказ и повторите действие");
     }
   }
   async updateDeliveryAddress(orderId: string, dto: UpdateOrderDeliveryAddressDto, actor: User) {
@@ -221,7 +326,7 @@ export class OrdersService {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
-      if (!requiresProduction(order.type)) throw new BadRequestException("Готовые модели и аксессуары не планируются в производство");
+      if (!requiresProduction(order.type)) throw new BadRequestException("Быстрые продажи и готовые изделия не планируются в производство");
       const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
       const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
       if (order.requiredDeliveryAt && violatesShippingLead(endsAt, order.requiredDeliveryAt, shippingLeadDays)) {
@@ -233,6 +338,20 @@ export class OrdersService {
       const slot = await tx.productionSlot.upsert({ where:{orderId}, create:{orderId,startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false}, update:{startsAt,endsAt,capacity:dto.capacity??1,tentative,locked:dto.locked??false,sourceSystem:null,sourceAccount:null,externalId:null} });
       await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_UPDATED",summary:"Обновлён производственный слот",metadata:{startsAt,endsAt,tentative,locked:dto.locked??false}}});
       await tx.auditLog.create({data:{actorId:actor.id,action:order.productionSlot?"UPDATE":"CREATE",entityType:"ProductionSlot",entityId:slot.id,before:order.productionSlot??undefined,after:slot}});return slot;
+    });
+  }
+  async deleteProductionSlot(orderId: string, dto: DeleteProductionSlotDto, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { productionSlot: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (!order.productionSlot) throw new NotFoundException("Производственный слот не найден");
+      if (order.productionSlot.updatedAt.toISOString() !== dto.expectedUpdatedAt) throw new ConflictException("Производственный слот уже изменён. Обновите план и повторите действие");
+      const slot = await tx.productionSlot.delete({ where: { orderId } });
+      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { productionStatus: "NOT_SCHEDULED" } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_DELETED", summary: "Производственный слот удалён", metadata: { slotId: slot.id, startsAt: slot.startsAt, endsAt: slot.endsAt } } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "DELETE", entityType: "ProductionSlot", entityId: slot.id, before: slot, after: { orderId, productionStatus: updatedOrder.productionStatus } } });
+      return { deleted: true, orderId, productionStatus: updatedOrder.productionStatus };
     });
   }
   async addPayment(orderId: string, dto: AddOrderPaymentDto, actor: User) {

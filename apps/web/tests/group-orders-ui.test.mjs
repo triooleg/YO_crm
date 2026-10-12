@@ -7,9 +7,11 @@ const list = readFileSync(new URL("../components/orders-workspace.tsx", import.m
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
 test("форма создаёт парный и групповой состав", () => {
-  for (const text of ["Парный заказ", "Групповой заказ", "Выберите состав группы"]) {
-    assert.match(panel, new RegExp(text));
-  }
+  assert.match(panel, /orderFormUi\.types\.PAIR/);
+  assert.match(panel, /orderFormUi\.types\.GROUP_ORDER/);
+  assert.match(panel, /Выберите состав группы/);
+  assert.match(i18n, /PAIR:\s*"Парный заказ"/);
+  assert.match(i18n, /GROUP_ORDER:\s*"Групповой заказ"/);
   assert.match(panel, /items,/);
 });
 

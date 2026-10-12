@@ -60,6 +60,11 @@ async function mockSettings(page: Page) {
       writes.push({ path, body });
       return route.fulfill({ json: production.map(item => ({ ...item, value: body[item.key] })) });
     }
+    if (path === "/api/orders/maintenance/website-sales" && request.method() === "POST") {
+      const body = request.postDataJSON();
+      writes.push({ path, body });
+      return route.fulfill({ json: body.dryRun ? { dryRun: true, matched: 1, updated: 0, orderNumbers: ["KC-701"], candidates: [{ orderId: "order-701", expectedUpdatedAt: "2026-10-10T12:00:00.000Z", expectedType: "CUSTOM_ORDER", expectedProductionSlotUpdatedAt: "2026-10-10T12:00:00.000Z", expectedSourceId: "2", expectedSourceName: "Сайт" }] } : { dryRun: false, matched: 1, updated: 1, orderNumbers: ["KC-701"], candidates: [] } });
+    }
     if (path === "/api/ai-assistant/settings" && request.method() === "GET") return route.fulfill({ json: aiAssistant });
     if (path === "/api/ai-assistant/settings" && request.method() === "PATCH") {
       const body = request.postDataJSON();
@@ -295,6 +300,14 @@ for (const viewport of [
     await expect(productionPanel.getByRole("status")).toHaveText("Настройки сохранены");
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-production-settings-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await productionPanel.screenshot({ path: screenshotPath(testInfo, `mantine-production-panel-${viewport.width}x${viewport.height}.png`) });
+    await productionPanel.getByRole("button", { name: "Проверить заказы" }).click();
+    await expect(productionPanel.getByText("Найдено заказов: 1. KC-701")).toBeVisible();
+    await productionPanel.getByRole("button", { name: "Применить коррекцию" }).click();
+    const correctionDialog=page.getByRole("dialog", { name: "Подтвердите коррекцию заказов" });
+    await expect(correctionDialog).toContainText("KC-701");
+    await page.screenshot({ path: screenshotPath(testInfo, `website-sales-correction-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    await correctionDialog.getByRole("button", { name: "Применить коррекцию" }).click();
+    await expect(productionPanel.getByText("Исправлено заказов: 1.")).toBeVisible();
 
     await page.getByRole("tab", { name: "Интерфейс" }).click();
     const brandingPanel = page.locator("#settings-interface-panel");
@@ -330,6 +343,8 @@ for (const viewport of [
 
     expect(writes).toEqual([
       { path: "/api/finance/settings/production", body: { defaultDurationDays: 12, shippingLeadDays: 4 } },
+      { path: "/api/orders/maintenance/website-sales", body: { dryRun: true } },
+      { path: "/api/orders/maintenance/website-sales", body: { dryRun: false, candidates: [{ orderId: "order-701", expectedUpdatedAt: "2026-10-10T12:00:00.000Z", expectedType: "CUSTOM_ORDER", expectedProductionSlotUpdatedAt: "2026-10-10T12:00:00.000Z", expectedSourceId: "2", expectedSourceName: "Сайт" }] } },
       { path: "/api/branding", body: { useInHeader: false, useInMessages: true, removeLogo: true } },
       { path: "/api/branding", body: { useInHeader: false, useInMessages: true, removeLogo: false } },
       { path: "/api/ai-control/settings", body: { key: "summaryDetailLevel", value: "COMPACT", scope: "GLOBAL" } },

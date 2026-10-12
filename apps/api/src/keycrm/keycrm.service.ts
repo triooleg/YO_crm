@@ -465,7 +465,7 @@ export class KeycrmService {
         persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number: order.number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {
-        const manualPriceOverride = Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, select: { id: true } }));
+        const manualPriceOverride = Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, OR: [{ type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, { type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
         const depositRequiredMinor = manualPriceOverride
           ? existing.depositRequiredMinor
           : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
@@ -482,11 +482,12 @@ export class KeycrmService {
         if (item.externalId) {
           const identity = { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: item.externalId };
           const beforeItem = await tx.orderItem.findUnique({ where: { sourceSystem_sourceAccount_externalId: identity } });
+          const manualItemOverride = beforeItem ? Boolean(await tx.activity.findFirst({ where: { orderId: persisted.id, type: "ORDER_ITEM_DETAILS_UPDATED", AND: [{ metadata: { path: ["itemId"], equals: beforeItem.id } }, { metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } })) : false;
           const localImage = item.externalImageUrl === mainExternalImageUrl ? importedModelImagePath : null;
           const replaceItemImage = shouldReplaceImportedImage(beforeItem?.modelImagePath, localImage);
           if (replaceItemImage && beforeItem?.modelImagePath && IMPORTED_IMAGE_NAME.test(beforeItem.modelImagePath)) replacedImagePaths.add(beforeItem.modelImagePath);
-          const syncedItem = await tx.orderItem.upsert({ where: { sourceSystem_sourceAccount_externalId: identity }, create: { orderId: persisted.id, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(localImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue, ...identity }, update: { name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(replaceItemImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue } });
-          await tx.auditLog.create({ data: { actorId, action: beforeItem ? "UPDATE" : "CREATE", entityType: "OrderItem", entityId: syncedItem.id, before: beforeItem ?? undefined, after: syncedItem } });
+          const syncedItem = manualItemOverride && beforeItem ? beforeItem : await tx.orderItem.upsert({ where: { sourceSystem_sourceAccount_externalId: identity }, create: { orderId: persisted.id, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(localImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue, ...identity }, update: { name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(replaceItemImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue } });
+          if (!manualItemOverride) await tx.auditLog.create({ data: { actorId, action: beforeItem ? "UPDATE" : "CREATE", entityType: "OrderItem", entityId: syncedItem.id, before: beforeItem ?? undefined, after: syncedItem } });
         }
         else if (!externallyLinked) {
           const localImage = item.externalImageUrl === mainExternalImageUrl ? importedModelImagePath : null;
@@ -1053,4 +1054,4 @@ function restorableData(source: Record<string, unknown>, omitted: string[]): Rec
   }
   return result;
 }
-function defaultDepositRequired(priceMinor: number, type: OrderType) { return type === OrderType.READY_MODEL || type === OrderType.ACCESSORY ? 0 : Math.round(priceMinor / 2); }
+function defaultDepositRequired(priceMinor: number, type: OrderType) { return new Set<OrderType>([OrderType.READY_MODEL, OrderType.ACCESSORY, OrderType.WEBSITE_SALE, OrderType.STOCK_SALE]).has(type) ? 0 : Math.round(priceMinor / 2); }

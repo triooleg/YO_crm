@@ -23,6 +23,8 @@ test("decimal rate is parsed as an exact rational without floating point", () =>
 test("minor units use exact rational and round half-up", () => {
   assert.equal(convertMinorWithRate(1, { numerator: "1", denominator: "2" }), 1);
   assert.equal(convertMinorWithRate(20000, { numerator: "11715", denominator: "10000" }), 23430);
+  assert.equal(convertMinorWithRate(2_147_483_647, { numerator: "1", denominator: "1" }), 2_147_483_647);
+  assert.throws(() => convertMinorWithRate(1_073_741_824, { numerator: "2", denominator: "1" }), /диапазон/);
   assert.throws(() => convertMinorWithRate(Number.MAX_SAFE_INTEGER, { numerator: "2", denominator: "1" }), /диапазон/);
 });
 

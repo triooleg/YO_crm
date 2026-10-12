@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const panel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
 test("раскрытый заказ позволяет заменить изображение конкретной позиции", () => {
@@ -16,10 +17,12 @@ test("раскрытый заказ позволяет заменить изоб
 
 test("раскрытый заказ открывает единое редактирование описания цены и главного изображения", () => {
   assert.match(dashboard, /ui\.editOrder/);
-  assert.match(dashboard, /function OrderEditModal/);
-  assert.match(dashboard, /`\/orders\/\$\{order\.id\}\/details`/);
-  assert.match(dashboard, /description: description\.trim\(\), priceMinor/);
-  assert.match(dashboard, /expectedDescription: order\.notes \?\? null, expectedPriceMinor: order\.priceMinor/);
-  assert.match(dashboard, /ui\.orderTotalPrice/);
+  assert.match(dashboard, /<OrderPanel[^>]*order=\{editOrder\}/);
+  assert.match(panel, /`\/orders\/\$\{order\.id\}\/details`/);
+  assert.match(panel, /description:description\.trim\(\),priceMinor/);
+  assert.match(panel, /currency,expectedCurrency:order\.currency,priceDirty/);
+  assert.match(panel, /onChange=\{e=>\{setPrice\(e\.currentTarget\.value\);setPriceDirty\(true\)\}\}/);
+  assert.match(panel, /expectedDescription:order\.notes\?\?null,expectedPriceMinor:order\.priceMinor/);
+  assert.match(panel, /orderFormUi\.editTitle/);
   assert.match(i18n, /editOrder:\s*"Изменить заказ"/);
 });

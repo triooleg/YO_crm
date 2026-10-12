@@ -27,3 +27,15 @@ test("быстрые продажи нельзя вручную или авто�
   assert.match(updateSlot,/requiresProduction\(order\.type\)/);
   assert.match(createOrder,/order\.requiredDeliveryAt && requiresProduction\(order\.type\)/);
 });
+
+test("производственный слот удаляется отдельно от заказа с аудитом",()=>{
+  assert.match(controller,/@Delete\(":id\/production-slot"\)/);
+  assert.match(controller,/deleteProductionSlot/);
+  const deleteSlot=service.slice(service.indexOf("async deleteProductionSlot"),service.indexOf("async addPayment"));
+  assert.match(deleteSlot,/\$transaction\(async tx/);
+  assert.match(deleteSlot,/productionSlot\.delete/);
+  assert.match(deleteSlot,/productionStatus:\s*"NOT_SCHEDULED"/);
+  assert.match(deleteSlot,/PRODUCTION_SLOT_DELETED/);
+  assert.match(deleteSlot,/action:\s*"DELETE"/);
+  assert.match(deleteSlot,/productionSlot\.updatedAt\.toISOString\(\) !== dto\.expectedUpdatedAt/);
+});

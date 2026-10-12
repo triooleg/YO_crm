@@ -112,6 +112,8 @@ enum Discipline {
 
 enum OrderType {
   READY_MODEL
+  WEBSITE_SALE
+  STOCK_SALE
   CUSTOM_ORDER
   COPY_MODEL
   MODIFIED_MODEL

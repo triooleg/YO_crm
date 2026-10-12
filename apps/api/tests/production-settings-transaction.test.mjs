@@ -43,6 +43,6 @@ test("valid duration and lead are written and audited together", async () => {
 test("historical quick-sale slots do not block a production shipping reserve increase", async () => {
   const { tx, writes } = transaction({ slots: [{ endsAt: new Date("2026-09-19T00:00:00.000Z"), order: { number: "YO-26-0002", type: "READY_MODEL", requiredDeliveryAt: new Date("2026-09-20T00:00:00.000Z") } }] });
   await saveProductionSettingsTransaction(tx, { defaultDurationDays: 14, shippingLeadDays: 3 }, "owner");
-  assert.deepEqual(writes.query.where.order.type.notIn, ["READY_MODEL", "ACCESSORY"]);
+  assert.deepEqual(writes.query.where.order.type.notIn, ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
   assert.equal(writes.settings.length, 2);
 });

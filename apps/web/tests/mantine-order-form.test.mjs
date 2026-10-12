@@ -26,7 +26,7 @@ test("большая форма заказа использует Mantine Drawer
 
 test("опасный цвет применяется только к удалению изображения", () => {
   assert.match(panel, /className="order-remove-file"/);
-  assert.match(styles, /\.order-upload \.order-remove-file\{[^}]*color:#a33/);
+  assert.match(styles, /\.order-upload \.order-remove-file\s*\{[^}]*color:\s*#a33/);
   assert.doesNotMatch(styles, /\.order-upload \.crm-button\{[^}]*color:#a33/);
 });
 

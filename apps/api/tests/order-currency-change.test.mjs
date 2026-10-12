@@ -62,6 +62,33 @@ test("currency change converts every order and item monetary field atomically an
   assert.equal(result.conversion.provider, "NBU");
 });
 
+test("currency change rejects a stale order snapshot before monetary writes", async () => {
+  const { tx, state } = fixture();
+  await assert.rejects(
+    () => changeOrderCurrencyTransaction(tx, "o1", "UAH", "owner-1", new Date(), {
+      currency: "EUR", type: "CUSTOM_ORDER", description: "Устаревшее описание", priceMinor: 10000,
+      requiredDeliveryAt: null, modelImagePath: null,
+    }),
+    error => error instanceof OrderCurrencyChangeError && error.code === "ORDER_CHANGED",
+  );
+  assert.equal(state.order.currency, "EUR");
+  assert.equal(state.activities.length, 0);
+  assert.equal(state.audits.length, 0);
+});
+
+test("currency change rejects a converted Prisma Int overflow before monetary writes", async () => {
+  const { tx, state } = fixture({ priceMinor: 2_147_483_647, items: [{ id: "i1", priceMinor: 2_147_483_647 }] });
+  await assert.rejects(
+    () => changeOrderCurrencyTransaction(tx, "o1", "UAH", "owner-1", new Date()),
+    error => error instanceof OrderCurrencyChangeError && error.code === "AMOUNT_OUT_OF_RANGE",
+  );
+  assert.equal(state.order.currency, "EUR");
+  assert.equal(state.order.priceMinor, 2_147_483_647);
+  assert.equal(state.order.items[0].priceMinor, 2_147_483_647);
+  assert.equal(state.activities.length, 0);
+  assert.equal(state.audits.length, 0);
+});
+
 for (const [name, overrides] of [
   ["payment", { payments: [{ id: "p1" }] }],
   ["invoice", { invoices: [{ id: "v1" }] }],

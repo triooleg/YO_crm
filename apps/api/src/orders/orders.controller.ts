@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { join } from "node:path";
 import { UserRole, type User } from "@prisma/client";
@@ -6,7 +6,7 @@ import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, CreateOrderDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto } from "./orders.dto";
+import { AddOrderPaymentDto, ArchiveOrdersDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, WebsiteSalesCorrectionDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
 import { isOrderImageName } from "./order-image-name";
@@ -19,6 +19,8 @@ export class OrdersController {
   @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") defaults() { return this.orders.defaults(); }
   @Get("production") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) productionList(@Query("orderId") orderId?: string, @Query("from") from?: string, @Query("to") to?: string) { return this.orders.productionList(orderId, from, to); }
   @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string) { return this.orders.list(search); }
+  @Patch("archive") @Roles(UserRole.OWNER, UserRole.ADMIN) archiveOrders(@Body() dto: ArchiveOrdersDto, @Req() req: Request & { user: User }) { return this.orders.archiveOrders(dto, req.user); }
+  @Post("maintenance/website-sales") @Roles(UserRole.OWNER, UserRole.ADMIN) correctWebsiteSales(@Body() dto: WebsiteSalesCorrectionDto, @Req() req: Request & { user: User }) { return this.orders.correctWebsiteSales(dto, req.user); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }
   @Post() @Roles("OWNER", "ADMIN", "MANAGER") create(@Body() dto: CreateOrderDto, @Req() req: Request & { user: User }) { return this.orders.create(dto, req.user); }
   @Patch(":id/statuses") @Roles("OWNER", "ADMIN", "MANAGER") updateStatuses(@Param("id") id: string, @Body() dto: UpdateOrderStatusesDto, @Req() req: Request & { user: User }) { return this.orders.updateStatuses(id, dto, req.user); }
@@ -27,8 +29,10 @@ export class OrdersController {
   @Patch(":id/discipline") @Roles("OWNER", "ADMIN", "MANAGER") updateDiscipline(@Param("id") id: string, @Body() dto: UpdateOrderDisciplineDto, @Req() req: Request & { user: User }) { return this.orders.updateDiscipline(id, dto, req.user); }
   @Patch(":id/model-image") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateModelImage(@Param("id") id: string, @Body() dto: UpdateOrderModelImageDto, @Req() req: Request & { user: User }) { return this.orders.updateModelImage(id, dto, req.user); }
   @Patch(":id/details") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateDetails(@Param("id") id: string, @Body() dto: UpdateOrderDetailsDto, @Req() req: Request & { user: User }) { return this.orders.updateDetails(id, dto, req.user); }
+  @Patch(":id/items/:itemId") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateItemDetails(@Param("id") id: string, @Param("itemId") itemId: string, @Body() dto: UpdateOrderItemDetailsDto, @Req() req: Request & { user: User }) { return this.orders.updateItemDetails(id, itemId, dto, req.user); }
   @Patch(":id/delivery-address") @Roles(...ORDER_DELIVERY_ADDRESS_ROLES) updateDeliveryAddress(@Param("id") id: string, @Body() dto: UpdateOrderDeliveryAddressDto, @Req() req: Request & { user: User }) { return this.orders.updateDeliveryAddress(id, dto, req.user); }
   @Patch(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") updateProductionSlot(@Param("id") id: string, @Body() dto: UpdateProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.updateProductionSlot(id, dto, req.user); }
+  @Delete(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") deleteProductionSlot(@Param("id") id: string, @Body() dto: DeleteProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.deleteProductionSlot(id, dto, req.user); }
   @Post(":id/payments") @Roles("OWNER", "ADMIN", "MANAGER") addPayment(@Param("id") id: string, @Body() dto: AddOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.addPayment(id, dto, req.user); }
   @Post(":id/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addMeasurement(@Param("id") id: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addMeasurement(id, dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {

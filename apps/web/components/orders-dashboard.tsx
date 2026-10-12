@@ -2,7 +2,7 @@
 
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
-import { ordersDashboardUi as ui } from "../lib/i18n";
+import { orderFormUi, ordersDashboardUi as ui } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
@@ -36,6 +36,7 @@ const DEFAULT_COLUMNS: ColumnId[] = ["client", "quantity", "discipline", "design
 const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
 const PRODUCTION_STATUSES = ["NOT_SCHEDULED", "TENTATIVE", "SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY", "ON_HOLD", "CANCELLED"];
 const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
+const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
 
 export function OrdersDashboard({ role, onNavigate }: Props) {
   const editableTextColor = (useMantineTheme().other.crmControls as { editableTextColor: string }).editableTextColor;
@@ -55,6 +56,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [deliveryOrderId, setDeliveryOrderId] = useState<string>();
   const [currencyOrderId, setCurrencyOrderId] = useState<string>();
   const [editOrderId, setEditOrderId] = useState<string>();
+  const [editOrderClient, setEditOrderClient] = useState<OrderClientDetail>();
+  const [editDesign, setEditDesign] = useState<{orderId:string;itemId:string}>();
   const paymentTrigger = useRef<HTMLButtonElement>(null);
   const [measurementOrder, setMeasurementOrder] = useState<Order>();
   const [filterOpen, setFilterOpen] = useState(false);
@@ -64,6 +67,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set());
   const [draggedColumn, setDraggedColumn] = useState<ColumnId>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [preview, setPreview] = useState<Preview>();
   const [newOrderOpen, setNewOrderOpen] = useState(false);
   const [newOrderClients, setNewOrderClients] = useState<OrderClientBrief[]>([]);
@@ -165,8 +170,11 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const deliveryOrder = orders.find((order) => order.id === deliveryOrderId);
   const currencyChangeOrder = orders.find((order) => order.id === currencyOrderId);
   const editOrder = orders.find((order) => order.id === editOrderId);
+  const editDesignOrder = orders.find((order) => order.id === editDesign?.orderId);
+  const editDesignItem = editDesignOrder?.items.find((item) => item.id === editDesign?.itemId);
   const visibleColumns = columnOrder.filter((id) => !hiddenColumns.has(id));
   const filterCount = Number(statusFilter !== "all") + Number(disciplineFilter !== "all");
+  const canArchiveOrders = role === "OWNER" || role === "ADMIN";
 
   function persistColumns(order: ColumnId[], hidden: Set<ColumnId>) {
     setColumnOrder(order);
@@ -243,7 +251,28 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     finally { setNewOrderLoading(false); }
   }
   function closeNewOrder() { setNewOrderOpen(false); setNewOrderClient(undefined); window.requestAnimationFrame(() => newOrderTrigger.current?.focus()); }
+  async function openEditOrder(order: Order) {
+    setEditOrderId(order.id); setEditOrderClient(undefined); setError("");
+    try { setEditOrderClient(await request(`/clients/${order.client.id}`)); }
+    catch (reason) { setEditOrderId(undefined); setError((reason as Error).message); }
+  }
+  function closeEditOrder() { setEditOrderId(undefined); setEditOrderClient(undefined); }
   function closePayment() { setPaymentOrderId(undefined); window.requestAnimationFrame(() => paymentTrigger.current?.focus()); }
+  async function archiveSelectedOrders() {
+    if (!selectedIds.size || archiving) return;
+    setArchiving(true);
+    try {
+      await request("/orders/archive", { method: "PATCH", body: JSON.stringify({ orderIds: [...selectedIds] }) });
+      setArchiveOpen(false);
+      setSelectedIds(new Set());
+      setExpandedId((current) => current && selectedIds.has(current) ? undefined : current);
+      await load();
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setArchiving(false);
+    }
+  }
 
   return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
@@ -284,7 +313,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <button className="orders-clear-filters" onClick={clearFilters}>{ui.clearAll}</button>
     </div>}
 
-    {selectedIds.size > 0 && <div className="orders-selection"><strong>{ui.selected}: {selectedIds.size}</strong><span>{ui.bulkHint}</span><button onClick={() => setSelectedIds(new Set())}>{ui.clearSelection}</button></div>}
+    {selectedIds.size > 0 && <div className="orders-selection"><strong>{ui.selected}: {selectedIds.size}</strong><span>{ui.bulkHint}</span>{canArchiveOrders && <CrmButton color="red" size="compact-sm" onClick={() => setArchiveOpen(true)}>{ui.archiveSelected}</CrmButton>}<button className="orders-clear-selection" onClick={() => setSelectedIds(new Set())}>{ui.clearSelection}</button></div>}
 
     <div className="orders-table-wrap orders-table-scroll">
       <table className="orders-table orders-dashboard-table">
@@ -298,7 +327,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => setExpandedId((current) => current === order.id ? undefined : order.id)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
               {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => setExpandedId((current) => current === order.id ? undefined : order.id)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
             </tr>
-            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}><ExpandedOrder order={order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onMeasurements={() => setMeasurementOrder(order)} onCurrency={() => setCurrencyOrderId(order.id)} onEdit={() => setEditOrderId(order.id)} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
+            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}><ExpandedOrder order={order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onMeasurements={() => setMeasurementOrder(order)} onCurrency={() => setCurrencyOrderId(order.id)} onEdit={() => void openEditOrder(order)} onEditItem={(itemId)=>setEditDesign({orderId:order.id,itemId})} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
           </Fragment>)}
         </tbody>
       </table>
@@ -311,13 +340,19 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <div className="orders-columns-list">{columnOrder.map((id, index) => <div key={id} data-column-id={id} draggable onDragStart={() => setDraggedColumn(id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropColumn(id)}><span aria-hidden="true">⋮⋮</span><CrmCheckbox data-autofocus={index === 0 || undefined} checked={!hiddenColumns.has(id)} onChange={() => toggleColumn(id)} label={ui.columnsMap[id]} /><CrmActionIcon disabled={index === 0} onClick={() => moveColumn(id, -1)} aria-label={ui.moveUp}>↑</CrmActionIcon><CrmActionIcon disabled={index === columnOrder.length - 1} onClick={() => moveColumn(id, 1)} aria-label={ui.moveDown}>↓</CrmActionIcon></div>)}</div>
       <footer className="orders-column-settings-footer"><CrmButton tone="secondary" onClick={() => persistColumns(DEFAULT_COLUMNS, new Set())}>{ui.reset}</CrmButton><CrmButton onClick={() => setColumnsOpen(false)}>{ui.done}</CrmButton></footer>
     </Modal>
+    <Modal opened={archiveOpen} onClose={() => !archiving && setArchiveOpen(false)} title={ui.archiveOrdersTitle} aria-label={ui.archiveOrdersTitle} closeButtonProps={{ "aria-label": ui.close, disabled: archiving }} closeOnClickOutside={!archiving} closeOnEscape={!archiving} returnFocus centered size={460}>
+      <p className="orders-archive-hint">{ui.archiveOrdersHint}</p>
+      <p><strong>{ui.selected}: {selectedIds.size}</strong></p>
+      <div className="orders-archive-actions"><CrmButton tone="secondary" disabled={archiving} onClick={() => setArchiveOpen(false)}>{ui.archiveOrdersCancel}</CrmButton><CrmButton color="red" loading={archiving} onClick={() => void archiveSelectedOrders()}>{archiving ? ui.archiving : ui.archiveOrdersConfirm}</CrmButton></div>
+    </Modal>
     {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await load(); }} />}
     {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await load(); }} />}
     {currencyChangeOrder && <CurrencyChangeModal order={currencyChangeOrder} request={request} onClose={() => setCurrencyOrderId(undefined)} onSaved={async () => { setCurrencyOrderId(undefined); await load(); }} />}
-    {editOrder && <OrderEditModal order={editOrder} request={request} onClose={() => setEditOrderId(undefined)} onSaved={async () => { setEditOrderId(undefined); await load(); }} />}
+    {editOrder && editOrderClient && <OrderPanel client={editOrderClient} order={editOrder} request={request} onClose={closeEditOrder} onSaved={async () => { closeEditOrder(); await load(); }} />}
+    {editDesignOrder && editDesignItem && <OrderDesignEditModal order={editDesignOrder} item={editDesignItem} request={request} onClose={()=>setEditDesign(undefined)} onSaved={async()=>{setEditDesign(undefined);await load()}}/>}
     {measurementOrder && measurementAthlete(measurementOrder) && <MeasurementPanel client={{ id: measurementOrder.client.id, displayName: measurementOrder.client.displayName, athletes: [measurementAthlete(measurementOrder)!] }} request={request} orderId={measurementOrder.id} initialValues={primaryMeasurement(measurementOrder)?.values} expectedMeasurementId={primaryMeasurement(measurementOrder)?.id} title={primaryMeasurement(measurementOrder) ? ui.editMeasurements : ui.addMeasurements} onClose={() => setMeasurementOrder(undefined)} onSaved={async () => { setMeasurementOrder(undefined); await load(); }} />}
   </section>;
 }
@@ -337,7 +372,7 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onExpand} aria-label={expanded ? ui.collapse : ui.expand} title={expanded ? ui.collapse : ui.expand} aria-expanded={expanded} aria-controls={detailsId}>•••</button></td>;
 }
 
-function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onMeasurements, onCurrency, onEdit, onImage }: { order: Order; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onMeasurements: () => void; onCurrency: () => void; onEdit: () => void; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
+function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onMeasurements, onCurrency, onEdit, onEditItem, onImage }: { order: Order; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onMeasurements: () => void; onCurrency: () => void; onEdit: () => void; onEditItem: (itemId:string)=>void; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
   const [measurementId, setMeasurementId] = useState<string>();
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const items = order.items.length ? order.items.map((item, index) => { const athlete = item.athlete || (!isMultiOrder(order) && index === 0 ? order.athlete : undefined); return { ...item, persistedItemId: item.id, athlete, measurement: ownedMeasurement(item.measurement, athlete) || (!isMultiOrder(order) && index === 0 ? legacyMeasurementForItem(order, item) : undefined) }; }) : [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete, measurement: ownedMeasurement(order.measurement, order.athlete) }];
@@ -361,7 +396,7 @@ function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClien
       <div><h3>{ui.clientDetails}</h3><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.language} value={order.client.language || ui.notSpecified} /></div>
       <div><h3>{ui.shippingDetails}</h3><EditableDetail label={ui.country} value={<><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.notSpecifiedFeminine}</>} onClick={onDelivery} /><EditableDetail label={ui.address} value={deliveryPlace(order)} onClick={onDelivery} /><Detail label={ui.recipient} value={deliveryRecipient(order)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /></div>
     </section>
-    <section className="orders-expanded-designs"><header><div><h3>{ui.designsInOrder} ({items.length})</h3><small>{itemQuantity(order)} {ui.itemsInOrder}</small></div><div className="orders-expanded-design-actions"><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton>{!isMultiOrder(order) && measurementAthlete(order) && <CrmButton tone="secondary" size="compact-sm" onClick={onMeasurements}>{primaryMeasurement(order) ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}</div></header><div className="orders-expanded-items">{items.map((item, index) => { const measurementDetailsId=`order-measurements-${order.id}-${item.id}`,image=itemImage(item); return <div className="orders-expanded-item-block" key={item.id}><article className="orders-expanded-item-row"><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={image} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div className="orders-item-name"><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small><em>{item.quantity} {ui.pieces}</em>{item.measurement && <button className="orders-measurement-toggle" aria-expanded={measurementId === item.id} aria-controls={measurementDetailsId} onClick={() => setMeasurementId((current) => current === item.id ? undefined : item.id)}>{measurementId === item.id ? ui.hideMeasurements : ui.allMeasurements}</button>}</div><Detail label={ui.dimensions} value={item.measurement ? measurementSizes(item.measurement.values) : ui.notReceived} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><div className="orders-item-payment"><small>{ui.payment}</small><strong>{ui.paymentAtOrderLevel}</strong><CrmStatusBadge domain="production" status={item.productionStatus}/></div></article>{measurementId === item.id && item.measurement && <ExpandedMeasurementGrid id={measurementDetailsId} measurement={item.measurement} values={item.measurement.values} />}</div>})}</div></section>
+    <section className="orders-expanded-designs"><header><div><h3>{ui.designsInOrder} ({items.length})</h3><small>{itemQuantity(order)} {ui.itemsInOrder}</small></div><div className="orders-expanded-design-actions"><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton>{!isMultiOrder(order) && measurementAthlete(order) && <CrmButton tone="secondary" size="compact-sm" onClick={onMeasurements}>{primaryMeasurement(order) ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}</div></header><div className="orders-expanded-items">{items.map((item, index) => { const measurementDetailsId=`order-measurements-${order.id}-${item.id}`,image=itemImage(item); return <div className="orders-expanded-item-block" key={item.id}><article className="orders-expanded-item-row"><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={image} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div className="orders-item-name"><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small><em>{item.quantity} {ui.pieces}</em>{item.persistedItemId&&<CrmButton tone="secondary" size="compact-xs" className="orders-design-edit" onClick={()=>onEditItem(item.persistedItemId!)}>{ui.editDesign}</CrmButton>}{item.measurement && <button className="orders-measurement-toggle" aria-expanded={measurementId === item.id} aria-controls={measurementDetailsId} onClick={() => setMeasurementId((current) => current === item.id ? undefined : item.id)}>{measurementId === item.id ? ui.hideMeasurements : ui.allMeasurements}</button>}</div><Detail label={ui.dimensions} value={item.measurement ? measurementSizes(item.measurement.values) : ui.notReceived} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><div className="orders-item-payment"><small>{ui.payment}</small><strong>{ui.paymentAtOrderLevel}</strong><CrmStatusBadge domain="production" status={item.productionStatus}/></div></article>{measurementId === item.id && item.measurement && <ExpandedMeasurementGrid id={measurementDetailsId} measurement={item.measurement} values={item.measurement.values} />}</div>})}</div></section>
     <section className="orders-expanded-operations"><h3>{ui.orderOperations}</h3><div className="orders-expanded-operation-grid"><article><h4>{ui.customerWishes}</h4><p>{order.notes || ui.notSpecified}</p></article><article><h4>{ui.productionSlot}</h4>{order.productionSlot ? <><Detail label={ui.productionPeriod} value={`${formatDateTime(order.productionSlot.startsAt)} — ${formatDateTime(order.productionSlot.endsAt)}`} /><Detail label={ui.slotCapacity} value={String(order.productionSlot.capacity)} /><span className={`orders-operation-state ${order.productionSlot.tentative ? "warning" : "success"}`}>{order.productionSlot.tentative ? ui.slotTentative : ui.slotConfirmed}</span><small>{order.productionSlot.locked ? ui.slotLocked : ui.slotUnlocked}</small></> : <p>{ui.notSpecified}</p>}</article><article><h4>{ui.shipping}</h4><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName || ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /></article></div></section>
     <section className="orders-expanded-card orders-expanded-payments"><div className="orders-expanded-section-heading"><h3>{ui.paymentHistory}</h3><button ref={paymentTrigger} className="orders-secondary-action" onClick={onPayment}>{ui.addPayment}</button></div><div className="orders-expanded-payment-history">{order.payments.length ? order.payments.map((payment) => <div key={payment.id}><span>{date(payment.receivedAt)}</span><b>{money(payment.amountMinor, payment.currency)}</b><small>{paymentMethodLabel(payment.method)}</small>{payment.currency !== order.currency && payment.appliedCurrency === order.currency && payment.appliedAmountMinor != null && <em>{ui.appliedToOrder}: {money(payment.appliedAmountMinor, order.currency)}</em>}{(payment.reference || payment.notes) && <em>{[payment.reference, payment.notes].filter(Boolean).join(" · ")}</em>}</div>) : <p>{ui.noPayments}</p>}</div>{order.invoices.length > 0 && <div className="orders-expanded-invoices"><h4>{ui.invoices}</h4>{order.invoices.map((invoice) => <div key={invoice.id}><b>{invoice.number}</b><a href={`/api/finance/invoices/${invoice.id}/document`} target="_blank" rel="noreferrer">{ui.viewInvoice}</a><a href={`/api/finance/invoices/${invoice.id}/document?download=1`}>{ui.download}</a></div>)}</div>}</section>
     <section className="orders-expanded-card orders-expanded-finance"><div className="orders-expanded-section-heading"><h3>{ui.finance}</h3><button className="orders-secondary-action" onClick={onCurrency}>{ui.changeCurrency}</button></div><MoneyLine label={`${ui.products} (${items.length})`} value={order.priceMinor - (order.deliveryMinor || 0) + (order.discountMinor || 0)} currency={order.currency} /><MoneyLine label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} muted /><MoneyLine label={ui.shipping} value={order.deliveryMinor || order.shipment?.costMinor || 0} currency={order.currency} /><hr /><MoneyLine label={ui.total} value={order.priceMinor} currency={order.currency} strong /><MoneyLine label={ui.requiredDeposit} value={order.depositRequiredMinor} currency={order.currency} /><MoneyLine label={ui.paid} value={paid(order)} currency={order.currency} success /><MoneyLine label={ui.balance} value={balance(order)} currency={order.currency} danger={balance(order) > 0} /></section>
@@ -387,48 +422,12 @@ function OrderImageEditor({ image, name, onChange }: { image?: string | null; na
 
 function fileToData(file: File) { return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
-function OrderEditModal({ order, request, onClose, onSaved }: { order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [description, setDescription] = useState(order.notes || "");
-  const [price, setPrice] = useState((order.priceMinor / 100).toFixed(2));
-  const [file, setFile] = useState<File>();
-  const [preview, setPreview] = useState(order.modelImagePath ? `/api/orders/images/${order.modelImagePath}` : order.externalImageUrl || "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!file) return;
-    const url = URL.createObjectURL(file); setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const priceMinor = parseOrderPriceMinor(price);
-    if (!description.trim()) { setError(ui.orderDescriptionRequired); return; }
-    if (priceMinor == null) { setError(ui.orderPriceInvalid); return; }
-    setBusy(true); setError("");
-    try {
-      let modelImagePath: string | undefined;
-      if (file) {
-        const data = await fileToData(file);
-        const image = await request("/orders/model-image", { method: "POST", body: JSON.stringify({ name: file.name, mime: file.type, data }) }) as { path: string };
-        modelImagePath = image.path;
-      }
-      const payload = { description: description.trim(), priceMinor, expectedDescription: order.notes ?? null, expectedPriceMinor: order.priceMinor, expectedModelImagePath: order.modelImagePath ?? null, ...(modelImagePath ? { modelImagePath } : {}) };
-      await request(`/orders/${order.id}/details`, { method: "PATCH", body: JSON.stringify(payload) });
-      await onSaved();
-    } catch (reason) { setError((reason as Error).message); }
-    finally { setBusy(false); }
-  }
-  return <Modal opened onClose={onClose} title={`${ui.editOrder}: ${order.number}`} aria-label={ui.editOrder} closeButtonProps={{ "aria-label": ui.close }} returnFocus centered size="lg" classNames={{ content: "orders-edit-modal", body: "orders-edit-modal-body" }}>
-    <form className="orders-edit-form" onSubmit={submit}>
-      <div className="orders-edit-image">{preview ? <img src={preview} alt={ui.orderImage} /> : <span><UiIcon name="image" /></span>}<input ref={fileInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.currentTarget.files?.[0])} /><CrmButton type="button" tone="secondary" onClick={() => fileInput.current?.click()}>{ui.changeOrderImage}</CrmButton>{file && <small>{file.name}</small>}</div>
-      <CrmTextarea data-autofocus autoFocus highlighted label={ui.orderDescription} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={300} autosize minRows={4} maxRows={8} required />
-      <CrmTextInput highlighted label={`${ui.orderTotalPrice}, ${order.currency}`} value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" required />
-      <p className="orders-edit-hint">{ui.orderDepositRecalculationHint}</p>
-      {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
-      <footer><CrmButton type="button" tone="secondary" onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" disabled={busy}>{busy ? ui.saving : ui.saveOrder}</CrmButton></footer>
-    </form>
-  </Modal>;
+function OrderDesignEditModal({order,item,request,onClose,onSaved}:{order:Order;item:Order["items"][number];request:(path:string,init?:RequestInit)=>Promise<unknown>;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const[name,setName]=useState(item.name),[quantity,setQuantity]=useState(String(item.quantity)),[price,setPrice]=useState((item.priceMinor/100).toFixed(2)),[file,setFile]=useState<File>(),[filePreview,setFilePreview]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const input=useRef<HTMLInputElement>(null),image=itemImage(item);
+  useEffect(()=>{if(!file){setFilePreview("");return}const url=URL.createObjectURL(file);setFilePreview(url);return()=>URL.revokeObjectURL(url)},[file]);
+  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();const priceMinor=parseOrderPriceMinor(price),nextQuantity=Number(quantity);if(!name.trim()){setError(ui.designNameRequired);return}if(priceMinor==null||!Number.isInteger(nextQuantity)||nextQuantity<1){setError(ui.designValuesInvalid);return}setBusy(true);setError("");try{let modelImagePath:string|undefined;if(file){const data=await fileToData(file);const uploaded=await request("/orders/model-image",{method:"POST",body:JSON.stringify({name:file.name,mime:file.type,data})}) as {path:string};modelImagePath=uploaded.path}await request(`/orders/${order.id}/items/${item.id}`,{method:"PATCH",body:JSON.stringify({name:name.trim(),quantity:nextQuantity,priceMinor,expectedName:item.name,expectedQuantity:item.quantity,expectedPriceMinor:item.priceMinor,expectedModelImagePath:item.modelImagePath??null,...(modelImagePath?{modelImagePath}:{})})});await onSaved()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  return <Modal opened onClose={onClose} title={`${ui.editDesign}: ${order.number}`} aria-label={ui.editDesign} closeButtonProps={{"aria-label":ui.close}} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus centered size="lg"><form className="orders-design-edit-form" onSubmit={submit}><div className="orders-edit-image">{filePreview?<img src={filePreview} alt={name}/>:image?<img src={image} alt={name}/>:<span><UiIcon name="image"/></span>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>setFile(event.currentTarget.files?.[0])}/><CrmButton type="button" tone="secondary" onClick={()=>input.current?.click()}>{ui.changeOrderImage}</CrmButton></div><CrmTextInput data-autofocus highlighted label={ui.designDescription} value={name} onChange={event=>setName(event.currentTarget.value)} required/><div className="orders-design-edit-grid"><CrmTextInput highlighted label={ui.quantity} type="number" min={1} max={1000} value={quantity} onChange={event=>setQuantity(event.currentTarget.value)} required/><CrmTextInput highlighted label={`${ui.unitPrice}, ${order.currency}`} inputMode="decimal" value={price} onChange={event=>setPrice(event.currentTarget.value)} required/></div><p className="orders-edit-hint">{ui.designTotalRecalculationHint}</p>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.saveDesign}</CrmButton></footer></form></Modal>
 }
 
 function ownedMeasurement(measurement: Order["measurement"], athlete: Order["athlete"]) { return measurement && athlete && measurement.athleteId === athlete.id ? measurement : undefined; }
@@ -436,7 +435,7 @@ function legacyMeasurementForItem(order: Order, item: Order["items"][number]) { 
 function ExpandedMeasurementGrid({ id, measurement, values }: { id: string; measurement: { measuredAt: string }; values?: Record<string, number> }) { return <div id={id} role="region" aria-label={ui.allMeasurements} className="orders-expanded-measurements"><header><strong>{ui.allMeasurements}</strong><small>{ui.measurementTakenAt}: {date(measurement.measuredAt)}</small></header>{Array.from({ length: 17 }, (_, index) => index + 1).map((number) => { const tone = [1,2,3,15].includes(number) ? "measurement-primary" : [6,7,8].includes(number) ? "measurement-secondary" : ""; return <span className={tone || undefined} key={number}><small>№{number} · {measurementFieldLabels[number - 1]}</small><b>{values?.[`m${number}`] == null ? "—" : `${formatCm(values[`m${number}`]!)} см`}</b></span>; })}</div>; }
 function formatCm(value: number) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value); }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
-function orderTypeLabel(value: string) { return ({ GROUP_ORDER: ui.groupOrder, PAIR: ui.pairOrder, READY_MODEL: ui.readyModelOrder, COPY_MODEL: ui.copyModelOrder, CUSTOM_ORDER: ui.customOrder } as Record<string, string>)[value] || value; }
+function orderTypeLabel(value: string) { return (orderFormUi.types as Record<string, string>)[value] || value; }
 function paymentMethodLabel(value: string) { return ({ BANK_TRANSFER: ui.bankTransfer, CARD: ui.cardPayment, PAYPAL: "PayPal", CASH: ui.cashPayment, OTHER: ui.otherPayment } as Record<string, string>)[value] || value; }
 
 type ExchangeRateStatus = { provider: "ECB" | "NBU"; officialUrl: string; supportedPairs: readonly string[]; cache: null | { effectiveDate: string; fetchedAt: string } };
@@ -562,7 +561,7 @@ function designCount(order: Order) { return Math.max(1, new Set(order.items.map(
 function quantitySummary(order: Order) { return `${itemQuantity(order)} ${ui.pieces}`; }
 function OrderDesigns({ order, onPreview, onLeave }: { order: Order; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onLeave: () => void }) { const paths = designPaths(order); if (!paths.length) return <span className="orders-design-placeholder"><UiIcon name="image" /></span>; return <div className="orders-design-stack">{paths.slice(0, 3).map((path) => <img key={path} loading="lazy" src={path} alt={ui.orderDesignAlt} referrerPolicy="no-referrer" onMouseEnter={onPreview} onMouseMove={onPreview} onMouseLeave={onLeave} />)}{paths.length > 3 && <b>+{paths.length - 3}</b>}</div>; }
 function orderProblems(order: Order) { const problems: string[] = []; if (days(order) < 0 && isActiveOrder(order)) problems.push(ui.problems.overdue); if (orderMeasurementState(order).problem === "dimensions") problems.push(ui.problems.dimensions); if (!hasDeliveryAddress(order)) problems.push(ui.problems.address); if (paid(order) < order.depositRequiredMinor && isActiveOrder(order)) problems.push(ui.problems.payment); if (!designPaths(order).length) problems.push(ui.problems.design); return problems; }
-function nextOrderAction(order: Order): { label: string; detail?: string; tone: string; icon: string } { if (orderMeasurementState(order).nextAction === "dimensions") return { label: ui.actions.dimensions, tone: "amber", icon: "warning" }; if (!hasDeliveryAddress(order) && isReadyToShip(order)) return { label: ui.actions.address, tone: "red", icon: "warning" }; if (paid(order) < order.depositRequiredMinor) return { label: ui.actions.deposit, detail: money(order.depositRequiredMinor - paid(order), order.currency), tone: "amber", icon: "payment" }; if (["DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL"].includes(order.salesStatus)) return { label: ui.actions.design, tone: "purple", icon: "image" }; if (order.productionStatus === "NOT_SCHEDULED") return { label: ui.actions.production, tone: "green", icon: "check" }; if (order.productionStatus === "READY" && balance(order) > 0) return { label: ui.actions.balance, detail: money(balance(order), order.currency), tone: "amber", icon: "payment" }; if (isReadyToShip(order)) return { label: ui.actions.shipping, tone: "green", icon: "truck" }; return { label: ui.actions.none, tone: "muted", icon: "check" }; }
+function nextOrderAction(order: Order): { label: string; detail?: string; tone: string; icon: string } { if (orderMeasurementState(order).nextAction === "dimensions") return { label: ui.actions.dimensions, tone: "amber", icon: "warning" }; if (!hasDeliveryAddress(order) && isReadyToShip(order)) return { label: ui.actions.address, tone: "red", icon: "warning" }; if (paid(order) < order.depositRequiredMinor) return { label: ui.actions.deposit, detail: money(order.depositRequiredMinor - paid(order), order.currency), tone: "amber", icon: "payment" }; if (["DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL"].includes(order.salesStatus)) return { label: ui.actions.design, tone: "purple", icon: "image" }; if (!NON_PRODUCTION_ORDER_TYPES.has(order.type) && order.productionStatus === "NOT_SCHEDULED") return { label: ui.actions.production, tone: "green", icon: "check" }; if (order.productionStatus === "READY" && balance(order) > 0) return { label: ui.actions.balance, detail: money(balance(order), order.currency), tone: "amber", icon: "payment" }; if (isReadyToShip(order)) return { label: ui.actions.shipping, tone: "green", icon: "truck" }; return { label: ui.actions.none, tone: "muted", icon: "check" }; }
 function hasMeasurements(order: Order) { return orderMeasurementState(order).complete; }
 function isMultiOrder(order: Order) { return order.type === "GROUP_ORDER" || order.type === "PAIR" || order.items.length > 1; }
 function primaryMeasurement(order: Order) { return ownedMeasurement(order.measurement, order.athlete) || ownedMeasurement(order.items[0]?.measurement, order.items[0]?.athlete || order.athlete); }
