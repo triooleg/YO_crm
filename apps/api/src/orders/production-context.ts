@@ -9,10 +9,13 @@ export const productionOrderSelect = {
   modelImagePath: true,
   externalImageUrl: true,
   requiredDeliveryAt: true,
+  deliveryTrackingCode: true,
   productionStatus: true,
+  shippingStatus: true,
   priceMinor: true,
   currency: true,
   productionSlot: true,
+  shipment: { select: { trackingNumber: true } },
   client: { select: { displayName: true, country: true } },
   items: { select: { quantity: true, modelImagePath: true, externalImageUrl: true, athlete: { select: { firstName: true, lastName: true } } } },
 } satisfies Prisma.OrderSelect;
@@ -23,10 +26,16 @@ export function includeRequestedProductionOrder<T extends { id: string }>(orders
 }
 
 type ProductionOrder = Prisma.OrderGetPayload<{ select: typeof productionOrderSelect }>;
+type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "shipment"> & { hasTrackingNumber: boolean };
 export type ProductionOrderRepository = {
   findMany: (query: object) => Promise<ProductionOrder[]>;
   findFirst: (query: object) => Promise<ProductionOrder | null>;
 };
+
+function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
+  const { deliveryTrackingCode, shipment, ...safeOrder } = order;
+  return { ...safeOrder, hasTrackingNumber: Boolean(shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim()) };
+}
 
 const PRODUCTION_RESULT_LIMIT = 1000;
 const MAX_PRODUCTION_RANGE_DAYS = 366;
@@ -56,7 +65,7 @@ export async function loadProductionOrders(repository: ProductionOrderRepository
     select: productionOrderSelect,
   });
   if (orders.length > PRODUCTION_RESULT_LIMIT) throw new Error("PRODUCTION_RESULT_LIMIT_EXCEEDED");
-  if (!orderId || orders.some((order) => order.id === orderId)) return orders;
+  if (!orderId || orders.some((order) => order.id === orderId)) return orders.map(presentProductionOrder);
   const requested = await repository.findFirst({ where: { id: orderId, archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
-  return includeRequestedProductionOrder(orders, requested);
+  return includeRequestedProductionOrder(orders, requested).map(presentProductionOrder);
 }

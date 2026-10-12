@@ -54,8 +54,13 @@ test("production reads use a dedicated least-privilege projection", () => {
     ordersService.indexOf("async updateStatuses("),
   );
   assert.match(projection, /productionSlot: true/);
+  assert.match(projection, /deliveryTrackingCode: true/);
+  assert.match(projection, /shippingStatus: true/);
+  assert.match(projection, /shipment: \{ select: \{ trackingNumber: true \} \}/);
   assert.match(projection, /client: \{ select: \{ displayName: true, country: true \} \}/);
-  assert.doesNotMatch(projection, /payments|invoices|shipment|address|postalCode|language|source|measurement|activities/);
+  assert.doesNotMatch(projection, /payments|invoices|address|postalCode|language|source|measurement|activities|carrier|costMinor|shippedAt|deliveredAt/);
+  assert.match(productionContext, /const \{ deliveryTrackingCode, shipment, \.\.\.safeOrder \} = order/);
+  assert.match(productionContext, /hasTrackingNumber: Boolean\(shipment\?\.trackingNumber\?\.trim\(\) \|\| deliveryTrackingCode\?\.trim\(\)\)/);
   assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to\)/);
 });
 

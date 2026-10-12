@@ -43,6 +43,8 @@ const productionOrder = {
   notes: "Купальник",
   requiredDeliveryAt: `${productionDate(25)}T12:00:00.000Z`,
   productionStatus: "ON_HOLD",
+  shippingStatus: "READY",
+  hasTrackingNumber: true,
   priceMinor: 32000,
   currency: "EUR",
   client: { displayName: "Анна", country: "Ukraine" },
@@ -57,7 +59,7 @@ const productionOrder = {
   },
 };
 
-async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean; productionLoadError?: boolean } = {}) {
+async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean; productionLoadError?: boolean; shippedProductionOrder?: boolean; legacyShippedProductionOrder?: boolean; shippedWithoutTracking?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
   const slotDeletes: unknown[] = [];
@@ -95,6 +97,21 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
       ["/api/shipping", { orders: shippingOrders, carriers: [{ carrier: "NOVA_GLOBAL", label: "Nova Global", enabled: true }, { carrier: "DHL", label: "DHL", enabled: true }] }],
       ["/api/orders/production", [{
         ...productionOrder,
+        ...(options.shippedProductionOrder ? {
+          shippingStatus: "SHIPPED",
+          hasTrackingNumber: true,
+          items: [{ quantity: 3 }],
+          client: { ...productionOrder.client, country: "Czech Republic" },
+        } : {}),
+        ...(options.legacyShippedProductionOrder ? {
+          shippingStatus: "SHIPPED",
+          hasTrackingNumber: true,
+        } : {}),
+        ...(options.shippedWithoutTracking ? {
+          shippingStatus: "SHIPPED",
+          hasTrackingNumber: false,
+          client: { ...productionOrder.client, country: undefined },
+        } : {}),
         productionSlot: {
           ...productionOrder.productionSlot,
           locked: options.lockedProductionSlot ?? productionOrder.productionSlot.locked,
@@ -121,7 +138,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.38");
+    await expect(page.locator(".crm-version")).toContainText("0.1.39");
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -199,6 +216,47 @@ test("панель производственного слота показыв�
   expect(slotDeletes[0]).toEqual({ expectedUpdatedAt: "2026-10-10T12:00:00.000Z" });
   await expect(page.locator(".timeline-bar")).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
+});
+
+test("отправленный заказ с накладной получает зелёный слот, а количество больше одного видно слева", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockWorkspaceApi(page, { shippedProductionOrder: true });
+  await page.goto("/?section=production");
+
+  const row = page.locator(".timeline-row").filter({ hasText: "YO-26-0103" });
+  await expect(row.locator(".timeline-order-quantity")).toHaveText("3 шт.");
+  await expect(row.locator(".timeline-order-country")).toHaveText("🇨🇿 Czech Republic");
+  expect(await row.locator(".timeline-order-country").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(row.locator(".timeline-bar")).toHaveClass(/shipped/);
+  await expect(row.locator(".timeline-bar")).toHaveCSS("background-color", "rgb(223, 245, 232)");
+});
+
+test("трек-номер без статуса отправки не окрашивает слот, а одна единица не дублируется слева", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockWorkspaceApi(page);
+  await page.goto("/?section=production");
+
+  const row = page.locator(".timeline-row").filter({ hasText: "YO-26-0103" });
+  await expect(row.locator(".timeline-order-quantity")).toHaveCount(0);
+  await expect(row.locator(".timeline-bar")).not.toHaveClass(/shipped/);
+});
+
+test("legacy накладная KeyCRM также окрашивает отправленный слот", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockWorkspaceApi(page, { legacyShippedProductionOrder: true });
+  await page.goto("/?section=production");
+
+  await expect(page.locator(".timeline-bar")).toHaveClass(/shipped/);
+});
+
+test("отправленный статус без накладной не окрашивает слот и не показывает отсутствующую страну", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await mockWorkspaceApi(page, { shippedWithoutTracking: true });
+  await page.goto("/?section=production");
+
+  const row = page.locator(".timeline-row").filter({ hasText: "YO-26-0103" });
+  await expect(row.locator(".timeline-bar")).not.toHaveClass(/shipped/);
+  await expect(row.locator(".timeline-order-country")).toHaveCount(0);
 });
 
 for (const viewport of [

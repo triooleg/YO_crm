@@ -24,7 +24,7 @@ test("загрузка производства делает второй огр
     findMany: async (query) => { calls.push(["many", query]); return firstPage; },
     findFirst: async (query) => { calls.push(["first", query]); return exact; },
   };
-  assert.deepEqual(await loadProductionOrders(repository, exact.id, "2026-10-01", "2027-03-31"), [exact, ...firstPage]);
+  assert.deepEqual((await loadProductionOrders(repository, exact.id, "2026-10-01", "2027-03-31")).map((order) => order.id), [exact.id, ...firstPage.map((order) => order.id)]);
   assert.equal(calls.length, 2);
   assert.equal(calls[0][1].take, 1001);
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.startsAt.lte.toISOString(), "2027-03-31T23:59:59.999Z");
@@ -32,9 +32,25 @@ test("загрузка производства делает второй огр
   assert.deepEqual(calls[0][1].where.type.notIn, ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
   assert.deepEqual(calls[1][1].where, { id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
   assert.equal(calls[1][1].select, productionOrderSelect);
-  for (const forbidden of ["payments", "invoices", "shipment", "address", "postalCode", "measurement", "activities"]) {
+  assert.deepEqual(productionOrderSelect.shipment, { select: { trackingNumber: true } });
+  assert.equal(productionOrderSelect.deliveryTrackingCode, true);
+  assert.equal(productionOrderSelect.shippingStatus, true);
+  for (const forbidden of ["payments", "invoices", "address", "postalCode", "measurement", "activities"]) {
     assert.equal(forbidden in productionOrderSelect, false);
   }
+});
+
+test("производство возвращает только признак накладной без самого трек-номера", async () => {
+  const repository = {
+    findMany: async () => [{ id: "tracked-order", deliveryTrackingCode: "LEGACY-SECRET", shipment: { trackingNumber: "SHIPMENT-SECRET" } }],
+    findFirst: async () => null,
+  };
+
+  const [order] = await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-01");
+
+  assert.equal(order.hasTrackingNumber, true);
+  assert.equal("deliveryTrackingCode" in order, false);
+  assert.equal("shipment" in order, false);
 });
 
 test("производство не теряет текущие слоты после импорта более 100 старых заказов", async () => {
