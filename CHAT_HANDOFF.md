@@ -1,5 +1,15 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-12 — production deployment CRM 0.1.39: контекст производственных слотов
+
+- Runtime commit `b2af63395e7e92773e88f563ca8972b55cecde6c` опубликован в `origin/main`, прошёл GitHub Actions `Quality gates` run `38212388081` со статусом `success` и развёрнут из точного Git archive. В производственном слоте количество показывается рядом с номером только при значении больше одного, затем отображаются флаг и страна; отправленный заказ с номером накладной выделяется зелёным. API передаёт роли производства только признак наличия трек-номера, без раскрытия самого значения.
+- Перед переключением создан и проверен FULL backup `20261012T062830Z-v039-predeploy` в `/home/trio/yoleotard-crm-backups/20261012T062830Z-v039-predeploy`: `SHA256SUMS` совпали, PostgreSQL custom dump и uploads tar читаются, manifest JSON валиден, запись `Backup` имеет статус `COMPLETED`. Размер — 305889573 байта; SHA-256 файла `SHA256SUMS` — `3b5d1d5f030b925d30761494a3f428bbf01968d5df95eb09805d9aff40f7c364`.
+- Exact-SHA archive `/home/trio/yoleotard-crm-0.1.39-b2af633.tar.gz` имеет размер 3228979 байт и SHA-256 `30dcf7446025f76f38203af1cba81090386bf5a94ffcb71e41d574e9acd4ee25`, совпавший локально и на сервере. Source rollback: `/home/trio/yoleotard-crm-backups/source-before-b2af633.tar.gz` с SHA-256 `7fd913976bd5250b2cf6f494f270b0cc45fa055a31fdfb8c8505f7e0f6abfbfb`; предыдущий checkout: `/home/trio/yoleotard-crm-previous-20261012T063010Z-v038`.
+- С `--no-deps` пересозданы только API `aec01a23d6091f817f4a869ed3a16641780c1243ab10730aeb20c14f05b3ffc4` и web `06f5f5c1909cf0600ab83d7c1cbc92d3862b56cead35cf47e339171de80605bb`. PostgreSQL `0bafd77d0c09f6081f585a54009ccb8568fff38f2d090ff17d776e9ee46e4c7b` и Redis `17013ec6cfa5da7a5e678097a6fb5600dd6eaa2a36699648c7b45c246c32f9cc` не пересоздавались; все сервисы healthy с restart count 0.
+- Новых миграций нет; все 28 миграций актуальны. До/после deployment полностью совпали счётчики Client/Conversation/Message/Order/OrderItem: `587/257/2913/504/579`. `.release-commit` и `.deployed-commit` равны runtime SHA.
+- Внутренние `/` и `/api/health` отвечают HTTP 200; публичные `https://crm.yoleotard.com/` и `/api/health` проверены с рабочей станции и отвечают HTTP 200, зависимости PostgreSQL/Redis/uploads — `up`, fresh API/web error scan — 0. Запрос публичного домена с LAN-сервера упирается в hairpin/NAT timeout, но внешний workstation smoke успешен.
+- Авторизованный read-only smoke: login 201; `/api/auth/me`, `/api/communications`, `/api/orders`, `/api/orders/production`, `/api/keycrm/settings`, `/api/finance/exchange-rates` — HTTP 200. Live browser smoke подтвердил `CRM v0.1.39`, точный SHA, загрузку «Входящих» и «Производства» без видимых ошибок; после проверки вкладка возвращена на «Входящие».
+
 # 2026-10-12 — production deployment CRM 0.1.38: компактные заказы и безопасные операции
 
 - Runtime commit `7d69e0f923d4ea01299b6e6b71004b65c454ecc9` опубликован в `origin/main`, развёрнут из точного Git archive и закреплён неизменяемым тегом `crm-v0.1.38`. GitHub Actions `Quality gates` run `38204051098` и `CRM release` run `38204885664` завершились со статусом `success`.
