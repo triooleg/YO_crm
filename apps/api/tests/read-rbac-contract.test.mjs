@@ -56,10 +56,12 @@ test("production reads use a dedicated least-privilege projection", () => {
   assert.match(projection, /productionSlot: true/);
   assert.match(projection, /deliveryTrackingCode: true/);
   assert.match(projection, /shippingStatus: true/);
-  assert.match(projection, /shipment: \{ select: \{ trackingNumber: true \} \}/);
+  assert.match(projection, /shipment: \{ select: \{ trackingNumber: true, shippedAt: true, deliveredAt: true \} \}/);
+  assert.match(projection, /payments: \{[\s\S]*where: \{ voidedAt: null \}/);
   assert.match(projection, /client: \{ select: \{ displayName: true, country: true \} \}/);
-  assert.doesNotMatch(projection, /payments|invoices|address|postalCode|language|source|measurement|activities|carrier|costMinor|shippedAt|deliveredAt/);
-  assert.match(productionContext, /const \{ deliveryTrackingCode, shipment, \.\.\.safeOrder \} = order/);
+  assert.doesNotMatch(projection, /invoices|address|postalCode|language|source|measurement|activities|carrier|costMinor/);
+  assert.match(productionContext, /const \{ deliveryTrackingCode, payments, shipment, \.\.\.safeOrder \} = order/);
+  assert.match(productionContext, /latestPaymentAt/);
   assert.match(productionContext, /hasTrackingNumber: Boolean\(shipment\?\.trackingNumber\?\.trim\(\) \|\| deliveryTrackingCode\?\.trim\(\)\)/);
   assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to\)/);
 });

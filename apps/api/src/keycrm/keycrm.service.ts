@@ -573,8 +573,11 @@ export class KeycrmService {
       if (matchedCarrier && (order.delivery.trackingCode || order.delivery.serviceId || order.delivery.serviceName)) {
         const shipment = await tx.shipment.findUnique({ where: { orderId: persisted.id } });
         if (!shipment) {
-          const createdShipment = await tx.shipment.create({ data: { orderId: persisted.id, carrier: matchedCarrier, trackingNumber: order.delivery.trackingCode, costMinor: order.deliveryMinor, currency: order.currency, shippedAt: null, serviceName: order.delivery.serviceName, externalServiceId: order.delivery.serviceId, externalStatus: order.delivery.externalStatus } });
+          const createdShipment = await tx.shipment.create({ data: { orderId: persisted.id, carrier: matchedCarrier, trackingNumber: order.delivery.trackingCode, costMinor: order.deliveryMinor, currency: order.currency, shippedAt: order.delivery.shippedAt, serviceName: order.delivery.serviceName, externalServiceId: order.delivery.serviceId, externalStatus: order.delivery.externalStatus } });
           await tx.auditLog.create({ data: { actorId, action: "CREATE", entityType: "Shipment", entityId: createdShipment.id, after: createdShipment } });
+        } else if (!shipment.shippedAt && order.delivery.shippedAt) {
+          const updatedShipment = await tx.shipment.update({ where: { orderId: persisted.id }, data: { shippedAt: order.delivery.shippedAt } });
+          await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Shipment", entityId: shipment.id, before: shipment, after: updatedShipment } });
         }
       }
       const action = existing ? "KEYCRM_ORDER_SYNCED" : "KEYCRM_ORDER_IMPORTED";

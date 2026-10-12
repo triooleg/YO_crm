@@ -1,56 +1,163 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Modal } from "@mantine/core";
-import { ordersUi, productionUi } from "../lib/i18n";
+import { productionUi } from "../lib/i18n";
 import { clearOrderContextUrl, orderContextId, resolveOrderContext } from "../lib/order-context";
+import { buildProductionMetrics, orderMatchesProductionFilters, productionAddDays, productionDayDiff, productionIso, productionLocalDate, productionRange, type ProductionFilters, type ProductionOrderView, type ProductionRangeMode, type ProductionSlotView } from "../lib/production-view";
 import { CrmAlert } from "./crm/alert";
 import { CrmButton } from "./crm/settings-controls";
-import { CrmStatusBadge } from "./crm/status-badge";
+import { ProductionFiltersBar, ProductionHeader, ProductionKpis, ProductionOrderDetails, ProductionTimeline } from "./production-planner-view";
 
-type Slot={startsAt:string;endsAt:string;capacity:number;tentative:boolean;locked:boolean;updatedAt?:string};
-type ProductionSettings={defaultDurationDays:number;shippingLeadDays:number};
-type Order={id:string;number:string;notes?:string;modelImagePath?:string;externalImageUrl?:string;requiredDeliveryAt?:string;hasTrackingNumber:boolean;productionStatus:string;shippingStatus:string;priceMinor:number;currency:string;client:{displayName:string;country?:string};items:{quantity:number;modelImagePath?:string;athlete?:{firstName:string;lastName?:string}}[];athlete?:{firstName:string;lastName?:string};productionSlot?:Slot};
-const PREVIEW_WIDTH_KEY="orders-image-preview-width-v1";
-const DAY=86400000, DEFAULT_DAYS=35, MIN_ORDER_COLUMN_WIDTH=155, MAX_ORDER_COLUMN_WIDTH=420, DAY_CELL_WIDTH=40, MONTHS=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
-const localDate=(value:string|Date)=>{const d=value instanceof Date?value:new Date(value);return new Date(d.getFullYear(),d.getMonth(),d.getDate())};
-export const toLocalIso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const plus=(d:Date,n:number)=>new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);
-const diff=(a:Date,b:Date)=>Math.round((localDate(a).getTime()-localDate(b).getTime())/DAY);
-const COUNTRY_CODES:Record<string,string>={ukraine:"UA",украина:"UA",україна:"UA",usa:"US","united states":"US","united states of america":"US","united kingdom":"GB",britain:"GB","czech republic":"CZ",uae:"AE"};
-const displayedCountryCodes=(()=>{const result=new Map<string,string>(),displays=["en","ru","uk"].map(locale=>new Intl.DisplayNames([locale],{type:"region"}));for(let first=65;first<=90;first++)for(let second=65;second<=90;second++){const code=String.fromCharCode(first,second);for(const display of displays){const name=display.of(code);if(name&&name!==code)result.set(name.trim().toLocaleLowerCase(),code)}}return result})();
-function countryCode(country?:string){if(!country)return"";const normalized=country.trim(),prefixed=normalized.toUpperCase().match(/^([A-Z]{2})(?:\s|$)/)?.[1],key=normalized.toLocaleLowerCase();return prefixed||COUNTRY_CODES[key]||displayedCountryCodes.get(key)||(normalized.length===2?normalized.toUpperCase():"")}
-function flag(country?:string){const code=countryCode(country);return code?[...code].map(letter=>String.fromCodePoint(127397+letter.charCodeAt(0))).join(""):"🌍"}
+type ProductionSettings = { defaultDurationDays: number; shippingLeadDays: number };
+type Preview = { src: string; x: number; y: number; country: string; quantity: number; total: string };
+type Props = { role?: string; onOpenOrder?: (orderId: string) => void; onCreateOrder?: () => void };
+const PREVIEW_WIDTH_KEY = "orders-image-preview-width-v1";
+const DEFAULT_FILTERS: ProductionFilters = { query: "", payment: "all", production: "all", shipping: "all", slot: "all", deadline: "all" };
 
-export function ProductionWorkspace({onOpenOrder}:{onOpenOrder?:(orderId:string)=>void}={}){
- const now=new Date(),timelineRef=useRef<HTMLElement>(null),contextOrderHandled=useRef(false),loadSequence=useRef(0),[dayCount,setDayCount]=useState(DEFAULT_DAYS),[base,setBase]=useState(()=>new Date(now.getFullYear(),now.getMonth(),1)),[orders,setOrders]=useState<Order[]>([]),[productionSettings,setProductionSettings]=useState<ProductionSettings|null>(null),[search,setSearch]=useState(""),[capacityPerDay,setCapacity]=useState(3),[previewWidth,setPreviewWidth]=useState(600),[selected,setSelected]=useState<string>(),[slotDeleteOpen,setSlotDeleteOpen]=useState(false),[slotDeleting,setSlotDeleting]=useState(false),[preview,setPreview]=useState<{src:string;x:number;y:number;country:string;quantity:number;total:string}>(),[error,setError]=useState("");
- const orderColumnWidth=useMemo(()=>Math.min(MAX_ORDER_COLUMN_WIDTH,Math.max(MIN_ORDER_COLUMN_WIDTH,...orders.flatMap(order=>{const quantity=order.items.reduce((sum,item)=>sum+item.quantity,0)||1,heading=[order.number,quantity>1?`${quantity} ${productionUi.pieces}`:"",order.client.country?`${flag(order.client.country)} ${order.client.country}`:""].filter(Boolean).join(" · ");return[heading.length,(order.notes||order.client.displayName).length]}).map(length=>length*7+28))),[orders]);
- async function load(signal?:AbortSignal){const sequence=++loadSequence.current,contextId=orderContextId(window.location.search),rangeEnd=plus(base,Math.max(dayCount,186)),params=new URLSearchParams({from:toLocalIso(base),to:toLocalIso(rangeEnd)});if(contextId)params.set("orderId",contextId);const productionUrl=`/api/orders/production?${params.toString()}`;try{const [ordersResponse,defaultsResponse]=await Promise.all([fetch(productionUrl,{credentials:"include",signal}),fetch("/api/orders/defaults",{credentials:"include",signal})]);if(signal?.aborted||sequence!==loadSequence.current)return;if(!ordersResponse.ok||!defaultsResponse.ok){setProductionSettings(null);setError(productionUi.loadError);return}const [loadedOrders,defaults]=await Promise.all([ordersResponse.json() as Promise<Order[]>,defaultsResponse.json()]);if(signal?.aborted||sequence!==loadSequence.current)return;if(!Number.isInteger(defaults.defaultDurationDays)||!Number.isInteger(defaults.shippingLeadDays)){setProductionSettings(null);setError(productionUi.loadError);return}setOrders(loadedOrders);setProductionSettings({defaultDurationDays:defaults.defaultDurationDays,shippingLeadDays:defaults.shippingLeadDays});let contextError="";if(!contextOrderHandled.current){const resolved=resolveOrderContext(loadedOrders,window.location.search);if(resolved.requested){contextOrderHandled.current=true;const order=resolved.order;if(order){setSelected(order.id);setSearch(order.number);const anchor=order.productionSlot?.startsAt||order.requiredDeliveryAt;if(anchor){const target=localDate(anchor);setBase(new Date(target.getFullYear(),target.getMonth(),1))}}else contextError=productionUi.contextOrderUnavailable;clearProductionContextAction()}}setError(contextError)}catch(loadError){if(signal?.aborted||sequence!==loadSequence.current||(loadError instanceof Error&&loadError.name==="AbortError"))return;setProductionSettings(null);setError(productionUi.loadError)}}
- useEffect(()=>{const controller=new AbortController(),timer=window.setTimeout(()=>void load(controller.signal),80);return()=>{window.clearTimeout(timer);controller.abort()}},[base,dayCount]);
- useEffect(()=>{const saved=Number(localStorage.getItem("production-capacity"));if(saved>=1&&saved<=10)setCapacity(saved);const savedWidth=Number(localStorage.getItem(PREVIEW_WIDTH_KEY));if(Number.isFinite(savedWidth)&&savedWidth>=200&&savedWidth<=1200)setPreviewWidth(savedWidth)},[]);
- useEffect(()=>{const target=timelineRef.current;if(!target)return;const update=(width:number)=>{const available=Math.max(DAY_CELL_WIDTH,width-orderColumnWidth),nextDayCount=Math.max(1,Math.floor(available/DAY_CELL_WIDTH)),effectiveOrderColumnWidth=Math.max(orderColumnWidth,width-nextDayCount*DAY_CELL_WIDTH);target.style.setProperty("--order-column-width",`${effectiveOrderColumnWidth}px`);target.style.setProperty("--timeline-width",`${effectiveOrderColumnWidth+nextDayCount*DAY_CELL_WIDTH}px`);setDayCount(nextDayCount)};update(target.clientWidth);const observer=new ResizeObserver(entries=>update(entries[0]?.contentRect.width??target.clientWidth));observer.observe(target);return()=>observer.disconnect()},[orderColumnWidth]);
- const days=useMemo(()=>Array.from({length:dayCount},(_,i)=>plus(base,i)),[base,dayCount]);
- const visible=useMemo(()=>orders.filter(o=>`${o.number} ${o.client.displayName} ${o.notes||""}`.toLowerCase().includes(search.toLowerCase())&&o.productionStatus!=="CANCELLED"),[orders,search]);
- const scheduled=visible.filter(o=>{if(!o.productionSlot)return false;const slotVisible=diff(localDate(o.productionSlot.endsAt),base)>=0&&diff(localDate(o.productionSlot.startsAt),base)<dayCount,deadlineDay=o.requiredDeliveryAt?diff(localDate(o.requiredDeliveryAt),base):undefined;return slotVisible||(deadlineDay!==undefined&&deadlineDay>=0&&deadlineDay<dayCount)});
- const dailyLoad=days.map(day=>scheduled.filter(o=>{const s=localDate(o.productionSlot!.startsAt),e=localDate(o.productionSlot!.endsAt);return day>=s&&day<=e}).length);
- const monthGroups=days.reduce<{month:number;year:number;start:number;length:number}[]>((all,d,i)=>{const last=all.at(-1);if(last&&last.month===d.getMonth())last.length++;else all.push({month:d.getMonth(),year:d.getFullYear(),start:i,length:1});return all},[]);
- const selectedOrder=orders.find(o=>o.id===selected);
- const selectedQuantity=selectedOrder?.items.reduce((sum,item)=>sum+item.quantity,0)||0;
- const selectedTotal=selectedOrder?new Intl.NumberFormat("ru-RU",{style:"currency",currency:selectedOrder.currency}).format(selectedOrder.priceMinor/100):"";
- function setCapacityValue(value:number){setCapacity(value);localStorage.setItem("production-capacity",String(value))}
- function setPreviewSize(value:number){const width=Math.max(200,Math.min(1200,Math.round(value/50)*50||600));setPreviewWidth(width);localStorage.setItem(PREVIEW_WIDTH_KEY,String(width))}
- async function saveSlot(order:Order,slot:Slot){setError("");setOrders(list=>list.map(o=>o.id===order.id?{...o,productionSlot:slot}:o));const r=await fetch(`/api/orders/${order.id}/production-slot`,{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(slot)});if(!r.ok){const body=await r.json().catch(()=>({}));setError(body.message||productionUi.saveError);await load();return}const saved=await r.json() as Slot;setOrders(list=>list.map(o=>o.id===order.id?{...o,productionSlot:saved}:o))}
- async function deleteSlot(){if(!selectedOrder?.productionSlot||slotDeleting)return;if(!selectedOrder.productionSlot.updatedAt){setError(productionUi.deleteSlotError);await load();return}setSlotDeleting(true);setError("");try{const response=await fetch(`/api/orders/${selectedOrder.id}/production-slot`,{method:"DELETE",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedUpdatedAt:selectedOrder.productionSlot.updatedAt})});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||productionUi.deleteSlotError)}setOrders(list=>list.map(order=>order.id===selectedOrder.id?{...order,productionSlot:undefined,productionStatus:"NOT_SCHEDULED"}:order));setSlotDeleteOpen(false)}catch(reason){setError(reason instanceof Error?reason.message:productionUi.deleteSlotError);await load()}finally{setSlotDeleting(false)}}
- function drag(order:Order,edge:"move"|"left"|"right",event:ReactPointerEvent){if(!order.productionSlot||!productionSettings){setError(productionUi.loadError);return}if(order.productionSlot.locked)return;event.preventDefault();const bar=(event.currentTarget as HTMLElement).closest(".timeline-bar") as HTMLElement|null,startX=event.clientX,originalStart=diff(localDate(order.productionSlot.startsAt),base),originalEnd=diff(localDate(order.productionSlot.endsAt),base),shippingLimit=order.requiredDeliveryAt?diff(plus(localDate(order.requiredDeliveryAt),-productionSettings.shippingLeadDays),base):undefined;let last=0,moved=false,latestSlot=order.productionSlot;const move=(e:PointerEvent)=>{const delta=Math.round((e.clientX-startX)/40);if(delta===last)return;last=delta;if(delta===0)return;moved=true;if(bar)bar.dataset.dragged="true";let s=originalStart,eDay=originalEnd;if(edge==="move"){s=originalStart+delta;eDay=originalEnd+delta}if(edge==="left")s=Math.min(originalEnd,originalStart+delta);if(edge==="right")eDay=Math.max(originalStart,originalEnd+delta);if(shippingLimit!==undefined&&eDay>shippingLimit){if(edge==="move"){s-=eDay-shippingLimit;eDay=shippingLimit}else if(edge==="right"){if(shippingLimit<originalStart)return;eDay=shippingLimit}}const slot={...order.productionSlot!,startsAt:toLocalIso(plus(base,s)),endsAt:toLocalIso(plus(base,eDay))};latestSlot=slot;setOrders(list=>list.map(o=>o.id===order.id?{...o,productionSlot:slot}:o))};const up=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);if(moved)void saveSlot(order,latestSlot);setTimeout(()=>{if(bar)delete bar.dataset.dragged},0)};window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true})}
- function autoSchedule(order:Order){if(!productionSettings){setError(productionUi.loadError);return}const end=order.requiredDeliveryAt?plus(localDate(order.requiredDeliveryAt),-productionSettings.shippingLeadDays):plus(base,14),slot={startsAt:toLocalIso(plus(end,-(productionSettings.defaultDurationDays-1))),endsAt:toLocalIso(end),capacity:1,tentative:true,locked:false};void saveSlot(order,slot)}
- return <main className="production-page"><header className="phase2-header"><div><p>{productionUi.eyebrow}</p><h1>План производства</h1><span>Заказы, загрузка и сроки на единой временной шкале</span></div><div className="production-period"><button onClick={()=>setBase(plus(base,-28))}>‹</button><b>{monthGroups.map(g=>`${MONTHS[g.month]} ${g.year}`).join(" — ")}</b><button onClick={()=>setBase(plus(base,28))}>›</button></div></header>
- <section className="production-metrics"><Metric label="Заказов на шкале" value={scheduled.length}/><Metric label="Средняя загрузка" value={`${Math.round(dailyLoad.reduce((a,b)=>a+b,0)/days.length/capacityPerDay*100)}%`}/><Metric label="Свободных дней" value={dailyLoad.filter(v=>v<capacityPerDay).length}/><Metric label="Перегружено дней" value={dailyLoad.filter(v=>v>capacityPerDay).length}/></section>
- <nav className="production-months"><span>Перейти к месяцу:</span>{Array.from({length:5},(_,i)=>new Date(base.getFullYear(),base.getMonth()+i,1)).map(m=>{const active=m.getMonth()===base.getMonth()&&m.getFullYear()===base.getFullYear();return <button key={m.toISOString()} className={active?"active":""} aria-current={active?"date":undefined} onClick={()=>setBase(m)}>{MONTHS[m.getMonth()]} <b>{orders.filter(o=>{if(!o.productionSlot)return false;const start=localDate(o.productionSlot.startsAt);return start.getMonth()===m.getMonth()&&start.getFullYear()===m.getFullYear()}).length}</b></button>})}</nav>
- <section className="production-toolbar"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={productionUi.search}/><label>Мощность дня <select value={capacityPerDay} onChange={e=>setCapacityValue(Number(e.target.value))}>{[1,2,3,4,5,6].map(v=><option key={v} value={v}>{v} {v===1?"заказ":"заказа"}</option>)}</select></label><label className="production-preview-width">{ordersUi.previewWidth} <input aria-label={ordersUi.previewWidth} type="number" min={200} max={1200} step={50} value={previewWidth} onChange={e=>setPreviewSize(Number(e.target.value))}/><span>px</span></label></section>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}
-<section className="production-timeline" ref={timelineRef}><div className="production-canvas" style={{"--timeline-days":dayCount} as CSSProperties}><div className="timeline-calendar-header"><div className="timeline-months"><div>Заказ / модель</div>{monthGroups.map(g=><b key={`${g.year}-${g.month}`} style={{gridColumn:`${g.start+2}/${g.start+g.length+2}`}}>{MONTHS[g.month]} {g.year}</b>)}</div><div className="timeline-days"><div>День</div>{days.map(d=><span key={toLocalIso(d)}>{d.getDate()}<small>{new Intl.DateTimeFormat("ru-RU",{weekday:"short"}).format(d)}</small></span>)}</div><div className="timeline-load"><div>Загрузка · {capacityPerDay}/день</div>{dailyLoad.map((count,i)=><span key={i} className={count>capacityPerDay?"over":count===capacityPerDay?"full":""}><i style={{width:`${Math.min(100,count/capacityPerDay*100)}%`}}/><small>{count}/{capacityPerDay}</small></span>)}</div></div>{scheduled.map(order=><TimelineRow key={order.id} order={order} base={base} dayCount={dayCount} select={()=>setSelected(current=>current===order.id?undefined:order.id)} drag={drag} preview={setPreview} toggleLock={()=>saveSlot(order,{...order.productionSlot!,locked:!order.productionSlot!.locked})}/>)}{visible.filter(o=>!o.productionSlot).map(order=><div className="timeline-unscheduled" key={order.id}><div><strong>{order.number}</strong><small>{order.client.displayName}</small></div><CrmButton tone="secondary" disabled={!productionSettings} onClick={()=>autoSchedule(order)}>+ {productionUi.schedule}</CrmButton></div>)}</div></section>
- {preview&&<div className="production-image-preview" style={{left:preview.x+18,top:preview.y+18,width:Math.min(previewWidth,window.innerWidth-36)}}><img src={preview.src} alt="Увеличенная модель заказа"/><div><b>{preview.country}</b><span>{preview.quantity} шт.</span><strong>{preview.total}</strong></div></div>}{selectedOrder&&<aside className="production-slot-card"><button onClick={()=>{setSlotDeleteOpen(false);setSelected(undefined)}}>×</button><small>ПРОИЗВОДСТВЕННЫЙ СЛОТ</small><h2>{selectedOrder.number}</h2><b>{selectedOrder.client.displayName}</b><section className="production-slot-summary"><div><small>{productionUi.items}</small><strong>{selectedQuantity} шт.</strong></div><div><small>{productionUi.amount}</small><strong>{selectedTotal}</strong></div><div><small>{productionUi.shippingDate}</small><strong>{selectedOrder.requiredDeliveryAt?new Intl.DateTimeFormat("ru-RU").format(localDate(selectedOrder.requiredDeliveryAt)):productionUi.noDeadline}</strong></div>{selectedOrder.notes&&<div className="production-slot-summary-note"><small>{productionUi.note}</small><strong>{selectedOrder.notes}</strong></div>}</section>{selectedOrder.productionSlot?<><label>Начало<input type="date" value={toLocalIso(localDate(selectedOrder.productionSlot.startsAt))} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,startsAt:e.target.value})}/></label><label>Окончание<input type="date" value={toLocalIso(localDate(selectedOrder.productionSlot.endsAt))} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,endsAt:e.target.value})}/></label><label className="slot-lock"><input type="checkbox" checked={selectedOrder.productionSlot.locked} onChange={e=>saveSlot(selectedOrder,{...selectedOrder.productionSlot!,locked:e.target.checked})}/> Закрепить слот</label></>:<div className="production-slot-empty"><p>{productionUi.noProductionSlot}</p><CrmButton tone="secondary" disabled={!productionSettings} onClick={()=>autoSchedule(selectedOrder)}>+ {productionUi.schedule}</CrmButton></div>}<CrmStatusBadge className="production-slot-status" domain="production" status={selectedOrder.productionStatus}/><div className="production-slot-actions">{onOpenOrder&&<CrmButton className="production-open-order" onClick={()=>onOpenOrder?.(selectedOrder.id)}>{productionUi.openOrder}</CrmButton>}{selectedOrder.productionSlot&&<CrmButton className="production-delete-slot" color="red" tone="secondary" onClick={()=>setSlotDeleteOpen(true)}>{productionUi.deleteSlot}</CrmButton>}</div></aside>}
- <Modal opened={slotDeleteOpen} onClose={()=>!slotDeleting&&setSlotDeleteOpen(false)} title={productionUi.deleteSlotTitle} aria-label={productionUi.deleteSlotTitle} closeButtonProps={{"aria-label":productionUi.close,disabled:slotDeleting}} closeOnClickOutside={!slotDeleting} closeOnEscape={!slotDeleting} returnFocus centered size={460}><p>{productionUi.deleteSlotHint}</p><div className="production-delete-slot-confirm"><CrmButton tone="secondary" disabled={slotDeleting} onClick={()=>setSlotDeleteOpen(false)}>{productionUi.cancel}</CrmButton><CrmButton color="red" loading={slotDeleting} onClick={()=>void deleteSlot()}>{productionUi.deleteSlotConfirm}</CrmButton></div></Modal></main>
+function startOfCalendarWeek(value: Date) {
+  const date = productionLocalDate(value);
+  return productionAddDays(date, date.getDay() === 0 ? -6 : 1 - date.getDay());
 }
-function clearProductionContextAction(){window.history.replaceState(null,"",clearOrderContextUrl(window.location.href))}
-function TimelineRow({order,base,dayCount,select,drag,toggleLock,preview}:{order:Order;base:Date;dayCount:number;select:()=>void;drag:(o:Order,e:"move"|"left"|"right",x:ReactPointerEvent)=>void;toggleLock:()=>void;preview:(value:{src:string;x:number;y:number;country:string;quantity:number;total:string}|undefined)=>void}){const slot=order.productionSlot!,start=diff(localDate(slot.startsAt),base),end=diff(localDate(slot.endsAt),base),shippingDay=order.requiredDeliveryAt?diff(localDate(order.requiredDeliveryAt),base):undefined,duration=end-start+1,shippingGap=shippingDay===undefined?undefined:shippingDay-end,overrun=shippingDay===undefined?0:Math.max(0,end-shippingDay),storedImage=order.items.find(i=>i.modelImagePath)?.modelImagePath||order.modelImagePath,image=storedImage?`/api/orders/images/${storedImage}`:undefined,quantity=order.items.reduce((sum,item)=>sum+item.quantity,0)||1,shippedWithTracking=["SHIPPED","IN_TRANSIT","DELIVERED"].includes(order.shippingStatus)&&order.hasTrackingNumber;return <div className="timeline-row"><div><div className="timeline-order-heading"><strong>{order.number}</strong>{quantity>1&&<span className="timeline-order-quantity">{quantity} {productionUi.pieces}</span>}{order.client.country&&<span className="timeline-order-country">{flag(order.client.country)} {order.client.country}</span>}</div><small>{order.notes||order.client.displayName}</small><button className="slot-pin" title={slot.locked?"Разблокировать":"Закрепить"} onClick={toggleLock}>{slot.locked?"🔒 Закреплён":"🔓 Закрепить"}</button></div>{end>=0&&start<dayCount&&<button className={`timeline-bar ${slot.tentative?"tentative":""} ${slot.locked?"locked":""} ${shippedWithTracking?"shipped":""}`} style={{gridColumn:`${Math.max(0,start)+2}/${Math.min(dayCount,end+1)+2}`}} onClick={e=>{if(e.currentTarget.dataset.dragged!=="true")select()}} onPointerDown={e=>drag(order,"move",e)}>{overrun>0&&<span className="shipping-overrun" style={{width:`${Math.min(100,overrun/duration*100)}%`}}/>}<span className="resize left" onPointerDown={e=>{e.stopPropagation();drag(order,"left",e)}}/>{image?<img src={image} alt="Модель" onMouseMove={e=>preview({src:e.currentTarget.src,x:e.clientX,y:e.clientY,country:`${flag(order.client.country)} ${order.client.country||"Страна не указана"}`,quantity,total:new Intl.NumberFormat("ru-RU",{style:"currency",currency:order.currency}).format(order.priceMinor/100)})} onMouseLeave={()=>preview(undefined)}/>:<i>Y</i>}<span className="timeline-bar-text"><b>{flag(order.client.country)} {order.client.displayName}</b><small>{diff(localDate(slot.endsAt),localDate(slot.startsAt))+1} дн.{shippingGap!==undefined?" · "+productionUi.untilShipping+" "+shippingGap+" дн.":""}</small></span><span className="resize right" onPointerDown={e=>{e.stopPropagation();drag(order,"right",e)}}/></button>}{shippingDay!==undefined&&shippingDay>=0&&shippingDay<dayCount&&<span className="shipping-date-marker" style={{gridColumn:`${shippingDay+2}/${shippingDay+3}`}} title={`${productionUi.deadline} ${toLocalIso(localDate(order.requiredDeliveryAt!))}`}><b>🚚</b><small>{localDate(order.requiredDeliveryAt!).getDate()}</small></span>}</div>}
-function Metric({label,value}:{label:string;value:number|string}){return <div><span>{label}</span><strong>{value}</strong></div>}
+function clearProductionContextAction() { window.history.replaceState(null, "", clearOrderContextUrl(window.location.href)); }
+
+export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props = {}) {
+  const now = new Date(), contextOrderHandled = useRef(false), loadSequence = useRef(0);
+  const [mode, setMode] = useState<ProductionRangeMode>("month");
+  const [base, setBase] = useState(() => startOfCalendarWeek(new Date(now.getFullYear(), now.getMonth(), 1)));
+  const [orders, setOrders] = useState<ProductionOrderView[]>([]);
+  const [productionSettings, setProductionSettings] = useState<ProductionSettings | null>(null);
+  const [filters, setFilters] = useState<ProductionFilters>(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [capacityPerDay, setCapacity] = useState(3);
+  const [previewWidth, setPreviewWidth] = useState(600);
+  const [selected, setSelected] = useState<string>();
+  const [slotDeleteOpen, setSlotDeleteOpen] = useState(false), [slotDeleting, setSlotDeleting] = useState(false);
+  const [preview, setPreview] = useState<Preview>(), [error, setError] = useState("");
+  const range = productionRange(mode);
+  const days = useMemo(() => Array.from({ length: range.days }, (_, index) => productionAddDays(base, index)), [base, range.days]);
+
+  async function load(signal?: AbortSignal) {
+    const sequence = ++loadSequence.current, contextId = orderContextId(window.location.search), rangeEnd = productionAddDays(base, range.days - 1);
+    const params = new URLSearchParams({ from: productionIso(base), to: productionIso(rangeEnd) });
+    if (contextId) params.set("orderId", contextId);
+    const productionUrl = `/api/orders/production?${params.toString()}`;
+    try {
+      const [ordersResponse, defaultsResponse] = await Promise.all([fetch(productionUrl, { credentials: "include", signal }), fetch("/api/orders/defaults", { credentials: "include", signal })]);
+      if (signal?.aborted || sequence !== loadSequence.current) return;
+      if (!ordersResponse.ok || !defaultsResponse.ok) { setProductionSettings(null); setError(productionUi.loadError); return; }
+      const [loadedOrders, defaults] = await Promise.all([ordersResponse.json() as Promise<ProductionOrderView[]>, defaultsResponse.json() as Promise<ProductionSettings>]);
+      if (signal?.aborted || sequence !== loadSequence.current) return;
+      if (!Number.isInteger(defaults.defaultDurationDays) || !Number.isInteger(defaults.shippingLeadDays)) { setProductionSettings(null); setError(productionUi.loadError); return; }
+      setOrders(loadedOrders); setProductionSettings(defaults);
+      let contextError = "";
+      if (!contextOrderHandled.current) {
+        const resolved = resolveOrderContext(loadedOrders, window.location.search);
+        if (resolved.requested) {
+          contextOrderHandled.current = true;
+          if (resolved.order) {
+            setSelected(resolved.order.id);
+            setFilters((current) => ({ ...current, query: resolved.order!.number }));
+            const anchor = resolved.order.productionSlot?.startsAt || resolved.order.requiredDeliveryAt;
+            if (anchor) setBase(startOfCalendarWeek(productionLocalDate(anchor)));
+          } else contextError = productionUi.contextOrderUnavailable;
+          clearProductionContextAction();
+        }
+      }
+      setError(contextError);
+    } catch (reason) {
+      if (signal?.aborted || sequence !== loadSequence.current || (reason instanceof Error && reason.name === "AbortError")) return;
+      setProductionSettings(null); setError(productionUi.loadError);
+    }
+  }
+
+  useEffect(() => { const controller = new AbortController(), timer = window.setTimeout(() => void load(controller.signal), 80); return () => { window.clearTimeout(timer); controller.abort(); }; }, [base, mode]);
+  useEffect(() => { const capacity = Number(localStorage.getItem("production-capacity")); if (capacity >= 1 && capacity <= 10) setCapacity(capacity); const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY)); if (Number.isFinite(width) && width >= 200 && width <= 1200) setPreviewWidth(width); }, []);
+
+  const activeOrders = useMemo(() => orders.filter((order) => order.productionStatus !== "CANCELLED"), [orders]);
+  const visibleOrders = useMemo(() => activeOrders.filter((order) => orderMatchesProductionFilters(order, filters)), [activeOrders, filters]);
+  const metrics = useMemo(() => buildProductionMetrics(activeOrders, base, range.days, capacityPerDay, productionSettings?.defaultDurationDays ?? 7), [activeOrders, base, range.days, capacityPerDay, productionSettings]);
+  const selectedOrder = orders.find((order) => order.id === selected), periodEnd = productionAddDays(base, range.days - 1);
+  const periodFocus = productionAddDays(base, Math.floor((range.days - 1) / 2));
+  const periodLabel = mode === "month"
+    ? new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(periodFocus)
+    : base.getMonth() === periodEnd.getMonth() && base.getFullYear() === periodEnd.getFullYear()
+      ? new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(base)
+      : `${new Intl.DateTimeFormat("ru-RU", { month: "short", year: "numeric" }).format(base)} — ${new Intl.DateTimeFormat("ru-RU", { month: "short", year: "numeric" }).format(periodEnd)}`;
+  const canManageOrders = role === "OWNER" || role === "ADMIN" || role === "MANAGER";
+  function setCapacityValue(value: number) { setCapacity(value); localStorage.setItem("production-capacity", String(value)); }
+  function setPreviewWidthValue(value: number) { const safe = Math.max(200, Math.min(1200, Math.round(value))); setPreviewWidth(safe); localStorage.setItem(PREVIEW_WIDTH_KEY, String(safe)); }
+
+  async function saveSlot(order: ProductionOrderView, slot: ProductionSlotView) {
+    setError(""); const previous = order.productionSlot;
+    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: slot } : item));
+    const response = await fetch(`/api/orders/${order.id}/production-slot`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(slot) });
+    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.message || productionUi.saveError); setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: previous } : item)); await load(); return; }
+    const saved = await response.json() as ProductionSlotView;
+    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: saved } : item));
+  }
+
+  async function deleteSlot() {
+    if (!selectedOrder?.productionSlot || slotDeleting) return;
+    if (!selectedOrder.productionSlot.updatedAt) { setError(productionUi.deleteSlotError); await load(); return; }
+    setSlotDeleting(true); setError("");
+    try {
+      const response = await fetch(`/api/orders/${selectedOrder.id}/production-slot`, { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: selectedOrder.productionSlot.updatedAt }) });
+      if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || productionUi.deleteSlotError); }
+      setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, productionSlot: undefined, productionStatus: "NOT_SCHEDULED" } : order)); setSlotDeleteOpen(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : productionUi.deleteSlotError); await load(); }
+    finally { setSlotDeleting(false); }
+  }
+
+  function drag(order: ProductionOrderView, edge: "move" | "left" | "right", event: ReactPointerEvent) {
+    if (!order.productionSlot || !productionSettings) { setError(productionUi.loadError); return; }
+    if (order.productionSlot.locked) return;
+    event.preventDefault();
+    const bar = (event.currentTarget as HTMLElement).closest(".timeline-bar") as HTMLElement | null, startX = event.clientX;
+    const originalStart = productionDayDiff(order.productionSlot.startsAt, base), originalEnd = productionDayDiff(order.productionSlot.endsAt, base);
+    const shippingLimit = order.requiredDeliveryAt ? productionDayDiff(productionAddDays(order.requiredDeliveryAt, -productionSettings.shippingLeadDays), base) : undefined;
+    let last = 0, moved = false, latestSlot = order.productionSlot;
+    const move = (pointer: PointerEvent) => {
+      const delta = Math.round((pointer.clientX - startX) / range.dayWidth); if (delta === last || delta === 0) return; last = delta; moved = true; if (bar) bar.dataset.dragged = "true";
+      let starts = originalStart, ends = originalEnd;
+      if (edge === "move") { starts += delta; ends += delta; }
+      if (edge === "left") starts = Math.min(originalEnd, originalStart + delta);
+      if (edge === "right") ends = Math.max(originalStart, originalEnd + delta);
+      if (shippingLimit !== undefined && ends > shippingLimit) { if (edge === "move") { starts -= ends - shippingLimit; ends = shippingLimit; } else if (edge === "right") { if (shippingLimit < originalStart) return; ends = shippingLimit; } }
+      latestSlot = { ...order.productionSlot!, startsAt: productionIso(productionAddDays(base, starts)), endsAt: productionIso(productionAddDays(base, ends)) };
+      setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: latestSlot } : item));
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); if (moved) void saveSlot(order, latestSlot); window.setTimeout(() => { if (bar) delete bar.dataset.dragged; }, 0); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true });
+  }
+
+  function autoSchedule(order: ProductionOrderView) {
+    if (!productionSettings) { setError(productionUi.loadError); return; }
+    const end = order.requiredDeliveryAt ? productionAddDays(order.requiredDeliveryAt, -productionSettings.shippingLeadDays) : productionAddDays(base, 14);
+    void saveSlot(order, { startsAt: productionIso(productionAddDays(end, -(productionSettings.defaultDurationDays - 1))), endsAt: productionIso(end), capacity: 1, tentative: true, locked: false });
+  }
+
+  return <main className="production-page">
+    <ProductionHeader periodLabel={periodLabel} mode={mode} onMode={setMode} onPrevious={() => setBase(productionAddDays(base, -range.shiftDays))} onNext={() => setBase(productionAddDays(base, range.shiftDays))} onToday={() => setBase(startOfCalendarWeek(new Date()))} onCreateOrder={onCreateOrder} canCreateOrder={canManageOrders}/>
+    <ProductionKpis metrics={metrics} capacity={capacityPerDay}/>
+    <ProductionFiltersBar filters={filters} opened={filtersOpen} capacity={capacityPerDay} previewWidth={previewWidth} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)}/>
+    {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
+    <ProductionTimeline orders={visibleOrders} days={days} base={base} dayWidth={range.dayWidth} capacity={capacityPerDay} selectedId={selected} onSelect={(orderId) => setSelected((current) => current === orderId ? undefined : orderId)} onDrag={drag} onToggleLock={(order) => order.productionSlot && void saveSlot(order, { ...order.productionSlot, locked: !order.productionSlot.locked })} onSchedule={autoSchedule} onPreview={setPreview}/>
+    {selectedOrder && (
+      <ProductionOrderDetails
+        order={selectedOrder}
+        onClose={() => {
+          setSlotDeleteOpen(false);
+          setSelected(undefined);
+        }}
+        onOpenOrder={onOpenOrder && canManageOrders ? () => onOpenOrder(selectedOrder.id) : undefined}
+        onSaveSlot={(slot) => void saveSlot(selectedOrder, slot)}
+        onDeleteSlot={() => setSlotDeleteOpen(true)}
+      />
+    )}
+    {preview && <div className="production-image-preview" style={{ left: Math.min(preview.x + 18, window.innerWidth - Math.min(previewWidth, window.innerWidth - 36) - 18), top: Math.min(preview.y + 18, window.innerHeight - 280), width: Math.min(previewWidth, window.innerWidth - 36) }}><img src={preview.src} alt={productionUi.enlargedModel}/><div><b>{preview.country}</b><span>{preview.quantity} {productionUi.pieces}</span><strong>{preview.total}</strong></div></div>}
+    <Modal opened={slotDeleteOpen} onClose={() => !slotDeleting && setSlotDeleteOpen(false)} title={productionUi.deleteSlotTitle} aria-label={productionUi.deleteSlotTitle} closeButtonProps={{ "aria-label": productionUi.close, disabled: slotDeleting }} closeOnClickOutside={!slotDeleting} closeOnEscape={!slotDeleting} returnFocus centered size={460}><p>{productionUi.deleteSlotHint}</p><div className="production-delete-slot-confirm"><CrmButton tone="secondary" disabled={slotDeleting} onClick={() => setSlotDeleteOpen(false)}>{productionUi.cancel}</CrmButton><CrmButton color="red" loading={slotDeleting} onClick={() => void deleteSlot()}>{productionUi.deleteSlotConfirm}</CrmButton></div></Modal>
+  </main>;
+}
+
+export const toLocalIso = productionIso;

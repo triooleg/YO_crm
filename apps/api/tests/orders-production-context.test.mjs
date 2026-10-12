@@ -1,6 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { includeRequestedProductionOrder, loadProductionOrders, productionOrderSelect } from "../src/orders/production-context.ts";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import ts from "typescript";
+
+const nativeRequire = createRequire(import.meta.url);
+const source = readFileSync(new URL("../src/orders/production-context.ts", import.meta.url), "utf8");
+const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const module = { exports: {} };
+const localRequire = (specifier) => specifier === "../finance/exchange-rates"
+  ? { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency && Number.isSafeInteger(payment.appliedAmountMinor) && (payment.appliedAmountMinor ?? -1) >= 0 ? payment.appliedAmountMinor : 0 }
+  : nativeRequire(specifier);
+vm.runInNewContext(javascript, { module, exports: module.exports, require: localRequire, console, Date });
+const { includeRequestedProductionOrder, loadProductionOrders, productionOrderSelect } = module.exports;
+const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("производство добавляет точный заказ за пределами первых 100", async () => {
   const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: `order-${index}` }));
@@ -12,8 +26,8 @@ test("производство добавляет точный заказ за �
 
 test("производство не дублирует точный заказ из первой сотни и не возвращает архивный", async () => {
   const visible = [{ id: "order-1" }, { id: "order-2" }];
-  assert.deepEqual(includeRequestedProductionOrder(visible, visible[1]), visible);
-  assert.deepEqual(includeRequestedProductionOrder(visible, null), visible);
+  assert.deepEqual(plain(includeRequestedProductionOrder(visible, visible[1])), visible);
+  assert.deepEqual(plain(includeRequestedProductionOrder(visible, null)), visible);
 });
 
 test("загрузка производства делает второй ограниченный запрос для точного заказа", async () => {
@@ -24,33 +38,120 @@ test("загрузка производства делает второй огр
     findMany: async (query) => { calls.push(["many", query]); return firstPage; },
     findFirst: async (query) => { calls.push(["first", query]); return exact; },
   };
-  assert.deepEqual((await loadProductionOrders(repository, exact.id, "2026-10-01", "2027-03-31")).map((order) => order.id), [exact.id, ...firstPage.map((order) => order.id)]);
+  assert.deepEqual(plain((await loadProductionOrders(repository, exact.id, "2026-10-01", "2027-03-31")).map((order) => order.id)), [exact.id, ...firstPage.map((order) => order.id)]);
   assert.equal(calls.length, 2);
   assert.equal(calls[0][1].take, 1001);
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.startsAt.lte.toISOString(), "2027-03-31T23:59:59.999Z");
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.endsAt.gte.toISOString(), "2026-10-01T00:00:00.000Z");
-  assert.deepEqual(calls[0][1].where.type.notIn, ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
-  assert.deepEqual(calls[1][1].where, { id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
+  assert.deepEqual(plain(calls[0][1].where.type.notIn), ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
+  assert.deepEqual(plain(calls[1][1].where), { id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
   assert.equal(calls[1][1].select, productionOrderSelect);
-  assert.deepEqual(productionOrderSelect.shipment, { select: { trackingNumber: true } });
+  assert.deepEqual(plain(productionOrderSelect.shipment), { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } });
   assert.equal(productionOrderSelect.deliveryTrackingCode, true);
   assert.equal(productionOrderSelect.shippingStatus, true);
-  for (const forbidden of ["payments", "invoices", "address", "postalCode", "measurement", "activities"]) {
+  assert.equal(productionOrderSelect.depositRequiredMinor, true);
+  assert.equal(productionOrderSelect.paymentStatus, true);
+  assert.deepEqual(plain(productionOrderSelect.payments.where), { voidedAt: null });
+  for (const forbidden of ["invoices", "address", "postalCode", "measurement", "activities"]) {
     assert.equal(forbidden in productionOrderSelect, false);
+  }
+});
+
+test("производственная проекция считает только применённые действительные оплаты и не раскрывает их строки", async () => {
+  const repository = {
+    findMany: async () => [
+      {
+        id: "unpaid",
+        currency: "EUR",
+        priceMinor: 30000,
+        depositRequiredMinor: 15000,
+        paymentStatus: "REFUNDED",
+        payments: [],
+        deliveryTrackingCode: null,
+        shipment: null,
+      },
+      {
+        id: "partial-converted",
+        currency: "EUR",
+        priceMinor: 30000,
+        depositRequiredMinor: 15000,
+        paymentStatus: "PARTIALLY_PAID",
+        payments: [
+          { amountMinor: 10000, currency: "USD", appliedAmountMinor: 9000, appliedCurrency: "EUR", receivedAt: new Date("2026-10-03T12:00:00.000Z") },
+          { amountMinor: 10000, currency: "UAH", appliedAmountMinor: null, appliedCurrency: null, receivedAt: new Date("2026-10-07T12:00:00.000Z") },
+        ],
+        deliveryTrackingCode: null,
+        shipment: null,
+      },
+      {
+        id: "deposit",
+        currency: "EUR",
+        priceMinor: 30000,
+        depositRequiredMinor: 15000,
+        paymentStatus: "DEPOSIT_PAID",
+        payments: [{ amountMinor: 15000, currency: "EUR", appliedAmountMinor: null, appliedCurrency: null, receivedAt: new Date("2026-10-04T12:00:00.000Z") }],
+        deliveryTrackingCode: null,
+        shipment: null,
+      },
+      {
+        id: "paid",
+        currency: "EUR",
+        priceMinor: 30000,
+        depositRequiredMinor: 15000,
+        paymentStatus: "PAID",
+        payments: [
+          { amountMinor: 10000, currency: "EUR", appliedAmountMinor: null, appliedCurrency: null, receivedAt: new Date("2026-10-02T12:00:00.000Z") },
+          { amountMinor: 20000, currency: "EUR", appliedAmountMinor: null, appliedCurrency: null, receivedAt: new Date("2026-10-05T12:00:00.000Z") },
+        ],
+        deliveryTrackingCode: null,
+        shipment: { trackingNumber: "TRACK", shippedAt: new Date("2026-10-06T12:00:00.000Z"), deliveredAt: new Date("2026-10-09T12:00:00.000Z") },
+      },
+    ],
+    findFirst: async () => null,
+  };
+
+  const orders = await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-01");
+
+  assert.deepEqual(orders.map((order) => ({
+    id: order.id,
+    paidMinor: order.paidMinor,
+    latestPaymentAt: order.latestPaymentAt?.toISOString() ?? null,
+    shippedAt: order.shippedAt?.toISOString() ?? null,
+    deliveredAt: order.deliveredAt?.toISOString() ?? null,
+  })), [
+    { id: "unpaid", paidMinor: 0, latestPaymentAt: null, shippedAt: null, deliveredAt: null },
+    { id: "partial-converted", paidMinor: 9000, latestPaymentAt: "2026-10-03T12:00:00.000Z", shippedAt: null, deliveredAt: null },
+    { id: "deposit", paidMinor: 15000, latestPaymentAt: "2026-10-04T12:00:00.000Z", shippedAt: null, deliveredAt: null },
+    { id: "paid", paidMinor: 30000, latestPaymentAt: "2026-10-05T12:00:00.000Z", shippedAt: "2026-10-06T12:00:00.000Z", deliveredAt: "2026-10-09T12:00:00.000Z" },
+  ]);
+  for (const order of orders) {
+    assert.equal("payments" in order, false);
+    assert.equal("shipment" in order, false);
+    assert.equal("deliveryTrackingCode" in order, false);
   }
 });
 
 test("производство возвращает только признак накладной без самого трек-номера", async () => {
   const repository = {
-    findMany: async () => [{ id: "tracked-order", deliveryTrackingCode: "LEGACY-SECRET", shipment: { trackingNumber: "SHIPMENT-SECRET" } }],
+    findMany: async () => [
+      { id: "shipment-tracked-order", deliveryTrackingCode: null, shipment: { trackingNumber: "SHIPMENT-SECRET" } },
+      { id: "legacy-tracked-order", deliveryTrackingCode: "LEGACY-SECRET", shipment: null },
+      { id: "untracked-order", deliveryTrackingCode: "  ", shipment: { trackingNumber: "" } },
+    ],
     findFirst: async () => null,
   };
 
-  const [order] = await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-01");
+  const orders = await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-01");
 
-  assert.equal(order.hasTrackingNumber, true);
-  assert.equal("deliveryTrackingCode" in order, false);
-  assert.equal("shipment" in order, false);
+  assert.deepEqual(orders.map((order) => [order.id, order.hasTrackingNumber]), [
+    ["shipment-tracked-order", true],
+    ["legacy-tracked-order", true],
+    ["untracked-order", false],
+  ]);
+  for (const order of orders) {
+    assert.equal("deliveryTrackingCode" in order, false);
+    assert.equal("shipment" in order, false);
+  }
 });
 
 test("производство не теряет текущие слоты после импорта более 100 старых заказов", async () => {
@@ -73,7 +174,7 @@ test("производство ограничивает ответ видимы�
   await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-05");
   assert.equal(calls[0].take, 1001);
   assert.equal(calls[0].where.OR.length, 3);
-  assert.deepEqual(calls[0].where.OR[2], { productionSlot: { is: null }, requiredDeliveryAt: null });
+  assert.deepEqual(plain(calls[0].where.OR[2]), { productionSlot: { is: null }, requiredDeliveryAt: null });
 });
 
 test("производство отклоняет некорректный и чрезмерно широкий период", async () => {
@@ -98,7 +199,7 @@ test("завершённый заказ не попадает в первую с
     findFirst: async () => null,
   };
   assert.deepEqual(await loadProductionOrders(repository), []);
-  assert.deepEqual(calls[0].where.salesStatus.notIn, ["COMPLETED", "CANCELLED"]);
+  assert.deepEqual(plain(calls[0].where.salesStatus.notIn), ["COMPLETED", "CANCELLED"]);
 });
 
 test("точный завершённый или отменённый заказ не возвращается в производство", async () => {
@@ -107,8 +208,8 @@ test("точный завершённый или отменённый заказ
     findMany: async () => [],
     findFirst: async (query) => { calls.push(query); return null; },
   };
-  assert.deepEqual(await loadProductionOrders(repository, "terminal-order"), []);
-  assert.deepEqual(calls[0].where.salesStatus.notIn, ["COMPLETED", "CANCELLED"]);
+  assert.deepEqual(plain(await loadProductionOrders(repository, "terminal-order")), []);
+  assert.deepEqual(plain(calls[0].where.salesStatus.notIn), ["COMPLETED", "CANCELLED"]);
 });
 
 test("быстрая продажа не попадает в производство даже по прямой ссылке", async () => {
@@ -117,7 +218,7 @@ test("быстрая продажа не попадает в производс�
     findMany: async (query) => { calls.push(query); return []; },
     findFirst: async (query) => { calls.push(query); return null; },
   };
-  assert.deepEqual(await loadProductionOrders(repository, "ready-sale"), []);
-  assert.deepEqual(calls[0].where.type.notIn, ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
-  assert.deepEqual(calls[1].where.type.notIn, ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
+  assert.deepEqual(plain(await loadProductionOrders(repository, "ready-sale")), []);
+  assert.deepEqual(plain(calls[0].where.type.notIn), ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
+  assert.deepEqual(plain(calls[1].where.type.notIn), ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
 });

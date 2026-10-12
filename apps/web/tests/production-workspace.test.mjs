@@ -1,54 +1,83 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-const production=await readFile(new URL("../components/production-workspace.tsx",import.meta.url),"utf8");
-const shell=await readFile(new URL("../components/crm-shell.tsx",import.meta.url),"utf8");
-const styles=await readFile(new URL("../app/production-workspace.css",import.meta.url),"utf8");
-test("раздел Производство открывает интерактивную шкалу",()=>{assert.match(shell,/ProductionWorkspace/);assert.match(production,/productionSlot/);assert.match(production,/pointermove/);assert.match(styles,/production-timeline/)});
-test("даты сохраняются локально и загрузка зависит от мощности",()=>{assert.match(production,/toLocalIso/);assert.match(production,/dailyLoad/);assert.match(production,/capacityPerDay/);assert.match(production,/production-slot/)});
-test("закрепленный слот нельзя двигать мышью",()=>{assert.match(production,/productionSlot\.locked/);assert.match(production,/Закрепить слот/);assert.match(styles,/timeline-bar\.locked/);assert.match(production,/dataset\.dragged/);assert.match(production,/slot-pin/)});
-test("preview width",()=>{assert.match(production,/orders-image-preview-width-v1/);assert.match(production,/min=\{200\}/);assert.match(production,/max=\{1200\}/);assert.match(production,/step=\{50\}/);assert.match(production,/previewWidth/);assert.match(styles,/production-preview-width/)});
-test("timeline click toggles date card",()=>{assert.match(production,/setSelected\(current=>current===order\.id\?undefined:order\.id\)/);assert.match(production,/dataset\.dragged/)});
 
-test("shipping date is marked and mouse movement is limited by it",()=>{assert.match(production,/requiredDeliveryAt/);assert.match(production,/shippingLimit/);assert.match(production,/shipping-date-marker/);assert.match(production,/shipping-overrun/);assert.match(styles,/shipping-date-marker/);assert.match(styles,/shipping-overrun/);assert.match(production,/slotVisible/);assert.match(production,/end>=0&&start<dayCount/)});
+const workspace = await readFile(new URL("../components/production-workspace.tsx", import.meta.url), "utf8");
+const planner = await readFile(new URL("../components/production-planner-view.tsx", import.meta.url), "utf8");
+const shell = await readFile(new URL("../components/crm-shell.tsx", import.meta.url), "utf8");
+const styles = await readFile(new URL("../app/production-workspace.css", import.meta.url), "utf8");
+const view = await readFile(new URL("../lib/production-view.ts", import.meta.url), "utf8");
 
-test("resize handles stay on bar edges and shipping gap stays in the same row",()=>{assert.match(styles,/\.resize\{position:absolute/);assert.doesNotMatch(styles,/timeline-bar>\.resize\{position:relative/);assert.match(styles,/timeline-bar>\.resize\{z-index:6/);assert.match(production,/shippingGap/);assert.match(production,/productionUi\.untilShipping/);assert.match(styles,/shipping-date-marker\{position:absolute/)});
-
-test("timeline grid starts after a content-aware order column and matches fixed-width day cells",()=>{assert.match(styles,/\.timeline-row::before\{left:var\(--order-column-width\)\}/);assert.match(styles,/var\(--order-column-width\) repeat\(var\(--timeline-days\),40px\)/);assert.match(styles,/width:var\(--timeline-width\)/);assert.doesNotMatch(styles,/var\(--timeline-days\) \* 40px/);assert.match(production,/MIN_ORDER_COLUMN_WIDTH=155/);assert.match(production,/MAX_ORDER_COLUMN_WIDTH=420/)});
-
-test("timeline recalculates only fully visible days and fills the available width",()=>{assert.match(production,/ResizeObserver/);assert.match(production,/timelineRef/);assert.match(production,/Math\.floor\(available\/DAY_CELL_WIDTH\)/);assert.match(production,/width-nextDayCount\*DAY_CELL_WIDTH/);assert.match(production,/--timeline-width/);assert.match(production,/--timeline-days/);assert.match(styles,/\.production-timeline\{overflow:visible/);assert.doesNotMatch(production,/const DAY=86400000, DAYS=35/)});
-
-test("calendar dates stay visible while production rows scroll",()=>{
-  assert.match(production,/<div className="timeline-calendar-header">[\s\S]*?<div className="timeline-months">[\s\S]*?<div className="timeline-days">[\s\S]*?<div className="timeline-load">/);
-  assert.match(styles,/\.timeline-calendar-header\{position:sticky;top:0;z-index:8/);
-  assert.match(styles,/@media\(max-width:800px\)\{[\s\S]*?\.production-timeline\{[^}]*overflow:auto/);
+test("раздел Производство собирает реальный интерактивный планировщик", () => {
+  assert.match(shell, /ProductionWorkspace/);
+  for (const component of ["ProductionHeader", "ProductionKpis", "ProductionFiltersBar", "ProductionTimeline", "ProductionOrderDetails"]) assert.match(workspace, new RegExp(component));
+  assert.match(workspace, /pointermove/);
+  assert.match(planner, /timeline-payment-segment/);
+  assert.match(planner, /timeline-production-segment/);
+  assert.match(planner, /shipping-date-marker/);
+  assert.match(styles, /\.production-board/);
 });
 
-test("production slot card opens the selected order",()=>{
-  assert.match(production,/onOpenOrder\?:\(orderId:string\)=>void/);
-  assert.match(production,/onClick=\{\(\)=>onOpenOrder\?\.\(selectedOrder\.id\)\}/);
-  assert.match(production,/productionUi\.openOrder/);
-  assert.match(production,/production-slot-summary/);
-  assert.match(production,/selectedOrder\?\.items\.reduce/);
-  assert.match(production,/selectedOrder\.priceMinor/);
-  assert.match(shell,/<ProductionWorkspace onOpenOrder=\{orderId=>navigate\("orders",\{orderId\}\)\}\/?>/);
+test("периоды календаря меняют диапазон и ограничивают серверный запрос", () => {
+  for (const mode of ["day", "week", "month", "twoMonths"]) assert.match(view, new RegExp(`${mode}: \\{ days:`));
+  assert.match(workspace, /rangeEnd = productionAddDays\(base, range\.days - 1\)/);
+  assert.match(workspace, /new URLSearchParams\(\{ from: productionIso\(base\), to: productionIso\(rangeEnd\) \}\)/);
+  assert.match(workspace, /setBase\(productionAddDays\(base, -range\.shiftDays\)\)/);
+  assert.match(workspace, /setBase\(productionAddDays\(base, range\.shiftDays\)\)/);
 });
 
-test("production slot card deletes only the selected slot after confirmation",()=>{
-  assert.match(production,/productionUi\.deleteSlot/);
-  assert.match(production,/productionUi\.deleteSlotTitle/);
-  assert.match(production,/method:\s*"DELETE"/);
-  assert.match(production,/`\/api\/orders\/\$\{selectedOrder\.id\}\/production-slot`/);
-  assert.match(production,/productionStatus:\s*"NOT_SCHEDULED"/);
-  assert.match(production,/<Modal[\s\S]*?productionUi\.deleteSlotConfirm/);
+test("перемещение, изменение длительности, ограничения отправки и блокировка сохранены", () => {
+  assert.match(workspace, /edge: "move" \| "left" \| "right"/);
+  assert.match(workspace, /productionSlot\.locked/);
+  assert.match(workspace, /dataset\.dragged/);
+  assert.match(workspace, /shippingLimit/);
+  assert.match(workspace, /productionSettings\.shippingLeadDays/);
+  assert.match(workspace, /\/production-slot/);
+  assert.match(planner, /className="resize left"/);
+  assert.match(planner, /className="resize right"/);
+  assert.match(planner, /onToggleLock/);
+  assert.match(styles, /\.production-flow-bar\.locked/);
 });
 
-test("production bars use two text lines and visible handles",()=>{assert.match(production,/timeline-bar-text/);assert.match(styles,/\.timeline-bar-text\{[^}]*display:grid/);assert.match(styles,/\.timeline-bar b\{font-size:11px/);assert.match(styles,/\.timeline-bar small\{font-size:9px/);assert.match(styles,/\.resize:after\{content:""/);assert.match(styles,/\.timeline-bar\.locked \.resize\{display:none/)});
+test("календарь имеет компактные строки, закреплённую шапку и синхронную прокрутку", () => {
+  assert.match(styles, /\.production-board-scroll\{[^}]*overflow:auto/);
+  assert.match(styles, /\.production-calendar-header\{position:sticky;top:0/);
+  assert.match(styles, /\.production-order-summary\{position:sticky;left:0/);
+  assert.match(styles, /\.production-order-row\{min-height:46px/);
+  assert.match(styles, /repeat\(var\(--timeline-days\),var\(--day-width\)\)/);
+});
 
-test("production workspace loads its dedicated projection",()=>{assert.match(production,/productionUrl/);assert.match(production,/\/api\/orders\/production/);assert.doesNotMatch(production,/fetch\("\/api\/orders",\{credentials:"include"\}\)/)});
+test("выбранный заказ открывает нижнюю панель с реальными данными и действиями", () => {
+  assert.match(planner, /production-order-details/);
+  assert.match(planner, /production-details-identity/);
+  assert.match(planner, /production-lifecycle/);
+  assert.match(planner, /production-details-dates/);
+  assert.match(planner, /production-details-notes/);
+  assert.match(planner, /production-details-actions/);
+  assert.match(workspace, /onOpenOrder\(selectedOrder\.id\)/);
+  assert.match(shell, /onOpenOrder=\{orderId=>navigate\("orders",\{orderId\}\)\}/);
+});
 
-test("production workspace requests a bounded visible date range",()=>{assert.match(production,/new URLSearchParams\(\{from:toLocalIso\(base\),to:toLocalIso\(rangeEnd\)\}\)/);assert.match(production,/Math\.max\(dayCount,186\)/)});
+test("удаление касается только выбранного слота и требует подтверждения", () => {
+  assert.match(workspace, /productionUi\.deleteSlotTitle/);
+  assert.match(workspace, /method: "DELETE"/);
+  assert.match(workspace, /`\/api\/orders\/\$\{selectedOrder\.id\}\/production-slot`/);
+  assert.match(workspace, /expectedUpdatedAt: selectedOrder\.productionSlot\.updatedAt/);
+  assert.match(workspace, /productionStatus: "NOT_SCHEDULED"/);
+  assert.match(workspace, /<Modal[\s\S]*productionUi\.deleteSlotConfirm/);
+});
 
-test("production workspace ignores stale period responses",()=>{assert.match(production,/loadSequence=useRef\(0\)/);assert.match(production,/new AbortController\(\)/);assert.match(production,/sequence!==loadSequence\.current/);assert.match(production,/controller\.abort\(\)/)});
+test("проекция загружается безопасно и устаревшие ответы игнорируются", () => {
+  assert.match(workspace, /\/api\/orders\/production\?\$\{params\.toString\(\)\}/);
+  assert.match(workspace, /loadSequence = useRef\(0\)/);
+  assert.match(workspace, /new AbortController\(\)/);
+  assert.match(workspace, /sequence !== loadSequence\.current/);
+  assert.match(workspace, /controller\.abort\(\)/);
+});
 
-test("month counters distinguish years and follow the selected period",()=>{assert.match(production,/start\.getMonth\(\)===m\.getMonth\(\)&&start\.getFullYear\(\)===m\.getFullYear\(\)/);assert.match(production,/new Date\(base\.getFullYear\(\),base\.getMonth\(\)\+i,1\)/);assert.match(production,/m\.getMonth\(\)===base\.getMonth\(\)&&m\.getFullYear\(\)===base\.getFullYear\(\)/);assert.match(production,/aria-current=\{active\?"date":undefined\}/)});
+test("предпросмотр изображения использует сохранённую настройку ширины", () => {
+  assert.match(workspace, /orders-image-preview-width-v1/);
+  assert.match(workspace, /previewWidth/);
+  assert.match(planner, /onMouseMove/);
+  assert.match(styles, /\.production-image-preview/);
+});

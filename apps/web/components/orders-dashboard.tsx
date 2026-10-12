@@ -111,6 +111,14 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     setHiddenColumns(new Set(saved.hidden));
   }, []);
 
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("action") !== "new-order" || !["OWNER", "ADMIN", "MANAGER"].includes(role)) return;
+    openNewOrder();
+    url.searchParams.delete("action");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [role]);
+
   useEffect(() => setPage(1), [quickFilter, statusFilter, disciplineFilter, sort, search]);
 
   useEffect(() => {

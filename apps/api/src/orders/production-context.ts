@@ -1,4 +1,5 @@
 import type { OrderType, Prisma } from "@prisma/client";
+import { appliedPaymentMinor } from "../finance/exchange-rates";
 
 const NON_PRODUCTION_ORDER_TYPES: OrderType[] = ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"];
 
@@ -13,11 +14,18 @@ export const productionOrderSelect = {
   productionStatus: true,
   shippingStatus: true,
   priceMinor: true,
+  depositRequiredMinor: true,
+  paymentStatus: true,
   currency: true,
   productionSlot: true,
-  shipment: { select: { trackingNumber: true } },
+  payments: {
+    where: { voidedAt: null },
+    orderBy: { receivedAt: "asc" },
+    select: { amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, receivedAt: true },
+  },
+  shipment: { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } },
   client: { select: { displayName: true, country: true } },
-  items: { select: { quantity: true, modelImagePath: true, externalImageUrl: true, athlete: { select: { firstName: true, lastName: true } } } },
+  items: { select: { name: true, quantity: true, modelImagePath: true, externalImageUrl: true, athlete: { select: { firstName: true, lastName: true } } } },
 } satisfies Prisma.OrderSelect;
 
 export function includeRequestedProductionOrder<T extends { id: string }>(orders: readonly T[], requested?: T | null) {
@@ -26,15 +34,35 @@ export function includeRequestedProductionOrder<T extends { id: string }>(orders
 }
 
 type ProductionOrder = Prisma.OrderGetPayload<{ select: typeof productionOrderSelect }>;
-type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "shipment"> & { hasTrackingNumber: boolean };
+type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment"> & {
+  hasTrackingNumber: boolean;
+  paidMinor: number;
+  latestPaymentAt: Date | null;
+  shippedAt: Date | null;
+  deliveredAt: Date | null;
+};
 export type ProductionOrderRepository = {
   findMany: (query: object) => Promise<ProductionOrder[]>;
   findFirst: (query: object) => Promise<ProductionOrder | null>;
 };
 
 function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
-  const { deliveryTrackingCode, shipment, ...safeOrder } = order;
-  return { ...safeOrder, hasTrackingNumber: Boolean(shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim()) };
+  const { deliveryTrackingCode, payments, shipment, ...safeOrder } = order;
+  const activePayments = payments ?? [];
+  const appliedPayments = activePayments.map((payment) => ({ payment, appliedMinor: appliedPaymentMinor(payment, order.currency) }));
+  const paidMinor = appliedPayments.reduce((sum, entry) => sum + entry.appliedMinor, 0);
+  let latestPaymentAt: Date | null = null;
+  for (let index = appliedPayments.length - 1; index >= 0; index--) {
+    if (appliedPayments[index]!.appliedMinor > 0) { latestPaymentAt = appliedPayments[index]!.payment.receivedAt; break; }
+  }
+  return {
+    ...safeOrder,
+    hasTrackingNumber: Boolean(shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim()),
+    paidMinor,
+    latestPaymentAt,
+    shippedAt: shipment?.shippedAt ?? null,
+    deliveredAt: shipment?.deliveredAt ?? null,
+  };
 }
 
 const PRODUCTION_RESULT_LIMIT = 1000;

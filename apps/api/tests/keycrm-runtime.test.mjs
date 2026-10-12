@@ -648,6 +648,43 @@ function normalizedOrder(overrides = {}) {
   };
 }
 
+test("фактическая дата отправки KeyCRM сохраняется в Shipment без перезаписи ручной даты", async () => {
+  const KeycrmService = loadKeycrmService();
+  let orderRow;
+  let shipmentRow;
+  const audits = [];
+  const tx = {
+    $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined, $queryRaw: async () => [],
+    order: {
+      findUnique: async ({ where }) => where.number ? null : orderRow || null,
+      create: async ({ data }) => (orderRow = { id: "order-1", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", ...data }),
+      update: async ({ data }) => (orderRow = { ...orderRow, ...data }),
+    },
+    client: { create: async ({ data }) => ({ id: "client-1", ...data }) },
+    orderItem: { count: async () => 0, create: async ({ data }) => ({ id: "item-1", ...data }) },
+    payment: { findUnique: async () => null, findMany: async () => [] },
+    productionSlot: { findUnique: async () => null },
+    shipment: {
+      findUnique: async () => shipmentRow || null,
+      create: async ({ data }) => (shipmentRow = { id: "shipment-1", ...data }),
+      update: async ({ data }) => (shipmentRow = { ...shipmentRow, ...data }),
+    },
+    activity: { create: async () => undefined },
+    auditLog: { create: async ({ data }) => { audits.push(data); } },
+  };
+  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  const shippedAt = new Date("2026-10-06T08:00:00.000Z");
+  await service.importOrder(normalizedOrder({
+    delivery: { addressLine1: null, addressLine2: null, city: null, region: null, postalCode: null, addressText: null, serviceId: "nova-1", serviceName: "Nova Poshta", trackingCode: "TRACK-1", externalStatus: "sent", shippedAt },
+  }), "owner-1", "run-1");
+  assert.equal(shipmentRow.shippedAt.toISOString(), shippedAt.toISOString());
+  assert.equal(audits.some(row => row.entityType === "Shipment" && row.action === "CREATE"), true);
+
+  const source = readFileSync(new URL("../src/keycrm/keycrm.service.ts", import.meta.url), "utf8");
+  assert.match(source, /else if \(!shipment\.shippedAt && order\.delivery\.shippedAt\)/);
+  assert.doesNotMatch(source, /else if \(shipment\.shippedAt && order\.delivery\.shippedAt\)/);
+});
+
 test("смена валюты связанного ручного заказа прекращает импорт до мутаций", async () => {
   const KeycrmService = loadKeycrmService();
   const issues = [];

@@ -24,8 +24,8 @@ test("production planner uses server defaults for scheduling and drag limits", (
   assert.match(production, /ProductionSettings/);
   assert.match(production, /shippingLeadDays/);
   assert.match(production, /defaultDurationDays/);
-  assert.match(production, /useState<ProductionSettings\|null>\(null\)/);
-  assert.match(production, /!ordersResponse\.ok\|\|!defaultsResponse\.ok/);
+  assert.match(production, /useState<ProductionSettings \| null>\(null\)/);
+  assert.match(production, /!ordersResponse\.ok \|\| !defaultsResponse\.ok/);
   assert.doesNotMatch(production, /defaultDurationDays:\s*7,shippingLeadDays:\s*2/);
-  assert.match(production, /plus\(localDate\(order\.requiredDeliveryAt\),-productionSettings\.shippingLeadDays\)/);
+  assert.match(production, /productionAddDays\(order\.requiredDeliveryAt, -productionSettings\.shippingLeadDays\)/);
 });

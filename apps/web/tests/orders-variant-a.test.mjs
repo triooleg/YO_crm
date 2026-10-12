@@ -35,7 +35,7 @@ test("variant A keeps one dense order workspace with contextual navigation", () 
 
 test("contextual links resolve the exact order in every destination and fail visibly", () => {
   for (const [source, selectedPattern, errorPattern, clearPattern] of [
-    [production, /setSelected\(order\.id\)/, /productionUi\.contextOrderUnavailable/, /clearProductionContextAction\(\)/],
+    [production, /setSelected\(resolved\.order\.id\)/, /productionUi\.contextOrderUnavailable/, /clearProductionContextAction\(\)/],
     [finance, /setFocusedOrderId\(order\.id\)/, /financeUi\.contextOrderUnavailable/, /clearFinanceContextAction\(\)/],
     [shipping, /setSelected\(order\)/, /shippingUi\.contextOrderUnavailable/, /clearShippingContextAction\(\)/],
   ]) {
@@ -45,8 +45,8 @@ test("contextual links resolve the exact order in every destination and fail vis
     assert.match(source, clearPattern);
   }
   assert.match(production, /\/api\/orders\/production\?\$\{params\.toString\(\)\}/);
-  assert.match(production, /params\.set\("orderId",contextId\)/);
-  assert.match(production, /setSearch\(order\.number\)/);
+  assert.match(production, /params\.set\("orderId", contextId\)/);
+  assert.match(production, /query: resolved\.order!\.number/);
   assert.match(finance, /finance-order\$\{focusedOrderId===order\.id\?" is-context":""\}/);
   assert.match(shipping, /shipping-row\$\{selected\?\.id===o\.id\?" is-context":""\}/);
 });

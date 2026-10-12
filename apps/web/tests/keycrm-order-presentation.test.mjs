@@ -6,6 +6,7 @@ const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", imp
 const orderTypes = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
 const orderService = readFileSync(new URL("../../api/src/orders/orders.service.ts", import.meta.url), "utf8");
 const production = readFileSync(new URL("../components/production-workspace.tsx", import.meta.url), "utf8");
+const productionView = readFileSync(new URL("../lib/production-view.ts", import.meta.url), "utf8");
 
 test("страница заказов показывает только локально проверенные изображения KeyCRM", () => {
   assert.match(orderTypes, /externalImageUrl\?:string/);
@@ -15,7 +16,7 @@ test("страница заказов показывает только лока
   assert.match(orderService, /taxMinor:\s*true/);
   assert.match(orderService, /buyerComment:\s*true/);
   assert.match(orderService, /sourceSystem:\s*true/);
-  assert.match(production, /externalImageUrl\?:string/);
-  assert.match(production, /image=storedImage\?`\/api\/orders\/images\/\$\{storedImage\}`:undefined/);
-  assert.match(production, /src=\{image\}/);
+  assert.match(productionView, /externalImageUrl\?: string/);
+  assert.match(productionView, /return stored \? `\/api\/orders\/images\/\$\{stored\}` : undefined/);
+  assert.doesNotMatch(productionView, /return order\.externalImageUrl/);
 });
