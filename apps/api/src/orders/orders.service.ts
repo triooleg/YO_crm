@@ -107,6 +107,67 @@ export class OrdersService {
     }));
   }
 
+  async detail(orderId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, archivedAt: null },
+      select: {
+        id: true, number: true, type: true, discipline: true, country: true,
+        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
+        deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
+        deliveryServiceName: true,
+        deliveryTrackingCode: true,
+        requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
+        deliveryMinor: true, discountMinor: true, taxMinor: true, giftWrapMinor: true,
+        depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
+        paymentStatus: true, shippingStatus: true, modelImagePath: true, externalImageUrl: true, notes: true,
+        buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
+        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
+        createdAt: true, updatedAt: true, productionSlot: true,
+        responsibleManager: { select: { id: true, displayName: true } },
+        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
+        athlete: {
+          select: {
+            id: true, firstName: true, lastName: true,
+            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+          },
+        },
+        measurement: { select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+        items: {
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true,
+            athlete: {
+              select: {
+                id: true, firstName: true, lastName: true,
+                measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+              },
+            },
+            measurement: { select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+          },
+        },
+        activities: { select: { id: true, type: true, summary: true, metadata: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 100 },
+        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } },
+        shipment: true,
+        invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
+      },
+    });
+    if (!order) throw new NotFoundException("Заказ не найден");
+    const paymentHistory = await this.prisma.payment.findMany({
+      where: { orderId },
+      select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true, voidedAt: true, voidReason: true, createdAt: true },
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
+    });
+    const items = order.items.map(({ athlete, ...item }) => {
+      if (!athlete) return { ...item, athlete: null, measurementHistory: [] };
+      const { measurements, ...athleteSummary } = athlete;
+      return { ...item, athlete: athleteSummary, measurementHistory: measurements };
+    });
+    const legacyAthlete = order.athlete;
+    const measurementHistory = legacyAthlete?.measurements ?? [];
+    const athlete = legacyAthlete ? { id: legacyAthlete.id, firstName: legacyAthlete.firstName, lastName: legacyAthlete.lastName } : null;
+    return { ...order, athlete, client: presentClientContact(order.client), items, paymentHistory, measurementHistory };
+  }
+
   async productionList(orderId?: string, from?: string, to?: string) {
     try {
       return await loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId, from, to);
@@ -435,6 +496,70 @@ export class OrdersService {
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: previousMeasurementId ? "MEASUREMENT_REPLACED" : "MEASUREMENT_CREATED", summary: previousMeasurementId ? `Обновлены замеры для заказа ${order.number}` : `Добавлены замеры для заказа ${order.number}`, metadata: { measurementId: measurement.id, previousMeasurementId, athleteId: athlete.id, standardHeight } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { athleteId: order.athleteId, measurementId: order.measurementId }, after: { athleteId: updatedOrder.athleteId, measurementId: updatedOrder.measurementId } } });
+      return measurement;
+    });
+  }
+
+  async addItemMeasurement(orderId: string, itemId: string, dto: OrderMeasurementDto, actor: User) {
+    const { measuredAt, standardHeight, notes, expectedMeasurementId, ...numbered } = dto;
+    if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
+      throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({
+        where: { id: orderId, archivedAt: null },
+        include: { items: { include: { measurement: { select: { athleteId: true } } } } },
+      });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const item = order.items.find(candidate => candidate.id === itemId);
+      if (!item) throw new NotFoundException("Позиция заказа не найдена");
+      const previousMeasurementId = item.measurementId ?? null;
+      if ((expectedMeasurementId ?? null) !== previousMeasurementId) {
+        throw new ConflictException("Замеры позиции уже изменены другим пользователем. Обновите заказ и повторите");
+      }
+      if (!item.athleteId) throw new BadRequestException("Сначала укажите спортсмена для позиции заказа");
+      if (item.measurement && item.measurement.athleteId !== item.athleteId) {
+        throw new BadRequestException("Снимок замеров не принадлежит спортсмену позиции");
+      }
+      const athlete = await tx.athlete.findFirst({ where: { id: item.athleteId, clientId: order.clientId, archivedAt: null } });
+      if (!athlete) throw new NotFoundException("Спортсмен позиции заказа не найден");
+      const measurement = await tx.measurement.create({
+        data: {
+          athleteId: athlete.id,
+          measuredAt: new Date(measuredAt),
+          chest: dto.m1,
+          waist: dto.m2,
+          hips: dto.m3,
+          torso: dto.m15,
+          values: { standardHeight, ...numbered },
+          notes,
+          source: previousMeasurementId ? `Редактирование замеров позиции заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из позиции заказа",
+        },
+      });
+      const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { measurementId: measurement.id } });
+      const mirrorsExistingItem = previousMeasurementId !== null && order.athleteId === athlete.id && order.measurementId === previousMeasurementId;
+      const mirrorsSingleItem = order.items.length === 1
+        && (order.athleteId === null || order.athleteId === athlete.id)
+        && (order.measurementId === null || order.measurementId === previousMeasurementId);
+      let updatedOrder: { athleteId: string | null; measurementId: string | null } | undefined;
+      if (mirrorsExistingItem || mirrorsSingleItem) {
+        updatedOrder = await tx.order.update({ where: { id: order.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
+      }
+      await tx.activity.create({
+        data: {
+          clientId: order.clientId,
+          orderId: order.id,
+          type: previousMeasurementId ? "MEASUREMENT_REPLACED" : "MEASUREMENT_CREATED",
+          summary: previousMeasurementId ? `Обновлены замеры позиции заказа ${order.number}` : `Добавлены замеры позиции заказа ${order.number}`,
+          metadata: { itemId: item.id, measurementId: measurement.id, previousMeasurementId, athleteId: athlete.id, standardHeight },
+        },
+      });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "OrderItem", entityId: item.id, before: { athleteId: item.athleteId, measurementId: item.measurementId }, after: { athleteId: updatedItem.athleteId, measurementId: updatedItem.measurementId } } });
+      if (updatedOrder) {
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: order.id, before: { athleteId: order.athleteId, measurementId: order.measurementId }, after: { athleteId: updatedOrder.athleteId, measurementId: updatedOrder.measurementId } } });
+      }
       return measurement;
     });
   }

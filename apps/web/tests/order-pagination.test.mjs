@@ -15,7 +15,7 @@ test("все 101 заказ доступны через локальную па�
 });
 
 test("API не обрезает список заказов до ста записей", () => {
-  const listMethod = service.slice(service.indexOf("async list("), service.indexOf("async productionList("));
+  const listMethod = service.slice(service.indexOf("async list("), service.indexOf("async detail("));
   assert.doesNotMatch(listMethod, /take:\s*100/);
   assert.match(dashboard, /paginateOrders\(sorted, page, PAGE_SIZE\)/);
 });

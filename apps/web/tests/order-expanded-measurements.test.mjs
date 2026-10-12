@@ -46,5 +46,5 @@ test("ростовой стандарт заполняет редактируе�
   assert.match(panel, /function usePreset\(h:number\)/);
   assert.match(panel, /setValues/);
   assert.match(panel, /onChange=\{e=>setValues/);
-  assert.match(panel, /orderId\?`\/orders\/\$\{orderId\}\/measurement`/);
+  assert.match(panel, /orderItemId\?`\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement`:`\/orders\/\$\{orderId\}\/measurement`/);
 });

@@ -120,22 +120,21 @@ for (const viewport of [
 
     await page.getByRole("button", { name: order.number, exact: true }).click();
 
-    const expandedOrder = page.locator(".orders-expanded-layout-a");
+    const expandedOrder = page.locator(".orders-approved-expanded");
     await expect(expandedOrder).toHaveCSS("font-size", "12px");
-    await expect(expandedOrder.locator(".orders-detail small").first()).toHaveCSS("font-size", "12px");
-    await expect(expandedOrder.locator(".orders-detail strong").first()).toHaveCSS("font-size", "13px");
-    await expect(expandedOrder.locator(".orders-expanded-meta h3").first()).toHaveCSS("font-size", "14px");
-    await expect(expandedOrder.locator(".orders-money-line.strong")).toHaveCSS("font-size", "14px");
-    await expect(expandedOrder.locator(".orders-expanded-status--sales .mantine-NativeSelect-input")).toHaveCSS("color", "rgb(17, 122, 192)");
-    await expect(page.locator(".orders-discipline-select")).toHaveCSS("color", "rgb(17, 122, 192)");
+    await expect(expandedOrder.locator(".orders-order-deadlines .orders-detail small").first()).toHaveCSS("font-size", "11px");
+    await expect(expandedOrder.locator(".orders-order-deadlines .orders-detail strong").first()).toHaveCSS("font-size", "11px");
+    await expect(expandedOrder.locator(".orders-order-deadlines h3").first()).toHaveCSS("font-size", "13px");
+    await expect(page.locator(".orders-discipline-select .mantine-NativeSelect-input")).toHaveCSS("font-size", "11px");
     await expect(page.locator(".orders-deadline-button strong")).toHaveCSS("color", "rgb(17, 122, 192)");
 
     const paid = page.locator('[data-domain="payment"][data-status="PAID"]');
     const shipping = page.locator('[data-domain="shipping"][data-status="LOST"]');
-    const production = page.locator('[data-domain="production"][data-status="READY"]');
-    const warning = page.locator('[data-domain="production"][data-status="ON_HOLD"]');
-    const fallback = page.locator('[data-domain="production"][data-status="QUALITY_CONTROL"]');
-    const unknown = page.locator('[data-domain="production"][data-status="PROVIDER_NEW_STATUS"]');
+    await page.getByRole("tab", { name: "Дизайны" }).click();
+    const production = expandedOrder.locator('[data-domain="production"][data-status="READY"]');
+    const warning = expandedOrder.locator('[data-domain="production"][data-status="ON_HOLD"]');
+    const fallback = expandedOrder.locator('[data-domain="production"][data-status="QUALITY_CONTROL"]');
+    const unknown = expandedOrder.locator('[data-domain="production"][data-status="PROVIDER_NEW_STATUS"]');
     await expect(paid).toHaveText("Оплачено");
     await expect(shipping).toHaveText("Утерян");
     await expect(production).toHaveText("Готов");
@@ -149,22 +148,13 @@ for (const viewport of [
     await expect(fallback).toHaveCSS("background-color", "rgb(236, 229, 255)");
     await expect(unknown).toHaveCSS("background-color", "rgb(236, 229, 255)");
     await expect(fallback).toHaveCSS("white-space", "nowrap");
-    const itemPaymentGeometry = await production.evaluate((badge) => {
-      const paymentText = badge.parentElement?.querySelector("strong");
-      const badgeRect = badge.getBoundingClientRect();
-      const textRect = paymentText?.getBoundingClientRect();
-      return {
-        display: getComputedStyle(badge).display,
-        gap: textRect ? badgeRect.top - textRect.bottom : -1,
-      };
-    });
-    expect(itemPaymentGeometry.display).toBe("block");
-    expect(itemPaymentGeometry.gap).toBeGreaterThanOrEqual(3);
+    await expect(production).toBeVisible();
+    await expect(production).toHaveCSS("white-space", "nowrap");
 
-    const itemBlocks = page.locator(".orders-expanded-item-block");
+    await page.getByRole("tab", { name: "Индивидуальные измерения" }).click();
+    const itemBlocks = expandedOrder.locator(".orders-tab-measurements > article");
     const firstItem = itemBlocks.nth(0);
     const secondItem = itemBlocks.nth(1);
-    await firstItem.getByRole("button", { name: "Все замеры" }).click();
     const firstMeasurements = firstItem.locator(".orders-expanded-measurements");
     await expect(firstMeasurements).toBeVisible();
     await expect(firstMeasurements.locator(":scope > span")).toHaveCount(17);
@@ -174,28 +164,28 @@ for (const viewport of [
     await expect(firstMeasurements.locator(":scope > span").nth(5)).toHaveCSS("background-color", "rgb(238, 248, 255)");
     await expect(firstMeasurements.locator(":scope > span").nth(5).locator("small")).toHaveCSS("color", "rgb(37, 119, 169)");
     await expect(firstMeasurements.getByText(/№17/)).toBeVisible();
-    expect(await firstMeasurements.evaluate((grid) => grid.parentElement?.classList.contains("orders-expanded-item-block"))).toBe(true);
+    expect(await firstMeasurements.evaluate((grid) => grid.parentElement?.tagName)).toBe("ARTICLE");
     await expect(firstMeasurements.locator(":scope > span small").last()).toHaveCSS("white-space", "normal");
 
-    await secondItem.getByRole("button", { name: "Все замеры" }).click();
-    await expect(firstMeasurements).toBeHidden();
     const secondMeasurements = secondItem.locator(".orders-expanded-measurements");
     await expect(secondMeasurements).toBeVisible();
-    expect(await secondMeasurements.evaluate((grid) => grid.previousElementSibling?.classList.contains("orders-expanded-item-row"))).toBe(true);
+    await expect(firstMeasurements).toBeVisible();
     await secondMeasurements.scrollIntoViewIfNeeded();
     await page.screenshot({
       path: testInfo.outputPath(`mantine-statuses-${viewport.width}x${viewport.height}.png`),
       fullPage: false,
     });
 
-    const statusControls = page.locator(".orders-expanded-statuses select");
-    await expect(statusControls).toHaveCount(2);
-    await expect(statusControls.nth(0)).toBeEnabled();
-    await expect(statusControls.nth(1)).toBeEnabled();
-    await statusControls.nth(0).selectOption("PAID");
-    await expect(statusControls.nth(0)).toHaveValue("PAID");
-    await statusControls.nth(1).selectOption("SEWING");
-    await expect(statusControls.nth(1)).toHaveValue("SEWING");
+    const salesStatus = page.getByRole("combobox", { name: "Изменить статус заказа" });
+    await page.getByRole("tab", { name: "Производство" }).click();
+    const productionStatus = expandedOrder.getByRole("combobox", { name: "Статус производства" });
+    const statusControls = [salesStatus, productionStatus];
+    await expect(statusControls[0]).toBeEnabled();
+    await expect(statusControls[1]).toBeEnabled();
+    await statusControls[0].selectOption("PAID");
+    await expect(statusControls[0]).toHaveValue("PAID");
+    await statusControls[1].selectOption("SEWING");
+    await expect(statusControls[1]).toHaveValue("SEWING");
     expect(statusUpdates).toEqual([{ salesStatus: "PAID" }, { productionStatus: "SEWING" }]);
 
     const pageOverflows = await page.evaluate(

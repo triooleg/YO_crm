@@ -1,12 +1,28 @@
-export const SORTABLE_ORDER_COLUMNS = ["client", "quantity", "discipline", "designs", "deadline", "payment", "status", "nextAction", "delivery", "created"];
+export const SORTABLE_ORDER_COLUMNS = [
+  "client",
+  "model",
+  "quantity",
+  "deadline",
+  "payment",
+  "production",
+  "delivery",
+  "status",
+  "created",
+  // Kept for saved settings and consumers that still use the previous table model.
+  "discipline",
+  "designs",
+  "nextAction",
+];
 
 const defaultDirections = {
   client: "asc",
+  model: "asc",
   quantity: "desc",
   discipline: "asc",
   designs: "asc",
   deadline: "asc",
   payment: "desc",
+  production: "asc",
   status: "asc",
   nextAction: "asc",
   delivery: "asc",
@@ -34,11 +50,13 @@ function paid(order) {
 
 function value(order, column) {
   if (column === "client") return order.client?.displayName ?? "";
+  if (column === "model") return `${order.items?.[0]?.name ?? order.notes ?? ""}|${order.discipline ?? ""}`;
   if (column === "quantity") return (order.items ?? []).reduce((sum, item) => sum + (item.quantity ?? 0), 0);
   if (column === "discipline") return order.discipline ?? "";
   if (column === "designs") return order.items?.[0]?.name ?? order.notes ?? "";
   if (column === "deadline") return order.requiredDeliveryAt ? Date.parse(order.requiredDeliveryAt) : null;
   if (column === "payment") return Math.max(0, (order.priceMinor ?? 0) - paid(order));
+  if (column === "production") return order.productionSlot?.startsAt ? `${order.productionSlot.startsAt}|${order.productionStatus ?? ""}` : null;
   if (column === "status") return order.salesStatus ?? "";
   if (column === "nextAction") return `${order.productionStatus ?? ""}|${order.salesStatus ?? ""}`;
   if (column === "delivery") return `${order.client?.country ?? order.country ?? ""}|${order.deliveryCity ?? ""}|${order.deliveryAddressText ?? ""}`;

@@ -1,19 +1,20 @@
 "use client";
 
-import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
-import { parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
+import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "./crm/settings-controls";
 import { CrmSearchField } from "./crm/search-field";
 import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
+import { CrmTabList } from "./crm/tab-list";
 import { repairMojibake } from "../lib/text-encoding.mjs";
 import { canOpenOrderFinance } from "../lib/order-context";
 import { orderMeasurementState } from "../lib/order-measurement-state";
 import { paginateOrders } from "../lib/order-pagination";
-import { defaultOrderSort, nextOrderSort, SORTABLE_ORDER_COLUMNS, sortOrders } from "../lib/order-sort.mjs";
+import { defaultOrderSort, nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
 import { orderDeliveryErrorMessage } from "../lib/order-delivery-errors";
 import { hasUsableDeliveryAddress } from "../lib/order-delivery-address";
 import { parseOrderPriceMinor } from "../lib/order-price";
@@ -21,7 +22,7 @@ import { MeasurementPanel, measurementFieldLabels } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { type Order } from "./orders-workspace";
 
-type ColumnId = keyof typeof ui.columnsMap;
+type ColumnId = "client" | "model" | "quantity" | "deadline" | "payment" | "production" | "delivery" | "status" | "created" | "menu";
 type SortColumnId = Exclude<ColumnId, "menu">;
 type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "work" | "ready" | "completed" | "overdue";
@@ -29,10 +30,20 @@ type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "produc
 type Preview = { src: string; left: number; top: number; width: number };
 type OrderClientBrief = { id: string; displayName: string; country?: string };
 type OrderClientDetail = OrderClientBrief & { athletes: { id: string; firstName: string; lastName?: string; measurements: { id: string; measuredAt: string }[] }[] };
+type DetailedOrderItem = Order["items"][number] & { measurementHistory?: Array<NonNullable<Order["items"][number]["measurement"]>> };
+type OrderDetail = Omit<Order, "items"> & {
+  responsibleManager?: { id: string; displayName: string } | null;
+  paymentHistory?: Array<Order["payments"][number] & { voidedAt?: string; voidReason?: string }>;
+  measurementHistory?: Array<NonNullable<Order["measurement"]>>;
+  items: DetailedOrderItem[];
+};
+type MeasurementTarget = { orderId: string; itemId?: string };
 
 const PAGE_SIZE = 20;
-const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
-const DEFAULT_COLUMNS: ColumnId[] = ["client", "quantity", "discipline", "designs", "deadline", "payment", "status", "nextAction", "delivery", "created", "menu"];
+const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v3";
+const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
+const DEFAULT_COLUMNS: ColumnId[] = ["client", "model", "quantity", "deadline", "payment", "production", "delivery", "status", "created", "menu"];
+const SORTABLE_ORDER_COLUMNS: SortColumnId[] = DEFAULT_COLUMNS.filter((id): id is SortColumnId => id !== "menu");
 const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
 const PRODUCTION_STATUSES = ["NOT_SCHEDULED", "TENTATIVE", "SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY", "ON_HOLD", "CANCELLED"];
 const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
@@ -50,6 +61,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [sort, setSort] = useState<SortState>({ column: "created", direction: "desc" });
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string>();
+  const [orderDetails, setOrderDetails] = useState<Record<string, OrderDetail>>({});
+  const [detailPending, setDetailPending] = useState<Set<string>>(new Set());
   const [statusPending, setStatusPending] = useState<Set<string>>(new Set());
   const statusRequests = useRef(new Set<string>());
   const [paymentOrderId, setPaymentOrderId] = useState<string>();
@@ -59,7 +72,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [editOrderClient, setEditOrderClient] = useState<OrderClientDetail>();
   const [editDesign, setEditDesign] = useState<{orderId:string;itemId:string}>();
   const paymentTrigger = useRef<HTMLButtonElement>(null);
-  const [measurementOrder, setMeasurementOrder] = useState<Order>();
+  const [measurementTarget, setMeasurementTarget] = useState<MeasurementTarget>();
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const columnsTrigger = useRef<HTMLButtonElement>(null);
@@ -99,16 +112,44 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     }
   }
 
+  async function refreshOrder(orderId: string) {
+    const detail = await request(`/orders/${orderId}`) as OrderDetail;
+    setOrderDetails((current) => ({ ...current, [orderId]: detail }));
+    setOrders((items) => items.map((item) => item.id === orderId ? detail : item));
+    return detail;
+  }
+
+  async function refreshAfterMutation(orderId: string) {
+    try { return await refreshOrder(orderId); }
+    catch {
+      setOrderDetails((current) => { const next = { ...current }; delete next[orderId]; return next; });
+      await load();
+      return undefined;
+    }
+  }
+
+  async function toggleExpanded(order: Order) {
+    if (expandedId === order.id) { setExpandedId(undefined); return; }
+    setExpandedId(order.id);
+    if (orderDetails[order.id] || detailPending.has(order.id)) return;
+    setDetailPending((current) => new Set(current).add(order.id));
+    try { await refreshOrder(order.id); setError(""); }
+    catch (reason) { setError((reason as Error).message); }
+    finally { setDetailPending((current) => { const next = new Set(current); next.delete(order.id); return next; }); }
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 220);
     return () => window.clearTimeout(timer);
   }, [search]);
 
   useEffect(() => {
-    const saved = parseOrderColumnSettings(localStorage.getItem(COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS);
+    const saved = parseOrderColumnSettings(localStorage.getItem(COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS)
+      ?? migrateLegacyOrderColumnSettings(localStorage.getItem(LEGACY_COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS);
     if (!saved) return;
     setColumnOrder(saved.order);
     setHiddenColumns(new Set(saved.hidden));
+    localStorage.setItem(COLUMN_SETTINGS_KEY, JSON.stringify(saved));
   }, []);
 
   useEffect(() => {
@@ -140,6 +181,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }, [newOrderOpen, newOrderQuery]);
 
   const metrics = useMemo(() => ({
+    total: orders.length,
     active: orders.filter(isActiveOrder).length,
     deposit: orders.filter((order) => isActiveOrder(order) && paid(order) < order.depositRequiredMinor).length,
     urgent: orders.filter((order) => isActiveOrder(order) && days(order) >= 0 && days(order) <= 7).length,
@@ -164,10 +206,9 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }), [orders, quickFilter, statusFilter, disciplineFilter]);
 
   const sorted = useMemo<Order[]>(() => sortOrders(filtered, sort, (order: Order, column: string) => {
-    if (column === "discipline") return discipline(order.discipline).label;
-    if (column === "designs") return designCount(order) > 1 ? `${ui.viewAll} (${designCount(order)})` : order.items[0]?.name || order.notes || ui.designMissing;
-    if (column === "status") return `${orderLabel("sales", order.salesStatus)}|${orderLabel("production", order.productionStatus)}`;
-    if (column === "nextAction") { const action = nextOrderAction(order); return `${action.label}|${action.detail || ""}`; }
+    if (column === "model") return `${order.items[0]?.name || order.notes || ui.designMissing}|${discipline(order.discipline).label}`;
+    if (column === "production") return `${order.productionSlot?.startsAt || ""}|${order.productionStatus}`;
+    if (column === "status") return orderLabel("sales", order.salesStatus);
     if (column === "delivery") return `${countryLabel(deliveryCountry(order)) || ui.addressMissing}|${deliveryPlace(order)}|${orderLabel("shipping", order.shippingStatus)}`;
     return undefined;
   }), [filtered, sort]);
@@ -206,22 +247,41 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   function clearFilters() { setQuickFilter("all"); setStatusFilter("all"); setDisciplineFilter("all"); }
   async function changeStatus(order: Order, field: "salesStatus" | "productionStatus", value: string) {
     if (statusRequests.current.has(order.id)) return;
+    const previous = order[field];
     statusRequests.current.add(order.id);
     setStatusPending((current) => new Set(current).add(order.id));
-    setOrders((items) => items.map((item) => item.id === order.id ? { ...item, [field]: value } : item));
-    try { await request(`/orders/${order.id}/statuses`, { method: "PATCH", body: JSON.stringify({ [field]: value }) }); await load(); }
-    catch (reason) { await load(); setError((reason as Error).message); }
+    const applyLocalStatus = (nextValue: string) => {
+      setOrders((items) => items.map((item) => item.id === order.id ? { ...item, [field]: nextValue } : item));
+      setOrderDetails((current) => {
+        const detail = current[order.id];
+        return detail ? { ...current, [order.id]: { ...detail, [field]: nextValue } as OrderDetail } : current;
+      });
+    };
+    applyLocalStatus(value);
+    try {
+      const updated = await request(`/orders/${order.id}/statuses`, { method: "PATCH", body: JSON.stringify({ [field]: value }) }) as Partial<Order>;
+      applyLocalStatus(String(updated[field] ?? value));
+    }
+    catch (reason) {
+      applyLocalStatus(previous);
+      setError((reason as Error).message);
+      statusRequests.current.delete(order.id);
+      setStatusPending((current) => { const next = new Set(current); next.delete(order.id); return next; });
+      return;
+    }
+    try { await refreshOrder(order.id); setError(""); }
+    catch (reason) { setError((reason as Error).message); }
     finally { statusRequests.current.delete(order.id); setStatusPending((current) => { const next = new Set(current); next.delete(order.id); return next; }); }
   }
   async function changeDeadline(order: Order, value: string) {
     if (!value) return;
-    try { await request(`/orders/${order.id}/deadline`, { method: "PATCH", body: JSON.stringify({ requiredDeliveryAt: value }) }); await load(); }
+    try { await request(`/orders/${order.id}/deadline`, { method: "PATCH", body: JSON.stringify({ requiredDeliveryAt: value }) }); await refreshAfterMutation(order.id); }
     catch (reason) { setError((reason as Error).message); }
   }
   async function changeDiscipline(order: Order, value: string) {
     const previous=order.discipline;
     setOrders(items=>items.map(item=>item.id===order.id?{...item,discipline:value}:item));
-    try{await request(`/orders/${order.id}/discipline`,{method:"PATCH",body:JSON.stringify({discipline:value})})}
+    try{await request(`/orders/${order.id}/discipline`,{method:"PATCH",body:JSON.stringify({discipline:value})});await refreshAfterMutation(order.id)}
     catch(reason){setOrders(items=>items.map(item=>item.id===order.id?{...item,discipline:previous}:item));setError((reason as Error).message)}
   }
   async function changeOrderImage(order: Order, itemId: string | undefined, expectedModelImagePath: string | null, file: File) {
@@ -229,7 +289,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       const data = await fileToData(file);
       const image = await request("/orders/model-image", { method: "POST", body: JSON.stringify({ name: file.name, mime: file.type, data }) }) as { path: string };
       await request(`/orders/${order.id}/model-image`, { method: "PATCH", body: JSON.stringify({ itemId, modelImagePath: image.path, expectedModelImagePath }) });
-      await load();
+      await refreshAfterMutation(order.id);
     } catch (reason) {
       setError((reason as Error).message);
     }
@@ -282,6 +342,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     }
   }
 
+  const expandedOrder = expandedId ? orders.find((order) => order.id === expandedId) : undefined;
+
   return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
       <div><p>{ui.eyebrow}</p><h1>{ui.title}</h1><span>{ui.subtitle}</span></div>
@@ -290,7 +352,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
 
     <div className="orders-kpi-grid">
-      <Kpi label={ui.kpis.active} value={metrics.active} icon="bag" active={quickFilter === "active"} onClick={() => selectQuickFilter("active")} />
+      <Kpi label={ui.kpis.all} value={metrics.total} icon="bag" active={quickFilter === "all"} onClick={() => selectQuickFilter("all")} />
       <Kpi label={ui.kpis.deposit} value={metrics.deposit} icon="payment" tone="amber" active={quickFilter === "deposit"} onClick={() => selectQuickFilter("deposit")} />
       <Kpi label={ui.kpis.urgent} value={metrics.urgent} icon="calendar" tone="red" active={quickFilter === "urgent"} onClick={() => selectQuickFilter("urgent")} />
       <Kpi label={ui.kpis.overdue} value={metrics.overdue} icon="clock" tone="red" active={quickFilter === "overdue"} onClick={() => selectQuickFilter("overdue")} />
@@ -330,16 +392,15 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
         <tbody>
           {loading && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><span className="orders-loader" />{ui.loading}</td></tr>}
           {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}
-          {!loading && shown.map((order) => <Fragment key={order.id}>
-            <tr className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
-              <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => setExpandedId((current) => current === order.id ? undefined : order.id)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
-              {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => setExpandedId((current) => current === order.id ? undefined : order.id)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
-            </tr>
-            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}><ExpandedOrder order={order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onMeasurements={() => setMeasurementOrder(order)} onCurrency={() => setCurrencyOrderId(order.id)} onEdit={() => void openEditOrder(order)} onEditItem={(itemId)=>setEditDesign({orderId:order.id,itemId})} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
-          </Fragment>)}
+          {!loading && shown.map((order) => <tr key={order.id} className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
+              <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => void toggleExpanded(order)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
+              {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => void toggleExpanded(order)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
+            </tr>)}
         </tbody>
       </table>
     </div>
+
+    {expandedOrder && <div className="orders-expanded-row"><div id={`order-details-${expandedOrder.id}`} role="region" aria-label={`${ui.orderDetails} ${expandedOrder.number}`}>{detailPending.has(expandedOrder.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder order={orderDetails[expandedOrder.id] ?? expandedOrder} paymentTrigger={paymentTrigger} statusPending={statusPending.has(expandedOrder.id)} onStatus={(field, value) => void changeStatus(orderDetails[expandedOrder.id] ?? expandedOrder, field, value)} onClient={() => onNavigate("clients", { clientId: expandedOrder.client.id, orderId: expandedOrder.id })} onConversation={() => onNavigate("inbox", { clientId: expandedOrder.client.id, clientName: expandedOrder.client.displayName, orderId: expandedOrder.id })} onProduction={() => onNavigate("production", { orderId: expandedOrder.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: expandedOrder.id }) : undefined} onPayment={() => setPaymentOrderId(expandedOrder.id)} onDelivery={() => setDeliveryOrderId(expandedOrder.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: expandedOrder.id, itemId })} onCurrency={() => setCurrencyOrderId(expandedOrder.id)} onEdit={() => void openEditOrder(expandedOrder)} onEditItem={(itemId)=>setEditDesign({orderId:expandedOrder.id,itemId})} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(expandedOrder, itemId, expectedModelImagePath, file)} /></div></div>}
 
     {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, page - 3), Math.max(5, page + 2)).map((value) => <button key={value} className={page === value ? "active" : ""} onClick={() => setPage(value)}>{value}</button>)}<button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)}><UiIcon name="chevronRight" /></button></nav><span>{PAGE_SIZE} / {ui.rowsPerPage}</span></div>}
 
@@ -356,59 +417,83 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}
-    {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await load(); }} />}
-    {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await load(); }} />}
-    {currencyChangeOrder && <CurrencyChangeModal order={currencyChangeOrder} request={request} onClose={() => setCurrencyOrderId(undefined)} onSaved={async () => { setCurrencyOrderId(undefined); await load(); }} />}
-    {editOrder && editOrderClient && <OrderPanel client={editOrderClient} order={editOrder} request={request} onClose={closeEditOrder} onSaved={async () => { closeEditOrder(); await load(); }} />}
-    {editDesignOrder && editDesignItem && <OrderDesignEditModal order={editDesignOrder} item={editDesignItem} request={request} onClose={()=>setEditDesign(undefined)} onSaved={async()=>{setEditDesign(undefined);await load()}}/>}
-    {measurementOrder && measurementAthlete(measurementOrder) && <MeasurementPanel client={{ id: measurementOrder.client.id, displayName: measurementOrder.client.displayName, athletes: [measurementAthlete(measurementOrder)!] }} request={request} orderId={measurementOrder.id} initialValues={primaryMeasurement(measurementOrder)?.values} expectedMeasurementId={primaryMeasurement(measurementOrder)?.id} title={primaryMeasurement(measurementOrder) ? ui.editMeasurements : ui.addMeasurements} onClose={() => setMeasurementOrder(undefined)} onSaved={async () => { setMeasurementOrder(undefined); await load(); }} />}
+    {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await refreshAfterMutation(paymentOrder.id); }} />}
+    {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await refreshAfterMutation(deliveryOrder.id); }} />}
+    {currencyChangeOrder && <CurrencyChangeModal order={currencyChangeOrder} request={request} onClose={() => setCurrencyOrderId(undefined)} onSaved={async () => { setCurrencyOrderId(undefined); await refreshAfterMutation(currencyChangeOrder.id); }} />}
+    {editOrder && editOrderClient && <OrderPanel client={editOrderClient} order={editOrder} request={request} onClose={closeEditOrder} onSaved={async () => { closeEditOrder(); await refreshAfterMutation(editOrder.id); }} />}
+    {editDesignOrder && editDesignItem && <OrderDesignEditModal order={editDesignOrder} item={editDesignItem} request={request} onClose={()=>setEditDesign(undefined)} onSaved={async()=>{const orderId=editDesignOrder.id;setEditDesign(undefined);await refreshAfterMutation(orderId)}}/>}
+    {measurementTarget && (() => { const order = orderDetails[measurementTarget.orderId] ?? orders.find((item) => item.id === measurementTarget.orderId); const item = measurementTarget.itemId ? order?.items.find((entry) => entry.id === measurementTarget.itemId) : undefined; const athlete = item?.athlete ?? (order ? measurementAthlete(order) : undefined); const measurement = item?.measurement ?? (order ? primaryMeasurement(order) : undefined); return order && athlete ? <MeasurementPanel client={{ id: order.client.id, displayName: order.client.displayName, athletes: [athlete] }} request={request} orderId={order.id} orderItemId={item?.id} initialValues={measurement?.values} expectedMeasurementId={measurement?.id} title={measurement ? ui.editMeasurements : ui.addMeasurements} onClose={() => setMeasurementTarget(undefined)} onSaved={async () => { setMeasurementTarget(undefined); await refreshOrder(order.id); }} /> : null; })()}
   </section>;
 }
 
-function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onDelivery }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onDelivery: () => void }) {
+function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onDelivery }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onDelivery: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
-  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient}><strong>{order.client.displayName}</strong><small><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
+  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
+  if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><CrmNativeSelect className="orders-discipline-select" aria-label={`${ui.discipline}: ${order.number}`} value={order.discipline || ""} onChange={(event) => void onDiscipline(order, event.target.value)} data={[{ value: "", label: discipline(undefined).label }, ...DISCIPLINES.map((value) => ({ value, label: discipline(value).label }))]} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
-  if (id === "discipline") return <td className="orders-col orders-col-discipline" style={style}><CrmNativeSelect className="orders-discipline-control" classNames={{ input: "orders-discipline-select" }} value={order.discipline||""} onChange={event=>void onDiscipline(order,event.target.value)} aria-label={ui.changeDiscipline} data={[...(!order.discipline ? [{ value: "", label: ui.disciplines.missing, disabled: true }] : []), ...DISCIPLINES.map(value => ({ value, label: `${discipline(value).code} — ${discipline(value).label}` }))]} /></td>;
-  if (id === "designs") return <td className="orders-col orders-col-designs" style={style}><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><small>{designCount(order) > 1 ? order.type === "GROUP_ORDER" ? `${ui.viewAll} (${designCount(order)})` : ui.viewAll : order.items[0]?.name || order.notes || ui.designMissing}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
-  if (id === "payment") return <td className="orders-col orders-col-payment" style={style}><strong>{money(order.priceMinor, order.currency)}</strong><small className="orders-paid-line">{ui.paidPrefix} {money(paid(order), order.currency)}</small><small className="orders-balance-line">{ui.balancePrefix} {money(balance(order), order.currency)}</small></td>;
-  if (id === "status") return <td className="orders-col orders-col-status" style={style}><CrmNativeSelect disabled={statusPending} className="orders-inline-status-control" classNames={{ input: `orders-inline-status orders-status--${crmStatusPresentation("sales",order.salesStatus).tone}` }} value={order.salesStatus} onChange={(event) => void onStatus(order, event.target.value)} aria-label={ui.changeStatus} data={SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))} /><small>{orderLabel("production", order.productionStatus)}</small></td>;
-  if (id === "nextAction") { const action = nextOrderAction(order); return <td className="orders-col orders-col-nextAction" style={style}><span className={`orders-next-action tone-${action.tone}`}><UiIcon name={action.icon} /><b>{action.label}</b></span>{action.detail && <small>{action.detail}</small>}</td>; }
+  if (id === "payment") { const received = paid(order), percent = order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div><small className={balance(order) > 0 ? "orders-balance-line" : "orders-paid-line"}>{balance(order) > 0 ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent}%</em></td>; }
+  if (id === "production") return <td className="orders-col orders-col-production" style={style}>{order.productionSlot ? <><strong>{slotDateRange(order)}</strong><CrmStatusBadge domain="production" status={order.productionStatus}/></> : <><small>{ui.notSpecified}</small>{!NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</td>;
+  if (id === "status") return <td className="orders-col orders-col-status" style={style}><CrmNativeSelect disabled={statusPending} className="orders-inline-status-control" classNames={{ input: `orders-inline-status orders-status--${crmStatusPresentation("sales",order.salesStatus).tone}` }} value={order.salesStatus} onChange={(event) => void onStatus(order, event.target.value)} aria-label={ui.changeStatus} data={SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))} /></td>;
   if (id === "delivery") return <td className="orders-col orders-col-delivery" style={style}><UnstyledButton className="orders-delivery-cell-button" onClick={onDelivery} aria-label={`${ui.editDeliveryAddress}: ${order.number}`}><strong><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.addressMissing}</strong><small>{deliveryPlace(order)}</small><small>{[order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName, orderLabel("shipping", order.shippingStatus)].filter(Boolean).join(" · ")}</small>{(order.shipment?.trackingNumber || order.deliveryTrackingCode) && <small>{order.shipment?.trackingNumber || order.deliveryTrackingCode}</small>}</UnstyledButton></td>;
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><strong>{date(order.createdAt)}</strong><small>{ageText(order.createdAt)}</small></td>;
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onExpand} aria-label={expanded ? ui.collapse : ui.expand} title={expanded ? ui.collapse : ui.expand} aria-expanded={expanded} aria-controls={detailsId}>•••</button></td>;
 }
 
-function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onMeasurements, onCurrency, onEdit, onEditItem, onImage }: { order: Order; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onMeasurements: () => void; onCurrency: () => void; onEdit: () => void; onEditItem: (itemId:string)=>void; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
+function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onMeasurements, onCurrency, onEdit, onEditItem, onImage }: { order: OrderDetail; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onMeasurements: (itemId?: string) => void; onCurrency: () => void; onEdit: () => void; onEditItem: (itemId:string)=>void; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
   const [measurementId, setMeasurementId] = useState<string>();
   const [historyExpanded, setHistoryExpanded] = useState(false);
-  const items = order.items.length ? order.items.map((item, index) => { const athlete = item.athlete || (!isMultiOrder(order) && index === 0 ? order.athlete : undefined); return { ...item, persistedItemId: item.id, athlete, measurement: ownedMeasurement(item.measurement, athlete) || (!isMultiOrder(order) && index === 0 ? legacyMeasurementForItem(order, item) : undefined) }; }) : [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete, measurement: ownedMeasurement(order.measurement, order.athlete) }];
+  const [activeTab, setActiveTab] = useState("details");
+  const items = order.items.length ? order.items.map((item, index) => { const athlete = item.athlete || (!isMultiOrder(order) && index === 0 ? order.athlete : undefined); return { ...item, persistedItemId: item.id, athlete, measurement: ownedMeasurement(item.measurement, athlete) || (!isMultiOrder(order) && index === 0 ? legacyMeasurementForItem(order, item) : undefined), measurementHistory: item.measurementHistory?.length ? item.measurementHistory : (!isMultiOrder(order) && index === 0 ? order.measurementHistory : []) }; }) : [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete, measurement: ownedMeasurement(order.measurement, order.athlete), measurementHistory: order.measurementHistory ?? [] }];
   const historyItems = order.activities;
   const initialHistoryItems = historyItems.slice(0,5);
   const visibleActivities = historyExpanded ? order.activities : order.activities.slice(0, 5);
   const showOlderHistory = ui.showAllHistory;
   const hideOlderHistory = ui.showRecentHistory;
-  return <div className="orders-expanded-layout orders-expanded-layout-a">
-    <div className="orders-expanded-command-row">
-      <section className="orders-expanded-card orders-expanded-statuses">
-        <CrmNativeSelect className="orders-expanded-status--sales" label={ui.salesStatus} disabled={statusPending} value={order.salesStatus} onChange={(event) => onStatus("salesStatus", event.target.value)} data={SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))} />
-        <div className="orders-expanded-status--payment"><small>{ui.paymentStatus}</small><CrmStatusBadge domain="payment" status={order.paymentStatus}/><em>{ui.automaticPaymentStatus}</em></div>
-        <CrmNativeSelect className="orders-expanded-status--production" label={ui.productionStatus} disabled={statusPending} value={order.productionStatus} onChange={(event) => onStatus("productionStatus", event.target.value)} data={PRODUCTION_STATUSES.map((status) => ({ value: status, label: orderLabel("production", status) }))} />
-        <div className="orders-expanded-status--shipping"><small>{ui.shippingStatus}</small><CrmStatusBadge domain="shipping" status={order.shippingStatus}/></div>
-      </section>
-      <nav className="orders-expanded-quick-nav" aria-label={ui.quickNavigation}><CrmButton tone="secondary" onClick={onConversation}>{ui.openConversation}</CrmButton><CrmButton tone="secondary" onClick={onClient}>{ui.openClient}</CrmButton><CrmButton tone="secondary" onClick={onProduction}>{ui.openProduction}</CrmButton>{onFinance && <CrmButton tone="secondary" onClick={onFinance}>{ui.openFinance}</CrmButton>}<CrmButton tone="secondary" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton></nav>
-    </div>
-    <section className="orders-expanded-meta">
-      <div><h3>{ui.orderDetails}</h3><Detail label={ui.orderNumber} value={order.number} /><Detail label={ui.orderTypeName} value={orderTypeLabel(order.type)} /><Detail label={ui.createdAt} value={date(order.createdAt)} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /></div>
-      <div><h3>{ui.clientDetails}</h3><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.language} value={order.client.language || ui.notSpecified} /></div>
-      <div><h3>{ui.shippingDetails}</h3><EditableDetail label={ui.country} value={<><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.notSpecifiedFeminine}</>} onClick={onDelivery} /><EditableDetail label={ui.address} value={deliveryPlace(order)} onClick={onDelivery} /><Detail label={ui.recipient} value={deliveryRecipient(order)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /></div>
+  const tabs = [
+    { key: "details", label: ui.tabs.details, icon: "list" },
+    { key: "designs", label: `${ui.tabs.designs} (${items.length})`, icon: "copy" },
+    { key: "measurements", label: ui.tabs.measurements, icon: "image" },
+    { key: "client", label: ui.tabs.client, icon: "user" },
+    { key: "finance", label: ui.tabs.finance, icon: "payment" },
+    { key: "production", label: ui.tabs.production, icon: "settings" },
+    { key: "delivery", label: ui.tabs.delivery, icon: "truck" },
+    { key: "notes", label: ui.tabs.notes, icon: "edit" },
+    { key: "history", label: ui.tabs.history, icon: "clock" },
+  ];
+  const primaryImage = designPaths(order)[0];
+  const problems = orderProblems(order);
+  const paidMinor = paid(order);
+  const paymentPercent = order.priceMinor > 0 ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
+  const paymentHistory = (order.paymentHistory ?? order.payments) as Array<Order["payments"][number] & { voidedAt?: string; voidReason?: string }>;
+  const requiresProduction = !NON_PRODUCTION_ORDER_TYPES.has(order.type);
+  const tabPanelId = `order-tab-panel-${order.id}`;
+  return <div className="orders-approved-expanded">
+    <section className="orders-order-overview">
+      <div className="orders-order-identity">
+        {primaryImage ? <img src={primaryImage} alt={ui.orderDesignAlt} /> : <span className="orders-order-identity-placeholder"><UiIcon name="image" /></span>}
+        <div><p>{ui.selectedOrder}</p><h2>{order.number}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small><small><OrderChannelIcon channel={order.client.source} />{orderLabel("source", order.client.source)}</small><em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
+      </div>
+      <div className="orders-order-flow" aria-label={`${ui.payment} → ${ui.tabs.production} → ${ui.shipping}`}>
+        <article className={paidMinor >= order.depositRequiredMinor ? "complete" : "warning"}><i><UiIcon name="check" /></i><b>{ui.payment}</b><CrmStatusBadge domain="payment" status={order.paymentStatus}/><strong>{money(paidMinor, order.currency)} / {money(order.priceMinor, order.currency)}</strong><small>{paymentPercent}% · {ui.balancePrefix} {money(balance(order), order.currency)}</small></article>
+        <article className="active"><i><UiIcon name="settings" /></i><b>{ui.tabs.production}</b><strong>{orderLabel("production", order.productionStatus)}</strong><small>{order.productionSlot ? slotDateRange(order) : ui.notSpecified}</small></article>
+        <article><i><UiIcon name="truck" /></i><b>{ui.shipping}</b><CrmStatusBadge domain="shipping" status={order.shippingStatus}/><small>{ui.actualShipping}: {order.shipment?.shippedAt ? date(order.shipment.shippedAt) : ui.notSpecifiedFeminine}</small></article>
+      </div>
+      <div className="orders-order-deadlines"><h3>{ui.deadlines}</h3><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.productionStart} value={order.productionSlot ? date(order.productionSlot.startsAt) : ui.notSpecified} /><Detail label={ui.productionEnd} value={order.productionSlot ? date(order.productionSlot.endsAt) : ui.notSpecified} /><Detail label={ui.plannedShipping} value={ui.notSpecifiedFeminine} /><Detail label={ui.daysRemaining} value={dayText(order)} /><Detail label={ui.statusPrefix} value={<CrmStatusBadge domain="sales" status={order.salesStatus}/>} /></div>
+      <div className="orders-order-actions"><h3>{ui.quickActions}</h3><CrmButton ref={paymentTrigger} tone="secondary" size="compact-sm" onClick={onPayment}><UiIcon name="payment" />{ui.addPayment}</CrmButton>{requiresProduction && <CrmButton tone="secondary" size="compact-sm" onClick={onProduction}><UiIcon name="calendar" />{ui.scheduleProduction}</CrmButton>}<CrmButton tone="secondary" size="compact-sm" onClick={onConversation}><UiIcon name="chat" />{ui.openConversation}</CrmButton><CrmButton tone="secondary" size="compact-sm" aria-label={ui.editOrder} onClick={onEdit}><UiIcon name="edit" />{ui.moreActions}</CrmButton></div>
     </section>
-    <section className="orders-expanded-designs"><header><div><h3>{ui.designsInOrder} ({items.length})</h3><small>{itemQuantity(order)} {ui.itemsInOrder}</small></div><div className="orders-expanded-design-actions"><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton>{!isMultiOrder(order) && measurementAthlete(order) && <CrmButton tone="secondary" size="compact-sm" onClick={onMeasurements}>{primaryMeasurement(order) ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}</div></header><div className="orders-expanded-items">{items.map((item, index) => { const measurementDetailsId=`order-measurements-${order.id}-${item.id}`,image=itemImage(item); return <div className="orders-expanded-item-block" key={item.id}><article className="orders-expanded-item-row"><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={image} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div className="orders-item-name"><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small><em>{item.quantity} {ui.pieces}</em>{item.persistedItemId&&<CrmButton tone="secondary" size="compact-xs" className="orders-design-edit" onClick={()=>onEditItem(item.persistedItemId!)}>{ui.editDesign}</CrmButton>}{item.measurement && <button className="orders-measurement-toggle" aria-expanded={measurementId === item.id} aria-controls={measurementDetailsId} onClick={() => setMeasurementId((current) => current === item.id ? undefined : item.id)}>{measurementId === item.id ? ui.hideMeasurements : ui.allMeasurements}</button>}</div><Detail label={ui.dimensions} value={item.measurement ? measurementSizes(item.measurement.values) : ui.notReceived} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><div className="orders-item-payment"><small>{ui.payment}</small><strong>{ui.paymentAtOrderLevel}</strong><CrmStatusBadge domain="production" status={item.productionStatus}/></div></article>{measurementId === item.id && item.measurement && <ExpandedMeasurementGrid id={measurementDetailsId} measurement={item.measurement} values={item.measurement.values} />}</div>})}</div></section>
-    <section className="orders-expanded-operations"><h3>{ui.orderOperations}</h3><div className="orders-expanded-operation-grid"><article><h4>{ui.customerWishes}</h4><p>{order.notes || ui.notSpecified}</p></article><article><h4>{ui.productionSlot}</h4>{order.productionSlot ? <><Detail label={ui.productionPeriod} value={`${formatDateTime(order.productionSlot.startsAt)} — ${formatDateTime(order.productionSlot.endsAt)}`} /><Detail label={ui.slotCapacity} value={String(order.productionSlot.capacity)} /><span className={`orders-operation-state ${order.productionSlot.tentative ? "warning" : "success"}`}>{order.productionSlot.tentative ? ui.slotTentative : ui.slotConfirmed}</span><small>{order.productionSlot.locked ? ui.slotLocked : ui.slotUnlocked}</small></> : <p>{ui.notSpecified}</p>}</article><article><h4>{ui.shipping}</h4><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName || ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /></article></div></section>
-    <section className="orders-expanded-card orders-expanded-payments"><div className="orders-expanded-section-heading"><h3>{ui.paymentHistory}</h3><button ref={paymentTrigger} className="orders-secondary-action" onClick={onPayment}>{ui.addPayment}</button></div><div className="orders-expanded-payment-history">{order.payments.length ? order.payments.map((payment) => <div key={payment.id}><span>{date(payment.receivedAt)}</span><b>{money(payment.amountMinor, payment.currency)}</b><small>{paymentMethodLabel(payment.method)}</small>{payment.currency !== order.currency && payment.appliedCurrency === order.currency && payment.appliedAmountMinor != null && <em>{ui.appliedToOrder}: {money(payment.appliedAmountMinor, order.currency)}</em>}{(payment.reference || payment.notes) && <em>{[payment.reference, payment.notes].filter(Boolean).join(" · ")}</em>}</div>) : <p>{ui.noPayments}</p>}</div>{order.invoices.length > 0 && <div className="orders-expanded-invoices"><h4>{ui.invoices}</h4>{order.invoices.map((invoice) => <div key={invoice.id}><b>{invoice.number}</b><a href={`/api/finance/invoices/${invoice.id}/document`} target="_blank" rel="noreferrer">{ui.viewInvoice}</a><a href={`/api/finance/invoices/${invoice.id}/document?download=1`}>{ui.download}</a></div>)}</div>}</section>
-    <section className="orders-expanded-card orders-expanded-finance"><div className="orders-expanded-section-heading"><h3>{ui.finance}</h3><button className="orders-secondary-action" onClick={onCurrency}>{ui.changeCurrency}</button></div><MoneyLine label={`${ui.products} (${items.length})`} value={order.priceMinor - (order.deliveryMinor || 0) + (order.discountMinor || 0)} currency={order.currency} /><MoneyLine label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} muted /><MoneyLine label={ui.shipping} value={order.deliveryMinor || order.shipment?.costMinor || 0} currency={order.currency} /><hr /><MoneyLine label={ui.total} value={order.priceMinor} currency={order.currency} strong /><MoneyLine label={ui.requiredDeposit} value={order.depositRequiredMinor} currency={order.currency} /><MoneyLine label={ui.paid} value={paid(order)} currency={order.currency} success /><MoneyLine label={ui.balance} value={balance(order)} currency={order.currency} danger={balance(order) > 0} /></section>
-    <section className="orders-expanded-card orders-expanded-history"><h3>{ui.orderHistory}</h3>{visibleActivities.length ? visibleActivities.map((activity) => <div key={activity.id}><i /><span><strong>{repairMojibake(activity.summary)}</strong><small>{formatDateTime(activity.createdAt)}</small></span></div>) : <p>{ui.noHistory}</p>}{order.activities.length > 5 && <CrmButton tone="secondary" className="orders-history-toggle" type="button" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded((value) => !value)}>{historyExpanded ? hideOlderHistory : `${showOlderHistory} (${order.activities.length - initialHistoryItems.length})`}</CrmButton>}</section>
+    <CrmTabList value={activeTab} onChange={setActiveTab} className="orders-order-tabs" ariaLabel={ui.orderDetails} tabs={tabs.map((tab) => ({ value: tab.key, label: tab.label, panelId: tabPanelId, tabId: `order-tab-${order.id}-${tab.key}`, icon: <UiIcon name={tab.icon} /> }))} />
+    <section id={tabPanelId} aria-labelledby={`order-tab-${order.id}-${activeTab}`} className={`orders-order-tab-panel orders-order-tab-${activeTab}`} role="tabpanel">
+      {activeTab === "details" && <div className="orders-tab-details"><article><h3>{ui.orderInformation}</h3><div className="orders-details-grid"><Detail label={ui.orderNumber} value={order.number} /><Detail label={ui.orderTypeName} value={orderTypeLabel(order.type)} /><Detail label={ui.createdAt} value={date(order.createdAt)} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><Detail label={ui.manager} value={order.responsibleManager?.displayName || ui.notSpecified} /><Detail label={ui.modelName} value={items[0]?.name || ui.designMissing} /><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.quantity} value={quantitySummary(order)} /><Detail label={ui.currency} value={order.currency} /><Detail label={ui.total} value={money(order.priceMinor, order.currency)} /></div></article><article><h3>{ui.customerWishes}</h3><p>{order.notes || ui.notSpecified}</p><div className="orders-detail-tags">{order.promocode && <span>{order.promocode}</span>}{order.isGift && <span>{ui.gift}</span>}</div></article><article><h3>{ui.files} ({designPaths(order).length})</h3><div className="orders-detail-files">{designPaths(order).map((path) => <img key={path} src={path} alt={ui.orderDesignAlt} />)}{!designPaths(order).length && <p>{ui.noFiles}</p>}</div></article></div>}
+      {activeTab === "designs" && <div className="orders-tab-designs"><header><h3>{ui.designsInOrder} ({items.length})</h3><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></header>{items.map((item, index) => <article key={item.id}><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={itemImage(item)} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div><strong>{item.name}</strong><small>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : ui.notSpecified}</small><em>{item.quantity} {ui.pieces}</em></div><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><Detail label={ui.dimensions} value={item.measurement ? ui.measurementsReceived : ui.notReceived} /><CrmStatusBadge domain="production" status={item.productionStatus}/>{item.persistedItemId && <CrmButton tone="secondary" size="compact-xs" onClick={() => onEditItem(item.persistedItemId!)}>{ui.editDesign}</CrmButton>}</article>)}</div>}
+      {activeTab === "measurements" && <div className="orders-tab-measurements"><header><h3>{ui.tabs.measurements}</h3></header>{items.map((item) => { const panelId = `order-measurements-${order.id}-${item.id}`; const measurementHistory = itemMeasurementHistory(item); return <article key={item.id}><div><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small></div>{item.measurement ? <><p><b>{ui.currentMeasurement}</b> · {date(item.measurement.measuredAt)} · cm</p><ExpandedMeasurementGrid id={panelId} measurement={item.measurement} values={item.measurement.values} /></> : <p>{ui.noMeasurements}</p>}<div className="orders-measurement-actions">{item.athlete && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(item.persistedItemId)}>{item.measurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{measurementHistory.length > 0 && <details><summary>{ui.measurementHistory} ({measurementHistory.length})</summary>{measurementHistory.map((measurement) => <p key={measurement.id}>{date(measurement.measuredAt)}{measurement.notes ? ` · ${measurement.notes}` : ""}</p>)}</details>}</div></article>})}</div>}
+      {activeTab === "client" && <div className="orders-tab-columns"><article><h3>{ui.clientDetails}</h3><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.country} value={<><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.notSpecified}</>} /><Detail label={ui.language} value={order.client.language || ui.notSpecified} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><CrmButton tone="secondary" size="compact-sm" onClick={onClient}>{ui.openClient}</CrmButton></article><article><h3>{ui.groupsAthletes}</h3>{items.filter((item) => item.athlete).map((item) => <p key={item.id}>{item.athlete && [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ")} · {item.name}</p>)}{!items.some((item) => item.athlete) && <p>{ui.notSpecified}</p>}</article></div>}
+      {activeTab === "finance" && <div className="orders-tab-columns"><section className="orders-expanded-card orders-expanded-finance"><div className="orders-expanded-section-heading"><h3>{ui.finance}</h3>{onFinance && <CrmButton tone="secondary" size="compact-sm" onClick={onFinance}>{ui.openFinance}</CrmButton>}<button className="orders-secondary-action" onClick={onCurrency}>{ui.changeCurrency}</button></div><MoneyLine label={`${ui.products} (${items.length})`} value={order.priceMinor - (order.deliveryMinor || 0) + (order.discountMinor || 0)} currency={order.currency} /><MoneyLine label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} muted /><MoneyLine label={ui.shipping} value={order.deliveryMinor || order.shipment?.costMinor || 0} currency={order.currency} /><MoneyLine label={ui.total} value={order.priceMinor} currency={order.currency} strong /><MoneyLine label={ui.requiredDeposit} value={order.depositRequiredMinor} currency={order.currency} /><MoneyLine label={ui.paid} value={paidMinor} currency={order.currency} success /><MoneyLine label={ui.balance} value={balance(order)} currency={order.currency} danger={balance(order) > 0} /></section><section className="orders-expanded-card orders-expanded-payments"><div className="orders-expanded-section-heading"><h3>{ui.paymentHistory}</h3><button className="orders-secondary-action" onClick={onPayment}>{ui.addPayment}</button></div><div className="orders-expanded-payment-history">{paymentHistory.length ? paymentHistory.map((payment) => <div key={payment.id} className={payment.voidedAt ? "voided" : undefined}><span>{date(payment.receivedAt)}</span><b>{money(payment.amountMinor, payment.currency)}</b><small>{payment.voidedAt ? `${ui.voidedPayment}${payment.voidReason ? ` · ${payment.voidReason}` : ""}` : paymentMethodLabel(payment.method)}</small>{payment.reference && <em>{ui.paymentReference}: {payment.reference}</em>}{payment.notes && <em>{ui.paymentNote}: {payment.notes}</em>}{payment.currency !== order.currency && payment.appliedCurrency === order.currency && payment.appliedAmountMinor != null && <em>{ui.appliedToOrder}: {money(payment.appliedAmountMinor, order.currency)}</em>}</div>) : <p>{ui.noPayments}</p>}</div></section><section className="orders-expanded-card orders-expanded-invoices"><h3>{ui.invoices}</h3>{order.invoices.length ? order.invoices.map((invoice) => <a key={invoice.id} href={`/api/finance/invoices/${invoice.id}/document?download=1`}><strong>{invoice.number}</strong><span>{money(invoice.totalMinor, invoice.currency || order.currency)}</span><small>{ui.download}</small></a>) : <p>{ui.noInvoices}</p>}</section></div>}
+      {activeTab === "production" && <div className="orders-tab-columns"><article><h3>{ui.productionSlot}</h3>{order.productionSlot ? <><Detail label={ui.productionStart} value={formatDateTime(order.productionSlot.startsAt)} /><Detail label={ui.productionEnd} value={formatDateTime(order.productionSlot.endsAt)} /><Detail label={ui.slotCapacity} value={String(order.productionSlot.capacity)} /><CrmStatusBadge domain="production" status={order.productionStatus}/><p>{order.productionSlot.tentative ? ui.slotTentative : ui.slotConfirmed} · {order.productionSlot.locked ? ui.slotLocked : ui.slotUnlocked}</p></> : <p>{ui.notSpecified}</p>}{requiresProduction && <CrmButton tone="secondary" size="compact-sm" onClick={onProduction}>{ui.openProduction}</CrmButton>}</article><article><h3>{ui.productionStatus}</h3>{requiresProduction ? <CrmNativeSelect aria-label={ui.productionStatus} disabled={statusPending} value={order.productionStatus} onChange={(event) => onStatus("productionStatus", event.target.value)} data={PRODUCTION_STATUSES.map((status) => ({ value: status, label: orderLabel("production", status) }))} /> : <p>{ui.productionNotRequired}</p>}</article></div>}
+      {activeTab === "delivery" && <div className="orders-tab-columns"><article><h3>{ui.shippingDetails}</h3><EditableDetail label={ui.recipient} value={deliveryRecipient(order)} onClick={onDelivery} /><EditableDetail label={ui.address} value={deliveryPlace(order)} onClick={onDelivery} /><Detail label={ui.phone} value={order.deliveryRecipientPhone || order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.country} value={<><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.notSpecified}</>} /></article><article><h3>{ui.shipping}</h3><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName || ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.plannedShipping} value={ui.notSpecifiedFeminine} /><Detail label={ui.actualShipping} value={order.shipment?.shippedAt ? date(order.shipment.shippedAt) : ui.notSpecifiedFeminine} /><Detail label={ui.actualDelivery} value={order.shipment?.deliveredAt ? date(order.shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Detail label={ui.shippingStatus} value={orderLabel("shipping", order.shippingStatus)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /><CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton></article></div>}
+      {activeTab === "notes" && <div className="orders-tab-columns"><article><h3>{ui.customerWishes}</h3><p>{order.notes || order.buyerComment || ui.notSpecified}</p></article><article><h3>{ui.managerNotes}</h3><p>{order.managerComment || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></article></div>}
+      {activeTab === "history" && <section className="orders-expanded-card orders-expanded-history"><h3>{ui.orderHistory}</h3>{visibleActivities.length ? visibleActivities.map((activity) => <div key={activity.id}><i /><span><strong>{repairMojibake(activity.summary)}</strong><small>{formatDateTime(activity.createdAt)}</small></span></div>) : <p>{ui.noHistory}</p>}{order.activities.length > 5 && <CrmButton tone="secondary" className="orders-history-toggle" type="button" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded((value) => !value)}>{historyExpanded ? hideOlderHistory : `${showOlderHistory} (${order.activities.length - initialHistoryItems.length})`}</CrmButton>}</section>}
+    </section>
   </div>;
 }
 
@@ -441,8 +526,11 @@ function OrderDesignEditModal({order,item,request,onClose,onSaved}:{order:Order;
 function ownedMeasurement(measurement: Order["measurement"], athlete: Order["athlete"]) { return measurement && athlete && measurement.athleteId === athlete.id ? measurement : undefined; }
 function legacyMeasurementForItem(order: Order, item: Order["items"][number]) { return ownedMeasurement(order.measurement, item.athlete || order.athlete); }
 function ExpandedMeasurementGrid({ id, measurement, values }: { id: string; measurement: { measuredAt: string }; values?: Record<string, number> }) { return <div id={id} role="region" aria-label={ui.allMeasurements} className="orders-expanded-measurements"><header><strong>{ui.allMeasurements}</strong><small>{ui.measurementTakenAt}: {date(measurement.measuredAt)}</small></header>{Array.from({ length: 17 }, (_, index) => index + 1).map((number) => { const tone = [1,2,3,15].includes(number) ? "measurement-primary" : [6,7,8].includes(number) ? "measurement-secondary" : ""; return <span className={tone || undefined} key={number}><small>№{number} · {measurementFieldLabels[number - 1]}</small><b>{values?.[`m${number}`] == null ? "—" : `${formatCm(values[`m${number}`]!)} см`}</b></span>; })}</div>; }
+function itemMeasurementHistory(item: unknown) { return ((item as { measurementHistory?: Array<{ id: string; measuredAt: string; notes?: string }> }).measurementHistory ?? []); }
 function formatCm(value: number) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value); }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function slotDateRange(order: Order) { return order.productionSlot ? `${shortDate(order.productionSlot.startsAt)} – ${shortDate(order.productionSlot.endsAt)}` : ui.notSpecified; }
+function shortDate(value: string) { return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" }).format(new Date(value)).replace(".", ""); }
 function orderTypeLabel(value: string) { return (orderFormUi.types as Record<string, string>)[value] || value; }
 function paymentMethodLabel(value: string) { return ({ BANK_TRANSFER: ui.bankTransfer, CARD: ui.cardPayment, PAYPAL: "PayPal", CASH: ui.cashPayment, OTHER: ui.otherPayment } as Record<string, string>)[value] || value; }
 
@@ -548,7 +636,7 @@ function OrderClientPicker({ clients, loading, query, onQuery, onSelect, onClose
 
 function CountryFlag({ country }: { country?: string }) { const code = countryCode(country); return code ? <span className={`fi fi-${code.toLowerCase()} orders-country-flag`} role="img" aria-label={code} /> : null; }
 
-function Kpi({ label, value, icon, tone = "purple", active, onClick }: { label: string; value: number; icon: string; tone?: string; active?: boolean; onClick: () => void }) { return <button className={`orders-kpi tone-${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><span><small>{label}</small><strong>{value}</strong></span><i><UiIcon name={icon} /></i></button>; }
+function Kpi({ label, value, icon, tone = "purple", active, onClick }: { label: string; value: number; icon: string; tone?: string; active?: boolean; onClick: () => void }) { return <button className={`orders-kpi tone-${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><i><UiIcon name={icon} /></i><span><small>{label}</small><strong>{value}</strong></span></button>; }
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) { return <button className="orders-filter-chip" onClick={onRemove}>{label}<span aria-hidden="true">×</span></button>; }
 function Detail({ label, value }: { label: string; value: ReactNode }) { return <div className="orders-detail"><small>{label}</small><strong>{value}</strong></div>; }
 function EditableDetail({ label, value, onClick }: { label: string; value: ReactNode; onClick: () => void }) { return <UnstyledButton className="orders-detail orders-editable-detail" onClick={onClick} aria-label={`${ui.editDeliveryAddress}: ${label}`}><small>{label}</small><strong>{value}</strong></UnstyledButton>; }

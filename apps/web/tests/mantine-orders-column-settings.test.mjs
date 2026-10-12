@@ -15,8 +15,10 @@ test("настройка столбцов заказов использует д
   assert.doesNotMatch(source, /orders-column-settings-overlay/);
 });
 
-test("настройка столбцов сохраняет прежний локальный контракт", () => {
-  assert.match(source, /const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2"/);
+test("настройка столбцов сохраняет новый контракт и мигрирует вариант A", () => {
+  assert.match(source, /const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v3"/);
+  assert.match(source, /const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2"/);
+  assert.match(source, /migrateLegacyOrderColumnSettings/);
   assert.match(source, /localStorage\.setItem\(COLUMN_SETTINGS_KEY/);
   assert.match(source, /draggable/);
   assert.match(source, /onDrop=\{\(\) => dropColumn\(id\)\}/);

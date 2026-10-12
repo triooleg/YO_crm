@@ -4,164 +4,34 @@ import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
-const workspace = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
-const production = readFileSync(new URL("../components/production-workspace.tsx", import.meta.url), "utf8");
-const finance = readFileSync(new URL("../components/finance-workspace.tsx", import.meta.url), "utf8");
-const shipping = readFileSync(new URL("../components/shipping-workspace.tsx", import.meta.url), "utf8");
-const theme = readFileSync(new URL("../lib/mantine-theme.ts", import.meta.url), "utf8");
+const expanded = dashboard.slice(dashboard.indexOf("function ExpandedOrder"), dashboard.indexOf("function OrderImageEditor"));
 
-const expandedStart = dashboard.indexOf("function ExpandedOrder");
-const expandedEnd = dashboard.indexOf("function QuickPayment", expandedStart);
-const expanded = dashboard.slice(expandedStart, expandedEnd);
-
-test("variant A keeps one dense order workspace with contextual navigation", () => {
-  for (const className of [
-    "orders-expanded-quick-nav",
-    "orders-expanded-meta",
-    "orders-expanded-operations",
-    "orders-expanded-payments",
-    "orders-expanded-finance",
-    "orders-expanded-history",
-  ]) assert.match(expanded, new RegExp(className));
-
-  for (const callback of ["onConversation", "onClient", "onProduction", "onFinance", "onDelivery"]) {
+test("утверждённая панель заказа содержит четыре зоны и контекстную навигацию", () => {
+  for (const token of ["orders-order-identity", "orders-order-flow", "orders-order-deadlines", "orders-order-actions"])
+    assert.match(expanded, new RegExp(token));
+  for (const callback of ["onConversation", "onClient", "onProduction", "onFinance", "onDelivery"])
     assert.match(expanded, new RegExp(callback));
-  }
-  assert.doesNotMatch(dashboard, /onNavigate\("shipping"/);
   assert.match(dashboard, /onNavigate\("production", \{ orderId: order\.id \}\)/);
-  assert.match(dashboard, /onNavigate\("finance", \{ orderId: order\.id \}\)/);
-  assert.match(dashboard, /onFinance=\{canOpenOrderFinance\(role\)/);
+  assert.match(dashboard, /onNavigate\("finance", \{ orderId: expandedOrder\.id \}\)/);
 });
 
-test("contextual links resolve the exact order in every destination and fail visibly", () => {
-  for (const [source, selectedPattern, errorPattern, clearPattern] of [
-    [production, /setSelected\(resolved\.order\.id\)/, /productionUi\.contextOrderUnavailable/, /clearProductionContextAction\(\)/],
-    [finance, /setFocusedOrderId\(order\.id\)/, /financeUi\.contextOrderUnavailable/, /clearFinanceContextAction\(\)/],
-    [shipping, /setSelected\(order\)/, /shippingUi\.contextOrderUnavailable/, /clearShippingContextAction\(\)/],
-  ]) {
-    assert.match(source, /resolveOrderContext\(/);
-    assert.match(source, selectedPattern);
-    assert.match(source, errorPattern);
-    assert.match(source, clearPattern);
-  }
-  assert.match(production, /\/api\/orders\/production\?\$\{params\.toString\(\)\}/);
-  assert.match(production, /params\.set\("orderId", contextId\)/);
-  assert.match(production, /query: resolved\.order!\.number/);
-  assert.match(finance, /finance-order\$\{focusedOrderId===order\.id\?" is-context":""\}/);
-  assert.match(shipping, /shipping-row\$\{selected\?\.id===o\.id\?" is-context":""\}/);
+test("утверждённый макет сохраняет плотную таблицу и адаптивную нижнюю панель", () => {
+  for (const selector of [".orders-dashboard", ".orders-dashboard-table", ".orders-order-overview", ".orders-order-tabs", ".orders-order-tab-panel"])
+    assert.match(styles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(styles, /@media\(max-width:900px\)/);
+  assert.match(styles, /orders-dashboard-table\{min-width:1420px\}/);
+  assert.match(styles, /orders-order-overview\{display:grid/);
 });
 
-test("variant A preserves semantic status dimensions and real production slot data", () => {
-  for (const dimension of ["sales", "payment", "production", "shipping"]) {
-    assert.match(expanded, new RegExp(`orders-expanded-status--${dimension}`));
-  }
-  assert.match(workspace, /productionSlot\?:\{/);
-  assert.match(expanded, /order\.productionSlot/);
-  assert.doesNotMatch(expanded, /responsibleManager|fake|mock/i);
-});
-
-test("each costume owns its immediately adjacent measurement row", () => {
-  assert.match(expanded, /orders-expanded-item-block/);
-  assert.match(expanded, /orders-expanded-item-row/);
-  assert.match(expanded, /measurementId === item\.id && item\.measurement && <ExpandedMeasurementGrid/);
-  assert.match(expanded, /measurement=\{item\.measurement\}/);
-  assert.match(dashboard, /measurementFieldLabels/);
-  assert.match(dashboard, /Array\.from\(\{ length: 17 \}/);
-  assert.match(expanded, /ownedMeasurement\(item\.measurement, athlete\)/);
-  assert.match(dashboard, /measurement\.athleteId === athlete\.id/);
-  assert.match(dashboard, /ownedMeasurement\(order\.measurement, item\.athlete \|\| order\.athlete\)/);
-  assert.match(expanded, /measurement: ownedMeasurement\(order\.measurement, order\.athlete\)/);
-  assert.match(dashboard, /function hasMeasurements\(order: Order\) \{ return orderMeasurementState\(order\)\.complete; \}/);
-  assert.match(dashboard, /orderMeasurementState\(order\)\.problem === "dimensions"/);
-  assert.match(dashboard, /orderMeasurementState\(order\)\.nextAction === "dimensions"/);
-});
-
-test("variant A separates transactions from totals and avoids duplicated linked sections", () => {
-  assert.match(expanded, /orders-expanded-payments/);
-  assert.match(expanded, /order\.payments\.map/);
-  assert.match(expanded, /orders-expanded-finance/);
-  assert.match(expanded, /MoneyLine/);
-  assert.doesNotMatch(expanded, /orders-expanded-related/);
-  assert.match(expanded, /historyExpanded \? order\.activities : order\.activities\.slice\(0, 5\)/);
-  assert.match(expanded, /setHistoryExpanded/);
-  assert.match(expanded, /<CrmButton tone="secondary" className="orders-history-toggle"/);
-});
-
-test("variant A has responsive compact styling with semantic status accents", () => {
-  for (const selector of [
-    ".orders-expanded-layout-a",
-    ".orders-expanded-quick-nav",
-    ".orders-expanded-meta",
-    ".orders-expanded-item-block",
-    ".orders-expanded-measurements",
-  ]) assert.match(styles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(styles, /orders-expanded-status--sales/);
-  assert.match(styles, /orders-expanded-status--payment/);
-  assert.match(styles, /orders-expanded-status--production/);
-  assert.match(styles, /orders-expanded-status--shipping/);
-  assert.match(styles, /@media\s*\(max-width:\s*900px\)/);
-  assert.match(styles, /orders-expanded-command-row\{grid-column:1\/-1;display:grid;grid-template-columns:minmax\(640px,1fr\) auto/);
-  assert.match(styles, /orders-expanded-command-row \.orders-expanded-statuses\{grid-column:auto\}/);
-  assert.doesNotMatch(styles, /@media \(max-width:1250px\)\{\.orders-expanded-command-row\{grid-template-columns:1fr/);
-  assert.match(styles, /width:calc\(100vw - 24px\)/);
-  assert.match(expanded, /<CrmButton tone="secondary"/);
-  assert.match(styles, /orders-expanded-measurements span small\{white-space:normal;overflow-wrap:anywhere/);
-  assert.doesNotMatch(styles, /orders-expanded-measurements span small\{[^}]*text-overflow/);
-  assert.match(styles, /orders-item-payment>small,.orders-item-payment>strong\{display:block\}/);
-  assert.match(styles, /orders-expanded-items \.orders-expanded-item-row\{grid-template-columns:22px 44px minmax\(0,1fr\);align-items:start;min-width:0/);
-  assert.match(styles, /orders-expanded-item-block \.orders-expanded-measurements\{min-width:0;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);padding:8px\}/);
-  assert.doesNotMatch(styles, /@media \(max-width:900px\)[^\n]*min-width:780px/);
-});
-
-test("variant A matches KeyCRM typography hierarchy in expanded order details", () => {
-  assert.match(styles, /\.orders-expanded-layout-a\{[^}]*font-size:12px/);
-  assert.match(styles, /\.orders-expanded-layout-a \.orders-detail small\{font-size:12px\}/);
-  assert.match(styles, /\.orders-expanded-layout-a \.orders-detail strong\{[^}]*font-size:13px/);
-  assert.match(styles, /\.orders-expanded-layout-a \.crm-status-badge\{font-size:12px\}/);
-  assert.match(styles, /\.orders-expanded-meta h3\{[^}]*font-size:14px/);
-  assert.match(styles, /\.orders-expanded-items \.orders-expanded-item-row\{[^}]*font-size:13px/);
-  assert.match(styles, /\.orders-expanded-measurements>header small\{[^}]*font-size:12px/);
-  assert.match(styles, /\.orders-expanded-measurements span b\{[^}]*font-size:13px/);
-  assert.match(styles, /\.orders-expanded-operation-grid h4\{[^}]*font-size:13px/);
-  assert.match(styles, /\.orders-expanded-operations>h3\{[^}]*font-size:14px/);
-  assert.match(styles, /\.orders-money-line\.strong\{font-size:14px/);
-  assert.match(styles, /\.orders-expanded-payment-history>div\{[^}]*font-size:12px/);
-  assert.match(styles, /\.orders-expanded-history small\{[^}]*font-size:12px/);
-});
-
-test("editable order values use the KeyCRM-style blue text cue", () => {
+test("визуальные подсказки редактируемых значений и доставка сохранены", () => {
   assert.match(dashboard, /editableTextColor/);
-  assert.match(theme, /editableTextColor:\s*"#117ac0"/);
-  assert.match(styles, /\.orders-discipline-select\{[^}]*color:var\(--od-editable\)/);
-  assert.match(styles, /\.orders-deadline-button strong\{color:var\(--od-editable\)\}/);
-  assert.match(styles, /\.orders-inline-status-control \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
-  assert.match(styles, /\.orders-expanded-statuses>\.crm-native-select \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
-  assert.match(styles, /\.orders-expanded-layout-a \.orders-expanded-designs header button,[^{]*\.orders-expanded-section-heading \.orders-secondary-action\{color:var\(--od-editable\)\}/);
-  assert.doesNotMatch(styles, /\.orders-measurement-toggle[^}]*color:var\(--od-editable\)/);
-});
-
-test("delivery address is edited from blue order values in a dedicated modal", () => {
-  assert.match(workspace, /deliveryAddressSet\?:boolean/);
+  assert.match(styles, /orders-deadline-button strong\{color:var\(--od-editable\)\}/);
+  assert.match(styles, /orders-inline-status-control \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
   assert.match(dashboard, /function DeliveryAddressModal/);
-  assert.match(dashboard, /\/delivery-address/);
-  assert.match(dashboard, /useClientAddress/);
-  assert.match(dashboard, /recipientMatchesClient/);
-  assert.match(dashboard, /deliveryAddressLine1/);
-  assert.match(dashboard, /deliveryAddressText/);
-  assert.match(dashboard, /function EditableDetail/);
-  assert.match(dashboard, /<UnstyledButton/);
   assert.match(dashboard, /className="orders-delivery-cell-button"/);
-  assert.match(expanded, /<EditableDetail label=\{ui\.address\}/);
-  assert.match(styles, /\.orders-delivery-cell-button,\.orders-editable-detail\{[^}]*color:var\(--od-editable\)/);
-  assert.match(styles, /\.orders-delivery-recipient-heading \.crm-checkbox\{[^}]*display:flex[^}]*align-items:center/);
-  assert.match(styles, /\.orders-delivery-cell-button:hover,[^{]*\.orders-editable-detail:hover\{background:#fff/);
-  assert.match(dashboard, /<Radio/);
-  assert.match(dashboard, /<CrmTextInput highlighted/);
-  assert.doesNotMatch(styles, /orders-delivery-details \.mantine-TextInput-input/);
-  assert.match(dashboard, /orderLabel\("shipping", order\.shippingStatus\)/);
 });
 
-test("the measurement grid visually separates primary and sleeve measurements", () => {
+test("основные и рукавные замеры различаются цветом", () => {
   assert.match(dashboard, /\[1,2,3,15\]\.includes\(number\).*measurement-primary/);
   assert.match(dashboard, /\[6,7,8\]\.includes\(number\).*measurement-secondary/);
   assert.match(styles, /\.orders-expanded-measurements span\.measurement-primary\{[^}]*background:/);

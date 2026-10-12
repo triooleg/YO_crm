@@ -19,6 +19,7 @@ export class OrdersController {
   @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") defaults() { return this.orders.defaults(); }
   @Get("production") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) productionList(@Query("orderId") orderId?: string, @Query("from") from?: string, @Query("to") to?: string) { return this.orders.productionList(orderId, from, to); }
   @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string) { return this.orders.list(search); }
+  @Get(":id") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) detail(@Param("id") id: string) { return this.orders.detail(id); }
   @Patch("archive") @Roles(UserRole.OWNER, UserRole.ADMIN) archiveOrders(@Body() dto: ArchiveOrdersDto, @Req() req: Request & { user: User }) { return this.orders.archiveOrders(dto, req.user); }
   @Post("maintenance/website-sales") @Roles(UserRole.OWNER, UserRole.ADMIN) correctWebsiteSales(@Body() dto: WebsiteSalesCorrectionDto, @Req() req: Request & { user: User }) { return this.orders.correctWebsiteSales(dto, req.user); }
   @Post("model-image") @Roles("OWNER", "ADMIN", "MANAGER") upload(@Body() dto: UploadModelImageDto) { return this.orders.upload(dto); }
@@ -35,6 +36,7 @@ export class OrdersController {
   @Delete(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") deleteProductionSlot(@Param("id") id: string, @Body() dto: DeleteProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.deleteProductionSlot(id, dto, req.user); }
   @Post(":id/payments") @Roles("OWNER", "ADMIN", "MANAGER") addPayment(@Param("id") id: string, @Body() dto: AddOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.addPayment(id, dto, req.user); }
   @Post(":id/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addMeasurement(@Param("id") id: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addMeasurement(id, dto, req.user); }
+  @Post(":orderId/items/:itemId/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addItemMeasurement(@Param("orderId") orderId: string, @Param("itemId") itemId: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addItemMeasurement(orderId, itemId, dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {
     if (!isOrderImageName(name)) return res.status(404).end();
     return res.sendFile(join(uploadsRoot(), "order-models", name));

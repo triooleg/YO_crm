@@ -28,7 +28,7 @@ test("полный финансовый раздел заказа доступе
 
 test("переходы в Клиенты и Входящие сохраняют и выделяют точный заказ", () => {
   assert.match(dashboard, /onNavigate\("clients", \{ clientId: order\.client\.id, orderId: order\.id \}\)/);
-  assert.match(dashboard, /onNavigate\("inbox", \{ clientId: order\.client\.id, clientName: order\.client\.displayName, orderId: order\.id \}\)/);
+  assert.match(dashboard, /onNavigate\("inbox", \{ clientId: expandedOrder\.client\.id, clientName: expandedOrder\.client\.displayName, orderId: expandedOrder\.id \}\)/);
   assert.match(clients, /initialOrderId/);
   assert.match(clients, /focused=\{o\.id === focusedOrderId\}/);
   assert.match(inbox, /initialOrderId/);

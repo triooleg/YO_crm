@@ -3,83 +3,60 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
-const legacyWorkspace = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
-const expandedStart = dashboard.indexOf("function ExpandedOrder");
-const expandedEnd = dashboard.indexOf("function QuickPayment", expandedStart);
-const expanded = expandedStart >= 0 && expandedEnd > expandedStart
-  ? dashboard.slice(expandedStart, expandedEnd)
-  : "";
-const cellStart = dashboard.indexOf("function OrderCell");
-const cellEnd = dashboard.indexOf("function ExpandedOrder", cellStart);
-const orderCell = cellStart >= 0 && cellEnd > cellStart
-  ? dashboard.slice(cellStart, cellEnd)
-  : "";
+const measurementPanel = readFileSync(new URL("../components/measurement-panel.tsx", import.meta.url), "utf8");
+const expanded = dashboard.slice(dashboard.indexOf("function ExpandedOrder"), dashboard.indexOf("function OrderImageEditor"));
 
-test("OrdersDashboard uses one inline expansion path and never opens the former full card", () => {
-  assert.doesNotMatch(dashboard, /OrderWorkspaceCard/);
-  assert.doesNotMatch(dashboard, /workspaceId|setWorkspaceId/);
-  assert.doesNotMatch(legacyWorkspace, /workspaceId|setWorkspaceId/);
+test("заказ раскрывается в строке и подгружает подробности отдельно от списка", () => {
   assert.match(dashboard, /const \[expandedId, setExpandedId\] = useState<string>\(\)/);
-  assert.match(dashboard, /onExpand=\{\(\) => setExpandedId/);
-  assert.match(orderCell, /orders-order-number[^>]*onClick=\{onExpand\}[^>]*>\{order\.number\}/);
-  assert.match(orderCell, /orders-menu-button[^>]*onClick=\{onExpand\}/);
-  assert.match(dashboard, /expandedId === order\.id && <tr className="orders-expanded-row"/);
+  assert.match(dashboard, /async function refreshOrder/);
+  assert.match(dashboard, /request\(`\/orders\/\$\{orderId\}`\)/);
+  assert.match(dashboard, /expandedOrder && <div className="orders-expanded-row"/);
+  assert.doesNotMatch(dashboard, /OrderWorkspaceCard|workspaceId|setWorkspaceId/);
 });
 
-test("expanded order preserves all four statuses with only sales and production editable", () => {
-  for (const field of ["salesStatus", "productionStatus", "paymentStatus", "shippingStatus"]) {
-    assert.match(expanded, new RegExp(`order\\.${field}`), `${field} must remain visible in the expanded row`);
-  }
-  assert.match(expanded, /<CrmNativeSelect[^>]*value=\{order\.salesStatus\}[^>]*onChange=\{[^}]*onStatus\("salesStatus",/);
-  assert.match(expanded, /<CrmNativeSelect[^>]*value=\{order\.productionStatus\}[^>]*onChange=\{[^}]*onStatus\("productionStatus",/);
-  assert.match(expanded, /<CrmStatusBadge domain="payment" status=\{order\.paymentStatus\}/);
-  assert.match(expanded, /<CrmStatusBadge domain="shipping" status=\{order\.shippingStatus\}/);
-  assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)",/);
+test("обзор сохраняет четыре независимых статуса", () => {
+  assert.match(expanded, /domain="payment" status=\{order\.paymentStatus\}/);
+  assert.match(expanded, /domain="production" status=\{order\.productionStatus\}/);
+  assert.match(expanded, /domain="shipping" status=\{order\.shippingStatus\}/);
+  assert.match(expanded, /domain="sales" status=\{order\.salesStatus\}/);
+  assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)"/);
 });
 
-test("expanded order exposes every numbered measurement only for its owning real or legacy item", () => {
-  assert.match(expanded, /order\.items\.length/);
-  assert.match(expanded, /measurement:\s*ownedMeasurement\(order\.measurement, order\.athlete\)/);
-  assert.match(expanded, /item\.measurement/);
+test("каждое изделие редактирует только собственный неизменяемый снимок замеров", () => {
+  assert.match(expanded, /items\.map\(\(item\)/);
   assert.match(expanded, /values=\{item\.measurement\.values\}/);
-  assert.match(expanded, /aria-controls=\{measurementDetailsId\}/);
-  assert.match(dashboard, /role="region" aria-label=\{ui\.allMeasurements\}/);
-  assert.match(dashboard, /orders-expanded-measurements/);
-  assert.match(dashboard, /Array\.from\(\{\s*length:\s*17\s*\}/);
-  assert.match(dashboard, /values\?\.\[`m\$\{number\}`\]/);
+  assert.match(expanded, /onMeasurements\(item\.persistedItemId\)/);
+  assert.match(dashboard, /orderItemId=\{item\?\.id\}/);
+  assert.match(measurementPanel, /\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement/);
+  assert.match(dashboard, /Array\.from\(\{ length: 17 \}/);
+  assert.match(expanded, /measurementHistory: order\.measurementHistory/);
 });
 
-test("expanded order retains payment history, payment action, and invoice documents", () => {
-  assert.match(expanded, /order\.depositRequiredMinor/);
-  assert.match(expanded, /onPayment/);
-  assert.match(expanded, /order\.payments\.map/);
-  for (const field of ["amountMinor", "currency", "method", "receivedAt", "reference", "notes"]) {
-    assert.match(expanded, new RegExp(`payment\\.${field}`), `payment ${field} must remain visible`);
-  }
-  assert.match(expanded, /order\.invoices(?:\?\.)?\.map/);
-  assert.match(expanded, /invoice\.number/, "invoice number must remain visible");
-  assert.match(expanded, /\/api\/finance\/invoices\/\$\{invoice\.id\}\/document/);
-  assert.match(expanded, /download=1/);
+test("смена статуса сериализована, откатывается при ошибке и не перечитывает список", () => {
+  const source = dashboard.match(/async function changeStatus\([\s\S]*?\r?\n  }\r?\n  async function changeDeadline/)?.[0] ?? "";
+  assert.match(source, /statusRequests\.current\.has\(order\.id\)/);
+  assert.match(source, /previous/);
+  assert.match(source, /await refreshOrder\(order\.id\)/);
+  assert.doesNotMatch(source, /await load\(\)/);
 });
 
-test("status updates are serialized and refresh canonical order activity", () => {
-  assert.match(dashboard, /statusRequests\.current\.has\(order\.id\)/);
-  assert.match(dashboard, /statusRequests\.current\.add\(order\.id\)/);
-  assert.match(dashboard, /await request\(`\/orders\/\$\{order\.id\}\/statuses`/);
-  assert.match(dashboard, /await load\(\)/);
-  assert.match(expanded, /disabled=\{statusPending\}/);
-});
-
-test("expanded order retains delivery, complete contact context, and activity history", () => {
-  for (const field of ["displayName", "phone", "email", "source", "language", "country", "city", "address", "postalCode"]) {
-    assert.match(expanded, new RegExp(`order\\.client\\.${field}`), `client ${field} must remain visible`);
-  }
-  for (const field of ["carrier", "trackingNumber", "costMinor"]) {
-    assert.match(expanded, new RegExp(`order\\.shipment\\?\\.${field}`), `shipment ${field} must remain visible`);
-  }
+test("вкладки показывают реальные финансы доставку историю и безопасное пустое состояние файлов", () => {
+  for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
+    assert.match(expanded, new RegExp(`key: "${key}"`));
+  assert.match(expanded, /paymentHistory\.map/);
+  assert.match(expanded, /ui\.paymentReference.*payment\.reference/);
+  assert.match(expanded, /ui\.paymentNote.*payment\.notes/);
+  assert.match(expanded, /order\.invoices\.map/);
   assert.match(expanded, /visibleActivities\.map/);
-  assert.match(expanded, /order\.activities\.slice\(0, 5\)/);
-  for (const field of ["summary", "createdAt"]) {
-    assert.match(expanded, new RegExp(`activity\\.${field}`), `activity ${field} must remain visible`);
-  }
+  assert.match(expanded, /order\.shipment\?\.trackingNumber/);
+  assert.match(expanded, /ui\.noFiles/);
+});
+
+test("быстрые продажи не получают производственные действия, а статусы остаются раздельными", () => {
+  assert.match(expanded, /const requiresProduction = !NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\)/);
+  assert.match(expanded, /requiresProduction && <CrmButton[^>]*onClick=\{onProduction\}/);
+  assert.match(expanded, /requiresProduction \? <CrmNativeSelect[^>]*productionStatus/);
+  const statusCell = dashboard.match(/if \(id === "status"\)[\s\S]*?if \(id === "delivery"\)/)?.[0] ?? "";
+  assert.match(statusCell, /order\.salesStatus/);
+  assert.doesNotMatch(statusCell, /order\.productionStatus/);
 });

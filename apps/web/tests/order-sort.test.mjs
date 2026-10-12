@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
+import { defaultOrderSort, nextOrderSort, SORTABLE_ORDER_COLUMNS, sortOrders } from "../lib/order-sort.mjs";
 
 const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
@@ -14,6 +14,36 @@ const orders = [
 test("повторный клик по заголовку меняет направление сортировки", () => {
   assert.deepEqual(nextOrderSort({ column: "client", direction: "asc" }, "client"), { column: "client", direction: "desc" });
   assert.deepEqual(nextOrderSort({ column: "client", direction: "desc" }, "quantity"), { column: "quantity", direction: "desc" });
+});
+
+test("helper поддерживает утверждённые колонки и сохраняет legacy sort ids", () => {
+  for (const column of ["model", "production", "discipline", "designs", "nextAction"])
+    assert.ok(SORTABLE_ORDER_COLUMNS.includes(column), `missing sort id: ${column}`);
+
+  assert.deepEqual(defaultOrderSort("model"), { column: "model", direction: "asc" });
+  assert.deepEqual(defaultOrderSort("production"), { column: "production", direction: "asc" });
+});
+
+test("новые объединённые колонки сортируются по модели со спортом и производственному слоту", () => {
+  const laterModel = {
+    ...orders[0],
+    id: "later-model",
+    number: "KC-20",
+    discipline: "RHYTHMIC_GYMNASTICS",
+    items: [{ name: "Zebra", quantity: 1 }],
+    productionSlot: { startsAt: "2026-11-10T00:00:00Z" },
+  };
+  const earlierModel = {
+    ...orders[1],
+    id: "earlier-model",
+    number: "KC-21",
+    discipline: "FIGURE_SKATING",
+    items: [{ name: "Amber", quantity: 1 }],
+    productionSlot: { startsAt: "2026-11-01T00:00:00Z" },
+  };
+
+  assert.deepEqual(sortOrders([laterModel, earlierModel], { column: "model", direction: "asc" }).map((order) => order.id), ["earlier-model", "later-model"]);
+  assert.deepEqual(sortOrders([laterModel, earlierModel], { column: "production", direction: "asc" }).map((order) => order.id), ["earlier-model", "later-model"]);
 });
 
 test("таблица сортирует данные по выбранной колонке в обоих направлениях", () => {

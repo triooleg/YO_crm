@@ -33,16 +33,19 @@ const order = {
   items: [{ id: "item-1", name: "Купальник", quantity: 1, priceMinor: 45000, productionStatus: "READY", modelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", externalImageUrl: "https://cdn.keycrm.test/design.svg" }],
   payments: [],
   activities: [],
-  invoices: [],
+  invoices: [{ id: "invoice-usd", number: "INV-USD", status: "ISSUED", language: "ru", currency: "USD", totalMinor: 12345, issueDate: "2026-10-01T12:00:00.000Z" }],
 };
 
-async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }) {
-  let currentOrder = structuredClone(order);
+async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number }) {
+  let currentOrder = structuredClone({ ...order, type: behavior?.orderType ?? order.type });
+  let statusPatched = false;
+  let paymentPosted = false;
   const updates: { path: string; body: Record<string, unknown> }[] = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if (method === "PATCH" && path.endsWith("/statuses") && behavior?.statusPatchFails) return route.fulfill({ status: 409, json: { message: "Статус уже изменён" } });
     if (method === "PATCH" && path.startsWith(`/api/orders/${order.id}/`)) {
       if (path.endsWith("/details") && detailsFailure) return route.fulfill({ status: detailsFailure.status, json: { message: detailsFailure.message } });
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -54,15 +57,32 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
       }
       if (path.endsWith("/details")) currentOrder = { ...currentOrder, currency: (body.currency as string | undefined) ?? currentOrder.currency, notes: body.description as string, priceMinor: body.priceMinor as number, modelImagePath: (body.modelImagePath as string | undefined) ?? currentOrder.modelImagePath };
       else currentOrder = { ...currentOrder, ...body } as typeof currentOrder;
+      if (path.endsWith("/statuses")) statusPatched = true;
       if (body.requiredDeliveryAt) currentOrder.requiredDeliveryAt = `${body.requiredDeliveryAt as string}T12:00:00.000Z`;
       await route.fulfill({ json: currentOrder });
       return;
     }
     if (method === "POST" && path === "/api/orders/model-image") return route.fulfill({ json: { path: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg" } });
+    if (method === "POST" && path === `/api/orders/${order.id}/payments`) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      const payment = { id: "payment-new", amountMinor: body.amountMinor as number, currency: body.currency as string, method: body.method as string, receivedAt: body.receivedAt as string, reference: body.reference as string | undefined, notes: body.notes as string | undefined };
+      currentOrder = { ...currentOrder, payments: [payment], paymentHistory: [payment] } as typeof currentOrder;
+      paymentPosted = true;
+      return route.fulfill({ json: payment });
+    }
     if (method === "PATCH" && path === "/api/orders/archive") { const body=route.request().postDataJSON() as Record<string,unknown>; updates.push({path,body}); return route.fulfill({json:{archived:1,orderIds:[order.id]}}); }
     if (method === "GET" && path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA", role: "OWNER" } } });
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
-    if (method === "GET" && path === "/api/orders") return route.fulfill({ json: [currentOrder] });
+    if (method === "GET" && path === "/api/orders") {
+      if (telemetry) telemetry.listGets += 1;
+      const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => ({ ...currentOrder, id: `visual-order-${index + 2}`, number: `YO-26-01${String(index + 2).padStart(2, "0")}`, requiredDeliveryAt: `2026-10-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`, client: { ...currentOrder.client, id: `visual-client-${index + 2}`, displayName: ["Анна Коваленко", "Maria Rossi", "Sophie Martin", "Emma Wilson"][index] ?? `Клиент ${index + 2}` } }));
+      return route.fulfill({ json: [currentOrder, ...additional] });
+    }
+    if (method === "GET" && path === `/api/orders/${order.id}`) {
+      if (statusPatched && behavior?.detailFailsAfterStatusPatch) return route.fulfill({ status: 503, json: { message: "Детали временно недоступны" } });
+      if (paymentPosted && behavior?.detailFailsAfterPayment) return route.fulfill({ status: 503, json: { message: "Детали временно недоступны" } });
+      return route.fulfill({ json: { ...currentOrder, responsibleManager: { id: "manager-1", displayName: "QA Manager" } } });
+    }
     if (method === "GET" && path === "/api/finance/exchange-rates") return route.fulfill({ json: { provider: "ECB", officialUrl: "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html", supportedPairs: ["EUR/USD", "EUR/UAH", "USD/UAH"], cache: { effectiveDate: "2026-10-10", fetchedAt: "2026-10-10T12:00:00.000Z", rates: [{ baseCurrency: "EUR", quoteCurrency: "USD", decimal: "1.16" }] } } });
     if (method === "GET" && path === "/api/orders/images/keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg") return route.fulfill({
       contentType: "image/svg+xml",
@@ -109,7 +129,7 @@ test("смена валюты без ручной правки цены отпр
 });
 
 for (const viewport of [
-  { name: "desktop", width: 1920, height: 1080 },
+  { name: "approved", width: 1703, height: 895 },
   { name: "laptop", width: 1366, height: 768 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
@@ -167,7 +187,6 @@ for (const viewport of [
       await expect(page.locator(".orders-image-preview")).toBeHidden();
     }
 
-    await expect(page.getByRole("button", { name: "Изменить изображение позиции: Купальник" })).toBeVisible();
     await page.getByRole("button", { name: "Изменить заказ" }).click();
     const editDialog = page.getByRole("dialog", { name: "Изменить заказ" });
     await expect(editDialog).toBeVisible();
@@ -186,6 +205,8 @@ for (const viewport of [
     const detailUpdate = updates.find((update) => update.path.endsWith("/details"));
     expect(updates.some((update) => update.path.endsWith("/currency"))).toBe(false);
     expect(detailUpdate).toEqual({ path: `/api/orders/${order.id}/details`, body: { currency: "USD", expectedCurrency: "EUR", priceDirty: true, type: "CUSTOM_ORDER", expectedType: "CUSTOM_ORDER", description: "Обновлённый тестовый заказ", priceMinor: 47550, expectedDescription: "Тестовый заказ", expectedPriceMinor: 45000, requiredDeliveryAt: "2026-10-20", expectedRequiredDeliveryAt: "2026-10-20T12:00:00.000Z", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+    await page.getByRole("tab", { name: /Дизайны/ }).click();
+    await expect(page.getByRole("button", { name: "Изменить изображение позиции: Купальник" })).toBeVisible();
     await page.getByRole("button", { name: "Изменить дизайн" }).click();
     const designDialog = page.getByRole("dialog", { name: "Изменить дизайн" });
     await expect(designDialog.getByLabel("Описание дизайна")).toHaveValue("Купальник");
@@ -197,11 +218,11 @@ for (const viewport of [
     await designDialog.getByRole("button", { name: "Сохранить дизайн" }).click();
     await expect(designDialog).toBeHidden();
     expect(updates.find((update) => update.path.endsWith("/items/item-1"))).toEqual({ path: `/api/orders/${order.id}/items/item-1`, body: { name: "Купальник с рукавами", quantity: 2, priceMinor: 25000, expectedName: "Купальник", expectedQuantity: 1, expectedPriceMinor: 45000, expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
-    const fileChooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Изменить изображение позиции: Купальник" }).click();
-    await (await fileChooser).setFiles({ name: "item-updated.png", mimeType: "image/png", buffer: testPng });
+    await page.getByRole("tab", { name: /Дизайны/ }).click();
+    await page.locator(".orders-item-image-editor input[type=file]").setInputFiles({ name: "item-updated.png", mimeType: "image/png", buffer: testPng });
     await expect.poll(() => updates.find((update) => update.path.endsWith("/model-image"))).toEqual({ path: `/api/orders/${order.id}/model-image`, body: { itemId: "item-1", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
 
+    await page.getByRole("tab", { name: "Финансы" }).click();
     await page.getByRole("button", { name: "Изменить валюту" }).click();
     const currencyDialog = page.getByRole("dialog", { name: new RegExp(order.number) });
     await expect(currencyDialog).toBeVisible();
@@ -210,27 +231,28 @@ for (const viewport of [
     await page.screenshot({ path: screenshotPath(testInfo, `order-currency-dialog-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await currencyDialog.getByRole("button", { name: "Отмена" }).click();
 
-    const discipline = page.getByRole("combobox", { name: "Изменить вид спорта" });
-    await expect(discipline.locator("xpath=ancestor::*[contains(@class,'crm-native-select')]")).toHaveClass(/mantine-NativeSelect-root/);
-    await discipline.selectOption("FIGURE_SKATING");
-    await expect(discipline).toHaveValue("FIGURE_SKATING");
-
     const deadline = page.getByRole("textbox", { name: "Изменить срок" });
     await deadline.evaluate((input) => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       setter?.call(input, "2026-10-25");
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    const inlineUpdates = () => updates.filter((update) => update.path.endsWith("/discipline") || update.path.endsWith("/deadline"));
-    await expect.poll(() => inlineUpdates().length).toBe(2);
+    const inlineUpdates = () => updates.filter((update) => update.path.endsWith("/deadline"));
+    await expect.poll(() => inlineUpdates().length).toBe(1);
     expect(inlineUpdates()).toEqual([
-      { path: `/api/orders/${order.id}/discipline`, body: { discipline: "FIGURE_SKATING" } },
       { path: `/api/orders/${order.id}/deadline`, body: { requiredDeliveryAt: "2026-10-25" } },
     ]);
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     if (viewport.name === "mobile") {
       expect(await page.locator(".orders-table-scroll").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    }
+    if (viewport.name === "approved") {
+      for (const tabName of ["Дизайны", "Индивидуальные измерения", "Финансы", "Производство", "Доставка"]) {
+        await page.getByRole("tab", { name: tabName }).click();
+        await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-tab-${tabName}-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      }
+      await page.getByRole("tab", { name: "Детали" }).click();
     }
     await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await page.getByRole("checkbox", { name: "Выбрать заказ" }).check();
@@ -287,8 +309,107 @@ test("фильтры и сортировка заказов сохраняют �
   await expect(orderNumbers).toHaveText([secondOrder.number, order.number]);
 });
 
+test("смена статуса сохраняется без перезагрузки списка и не закрывает выбранный заказ", async ({ page }) => {
+  const telemetry = { listGets: 0 };
+  const updates = await mockOrdersApi(page, undefined, telemetry);
+  await page.goto("/?section=orders");
+  await expect.poll(() => telemetry.listGets).toBe(1);
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const details = page.getByRole("region", { name: `Данные заказа ${order.number}` });
+  await expect(details).toBeVisible();
+  await page.getByRole("combobox", { name: "Изменить статус" }).selectOption("PAID");
+  await expect.poll(() => updates.some((update) => update.path.endsWith("/statuses") && update.body.salesStatus === "PAID")).toBe(true);
+  await expect(details).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Изменить статус" })).toHaveValue("PAID");
+  expect(telemetry.listGets).toBe(1);
+});
+
+test("ошибка PATCH статуса полностью откатывает оптимистическое изменение без перезагрузки списка", async ({ page }) => {
+  const telemetry = { listGets: 0 };
+  await mockOrdersApi(page, undefined, telemetry, { statusPatchFails: true });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const status = page.getByRole("combobox", { name: "Изменить статус" });
+  await status.selectOption("PAID");
+  await expect(status).toHaveValue("ORDER_CONFIRMED");
+  await expect(page.getByText("Статус уже изменён")).toBeVisible();
+  expect(telemetry.listGets).toBe(1);
+});
+
+test("успешный PATCH статуса не откатывается при сбое точечного обновления деталей", async ({ page }) => {
+  const telemetry = { listGets: 0 };
+  await mockOrdersApi(page, undefined, telemetry, { detailFailsAfterStatusPatch: true });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const status = page.getByRole("combobox", { name: "Изменить статус" });
+  await status.selectOption("PAID");
+  await expect(status).toHaveValue("PAID");
+  await expect(page.getByText("Детали временно недоступны")).toBeVisible();
+  expect(telemetry.listGets).toBe(1);
+});
+
+test("после добавления оплаты раскрытая карточка обновляет сумму и историю без перезагрузки списка", async ({ page }) => {
+  const telemetry = { listGets: 0 };
+  await mockOrdersApi(page, undefined, telemetry);
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("button", { name: "+ Добавить оплату" }).first().click();
+  const payment = page.getByRole("dialog", { name: "Оплата по заказу" });
+  await payment.getByLabel("Сумма").fill("225");
+  await payment.getByLabel("Номер / ссылка").fill("PAY-225");
+  await payment.getByLabel("Примечание").fill("Подтверждено банком");
+  await payment.getByRole("button", { name: "Добавить оплату" }).click();
+  await expect(payment).toBeHidden();
+  await page.getByRole("tab", { name: "Финансы" }).click();
+  await expect(page.getByText("PAY-225")).toBeVisible();
+  await expect(page.getByText("Подтверждено банком")).toBeVisible();
+  await expect(page.getByText(/123,45.*\$/)).toBeVisible();
+  expect(telemetry.listGets).toBe(1);
+});
+
+test("сбой точечного обновления после оплаты безопасно перечитывает список и не оставляет старую сумму", async ({ page }) => {
+  const telemetry = { listGets: 0 };
+  await mockOrdersApi(page, undefined, telemetry, { detailFailsAfterPayment: true });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("button", { name: "+ Добавить оплату" }).first().click();
+  const payment = page.getByRole("dialog", { name: "Оплата по заказу" });
+  await payment.getByLabel("Сумма").fill("225");
+  await payment.getByRole("button", { name: "Добавить оплату" }).click();
+  await expect(payment).toBeHidden();
+  await expect.poll(() => telemetry.listGets).toBe(2);
+  await expect(page.getByRole("region", { name: `Данные заказа ${order.number}` })).toContainText("225,00");
+});
+
+for (const orderType of ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]) {
+  test(`тип ${orderType} не предлагает производство`, async ({ page }) => {
+    await mockOrdersApi(page, undefined, undefined, { orderType });
+    await page.goto("/?section=orders");
+    await page.getByRole("button", { name: order.number, exact: true }).click();
+    await expect(page.getByRole("button", { name: "Назначить производство" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Открыть в производств/ })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Производство" }).click();
+    await expect(page.getByText("Производство не требуется для этого типа заказа")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Статус производства" })).toHaveCount(0);
+  });
+}
+
+test("утверждённая геометрия сохраняет плотность пяти строк и нижнюю панель", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1703, height: 895 });
+  await mockOrdersApi(page, undefined, undefined, { additionalOrders: 4 });
+  await page.goto("/?section=orders");
+  await expect(page.locator(".orders-summary-row")).toHaveCount(5);
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await expect(page.locator(".orders-order-overview")).toBeVisible();
+  const rowHeight = await page.locator(".orders-summary-row").nth(1).evaluate((row) => row.getBoundingClientRect().height);
+  expect(rowHeight).toBeLessThanOrEqual(66);
+  await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-1703x895.png"), fullPage: false });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-1920x1080.png"), fullPage: false });
+});
+
 for (const viewport of [
-  { name: "desktop", width: 1920, height: 1080 },
+  { name: "approved", width: 1703, height: 895 },
   { name: "laptop", width: 1366, height: 768 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
@@ -303,20 +424,20 @@ for (const viewport of [
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("checkbox", { name: "№ / Клиент" })).toBeFocused();
 
-    const designs = dialog.getByRole("checkbox", { name: "Дизайны" });
-    await designs.uncheck();
-    await expect(page.getByRole("columnheader", { name: "Дизайны" })).toBeHidden();
+    const model = dialog.getByRole("checkbox", { name: "Модель / Спорт" });
+    await model.uncheck();
+    await expect(page.getByRole("columnheader", { name: "Модель / Спорт" })).toBeHidden();
 
     await dialog.getByRole("button", { name: "Ниже" }).first().click();
-    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("Кол-во");
-    await expect(page.locator("thead th.orders-col").nth(1).locator(".orders-sort-heading span")).toHaveText("№ / Клиент");
+    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("№ / Клиент");
+    await expect(page.locator("thead th.orders-col").nth(1).locator(".orders-sort-heading span")).toHaveText("Кол-во");
 
     const deadlineRow = dialog.locator('[data-column-id="deadline"]');
     const paymentRow = dialog.locator('[data-column-id="payment"]');
     await deadlineRow.dragTo(paymentRow);
     const visibleColumnClasses = async (selector: string) => page.locator(selector).evaluateAll((elements) => elements.map((element) => [...element.classList].find((name) => name.startsWith("orders-col-") && name !== "orders-col") || ""));
     await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
-      "orders-col-quantity", "orders-col-client", "orders-col-discipline", "orders-col-payment", "orders-col-deadline", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+      "orders-col-client", "orders-col-quantity", "orders-col-payment", "orders-col-deadline", "orders-col-production", "orders-col-delivery", "orders-col-status", "orders-col-created", "orders-col-menu",
     ]);
     expect(await visibleColumnClasses("tbody tr.orders-summary-row td.orders-col")).toEqual(await visibleColumnClasses("thead th.orders-col"));
     await expect(dialog.getByRole("button", { name: "Готово" })).toBeInViewport();
@@ -327,26 +448,26 @@ for (const viewport of [
     await expect(trigger).toBeFocused();
 
     await trigger.click();
-    await expect(page.getByRole("dialog", { name: "Столбцы" }).getByRole("checkbox", { name: "Дизайны" })).not.toBeChecked();
+    await expect(page.getByRole("dialog", { name: "Столбцы" }).getByRole("checkbox", { name: "Модель / Спорт" })).not.toBeChecked();
     await page.getByRole("dialog", { name: "Столбцы" }).getByRole("button", { name: "Готово" }).click();
     await page.reload();
     await page.getByRole("button", { name: "Столбцы" }).click();
     const persistedDialog = page.getByRole("dialog", { name: "Столбцы" });
-    await expect(persistedDialog.getByRole("checkbox", { name: "Дизайны" })).not.toBeChecked();
-    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("Кол-во");
+    await expect(persistedDialog.getByRole("checkbox", { name: "Модель / Спорт" })).not.toBeChecked();
+    await expect(page.locator("thead th.orders-col").nth(0).locator(".orders-sort-heading span")).toHaveText("№ / Клиент");
     await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
-      "orders-col-quantity", "orders-col-client", "orders-col-discipline", "orders-col-payment", "orders-col-deadline", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+      "orders-col-client", "orders-col-quantity", "orders-col-payment", "orders-col-deadline", "orders-col-production", "orders-col-delivery", "orders-col-status", "orders-col-created", "orders-col-menu",
     ]);
 
     await persistedDialog.getByRole("button", { name: "Сбросить" }).click();
-    await expect(persistedDialog.getByRole("checkbox", { name: "Дизайны" })).toBeChecked();
+    await expect(persistedDialog.getByRole("checkbox", { name: "Модель / Спорт" })).toBeChecked();
     await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
-      "orders-col-client", "orders-col-quantity", "orders-col-discipline", "orders-col-designs", "orders-col-deadline", "orders-col-payment", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+      "orders-col-client", "orders-col-model", "orders-col-quantity", "orders-col-deadline", "orders-col-payment", "orders-col-production", "orders-col-delivery", "orders-col-status", "orders-col-created", "orders-col-menu",
     ]);
     await persistedDialog.getByRole("button", { name: "Готово" }).click();
     await page.reload();
     await expect.poll(() => visibleColumnClasses("thead th.orders-col")).toEqual([
-      "orders-col-client", "orders-col-quantity", "orders-col-discipline", "orders-col-designs", "orders-col-deadline", "orders-col-payment", "orders-col-status", "orders-col-nextAction", "orders-col-delivery", "orders-col-created", "orders-col-menu",
+      "orders-col-client", "orders-col-model", "orders-col-quantity", "orders-col-deadline", "orders-col-payment", "orders-col-production", "orders-col-delivery", "orders-col-status", "orders-col-created", "orders-col-menu",
     ]);
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);

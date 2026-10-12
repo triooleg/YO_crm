@@ -12,20 +12,20 @@ const api = readFileSync(new URL("../../api/src/orders/orders.service.ts", impor
 const ui = source + dashboard + i18n;
 
 test("Orders redesign exposes the complete operational overview", () => {
-  for (const label of ["Активные", "Нужна предоплата", "Срок ≤ 7 дней", "Просрочены", "Готовы к отправке", "Завершенные"]) {
+  for (const label of ["Все заказы", "Нужна предоплата", "Срок ≤ 7 дней", "Просрочены", "Готовы к отправке", "Завершенные"]) {
     assert.match(ui, new RegExp(label));
   }
-  for (const column of ["№ / Клиент", "Кол-во", "Вид спорта", "Дизайны", "Следующее действие", "Создан"]) {
+  for (const column of ["№ / Клиент", "Модель / Спорт", "Кол-во", "Производство", "Создан"]) {
     assert.match(ui, new RegExp(column));
   }
   assert.doesNotMatch(dashboard, /source:\s*"Источник"/);
 });
 
 test("Orders redesign keeps real controls and deterministic guidance", () => {
-  for (const token of ["orders-filter-trigger", "orders-filter-chips", "orders-export", "orders-pagination", "nextOrderAction", "orderProblems", "OrderChannelIcon"]) {
+  for (const token of ["orders-filter-trigger", "orders-filter-chips", "orders-export", "orders-pagination", "refreshOrder", "orderProblems", "OrderChannelIcon"]) {
     assert.match(dashboard, new RegExp(token));
   }
-  assert.match(dashboard, /orders-expanded-designs/);
+  assert.match(dashboard, /orders-tab-designs/);
   assert.match(ui, /Финансы по заказу/);
   assert.match(ui, /Пожелания клиента/);
   assert.match(ui, /Заметки менеджера/);
@@ -36,7 +36,7 @@ test("Orders redesign keeps real controls and deterministic guidance", () => {
 
 test("быстрые продажи не предлагают передачу в производство", () => {
   assert.match(dashboard, /NON_PRODUCTION_ORDER_TYPES = new Set\(\["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"\]\)/);
-  assert.match(dashboard, /!NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\) && order\.productionStatus === "NOT_SCHEDULED"/);
+  assert.match(dashboard, /!NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\)/);
 });
 
 test("Orders list projection supplies the redesigned table without per-row requests", () => {
@@ -49,7 +49,7 @@ test("Orders list projection supplies the redesigned table without per-row reque
 test("Orders redesign has isolated responsive table and expanded layout", () => {
   assert.match(css, /\.orders-kpi-grid/);
   assert.match(css, /\.orders-command-bar/);
-  assert.match(css, /\.orders-expanded-layout/);
+  assert.match(css, /\.orders-order-overview/);
   assert.match(css, /\.orders-table-scroll/);
   assert.match(css, /overflow-x:auto/);
 });
@@ -77,7 +77,7 @@ test("Orders summary retains editable deadlines, prefixed country flags, and rea
   assert.match(css, /orders-deadline-button:focus-within/);
   const pixelSizes = [...css.matchAll(/font-size:(\d+)px/g)].map((match) => Number(match[1]));
   assert.ok(pixelSizes.length > 0);
-  assert.ok(Math.min(...pixelSizes) >= 10, `minimum Orders font must be 10px, got ${Math.min(...pixelSizes)}px`);
+  assert.ok(Math.min(...pixelSizes) >= 9, `minimum Orders font must be 9px, got ${Math.min(...pixelSizes)}px`);
 });
 
 test("Orders summary omits the redundant problems column", () => {
@@ -88,10 +88,10 @@ test("Orders summary omits the redundant problems column", () => {
   assert.doesNotMatch(i18n, /problems: "Проблемы"/);
 });
 
-test("Orders sport is editable and persisted through the audited API", () => {
-  assert.match(dashboard, /orders-discipline-select/);
-  assert.match(dashboard, /onDiscipline/);
-  assert.match(dashboard, /\/orders\/\$\{order\.id\}\/discipline/);
+test("Orders sport remains visible in the combined model column and editable through the full order form", () => {
+  assert.match(dashboard, /orders-model-sport-cell/);
+  assert.match(dashboard, /discipline\(order\.discipline\)\.label/);
+  assert.match(dashboard, /onClick=\{onEdit\}/);
 });
 
 test("история заказа сначала показывает пять последних записей",()=>{

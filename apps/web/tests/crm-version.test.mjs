@@ -58,11 +58,20 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.41");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.42");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.41\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.41\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.42\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.42\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.42 описывает редизайн заказов и безопасное сохранение статуса", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.42"'), i18n.indexOf('version: "0.1.41"'));
+  assert.match(release, /утверждённому макету/iu);
+  assert.match(release, /без перезагрузки страницы/iu);
+  assert.match(release, /снимками замеров/iu);
+  assert.match(release, /crm-v0\.1\.41/);
+  assert.match(changelog, /## \[0\.1\.42\] - 2026-10-12/);
 });
 
 test("журнал 0.1.41 описывает полноразмерный график, hover и отправленные слоты", () => {
