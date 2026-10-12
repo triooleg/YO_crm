@@ -48,3 +48,7 @@ test("срок готовности не подменяет плановую о�
 test("активная Mantine-вкладка получает утверждённое визуальное состояние", () => {
   assert.match(css, /\.orders-order-tabs button\[data-active\]/);
 });
+
+test("первая колонка компактнее и не создаёт лишний разрыв перед моделью", () => {
+  assert.match(css, /\.orders-dashboard-table \.orders-col-client\{width:190px!important\}/);
+});

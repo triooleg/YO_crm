@@ -36,7 +36,7 @@ const order = {
   invoices: [{ id: "invoice-usd", number: "INV-USD", status: "ISSUED", language: "ru", currency: "USD", totalMinor: 12345, issueDate: "2026-10-01T12:00:00.000Z" }],
 };
 
-async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number }) {
+async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number; primaryIndex?: number }) {
   let currentOrder = structuredClone({ ...order, type: behavior?.orderType ?? order.type });
   let statusPatched = false;
   let paymentPosted = false;
@@ -75,8 +75,10 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
     if (method === "GET" && path === "/api/orders") {
       if (telemetry) telemetry.listGets += 1;
-      const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => ({ ...currentOrder, id: `visual-order-${index + 2}`, number: `YO-26-01${String(index + 2).padStart(2, "0")}`, requiredDeliveryAt: `2026-10-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`, client: { ...currentOrder.client, id: `visual-client-${index + 2}`, displayName: ["Анна Коваленко", "Maria Rossi", "Sophie Martin", "Emma Wilson"][index] ?? `Клиент ${index + 2}` } }));
-      return route.fulfill({ json: [currentOrder, ...additional] });
+      const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => ({ ...currentOrder, id: `visual-order-${index + 2}`, number: `YO-26-01${String(index + 2).padStart(2, "0")}`, requiredDeliveryAt: `2026-10-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`, createdAt: index < 2 ? `2026-09-0${3 - index}T12:00:00.000Z` : `2026-08-${31 - index}T12:00:00.000Z`, client: { ...currentOrder.client, id: `visual-client-${index + 2}`, displayName: ["Анна Коваленко", "Maria Rossi", "Sophie Martin", "Emma Wilson"][index] ?? `Клиент ${index + 2}` } }));
+      const result = [...additional];
+      result.splice(Math.min(behavior?.primaryIndex ?? 0, result.length), 0, currentOrder);
+      return route.fulfill({ json: result });
     }
     if (method === "GET" && path === `/api/orders/${order.id}`) {
       if (statusPatched && behavior?.detailFailsAfterStatusPatch) return route.fulfill({ status: 503, json: { message: "Детали временно недоступны" } });
@@ -126,6 +128,44 @@ test("смена валюты без ручной правки цены отпр
   await expect(dialog).toBeHidden();
   expect(updates.some((update) => update.path.endsWith("/currency"))).toBe(false);
   expect(updates.find((update) => update.path.endsWith("/details"))?.body).toMatchObject({ currency: "USD", expectedCurrency: "EUR", priceDirty: false, priceMinor: 45000, expectedPriceMinor: 45000 });
+});
+
+test("вид спорта выглядит как текст и карточка раскрывается сразу под выбранной строкой", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1703, height: 895 });
+  const updates = await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+
+  const sport = page.getByRole("button", { name: `Вид спорта: Художественная гимнастика, ${order.number}` });
+  await expect(sport).toHaveText("Художественная гимнастика");
+  await expect(sport).not.toHaveAttribute("aria-haspopup", "listbox");
+  await sport.click();
+  const currentSport = page.getByRole("menuitem", { name: "Художественная гимнастика, Выбрано" });
+  await expect(currentSport).toBeDisabled();
+  await currentSport.evaluate((element) => (element as HTMLElement).click());
+  await expect.poll(() => updates.filter((update) => update.path.endsWith("/discipline")).length).toBe(0);
+  await page.getByRole("menuitem", { name: "Фигурное катание" }).click();
+  await expect.poll(() => updates.some((update) => update.path.endsWith("/discipline") && update.body.discipline === "FIGURE_SKATING")).toBe(true);
+
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const summaryRow = page.locator("tr.orders-summary-row", { has: page.getByRole("button", { name: order.number, exact: true }) });
+  const detailRow = summaryRow.locator("xpath=following-sibling::tr[1]");
+  await expect(detailRow).toHaveClass(/orders-expanded-row/);
+  await expect(detailRow.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
+  await page.screenshot({ path: screenshotPath(testInfo, "orders-inline-details-1703x895.png"), fullPage: false });
+});
+
+test("выбранная сортировка сохраняется после обновления страницы", async ({ page }) => {
+  await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+
+  const sort = page.getByLabel("Сортировка");
+  await sort.selectOption("deadline");
+  await page.getByRole("button", { name: "Сортировать по столбцу: Срок" }).click();
+  await expect(page.getByRole("columnheader", { name: /Срок/ })).toHaveAttribute("aria-sort", "descending");
+
+  await page.reload();
+  await expect(sort).toHaveValue("deadline");
+  await expect(page.getByRole("columnheader", { name: /Срок/ })).toHaveAttribute("aria-sort", "descending");
 });
 
 for (const viewport of [
@@ -396,16 +436,27 @@ for (const orderType of ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE
 
 test("утверждённая геометрия сохраняет плотность пяти строк и нижнюю панель", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1703, height: 895 });
-  await mockOrdersApi(page, undefined, undefined, { additionalOrders: 4 });
+  await mockOrdersApi(page, undefined, undefined, { additionalOrders: 4, primaryIndex: 2 });
   await page.goto("/?section=orders");
   await expect(page.locator(".orders-summary-row")).toHaveCount(5);
+  const clientColumnWidth = await page.locator("tbody .orders-col-client").first().evaluate((cell) => cell.getBoundingClientRect().width);
+  expect(clientColumnWidth).toBeLessThanOrEqual(221);
   await page.getByRole("button", { name: order.number, exact: true }).click();
+  const selectedRow = page.locator("tr.orders-summary-row", { has: page.getByRole("button", { name: order.number, exact: true }) });
+  await expect(selectedRow.locator("xpath=following-sibling::tr[1]")).toHaveClass(/orders-expanded-row/);
   await expect(page.locator(".orders-order-overview")).toBeVisible();
   const rowHeight = await page.locator(".orders-summary-row").nth(1).evaluate((row) => row.getBoundingClientRect().height);
   expect(rowHeight).toBeLessThanOrEqual(66);
   await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-1703x895.png"), fullPage: false });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-1920x1080.png"), fullPage: false });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.getByRole("button", { name: new RegExp(`^Вид спорта: .*, ${order.number}$`) }).click();
+  await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-menu-1366x768.png"), fullPage: false });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: new RegExp(`^Вид спорта: .*, ${order.number}$`) }).click();
+  await page.screenshot({ path: screenshotPath(testInfo, "keycrm-orders-density-menu-390x844.png"), fullPage: false });
 });
 
 for (const viewport of [

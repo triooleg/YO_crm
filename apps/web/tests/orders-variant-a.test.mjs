@@ -12,7 +12,7 @@ test("утверждённая панель заказа содержит чет
   for (const callback of ["onConversation", "onClient", "onProduction", "onFinance", "onDelivery"])
     assert.match(expanded, new RegExp(callback));
   assert.match(dashboard, /onNavigate\("production", \{ orderId: order\.id \}\)/);
-  assert.match(dashboard, /onNavigate\("finance", \{ orderId: expandedOrder\.id \}\)/);
+  assert.match(dashboard, /onNavigate\("finance", \{ orderId: order\.id \}\)/);
 });
 
 test("утверждённый макет сохраняет плотную таблицу и адаптивную нижнюю панель", () => {

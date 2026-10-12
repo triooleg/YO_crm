@@ -10,8 +10,28 @@ test("заказ раскрывается в строке и подгружае�
   assert.match(dashboard, /const \[expandedId, setExpandedId\] = useState<string>\(\)/);
   assert.match(dashboard, /async function refreshOrder/);
   assert.match(dashboard, /request\(`\/orders\/\$\{orderId\}`\)/);
-  assert.match(dashboard, /expandedOrder && <div className="orders-expanded-row"/);
+  assert.match(dashboard, /<Fragment key=\{order\.id\}>/);
+  assert.match(dashboard, /expandedId === order\.id && <tr className="orders-expanded-row"/);
+  assert.match(dashboard, /<td colSpan=\{visibleColumns\.length \+ 1\}>/);
+  assert.doesNotMatch(dashboard, /expandedOrder && <div className="orders-expanded-row"/);
   assert.doesNotMatch(dashboard, /OrderWorkspaceCard|workspaceId|setWorkspaceId/);
+});
+
+test("вид спорта редактируется через простую текстовую кнопку без стрелки select", () => {
+  assert.match(dashboard, /function OrderDisciplineMenu/);
+  assert.match(dashboard, /className="orders-discipline-trigger"/);
+  assert.match(dashboard, /<Menu\.Dropdown>/);
+  assert.match(dashboard, /if \(value === order\.discipline \|\| !DISCIPLINES\.includes/);
+  assert.match(dashboard, /aria-current=\{selected \? "true" : undefined\}/);
+  assert.match(dashboard, /aria-label=\{selected \? `\$\{label\}, \$\{ui\.selected\}` : label\}/);
+  assert.doesNotMatch(dashboard, /const values = \["", \.\.\.DISCIPLINES\]/);
+  assert.doesNotMatch(dashboard, /className="orders-discipline-select"/);
+});
+
+test("выбранная колонка и направление сортировки сохраняются между обновлениями", () => {
+  assert.match(dashboard, /const SORT_SETTINGS_KEY = "orders-dashboard-sort-v1"/);
+  assert.match(dashboard, /parseSavedOrderSort\(localStorage\.getItem\(SORT_SETTINGS_KEY\)\)/);
+  assert.match(dashboard, /localStorage\.setItem\(SORT_SETTINGS_KEY, JSON\.stringify\(next\)\)/);
 });
 
 test("обзор сохраняет четыре независимых статуса", () => {

@@ -58,11 +58,20 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.42");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.43");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.42\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.42\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.43\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.43\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.43 описывает контекстную карточку и устойчивую сортировку", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.43"'), i18n.indexOf('version: "0.1.42"'));
+  assert.match(release, /непосредственно под выбранной строкой/iu);
+  assert.match(release, /сохраняются после обновления страницы/iu);
+  assert.match(release, /ложную запись истории/iu);
+  assert.match(release, /crm-v0\.1\.42/);
+  assert.match(changelog, /## \[0\.1\.43\] - 2026-10-12/);
 });
 
 test("журнал 0.1.42 описывает редизайн заказов и безопасное сохранение статуса", () => {

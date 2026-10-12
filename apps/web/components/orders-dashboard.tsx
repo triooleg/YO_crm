@@ -1,7 +1,7 @@
 "use client";
 
-import { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
@@ -42,6 +42,7 @@ type MeasurementTarget = { orderId: string; itemId?: string };
 const PAGE_SIZE = 20;
 const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v3";
 const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
+const SORT_SETTINGS_KEY = "orders-dashboard-sort-v1";
 const DEFAULT_COLUMNS: ColumnId[] = ["client", "model", "quantity", "deadline", "payment", "production", "delivery", "status", "created", "menu"];
 const SORTABLE_ORDER_COLUMNS: SortColumnId[] = DEFAULT_COLUMNS.filter((id): id is SortColumnId => id !== "menu");
 const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
@@ -153,6 +154,11 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }, []);
 
   useEffect(() => {
+    const saved = parseSavedOrderSort(localStorage.getItem(SORT_SETTINGS_KEY));
+    if (saved) setSort(saved);
+  }, []);
+
+  useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("action") !== "new-order" || !["OWNER", "ADMIN", "MANAGER"].includes(role)) return;
     openNewOrder();
@@ -245,6 +251,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }
   function selectQuickFilter(filter: QuickFilter) { setQuickFilter((current) => current === filter && filter !== "all" ? "all" : filter); }
   function clearFilters() { setQuickFilter("all"); setStatusFilter("all"); setDisciplineFilter("all"); }
+  function persistSort(next: SortState) { setSort(next); localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); }
+  function cycleSort(id: SortColumnId) { setSort((current) => { const next = nextOrderSort(current, id) as SortState; localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); return next; }); }
   async function changeStatus(order: Order, field: "salesStatus" | "productionStatus", value: string) {
     if (statusRequests.current.has(order.id)) return;
     const previous = order[field];
@@ -279,6 +287,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     catch (reason) { setError((reason as Error).message); }
   }
   async function changeDiscipline(order: Order, value: string) {
+    if (value === order.discipline || !DISCIPLINES.includes(value as (typeof DISCIPLINES)[number])) return;
     const previous=order.discipline;
     setOrders(items=>items.map(item=>item.id===order.id?{...item,discipline:value}:item));
     try{await request(`/orders/${order.id}/discipline`,{method:"PATCH",body:JSON.stringify({discipline:value})});await refreshAfterMutation(order.id)}
@@ -342,8 +351,6 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     }
   }
 
-  const expandedOrder = expandedId ? orders.find((order) => order.id === expandedId) : undefined;
-
   return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
       <div><p>{ui.eyebrow}</p><h1>{ui.title}</h1><span>{ui.subtitle}</span></div>
@@ -371,7 +378,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
         </div>}
       </div>
       <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.deposit], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{value}</small></button>)}</div>
-      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => setSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
+      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
     </div>
@@ -388,19 +395,20 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     <div className="orders-table-wrap orders-table-scroll">
       <table className="orders-table orders-dashboard-table">
         <colgroup><col className="orders-controls" />{visibleColumns.map((id) => <col key={id} className={`orders-col orders-col-${id}`} />)}</colgroup>
-        <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => id === "menu" ? <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th> : <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }} aria-sort={sort.column === id ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button className="orders-sort-heading" onClick={() => setSort((current) => nextOrderSort(current, id) as SortState)} aria-label={`${ui.sortByColumn}: ${ui.columnsMap[id]}`} title={`${ui.sortByColumn}: ${ui.columnsMap[id]}`}><span>{ui.columnsMap[id]}</span><b aria-hidden="true">{sort.column === id ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</b></button></th>)}</tr></thead>
+        <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => id === "menu" ? <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th> : <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }} aria-sort={sort.column === id ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button className="orders-sort-heading" onClick={() => cycleSort(id)} aria-label={`${ui.sortByColumn}: ${ui.columnsMap[id]}`} title={`${ui.sortByColumn}: ${ui.columnsMap[id]}`}><span>{ui.columnsMap[id]}</span><b aria-hidden="true">{sort.column === id ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</b></button></th>)}</tr></thead>
         <tbody>
           {loading && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><span className="orders-loader" />{ui.loading}</td></tr>}
           {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}
-          {!loading && shown.map((order) => <tr key={order.id} className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
+          {!loading && shown.map((order) => <Fragment key={order.id}>
+            <tr className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => void toggleExpanded(order)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
               {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => void toggleExpanded(order)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
-            </tr>)}
+            </tr>
+            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}>{detailPending.has(order.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder order={orderDetails[order.id] ?? order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(orderDetails[order.id] ?? order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: order.id, itemId })} onCurrency={() => setCurrencyOrderId(order.id)} onEdit={() => void openEditOrder(order)} onEditItem={(itemId) => setEditDesign({ orderId: order.id, itemId })} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
+          </Fragment>)}
         </tbody>
       </table>
     </div>
-
-    {expandedOrder && <div className="orders-expanded-row"><div id={`order-details-${expandedOrder.id}`} role="region" aria-label={`${ui.orderDetails} ${expandedOrder.number}`}>{detailPending.has(expandedOrder.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder order={orderDetails[expandedOrder.id] ?? expandedOrder} paymentTrigger={paymentTrigger} statusPending={statusPending.has(expandedOrder.id)} onStatus={(field, value) => void changeStatus(orderDetails[expandedOrder.id] ?? expandedOrder, field, value)} onClient={() => onNavigate("clients", { clientId: expandedOrder.client.id, orderId: expandedOrder.id })} onConversation={() => onNavigate("inbox", { clientId: expandedOrder.client.id, clientName: expandedOrder.client.displayName, orderId: expandedOrder.id })} onProduction={() => onNavigate("production", { orderId: expandedOrder.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: expandedOrder.id }) : undefined} onPayment={() => setPaymentOrderId(expandedOrder.id)} onDelivery={() => setDeliveryOrderId(expandedOrder.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: expandedOrder.id, itemId })} onCurrency={() => setCurrencyOrderId(expandedOrder.id)} onEdit={() => void openEditOrder(expandedOrder)} onEditItem={(itemId)=>setEditDesign({orderId:expandedOrder.id,itemId})} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(expandedOrder, itemId, expectedModelImagePath, file)} /></div></div>}
 
     {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, page - 3), Math.max(5, page + 2)).map((value) => <button key={value} className={page === value ? "active" : ""} onClick={() => setPage(value)}>{value}</button>)}<button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)}><UiIcon name="chevronRight" /></button></nav><span>{PAGE_SIZE} / {ui.rowsPerPage}</span></div>}
 
@@ -426,10 +434,24 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   </section>;
 }
 
+function OrderDisciplineMenu({ order, onChange }: { order: Order; onChange: (order: Order, value: string) => void }) {
+  const currentLabel = discipline(order.discipline).label;
+  return <Menu width={220} position="bottom-start" shadow="md">
+    <Menu.Target>
+      <UnstyledButton className="orders-discipline-trigger" aria-label={`${ui.discipline}: ${currentLabel}, ${order.number}`}>
+        {currentLabel}
+      </UnstyledButton>
+    </Menu.Target>
+    <Menu.Dropdown>
+      {DISCIPLINES.map((value) => { const selected = order.discipline === value; const label = discipline(value).label; return <Menu.Item key={value} aria-current={selected ? "true" : undefined} aria-label={selected ? `${label}, ${ui.selected}` : label} disabled={selected} onClick={() => void onChange(order, value)}>{label}</Menu.Item>; })}
+    </Menu.Dropdown>
+  </Menu>;
+}
+
 function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onDelivery }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onDelivery: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
   if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
-  if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><CrmNativeSelect className="orders-discipline-select" aria-label={`${ui.discipline}: ${order.number}`} value={order.discipline || ""} onChange={(event) => void onDiscipline(order, event.target.value)} data={[{ value: "", label: discipline(undefined).label }, ...DISCIPLINES.map((value) => ({ value, label: discipline(value).label }))]} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
+  if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") { const received = paid(order), percent = order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div><small className={balance(order) > 0 ? "orders-balance-line" : "orders-paid-line"}>{balance(order) > 0 ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent}%</em></td>; }
@@ -664,6 +686,7 @@ function primaryMeasurement(order: Order) { return ownedMeasurement(order.measur
 function measurementAthlete(order: Order) { return order.athlete || order.items[0]?.athlete; }
 function measurementSizes(values?: Record<string, number>) { if (!values) return ui.notReceived; const height = values.standardHeight ? `${values.standardHeight} / ` : ""; return `${height}${[values.m1, values.m2, values.m3, values.m15].map((value) => value ?? "—").join(" / ")} см`; }
 function discipline(value?: string) { const codes: Record<string, string> = { RHYTHMIC_GYMNASTICS: "RG", ACROBATIC_GYMNASTICS: "ACRO", FIGURE_SKATING: "FS", AEROBIC_GYMNASTICS: "AERO", BATON_TWIRLING_MAJORETTE: "TW", OTHER: "—" }; const labels = ui.disciplines as Record<string, string>; return { code: codes[value || ""] || "—", label: labels[value || ""] || ui.disciplines.missing }; }
+function parseSavedOrderSort(value: string | null): SortState | undefined { try { const parsed = JSON.parse(value || "null") as Partial<SortState> | null; return parsed && SORTABLE_ORDER_COLUMNS.includes(parsed.column as SortColumnId) && (parsed.direction === "asc" || parsed.direction === "desc") ? parsed as SortState : undefined; } catch { return undefined; } }
 function carrierLabel(value: string) { return (ui.carriers as Record<string, string>)[value] || value; }
 function money(value: number, currency: string) { return new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(value / 100); }
 function days(order: Order) { return order.requiredDeliveryAt ? Math.ceil((new Date(order.requiredDeliveryAt).getTime() - Date.now()) / 86400000) : 9999; }

@@ -23,7 +23,7 @@
 .orders-country-flag{width:18px;height:13px;margin-right:5px;border-radius:2px;box-shadow:0 0 0 1px #0002;vertical-align:-1px}
 .orders-deadline-button strong,.orders-deadline-button small{display:block}.orders-deadline-button small{margin-top:3px;color:var(--muted);font-size:11px}
 .orders-deadline-button:focus-within{outline:2px solid var(--od-purple);outline-offset:2px;background:#f4f0ff}
-.orders-deadline-button input{pointer-events:none}.orders-discipline-select{width:100%;min-height:33px;padding:5px 22px 5px 7px;border:1px solid transparent;border-radius:7px;background:#faf8ff;color:var(--od-editable);font:inherit;font-weight:700;cursor:pointer}.orders-discipline-select:hover,.orders-discipline-select:focus{border-color:var(--od-purple);outline:0}.orders-deadline-button strong{color:var(--od-editable)}
+.orders-deadline-button input{pointer-events:none}.orders-discipline-trigger{display:block;max-width:100%;padding:2px 0;color:var(--od-editable);font:inherit;font-weight:700;line-height:1.25;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.orders-discipline-trigger:hover{text-decoration:underline}.orders-discipline-trigger:focus-visible{border-radius:3px;outline:2px solid var(--od-purple);outline-offset:2px}.orders-deadline-button strong{color:var(--od-editable)}
 .orders-item-payment .crm-status-badge{display:block;width:max-content;margin-top:4px}
 
 /* Mantine phase 8: shared controls preserve the established dense Orders layout. */
@@ -146,11 +146,9 @@
 .orders-dashboard-table .orders-summary-row .orders-assign-production{padding:2px 6px;white-space:nowrap}
 .orders-client-cell .orders-order-number{grid-column:1/-1;width:100%}
 .orders-client-cell>button{width:100%}
-.orders-dashboard-table .orders-col-client{width:250px}
+.orders-dashboard-table .orders-col-client{width:190px!important}
 .orders-dashboard-table .orders-col-model{width:220px}
-.orders-model-sport-cell .orders-discipline-select{display:block!important;width:170px;max-width:100%;height:22px!important;min-height:22px!important}
-.orders-model-sport-cell .orders-discipline-select .mantine-Input-wrapper{height:22px!important;min-height:22px!important}
-.orders-model-sport-cell .orders-discipline-select .mantine-NativeSelect-input{min-height:22px;height:22px;padding:0 22px 0 0;border:0;background:transparent;color:#706683;font-size:11px}
+.orders-model-sport-cell .orders-discipline-trigger{width:170px;font-size:11px}
 .orders-approved-expanded{font-size:12px}
 .orders-order-identity p,.orders-order-identity small,.orders-order-identity em{font-size:11px}
 .orders-order-identity strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
