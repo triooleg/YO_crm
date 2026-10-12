@@ -41,7 +41,8 @@ test("устаревший polling не отменяет локальное по
  const versionAfterOutboundPromotion=requestVersion+1;
  assert.equal(isCurrentInboxRefresh(requestVersion,versionAfterOutboundPromotion,readVersion,readVersion),false);
  assert.match(workspace,/function promoteClient[\s\S]*?refreshRequestSequence\.current\+\+/);
- for(const path of[/promoteClient\(operationClientId,delivered\)/,/promoteClient\(operationClientId,result\)/])assert.match(workspace,path);
+ assert.match(workspace,/const delivered=action==="SEND"\?latestSuccessfulMessage\(sent\):undefined/);
+ assert.match(workspace,/if\(delivered\)promoteClient\(operationClientId,delivered\)/);
 });
 
 test("ручной поиск или фильтр отменяет начатый ранее polling",()=>{

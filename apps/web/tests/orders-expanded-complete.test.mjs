@@ -49,7 +49,8 @@ test("каждое изделие редактирует только собст
   assert.match(dashboard, /orderItemId=\{item\?\.id\}/);
   assert.match(measurementPanel, /\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement/);
   assert.match(dashboard, /Array\.from\(\{ length: 17 \}/);
-  assert.match(expanded, /measurementHistory: order\.measurementHistory/);
+  assert.match(expanded, /athleteMeasurements\(athlete\)/);
+  assert.match(expanded, /order\.measurementHistory/);
 });
 
 test("смена статуса сериализована, откатывается при ошибке и не перечитывает список", () => {
@@ -79,4 +80,11 @@ test("быстрые продажи не получают производств
   const statusCell = dashboard.match(/if \(id === "status"\)[\s\S]*?if \(id === "delivery"\)/)?.[0] ?? "";
   assert.match(statusCell, /order\.salesStatus/);
   assert.doesNotMatch(statusCell, /order\.productionStatus/);
+});
+
+test("новый дизайн и пустая позиция используют всех спортсменов и снимки клиента", () => {
+  assert.match(dashboard, /const athletes=order\.client\.athletes\?\?uniqueOrderAthletes\(order\)/);
+  assert.match(dashboard, /function clientMeasurementOptions\(order:OrderDetail,item:DetailedOrderItem\)/);
+  assert.match(dashboard, /\(order\.client\.athletes\?\?\[\]\)\.filter\(athlete=>!item\.athlete\|\|athlete\.id===item\.athlete\.id\)/);
+  assert.match(expanded, /const measurementOptions=clientMeasurementOptions\(order,item\)/);
 });

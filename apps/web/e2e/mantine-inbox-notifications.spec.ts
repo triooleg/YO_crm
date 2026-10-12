@@ -22,6 +22,7 @@ async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boo
     status: "ACTIVE",
     source: activeChannel,
     preferredChannel: activeChannel,
+    waitingForReply: true,
     orders: [],
     buyerSummary: { purchaseCount: 0, paymentTotals: [] },
     linkedChannels: [activeChannel],
@@ -59,7 +60,7 @@ async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boo
       return;
     }
     if (path === "/api/communications") {
-      await route.fulfill({ json: { items: [client], total: 1, hasMore: false, channelCounts: { [activeChannel]: 1 } } });
+      await route.fulfill({ json: { items: [client], total: 1, hasMore: false, scopeCounts: { all: 1, unread: 0, waiting: 1 }, channelCounts: { [activeChannel]: 1 } } });
       return;
     }
     if (path === "/api/communications/client-toast") {
@@ -82,6 +83,33 @@ async function mockInboxWithMessage(page: Page, options: { clipboardReject?: boo
   });
 }
 
+test("AI предложение во Входящих по умолчанию свернуто и неактивно", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1536, height: 1024 });
+  await mockInboxWithMessage(page);
+  await page.goto("/?section=inbox");
+
+  const toggle = page.getByRole("button", { name: /Предложение ответа от AI/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#communications-ai-panel-body")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ответ AI" })).toHaveCount(0);
+  const waitingRequest=page.waitForRequest(request=>request.url().includes("/api/communications?")&&request.url().includes("conversationScope=WAITING"));
+  await page.getByRole("complementary",{name:"Список клиентов"}).getByRole("button",{name:"Ждут ответа 1",exact:true}).click();
+  await waitingRequest;
+  await page.screenshot({ path: testInfo.outputPath("inbox-approved-collapsed-1536x1024.png"), fullPage: false });
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#communications-ai-panel-body")).toBeVisible();
+  await expect(page.getByLabel("Язык ответа")).toBeVisible();
+  await expect(page.getByLabel("Язык ответа")).toHaveValue("auto");
+  await expect(page.getByRole("button", { name: "Ответ AI" })).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath("inbox-approved-expanded-1536x1024.png"), fullPage: false });
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#communications-ai-panel-body")).toHaveCount(0);
+});
+
 for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) {
   test(`копирование показывает компактное временное уведомление ${viewport.width}×${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
@@ -91,7 +119,10 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 76
     const orderFilter = page.locator("select[aria-label='Фильтр по заказам']");
     await expect(orderFilter).toHaveClass(/mantine-NativeSelect-input/);
     if (viewport.width < 700) {
-      await page.locator(".communications-mobile-list-toggle").click();
+      await expect(page.locator(".communications-message-content").filter({hasText:"Текст для копирования"})).toBeVisible();
+      const listToggle=page.locator(".communications-mobile-list-toggle");
+      await expect(listToggle).toBeVisible();
+      await listToggle.evaluate((button:HTMLButtonElement)=>button.click());
       await expect(page.locator(".communications-clients.mobile-open")).toBeVisible();
     }
     await page.screenshot({ path: testInfo.outputPath(`inbox-controls-${viewport.width}x${viewport.height}.png`), fullPage: false });

@@ -256,6 +256,8 @@ test("AI selected reply is server scoped, Russian first, and translates only aft
   assert.match(service,/d\.action==="REPLY"\?"Русский"/);
   assert.match(service,/if\(d\.action==="FINALIZE_REPLY"\)/);
   assert.match(service,/inbound=visibleSelected\.filter\(message=>message\.direction===MessageDirection\.INBOUND\)/);
+  assert.match(service,/normalizeClientLanguageCode\(d\.targetLanguage\)/);
+  assert.match(service,/if\(d\.targetLanguage&&!targetLanguage\)thrownewBadRequestException/);
   assert.match(service,/JSON\.parse\(detected\)/);
   assert.match(service,/normalizeClientLanguageCode\(parsed\.language\)/);
   assert.match(service,/двухбуквенныйкодISO639-1/);
@@ -267,6 +269,12 @@ test("AI selected reply is server scoped, Russian first, and translates only aft
   assert.match(service,/InboundMessageTranslation/);
   assert.match(service,/FORUPDATE/);
   assert.doesNotMatch(service,/after:\{[^}]*text:translated\.text/s);
+});
+test("Inbox message search excludes deleted and deduplicated history",()=>{
+  assert.match(service,/SELECTDISTINCTc\."clientId"AS"clientId"FROM"Message"m/);
+  assert.match(service,/m\."metadata"#>>'\{deletion,deletedAt\}'ISNULL/);
+  assert.match(service,/m\."metadata"->>'deduplicatedIntoMessageId'ISNULL/);
+  assert.match(service,/messageSearchClientIds\.length\?\[\{id:\{in:messageSearchClientIds\}\}\]/);
 });
 test("GPT-5 AI requests preserve output budget and log safe incomplete diagnostics",()=>{
   assert.match(aiResponse,/reasoning:\{effort:"minimal"\}/);
@@ -335,15 +343,35 @@ test("a saved draft is sent in place without creating a duplicate message",()=>{
 });
 
 test("inbox secondary filters and channel counters are server complete", () => {
-  assert.match(dto, /@IsIn\(\["UNREAD","CLIENTS"\]asconst\)conversationScope\?:"UNREAD"\|"CLIENTS"/);
+  assert.match(dto, /@IsIn\(\["UNREAD","WAITING","CLIENTS"\]asconst\)conversationScope\?:"UNREAD"\|"WAITING"\|"CLIENTS"/);
   assert.match(service, /query\.conversationScope==="CLIENTS"/);
   assert.match(service, /query\.conversationScope==="UNREAD"/);
+  assert.match(service, /query\.conversationScope==="WAITING"/);
   assert.match(service, /unreadCount:\{gt:0\}/);
+  assert.match(service, /scopeCounts:\{all:/);
+  assert.match(service, /waitingForReply:/);
   assert.match(service, /channelCounts:Object\.fromEntries/);
 });
 
+test("waiting for reply is based on the latest visible delivered message, not unread state",()=>{
+  assert.match(service,/latestReplyStateRows/);
+  assert.match(service,/DISTINCTON\(m\."conversationId"\)/);
+  assert.match(service,/m\."direction"IN\('INBOUND','OUTBOUND'\)/);
+  assert.match(service,/m\."status"IN\('RECEIVED','SENT'\)/);
+  assert.match(service,/m\."messageType"<>'reaction'/);
+  assert.match(service,/deduplicatedIntoMessageId/);
+  assert.match(service,/deletion,deletedAt/);
+});
+
+test("inbox search includes visible message content",()=>{
+  assert.match(service,/m\."content"ILIKE/);
+  assert.match(service,/m\."normalizedText"ILIKE/);
+  assert.match(service,/messageSearchClientIds/);
+});
+
 test("inbox active order context includes real payment rows",()=>{
-  assert.match(service,/include:\{payments:\{where:\{voidedAt:null\},orderBy:\{receivedAt:"desc"\}\}\}/);
+  assert.match(service,/payments:\{where:\{voidedAt:null\},orderBy:\{receivedAt:"desc"\}\}/);
+  assert.match(service,/items:\{orderBy:\[\{createdAt:"asc"\},\{id:"asc"\}\],select:\{name:true,quantity:true\}\}/);
 });
 
 test("composer autosave updates one owned draft instead of appending duplicates",()=>{
@@ -359,6 +387,9 @@ test("composer autosave updates one owned draft instead of appending duplicates"
   assert.match(service,/direction:MessageDirection\.OUTBOUND/);
   assert.match(service,/conversation:\{clientId,archivedAt:null\}/);
   assert.match(service,/action:existing\?"UPDATE":"CREATE",entityType:"Message"/);
+  assert.match(dto,/classUpdateMessageDraftDto[\s\S]*aiRunId/);
+  assert.match(service,/scopedFeedback=awaittx\.aiResponseFeedback\.findFirst/);
+  assert.match(service,/metadata=\{\.\.\.preservedMetadata,composerDraftKey:draftKey,\.\.\.\(d\.aiRunId\?\{aiRunId:d\.aiRunId\}:\{\}\)\}/);
 });
 
 test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundaries",async()=>{
@@ -371,6 +402,24 @@ test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundari
   assert.ok((await errors(12345)).length>0);
   assert.ok((await errors("c".repeat(19))).length>0);
   assert.ok((await errors("c".repeat(81))).length>0);
+});
+
+test("AI draft provenance is reserved and completed for e-mail and Chatwoot sends",()=>{
+  const emailSend=service.slice(service.indexOf("if(channel===ContactChannel.EMAIL)"),service.indexOf("if(channel===ContactChannel.CHATWOOT)"));
+  const chatwootSend=service.slice(service.indexOf("if(channel===ContactChannel.CHATWOOT)"),service.indexOf("if(channel!==ContactChannel.FACEBOOK"));
+  const idempotentMismatch=service.indexOf("if(d.aiRunId&&requestedDraftAiRunId&&d.aiRunId!==requestedDraftAiRunId)");
+  const terminalRetryReturn=service.indexOf('if(attempt.status==="SENT"||attempt.status==="FAILED")return');
+  assert.ok(idempotentMismatch>=0&&terminalRetryReturn>idempotentMismatch,"AI provenance mismatch must be rejected before a terminal idempotent retry returns");
+  assert.match(service,/constsendAiRunId=d\.aiRunId\|\|storedAiRunId/);
+  for(const channelSend of [emailSend,chatwootSend]){
+    assert.match(channelSend,/aiRunId:sendAiRunId,sentMessageId:null,accepted:null/);
+    assert.match(channelSend,/reserveAiFeedback\(tx,\{aiRunId:sendAiRunId,clientId,conversationId:conversation\.id\}\)/);
+    assert.match(channelSend,/aiRunId:sendAiRunId,sentMessageId:null,accepted:false/);
+    assert.match(channelSend,/accepted:true,rejected:false,sentMessageId:message\.id/);
+  }
+  assert.match(service,/integration\.email\.delivery-uncertain/);
+  assert.match(service,/uncertainAiRunId/);
+  assert.match(service,/asyncreleaseEmailAttempt[\s\S]*data:\{accepted:null\}/);
 });
 
 test("Messenger thread-control mutations have separate durable history without customer data", () => {
@@ -452,7 +501,7 @@ test("uncertain WhatsApp sends remain blocked from retries", () => {
   assert.match(whatsappSend, /persistSuccessFailure:channel===ContactChannel\.WHATSAPP/);
   assert.match(whatsappSend, /integration\.whatsapp\.delivery-uncertain/);
   assert.match(whatsappSend, /message-send:"\+conversation\.id/);
-  assert.match(whatsappSend, /uncertaintyValue=.*aiRunId:d\.aiRunId/);
+  assert.match(whatsappSend, /uncertaintyValue=.*aiRunId:sendAiRunId/);
   assert.match(whatsappSend, /providerMessageId:result\.message_id/);
   assert.match(whatsappSend, /draftMessageId:draft\.id/);
   assert.match(whatsappSend, /deduplicatedIntoMessageId:existing\.id/);

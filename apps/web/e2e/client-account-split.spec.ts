@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function mockMergedClient(page:Page,{splitFailure,secondClient=false,postSplitDelayMs=0,postSplitListFailure=false,detailMessage=false,nestedChain=false,delayedDraftMs=0,delayedAsyncMs=0}:{splitFailure?:string;secondClient?:boolean;postSplitDelayMs?:number;postSplitListFailure?:boolean;detailMessage?:boolean;nestedChain?:boolean;delayedDraftMs?:number;delayedAsyncMs?:number}={}){
-  let split=false,splitPayload:unknown,detailRequests=0,draftWrites=0,postSplitListRequests=0;const events:string[]=[];
+async function mockMergedClient(page:Page,{splitFailure,secondClient=false,initialSecondClient=false,postSplitDelayMs=0,postSplitListFailure=false,detailMessage=false,nestedChain=false,delayedDraftMs=0,delayedAsyncMs=0}:{splitFailure?:string;secondClient?:boolean;initialSecondClient?:boolean;postSplitDelayMs?:number;postSplitListFailure?:boolean;detailMessage?:boolean;nestedChain?:boolean;delayedDraftMs?:number;delayedAsyncMs?:number}={}){
+  let split=false,splitPayload:unknown,detailRequests=0,draftWrites=0,postSplitListRequests=0;const events:string[]=[],draftBodies:unknown[]=[];
   const instagram={id:"conversation-instagram",channel:"INSTAGRAM",lastMessageAt:"2026-09-08T18:51:00.000Z",unreadCount:0,unreadVersion:0,messages:[{content:"No rush",createdAt:"2026-09-08T18:51:00.000Z"}]};
   const whatsapp={id:"conversation-whatsapp",channel:"WHATSAPP",lastMessageAt:"2026-09-08T18:40:00.000Z",unreadCount:0,unreadVersion:0,messages:[{content:"Hello",createdAt:"2026-09-08T18:40:00.000Z"}]};
   const facebook={id:"conversation-facebook",channel:"FACEBOOK",lastMessageAt:"2026-09-08T18:45:00.000Z",unreadCount:0,unreadVersion:0,messages:[{content:"From leaf",createdAt:"2026-09-08T18:45:00.000Z"}]};
@@ -15,21 +15,23 @@ async function mockMergedClient(page:Page,{splitFailure,secondClient=false,postS
       if(splitFailure){await route.fulfill({status:409,json:{message:splitFailure}});return;}
       split=true;await route.fulfill({json:{mode:"CHANNELS_ONLY",movedConversationIds:nestedChain?["conversation-facebook","conversation-whatsapp"]:["conversation-whatsapp"],movedChannels:nestedChain?["FACEBOOK","WHATSAPP"]:["WHATSAPP"],detachedSourceClientIds:nestedChain?["source-whatsapp","source-facebook"]:["source-whatsapp"]}});return;
     }
-    if(method==="PUT"&&path.includes("/drafts/")){draftWrites++;events.push("draft-start");if(delayedDraftMs)await new Promise(resolve=>setTimeout(resolve,delayedDraftMs));events.push("draft-end");await route.fulfill({json:{id:"delayed-draft",content:"late",channel:"WHATSAPP",direction:"OUTBOUND",status:"DRAFT",createdAt:new Date().toISOString()}});return;}
+    if(method==="PUT"&&path.includes("/drafts/")){draftWrites++;draftBodies.push(route.request().postDataJSON());events.push("draft-start");if(delayedDraftMs)await new Promise(resolve=>setTimeout(resolve,delayedDraftMs));events.push("draft-end");const body=route.request().postDataJSON() as {content:string;channel:string};await route.fulfill({json:{id:"delayed-draft",content:body.content,channel:body.channel,direction:"OUTBOUND",status:"DRAFT",createdAt:new Date().toISOString()}});return;}
     if(method==="POST"&&path==="/api/ai-assistant/messages/stale-whatsapp/translate"){if(delayedAsyncMs)await new Promise(resolve=>setTimeout(resolve,delayedAsyncMs));await route.fulfill({json:{metadata:{translation:{text:"Поздний перевод",language:"ru"}}}});return;}
-    if(method==="POST"&&path==="/api/ai-assistant/generate"){if(delayedAsyncMs)await new Promise(resolve=>setTimeout(resolve,delayedAsyncMs));await route.fulfill({json:{text:"Поздний AI текст"}});return;}
+    if(method==="POST"&&path==="/api/ai-assistant/generate"){if(delayedAsyncMs)await new Promise(resolve=>setTimeout(resolve,delayedAsyncMs));await route.fulfill({json:{text:"Поздний AI текст",aiRunId:"ai-run-switch",targetLanguage:"en"}});return;}
     if(method==="POST"&&path==="/api/ai-assistant/clients/merged-client/summaries"){if(delayedAsyncMs)await new Promise(resolve=>setTimeout(resolve,delayedAsyncMs));await route.fulfill({json:{fromDate:"2026-09-08",summary:"Поздняя сводка",generatedAt:new Date().toISOString(),messageCount:1}});return;}
     if(method!=="GET"){await route.fulfill({status:405,json:{message:"Unexpected test mutation"}});return;}
     if(path==="/api/auth/me"){await route.fulfill({json:{user:{email:"qa@yoleotard.local",displayName:"QA Operator",role:"OWNER"}}});return;}
     if(path==="/api/branding"){await route.fulfill({json:{}});return;}
     if(path==="/api/communications/templates"){await route.fulfill({json:[]});return;}
     if(path==="/api/ai-assistant/clients/merged-client/summaries"){await route.fulfill({json:{firstMessageDate:"2026-09-08",items:[]}});return;}
-    if(path==="/api/communications"){const removedFilter=split&&url.searchParams.get("channels")?.split(",").includes("WHATSAPP");if(split){postSplitListRequests++;if(postSplitDelayMs)await new Promise(resolve=>setTimeout(resolve,postSplitDelayMs));if(postSplitListFailure){await route.fulfill({status:503,json:{message:"TEST_LIST_FAILURE"}});return}}const items=removedFilter?[]:(split&&secondClient?[other(),client()]:[client()]);await route.fulfill({json:{items,total:items.length,hasMore:false,channelCounts:{FACEBOOK:0,INSTAGRAM:split&&secondClient?2:1,WHATSAPP:split?0:1,CHATWOOT:0,EMAIL:0}}});return;}
+    if(path==="/api/communications"){const removedFilter=split&&url.searchParams.get("channels")?.split(",").includes("WHATSAPP");if(split){postSplitListRequests++;if(postSplitDelayMs)await new Promise(resolve=>setTimeout(resolve,postSplitDelayMs));if(postSplitListFailure){await route.fulfill({status:503,json:{message:"TEST_LIST_FAILURE"}});return}}const includeSecond=initialSecondClient||(split&&secondClient),items=removedFilter?[]:(includeSecond?[other(),client()]:[client()]);await route.fulfill({json:{items,total:items.length,hasMore:false,scopeCounts:{all:items.length,unread:0,waiting:0},channelCounts:{FACEBOOK:0,INSTAGRAM:includeSecond?2:1,WHATSAPP:split?0:1,CHATWOOT:0,EMAIL:0}}});return;}
     if(path==="/api/communications/merged-client"){detailRequests++;await route.fulfill({json:{messages:detailMessage&&!split?[{id:"stale-whatsapp",content:"Старое сообщение WhatsApp",channel:"WHATSAPP",direction:"INBOUND",status:"SENT",createdAt:"2026-09-08T18:40:00.000Z"},...(nestedChain?[{id:"stale-facebook",content:"Старое сообщение Facebook",channel:"FACEBOOK",direction:"INBOUND",status:"SENT",createdAt:"2026-09-08T18:45:00.000Z"}]:[])]:[]}});return;}
+    if(path==="/api/communications/another-client"){await route.fulfill({json:{messages:[]}});return;}
     if(path==="/api/clients/merged-client"){await route.fulfill({json:{id:"merged-client",displayName:"Yolanda Yao",athletes:[],workTasks:[]}});return;}
+    if(path==="/api/clients/another-client"){await route.fulfill({json:{id:"another-client",displayName:"Anna First",athletes:[],workTasks:[]}});return;}
     await route.fulfill({status:501,json:{message:`Unexpected test route: ${path}`}});
   });
-  return{payload:()=>splitPayload,detailRequests:()=>detailRequests,draftWrites:()=>draftWrites,postSplitListRequests:()=>postSplitListRequests,events:()=>events};
+  return{payload:()=>splitPayload,detailRequests:()=>detailRequests,draftWrites:()=>draftWrites,draftBodies:()=>draftBodies,postSplitListRequests:()=>postSplitListRequests,events:()=>events};
 }
 
 for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",width:1366,height:768},{name:"mobile",width:390,height:844}]){
@@ -109,12 +111,13 @@ test("разделение снимает фильтр удалённого ка
   await expect(page.getByText("proof.png")).toBeVisible();
   await page.getByRole("button",{name:"Разделить аккаунты"}).click();
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
-  await expect(page.getByRole("button",{name:/^Все \d+$/})).toHaveAttribute("aria-pressed","true");
+  await expect(page.locator(".communications-social-filter.communications-channel-filter-all")).toHaveAttribute("aria-pressed","true");
   await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
   await expect(composer).toHaveValue("");
   await expect(page.getByText("proof.png")).toBeHidden();
+  const writesAfterSplit=state.draftWrites();
   await page.waitForTimeout(1100);
-  expect(state.draftWrites()).toBe(0);
+  expect(state.draftWrites()).toBe(writesAfterSplit);
   expect(state.postSplitListRequests()).toBe(1);
 });
 
@@ -151,8 +154,11 @@ test("вложенное A → B → C разделение очищает ка�
 test("разделение ждёт уже начатый autosave и не возвращает его поздний результат",async({page})=>{
   const state=await mockMergedClient(page,{delayedDraftMs:700});
   await page.goto("/?section=inbox");
+  await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
   const composer=page.locator(".communications-compose textarea");await composer.fill("Активное автосохранение");
-  await expect.poll(()=>state.draftWrites()).toBe(1);
+  await expect(composer).toHaveValue("Активное автосохранение");
+  await page.waitForTimeout(950);
+  await expect.poll(()=>state.draftWrites(),{timeout:8000}).toBe(1);
   await page.getByRole("button",{name:"Разделить аккаунты"}).click();
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(page.getByRole("button",{name:"Разделить аккаунты"})).toBeHidden();
@@ -161,14 +167,84 @@ test("разделение ждёт уже начатый autosave и не во�
   await expect(page.getByText("late",{exact:true})).toBeHidden();
 });
 
+test("быстрое переключение диалога сначала сохраняет текст composer",async({page})=>{
+  const state=await mockMergedClient(page,{initialSecondClient:true,delayedDraftMs:120});
+  await page.goto("/?section=inbox");
+  await expect(page.locator(".communications-chat-client")).toContainText("Anna First");
+  await expect(page.getByRole("status").filter({hasText:"Сообщений пока нет"})).toBeVisible();
+  const composer=page.locator(".communications-compose textarea");
+  await composer.fill("Не потерять этот черновик");
+  await expect(composer).toHaveValue("Не потерять этот черновик");
+  await page.waitForTimeout(50);
+  const nextClient=page.locator(".communications-client-list>button").filter({hasText:"Yolanda Yao"});
+  await expect(nextClient).toBeVisible();
+  await nextClient.click();
+  await expect.poll(()=>state.draftWrites()).toBe(1);
+  await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
+  expect(state.draftBodies()).toContainEqual({content:"Не потерять этот черновик",channel:"INSTAGRAM"});
+});
+
+test("переход из Входящих сначала сохраняет текст composer",async({page})=>{
+  const state=await mockMergedClient(page,{delayedDraftMs:120});
+  await page.goto("/?section=inbox");
+  await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
+  const composer=page.locator(".communications-compose textarea");
+  await composer.fill("Сохранить перед переходом к клиенту");
+
+  await page.locator(".communications-open-client").click();
+
+  await expect.poll(()=>state.draftWrites()).toBe(1);
+  await expect(page).toHaveURL(/section=clients/);
+  expect(state.draftBodies()).toContainEqual({content:"Сохранить перед переходом к клиенту",channel:"INSTAGRAM"});
+  expect(state.events().indexOf("draft-end")).toBeGreaterThanOrEqual(0);
+});
+
+test("верхняя навигация сохраняет черновик до размонтирования Входящих",async({page})=>{
+  const state=await mockMergedClient(page,{delayedDraftMs:120});
+  await page.goto("/?section=inbox");
+  await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
+  const composer=page.locator(".communications-compose textarea");
+  await composer.fill("Сохранить перед переходом через шапку");
+
+  await page.locator(".crm-topbar-nav").getByRole("button",{name:"Заказы"}).click();
+
+  await expect.poll(()=>state.draftWrites()).toBe(1);
+  await expect(page).toHaveURL(/section=orders/);
+  expect(state.draftBodies()).toContainEqual({content:"Сохранить перед переходом через шапку",channel:"INSTAGRAM"});
+  expect(state.events().indexOf("draft-end")).toBeGreaterThanOrEqual(0);
+});
+
+test("быстрая смена канала сохраняет AI provenance вместе с черновиком",async({page})=>{
+  const state=await mockMergedClient(page,{detailMessage:true});
+  await page.goto("/?section=inbox");
+  await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
+  await page.getByRole("button",{name:/Предложение ответа от AI/}).click();
+  await page.getByRole("button",{name:"Ответ AI"}).click();
+  await page.getByRole("checkbox",{name:"Выбрать входящее сообщение для ответа"}).check();
+  await page.getByRole("button",{name:"Сформировать ответ на русском"}).click();
+  await page.getByRole("button",{name:"Подготовить перевод"}).click();
+  await page.getByRole("button",{name:"Вставить в чат"}).click();
+
+  await page.locator(".communications-chat-header select").selectOption("WHATSAPP");
+
+  await expect.poll(()=>state.draftWrites()).toBe(1);
+  expect(state.draftBodies()).toContainEqual({content:"Поздний AI текст",channel:"INSTAGRAM",aiRunId:"ai-run-switch"});
+  await expect(page.locator(".communications-chat-header select")).toHaveValue("WHATSAPP");
+});
+
 test("поздние translation summary и AI ответы не возвращаются после разделения",async({page})=>{
   await mockMergedClient(page,{postSplitListFailure:true,detailMessage:true,delayedAsyncMs:700});
   await page.goto("/?section=inbox");
   await page.locator(".communications-message-more").evaluate((element:HTMLDetailsElement)=>{element.open=true});
-  await page.getByRole("menuitem",{name:"Перевести"}).click({force:true});
+  await page.getByRole("button",{name:"Перевести",exact:true}).click({force:true});
   const composer=page.locator(".communications-compose textarea");await composer.fill("Текст для AI");
+  const aiPanelToggle=page.getByRole("button",{name:/Предложение ответа от AI/});
+  await expect(aiPanelToggle).toHaveAttribute("aria-expanded","false");
+  await expect(page.getByRole("button",{name:"Улучшить"})).toBeHidden();
+  await aiPanelToggle.click();
+  await expect(aiPanelToggle).toHaveAttribute("aria-expanded","true");
   await page.locator(".communications-composer-more").evaluate((element:HTMLDetailsElement)=>{element.open=true});await page.getByRole("button",{name:"Улучшить"}).click({force:true});
-  await page.getByRole("tab",{name:"Сводка"}).click();
+  await page.locator(".communications-context-actions button").filter({hasText:"Сводка"}).click();
   const summaryButton=page.getByRole("button",{name:"Сформировать сводку"});await expect(summaryButton).toBeEnabled();await summaryButton.click();
   await page.getByRole("button",{name:"Разделить аккаунты"}).click();
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
@@ -203,7 +279,11 @@ for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",wi
     });
     await page.goto("/?section=inbox");
     await expect(page.getByText("История 0",{exact:true})).toBeVisible();
-    if(viewport.name!=="mobile")await page.getByRole("button",{name:"WhatsApp: 1"}).click();
+    if(viewport.name!=="mobile"){
+      const filtered=page.waitForResponse(response=>{const url=new URL(response.url());return url.pathname==="/api/communications"&&url.searchParams.get("channels")==="WHATSAPP"});
+      await page.getByRole("button",{name:"WhatsApp: 1"}).click();
+      await filtered;
+    }
     const messages=page.locator(".communications-messages");
     await expect(messages.locator("article")).toHaveCount(36);
     expect(await messages.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);

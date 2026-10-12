@@ -4,7 +4,7 @@ type InboxMessage = {
   channel?: string;
   content: string;
   createdAt: string;
-  metadata?: { composerDraftKey?: string };
+  metadata?: { composerDraftKey?: string; aiRunId?: string };
 };
 
 export function prepareInboxMessages<T extends InboxMessage>(messages: T[], channel: string) {
@@ -16,6 +16,7 @@ export function prepareInboxMessages<T extends InboxMessage>(messages: T[], chan
     visible,
     draft,
     draftKey: draft?.metadata?.composerDraftKey,
+    draftAiRunId: draft?.metadata?.aiRunId,
   };
 }
 
@@ -25,4 +26,14 @@ export function restoreInboxDraft<T extends InboxMessage>(messages: T[], channel
     ...prepared,
     content: volatileContent !== undefined ? volatileContent : prepared.draft?.content || "",
   };
+}
+
+export function inboxDraftNeedsSave(
+  savedText: string,
+  savedAiRunId: string | undefined,
+  nextText: string,
+  nextAiRunId: string | undefined,
+) {
+  const normalizedText = nextText.trim();
+  return Boolean(normalizedText) && (normalizedText !== savedText || nextAiRunId !== savedAiRunId);
 }

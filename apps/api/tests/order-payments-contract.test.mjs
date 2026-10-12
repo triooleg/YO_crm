@@ -17,7 +17,7 @@ test("к заказу можно добавить проверенную опл�
 });
 
 test("достижение порога предоплаты атомарно подтверждает предварительный слот",()=>{
-  const addPayment=service.slice(service.indexOf("async addPayment"),service.indexOf("async upload"));
+  const addPayment=service.slice(service.indexOf("async addPayment"),service.indexOf("async addMeasurement"));
   const transactionBody=addPayment.slice(addPayment.indexOf("return this.prisma.$transaction"));
   assert.match(addPayment,/\$transaction\(async \(tx\)/);
   assert.match(addPayment,/pg_advisory_xact_lock/);
@@ -35,7 +35,7 @@ test("достижение порога предоплаты атомарно п
 });
 
 test("оплата в другой валюте автоматически получает официальный снимок пересчёта",()=>{
-  const addPayment=service.slice(service.indexOf("async addPayment"),service.indexOf("async upload"));
+  const addPayment=service.slice(service.indexOf("async addPayment"),service.indexOf("async addMeasurement"));
   assert.match(addPayment,/currentOrRefresh\(actor\)/);
   assert.match(addPayment,/buildPaymentConversion/);
   assert.doesNotMatch(addPayment,/Оплата должна быть в валюте заказа/);

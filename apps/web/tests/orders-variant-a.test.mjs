@@ -19,7 +19,7 @@ test("утверждённый макет сохраняет плотную та
   for (const selector of [".orders-dashboard", ".orders-dashboard-table", ".orders-order-overview", ".orders-order-tabs", ".orders-order-tab-panel"])
     assert.match(styles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(styles, /@media\(max-width:900px\)/);
-  assert.match(styles, /orders-dashboard-table\{min-width:1420px\}/);
+  assert.match(styles, /orders-dashboard-table\{[^}]*min-width:1580px/);
   assert.match(styles, /orders-order-overview\{display:grid/);
 });
 
@@ -28,7 +28,7 @@ test("визуальные подсказки редактируемых зна�
   assert.match(styles, /orders-deadline-button strong\{color:var\(--od-editable\)\}/);
   assert.match(styles, /orders-inline-status-control \.mantine-NativeSelect-input\{[^}]*color:var\(--od-editable\)/);
   assert.match(dashboard, /function DeliveryAddressModal/);
-  assert.match(dashboard, /className="orders-delivery-cell-button"/);
+  assert.match(dashboard, /className=\{shipped \? "orders-delivery-cell-button is-shipped" : "orders-delivery-cell-button"\}/);
 });
 
 test("основные и рукавные замеры различаются цветом", () => {

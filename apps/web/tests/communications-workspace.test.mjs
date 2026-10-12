@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 const component = await readFile(new URL("../components/communications-workspace.tsx", import.meta.url), "utf8");
 const locale = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/communications-workspace.css", import.meta.url), "utf8");
+const inboxCss = await readFile(new URL("../app/inbox-reference.css", import.meta.url), "utf8");
 const menuCss = await readFile(new URL("../app/communications-template-menu.css", import.meta.url), "utf8");
 
 test("входящие используют централизованные русские подписи и статусы", () => {
@@ -15,9 +16,10 @@ test("входящие используют централизованные р�
     assert.match(locale, new RegExp(`${key}:`));
 });
 
-test("правая панель содержит вкладку Сводка рядом с Файлами и календарь сохранённых дат",()=>{
-  assert.match(component,/type ContextTab = "CLIENT" \| "ORDERS" \| "NOTES" \| "FILES" \| "SUMMARY"/);
-  assert.match(component,/key:"FILES",label:ui\.contextFiles\},\{key:"SUMMARY",label:ui\.contextSummary\}/);
+test("правая панель содержит пять основных вкладок, а Сводка доступна как дополнительное действие",()=>{
+  assert.match(component,/type ContextTab = "CLIENT" \| "ORDERS" \| "TASKS" \| "NOTES" \| "FILES" \| "SUMMARY"/);
+  assert.match(component,/key:"NOTES",label:ui\.contextNotes\},\{key:"FILES",label:ui\.contextFiles\}\]/);
+  assert.match(component,/setContextTab\("SUMMARY"\)/);
   assert.match(component,/\/ai-assistant\/clients\/\$\{encodeURIComponent\(operationClientId\)\}\/summaries/);
   assert.match(component,/className="communications-summary-calendar"/);
   assert.match(component,/is-generated/);
@@ -71,43 +73,64 @@ test("каждое входящее переводится внутри сооб
   assert.match(component,/messages\/\$\{message\.id\}\/translate/);
   assert.match(component,/message\.metadata\?\.translation\?\.text/);
   assert.match(component,/communications-message-translation/);
+  assert.match(component,/shownTranslations\.has\(message\.id\)/);
+  assert.match(component,/ui\.hideTranslation:ui\.showTranslation/);
   assert.match(component,/message\.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation\(message\.language\) && <button[^>]*communications-message-translate[^>]*aria-label=\{[^}]+\}[^>]*title=\{[^}]+\}[\s\S]*?<svg/);
   assert.match(css,/communications-message-translation\{[^}]*border-top:1px solid #aaa[^}]*color:#666/);
   assert.match(css,/\.communications-message-translate\{[^}]*position:absolute[^}]*top:8px[^}]*right:8px[^}]*width:28px[^}]*height:28px/);
   assert.match(css,/communications-message-translate:focus-visible/);
-  for(const key of["translateAgain","translating","selectMessageForReply"])assert.match(locale,new RegExp(`${key}:`));
+  for(const key of["translateAgain","showTranslation","hideTranslation","translating","selectMessageForReply"])assert.match(locale,new RegExp(`${key}:`));
 });
 
-test("AI ответ использует выбранные входящие и требует подтверждения",()=>{
+test("AI предложение свернуто по умолчанию, активно только после раскрытия и вставляется в редактор",()=>{
+  assert.match(component,/\[aiPanelOpen,setAiPanelOpen\]=useState\(false\)/);
+  assert.match(component,/aria-expanded=\{aiPanelOpen\}/);
+  assert.match(component,/aria-controls="communications-ai-panel-body"/);
+  assert.match(component,/\{aiPanelOpen&&<div id="communications-ai-panel-body"/);
+  assert.match(component,/function closeAiPanel\(\)\{invalidateAiOperation\(\);setAiPanelOpen\(false\)/);
   assert.match(component,/selectedMessageIds/);
   assert.match(component,/message\.direction === "INBOUND"/);
   assert.match(component,/replyInstruction/);
   assert.match(component,/action:"REPLY"[\s\S]*messageIds:selectedMessageIds/);
   assert.match(component,/action:"FINALIZE_REPLY"[\s\S]*messageIds:aiReply\.messageIds/);
+  assert.match(component,/label=\{ui\.aiReplyLanguage\}/);
+  assert.match(component,/value=\{aiTargetLanguage\}/);
+  assert.match(component,/aiTargetLanguage!=="auto"\?\{targetLanguage:aiTargetLanguage\}:\{\}/);
   assert.match(component,/phase:"TRANSLATED"/);
   assert.match(component,/communications-ai-draft-message/);
   assert.match(component,/value=\{aiDraftText\}/);
-  assert.match(component,/pendingAiSend/);
-  assert.match(component,/body:JSON\.stringify\(\{content,channel:activeChannel,action:"SEND",clientRequestId:requestId,aiRunId:aiReply\.aiRunId\}\)/);
   assert.match(component,/setAiReply\(\{messageIds:\[\.\.\.selectedMessageIds\],phase:"RUSSIAN",aiRunId:x\.aiRunId\}\)/);
-  assert.match(component,/pendingAiSend\.current\.textContent===content&&pendingAiSend\.current\.textRequestId/);
   assert.match(component,/ref=\{aiDraftEditor\}/);
   assert.match(component,/scrollIntoView\(\{block:"nearest"\}\)/);
   assert.match(component,/disabled=\{aiPreparing\|\|busy\}/);
-  const aiSend=component.slice(component.indexOf("async function sendConfirmedAiReply"),component.indexOf("function chooseTemplate"));
-  assert.doesNotMatch(aiSend,/attachment|setText|setAttachment|pendingSend/);
-  assert.match(aiSend,/if\(result\.status==="FAILED"\)\{pendingAiSend\.current=\{\}/);
+  const insertAi=component.slice(component.indexOf("function insertAiReplyIntoComposer"),component.indexOf("async function saveAsTemplate"));
+  assert.match(insertAi,/setText\(aiDraftText\.trim\(\)\)/);
+  assert.match(insertAi,/closeAiPanel\(\)/);
+  assert.doesNotMatch(insertAi,/communications\/.+\/messages|action:"SEND"|api\(/);
   assert.match(css,/communications-ai-draft-message/);
+  assert.match(css,/communications-ai-language-row/);
+  assert.match(inboxCss,/@media\(max-width:720px\)[\s\S]*communications-ai>button[\s\S]*min-height:40px/);
+  assert.match(inboxCss,/@media\(max-width:720px\)[\s\S]*communications-attach[^}]*width:40px[^}]*height:40px/);
   assert.match(component,/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
   for(const name of["generateSelectedReply","prepareAiTranslation"]){const section=component.slice(component.indexOf(`async function ${name}`),component.indexOf("\n  }",component.indexOf(`async function ${name}`))+4);assert.equal((section.match(/selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/g)||[]).length,3)}
   assert.match(component,/const isActive=\(\)=>selectedClientId\.current===operationClientId&&composeEpoch\.current===operationEpoch/);
   assert.match(component,/aiOperationSequence\.current===operationSequence/);
   assert.match(component,/function invalidateAiOperation\(\)\{aiOperationSequence\.current\+\+;setAiPreparing\(false\)\}/);
-  assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);setText\(e\.target\.value\);/);
+  assert.match(component,/onChange=\{\(e\) => \{invalidateAiOperation\(\);currentComposerText\.current=e\.target\.value;setText\(e\.target\.value\);/);
   assert.match(component,/function chooseTemplate[\s\S]*setAiReply\(null\)/);
   assert.match(component,/if\(action==="DRAFT"\)\{setAiReply\(null\);setAiDraftText\(""\)\}/);
-  assert.match(component,/ui\.confirmTranslationAndSend/);
-  for(const key of["replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","confirmTranslationAndSend"])assert.match(locale,new RegExp(`${key}:`));
+  assert.match(component,/ui\.insertAiReply/);
+  assert.match(component,/transformAiDraft/);
+  assert.match(component,/ui\.makeShorter/);
+  assert.match(component,/navigator\.clipboard\.writeText\(aiDraftText\)/);
+  for(const key of["aiSuggestionTitle","expandAiSuggestion","collapseAiSuggestion","replyTask","replyTaskPlaceholder","prepareRussianDraft","russianDraftHint","prepareTranslation","translatedDraftHint","insertAiReply"])assert.match(locale,new RegExp(`${key}:`));
+});
+
+test("контекст чата открывает конкретный заказ и производство",()=>{
+  assert.match(component,/type ContextTarget = "clients" \| "orders" \| "production" \| "tasks" \| "finance"/);
+  assert.match(component,/onNavigate\?\.\("orders",\{orderId:o\.id\}\)/);
+  assert.match(component,/onNavigate\?\.\("production",\{orderId:o\.id\}\)/);
+  assert.match(component,/orderQuantity\(o\)/);
 });
 
 test("чекбоксы ответа появляются только в режиме ответа и не показываются для фото и видео", () => {
@@ -688,7 +711,7 @@ test("фильтры каналов показывают Все и реальн�
   assert.doesNotMatch(component, /<b>\{item==="EMAIL"\?ui\.gmail:ui\.sources\[item\]\}<\/b>/);
   assert.doesNotMatch(css, /communications-social-filter>b/);
   assert.doesNotMatch(css, /communications-social-filter>strong[^}]*display:none/);
-  for (const key of ["allChannels", "unreadChats", "clientFilter"])
+  for (const key of ["allChannels", "unreadChats", "waitingReply", "clientFilter"])
     assert.match(locale, new RegExp(`${key}:`));
 });
 
@@ -697,15 +720,45 @@ test("вторичные фильтры выполняются сервером 
   assert.match(component, /conversationScope=\$\{encodeURIComponent\(selectedConversationScope\)\}/);
   assert.match(component, /setClientTotal\(page\.total\)/);
   assert.match(component, /setChannelTotals\(page\.channelCounts\)/);
+  assert.match(component, /setScopeCounts\(page\.scopeCounts\)/);
   assert.doesNotMatch(component, /const filteredClients = clients\.filter/);
 });
 
 test("вторичная фильтрация и шапка чата показывают рабочий контекст",()=>{
-  assert.match(component,/type ConversationScope = "ALL" \| "UNREAD" \| "CLIENTS"/);
+  assert.match(component,/type ConversationScope = "ALL" \| "UNREAD" \| "WAITING" \| "CLIENTS"/);
   assert.match(component,/communications-secondary-filters/);
+  assert.match(component,/conversationScope==="WAITING"/);
+  assert.match(component,/waitingForReply/);
   assert.match(component,/communications-chat-badges/);
   assert.match(component,/client\.country/);
   assert.match(component,/activeOrders\.length/);
+});
+
+test("смена клиента сначала сохраняет ожидающий черновик",()=>{
+  assert.match(component,/async function flushComposerDraftBeforeNavigation/);
+  assert.match(component,/!await flushComposerDraftBeforeNavigation\(\)\)return/);
+  assert.match(component,/setDraftStatus\("ERROR"\)/);
+});
+
+test("любой переход из Inbox сначала сохраняет черновик",()=>{
+  assert.match(component,/onNavigate:navigate/);
+  assert.match(component,/const onNavigate=navigate\?\(\(section:ContextTarget,context\?:Record<string,string>\)=>\{void navigateFromInbox\(section,context\)\}\)/);
+  assert.match(component,/async function navigateFromInbox[\s\S]*await flushComposerDraftBeforeNavigation\(\)[\s\S]*navigate\(section,context\)/);
+});
+
+test("вставленный AI ответ сохраняет provenance до явной отправки",()=>{
+  assert.match(component,/\[composerAiRunId,setComposerAiRunId\]=useState<string>\(\)/);
+  assert.match(component,/setComposerAiRunId\(aiReply\.aiRunId\)/);
+  assert.match(component,/content&&composerAiRunId\?\{aiRunId:composerAiRunId\}:\{\}/);
+  assert.match(component,/setComposerAiRunId\(undefined\)/);
+  assert.match(component,/composerAiRunId\?\{aiRunId:composerAiRunId\}:\{\}/);
+  assert.match(component,/setComposerAiRunId\(prepared\.draftAiRunId\)/);
+  assert.match(component,/lastAutosavedAiRunId=useRef<string\|undefined>/);
+  assert.match(component,/inboxDraftNeedsSave\(lastAutosavedText\.current,lastAutosavedAiRunId\.current,content,composerAiRunId\)/);
+  assert.match(component,/lastAutosavedAiRunId\.current=operationAiRunId/);
+  assert.match(component,/lastAutosavedAiRunId\.current=prepared\.draftAiRunId/);
+  assert.match(component,/async function changeReplyChannel[\s\S]*await flushComposerDraftBeforeNavigation\(\)[\s\S]*setActiveChannel\(nextChannel\)/);
+  assert.match(component,/onChange=\{event=>void changeReplyChannel\(event\.target\.value\)\}/);
 });
 
 test("список отмечает готовую сводку, а шапка показывает все каналы клиента",()=>{
@@ -737,7 +790,7 @@ test("composer предлагает контекстные быстрые дей
   assert.match(component,/attachmentInput/);
   assert.match(component,/ui\.attachPhotoVideo/);
   assert.match(component,/ui\.measurementsShortcut/);
-  assert.match(component,/ui\.quickReply/);
+  assert.match(component,/templates\.slice\(0,5\)/);
   assert.match(component,/action:"new-invoice"/);
   assert.match(component,/rows=\{1\}/);
   assert.match(component,/Math\.min\(e\.currentTarget\.scrollHeight,140\)/);
@@ -752,15 +805,24 @@ test("существующие замеры спортсмена можно ск
   assert.match(component,/onSaved=\{async\(\)=>\{setEditingMeasurements\(undefined\);await loadClientDetail\(client\.id\)\}\}/);
 });
 
-test("правая панель организована доступными вкладками клиента, заказов, заметок и файлов", () => {
-  assert.match(component, /type ContextTab = "CLIENT" \| "ORDERS" \| "NOTES" \| "FILES"/);
+test("правая панель организована доступными вкладками клиента, заказов, задач, заметок и файлов", () => {
+  assert.match(component, /type ContextTab = "CLIENT" \| "ORDERS" \| "TASKS" \| "NOTES" \| "FILES"/);
   assert.match(component, /function ContextTabs/);
   assert.match(component, /role="tablist"/);
   assert.match(component, /aria-selected=\{active===tab\.key\}/);
   assert.match(component, /role="tabpanel"/);
   assert.match(css, /\.communications-context-tabs\{[^}]*display:grid/);
-  for (const key of ["contextClient", "contextOrders", "contextNotes", "contextFiles"])
+  assert.match(component, /communications-context-tasks/);
+  assert.match(component, /onNavigate\?\.\("tasks",\{clientId:client\.id,taskId:task\.id\}\)/);
+  assert.match(component, /className="communications-open-client"[\s\S]*navigateFromInbox\("clients",\{clientId:client\.id\}\)/);
+  for (const key of ["contextClient", "contextOrders", "contextTasks", "contextNotes", "contextFiles", "openClient"])
     assert.match(locale, new RegExp(`${key}:`));
+});
+
+test("быстрые ответы под редактором используют реальные шаблоны",()=>{
+  assert.match(component,/templates\.slice\(0,5\)\.map\(template=>/);
+  assert.match(component,/chooseTemplate\(template\)/);
+  assert.match(component,/templates\.length>5/);
 });
 
 test("вкладка файлов показывает media-превью и открывает его в общем lightbox", () => {

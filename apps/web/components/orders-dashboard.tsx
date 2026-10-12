@@ -13,7 +13,7 @@ import { CrmTabList } from "./crm/tab-list";
 import { repairMojibake } from "../lib/text-encoding.mjs";
 import { canOpenOrderFinance } from "../lib/order-context";
 import { orderMeasurementState } from "../lib/order-measurement-state";
-import { paginateOrders } from "../lib/order-pagination";
+import { ORDER_PAGE_SIZES, type OrderPageSize, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination";
 import { defaultOrderSort, nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
 import { orderDeliveryErrorMessage } from "../lib/order-delivery-errors";
 import { hasUsableDeliveryAddress } from "../lib/order-delivery-address";
@@ -31,7 +31,8 @@ type Preview = { src: string; left: number; top: number; width: number };
 type OrderClientBrief = { id: string; displayName: string; country?: string };
 type OrderClientDetail = OrderClientBrief & { athletes: { id: string; firstName: string; lastName?: string; measurements: { id: string; measuredAt: string }[] }[] };
 type DetailedOrderItem = Order["items"][number] & { measurementHistory?: Array<NonNullable<Order["items"][number]["measurement"]>> };
-type OrderDetail = Omit<Order, "items"> & {
+type OrderDetail = Omit<Order, "items" | "client"> & {
+  client: Order["client"] & { athletes?: OrderClientDetail["athletes"] };
   responsibleManager?: { id: string; displayName: string } | null;
   paymentHistory?: Array<Order["payments"][number] & { voidedAt?: string; voidReason?: string }>;
   measurementHistory?: Array<NonNullable<Order["measurement"]>>;
@@ -39,7 +40,7 @@ type OrderDetail = Omit<Order, "items"> & {
 };
 type MeasurementTarget = { orderId: string; itemId?: string };
 
-const PAGE_SIZE = 20;
+const PAGINATION_SETTINGS_KEY = "orders-dashboard-pagination-v1";
 const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v3";
 const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
 const SORT_SETTINGS_KEY = "orders-dashboard-sort-v1";
@@ -61,6 +62,9 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [sort, setSort] = useState<SortState>({ column: "created", direction: "desc" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<OrderPageSize>(20);
+  const [paginationReady, setPaginationReady] = useState(false);
+  const previousListCriteria = useRef<string | undefined>(undefined);
   const [expandedId, setExpandedId] = useState<string>();
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderDetail>>({});
   const [detailPending, setDetailPending] = useState<Set<string>>(new Set());
@@ -68,7 +72,11 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const statusRequests = useRef(new Set<string>());
   const [paymentOrderId, setPaymentOrderId] = useState<string>();
   const [deliveryOrderId, setDeliveryOrderId] = useState<string>();
+  const [deliveryContactOrderId, setDeliveryContactOrderId] = useState<string>();
   const [currencyOrderId, setCurrencyOrderId] = useState<string>();
+  const [customerWishesOrderId, setCustomerWishesOrderId] = useState<string>();
+  const [clientEditOrderId, setClientEditOrderId] = useState<string>();
+  const [addDesignOrderId, setAddDesignOrderId] = useState<string>();
   const [editOrderId, setEditOrderId] = useState<string>();
   const [editOrderClient, setEditOrderClient] = useState<OrderClientDetail>();
   const [editDesign, setEditDesign] = useState<{orderId:string;itemId:string}>();
@@ -90,6 +98,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [newOrderLoading, setNewOrderLoading] = useState(false);
   const [newOrderQuery, setNewOrderQuery] = useState("");
   const newOrderTrigger = useRef<HTMLButtonElement>(null);
+  const initialOrderId = useRef(typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("orderId") || undefined);
 
   async function request(path: string, init?: RequestInit) {
     const response = await fetch(`/api${path}`, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
@@ -104,7 +113,15 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   async function load() {
     setLoading(true);
     try {
-      setOrders(await request(`/orders${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`));
+      const listed = await request(`/orders${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`) as Order[];
+      const contextOrder = initialOrderId.current
+        ? await request(`/orders/${encodeURIComponent(initialOrderId.current)}`).catch(() => undefined) as OrderDetail | undefined
+        : undefined;
+      setOrders(contextOrder && !listed.some((order) => order.id === contextOrder.id) ? [contextOrder, ...listed] : listed);
+      if (contextOrder) {
+        setOrderDetails((current) => ({ ...current, [contextOrder.id]: contextOrder }));
+        setExpandedId(contextOrder.id);
+      }
       setError("");
     } catch (reason) {
       setError((reason as Error).message);
@@ -126,6 +143,22 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       setOrderDetails((current) => { const next = { ...current }; delete next[orderId]; return next; });
       await load();
       return undefined;
+    }
+  }
+
+  async function uploadOrderFile(orderId:string,file:File){
+    const mimeType=file.type||(/\.ai$/i.test(file.name)?"application/illustrator":"");
+    await request(`/orders/${orderId}/files`,{method:"POST",body:JSON.stringify({name:file.name,mimeType,data:await fileToData(file)})});
+    await refreshAfterMutation(orderId);
+  }
+
+  async function bindOrderItemMeasurement(orderId:string,itemId:string,measurementId:string,expectedMeasurementId:string|null){
+    try {
+      await request(`/orders/${orderId}/items/${itemId}/measurement`,{method:"PATCH",body:JSON.stringify({measurementId,expectedMeasurementId})});
+      await refreshAfterMutation(orderId);
+      setError("");
+    } catch (reason) {
+      setError((reason as Error).message);
     }
   }
 
@@ -159,6 +192,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }, []);
 
   useEffect(() => {
+    const saved = parseOrderPaginationState(sessionStorage.getItem(PAGINATION_SETTINGS_KEY));
+    setPage(saved.page);
+    setPageSize(saved.pageSize);
+    setPaginationReady(true);
+  }, []);
+
+  useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("action") !== "new-order" || !["OWNER", "ADMIN", "MANAGER"].includes(role)) return;
     openNewOrder();
@@ -166,7 +206,23 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, [role]);
 
-  useEffect(() => setPage(1), [quickFilter, statusFilter, disciplineFilter, sort, search]);
+  useEffect(() => {
+    if (!paginationReady) return;
+    const criteria = JSON.stringify([quickFilter, statusFilter, disciplineFilter, sort, search]);
+    if (previousListCriteria.current === undefined) {
+      previousListCriteria.current = criteria;
+      return;
+    }
+    if (previousListCriteria.current !== criteria) {
+      previousListCriteria.current = criteria;
+      setPage(1);
+    }
+  }, [paginationReady, quickFilter, statusFilter, disciplineFilter, sort, search]);
+
+  useEffect(() => {
+    if (!paginationReady) return;
+    sessionStorage.setItem(PAGINATION_SETTINGS_KEY, JSON.stringify({ page, pageSize }));
+  }, [paginationReady, page, pageSize]);
 
   useEffect(() => {
     if (!newOrderOpen) return;
@@ -218,18 +274,38 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if (column === "delivery") return `${countryLabel(deliveryCountry(order)) || ui.addressMissing}|${deliveryPlace(order)}|${orderLabel("shipping", order.shippingStatus)}`;
     return undefined;
   }), [filtered, sort]);
-  const orderPage = paginateOrders(sorted, page, PAGE_SIZE);
+  const orderPage = paginateOrders(sorted, page, pageSize);
   const totalPages = orderPage.totalPages;
+  const currentPage = orderPage.page;
   const shown = orderPage.items;
   const paymentOrder = orders.find((order) => order.id === paymentOrderId);
   const deliveryOrder = orders.find((order) => order.id === deliveryOrderId);
+  const deliveryContactOrder = orders.find((order) => order.id === deliveryContactOrderId);
   const currencyChangeOrder = orders.find((order) => order.id === currencyOrderId);
+  const customerWishesOrder = orders.find((order) => order.id === customerWishesOrderId);
+  const clientEditOrder = orders.find((order) => order.id === clientEditOrderId);
+  const addDesignOrder = orders.find((order) => order.id === addDesignOrderId);
   const editOrder = orders.find((order) => order.id === editOrderId);
   const editDesignOrder = orders.find((order) => order.id === editDesign?.orderId);
   const editDesignItem = editDesignOrder?.items.find((item) => item.id === editDesign?.itemId);
   const visibleColumns = columnOrder.filter((id) => !hiddenColumns.has(id));
   const filterCount = Number(statusFilter !== "all") + Number(disciplineFilter !== "all");
   const canArchiveOrders = role === "OWNER" || role === "ADMIN";
+
+  useEffect(() => {
+    if (paginationReady && !loading && page !== currentPage) setPage(currentPage);
+  }, [paginationReady, loading, page, currentPage]);
+
+  useEffect(() => {
+    const contextOrderId = initialOrderId.current;
+    if (!paginationReady || loading || !contextOrderId) return;
+    const targetIndex = sorted.findIndex((order) => order.id === contextOrderId);
+    if (targetIndex < 0) return;
+    const targetPage = Math.floor(targetIndex / pageSize) + 1;
+    if (page !== targetPage) { setPage(targetPage); return; }
+    setExpandedId(contextOrderId);
+    requestAnimationFrame(() => document.getElementById(`order-details-${contextOrderId}`)?.scrollIntoView({ block: "center" }));
+  }, [paginationReady, loading, sorted, pageSize, page]);
 
   function persistColumns(order: ColumnId[], hidden: Set<ColumnId>) {
     setColumnOrder(order);
@@ -253,6 +329,12 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   function clearFilters() { setQuickFilter("all"); setStatusFilter("all"); setDisciplineFilter("all"); }
   function persistSort(next: SortState) { setSort(next); localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); }
   function cycleSort(id: SortColumnId) { setSort((current) => { const next = nextOrderSort(current, id) as SortState; localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); return next; }); }
+  function changePageSize(value: string) {
+    const next = Number(value) as OrderPageSize;
+    if (!ORDER_PAGE_SIZES.includes(next)) return;
+    setPageSize(next);
+    setPage(1);
+  }
   async function changeStatus(order: Order, field: "salesStatus" | "productionStatus", value: string) {
     if (statusRequests.current.has(order.id)) return;
     const previous = order[field];
@@ -404,13 +486,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => void toggleExpanded(order)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
               {visibleColumns.map((id) => <OrderCell key={id} id={id} order={order} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => void toggleExpanded(order)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
             </tr>
-            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}>{detailPending.has(order.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder order={orderDetails[order.id] ?? order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(orderDetails[order.id] ?? order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: order.id, itemId })} onCurrency={() => setCurrencyOrderId(order.id)} onEdit={() => void openEditOrder(order)} onEditItem={(itemId) => setEditDesign({ orderId: order.id, itemId })} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
+            {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}>{detailPending.has(order.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder order={orderDetails[order.id] ?? order} paymentTrigger={paymentTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(orderDetails[order.id] ?? order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onEditClient={() => setClientEditOrderId(order.id)} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onDeliveryContact={() => setDeliveryContactOrderId(order.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: order.id, itemId })} onBindMeasurement={(itemId,measurementId,expectedMeasurementId)=>bindOrderItemMeasurement(order.id,itemId,measurementId,expectedMeasurementId)} onCurrency={() => setCurrencyOrderId(order.id)} onCustomerWishes={() => setCustomerWishesOrderId(order.id)} onEdit={() => void openEditOrder(order)} onAddDesign={()=>setAddDesignOrderId(order.id)} onEditItem={(itemId) => setEditDesign({ orderId: order.id, itemId })} onUploadFile={(file)=>uploadOrderFile(order.id,file)} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} /></div></td></tr>}
           </Fragment>)}
         </tbody>
       </table>
     </div>
 
-    {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, page - 3), Math.max(5, page + 2)).map((value) => <button key={value} className={page === value ? "active" : ""} onClick={() => setPage(value)}>{value}</button>)}<button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)}><UiIcon name="chevronRight" /></button></nav><span>{PAGE_SIZE} / {ui.rowsPerPage}</span></div>}
+    {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, currentPage - 3), Math.max(5, currentPage + 2)).map((value) => <button key={value} className={currentPage === value ? "active" : ""} aria-current={currentPage === value ? "page" : undefined} onClick={() => setPage(value)}>{value}</button>)}<button disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}><UiIcon name="chevronRight" /></button></nav><CrmNativeSelect className="orders-page-size" aria-label={ui.ordersPerPage} value={String(pageSize)} onChange={(event) => changePageSize(event.target.value)} data={ORDER_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value} / ${ui.rowsPerPage}` }))} /></div>}
 
     <Modal opened={columnsOpen} onClose={() => setColumnsOpen(false)} title={ui.columns} aria-label={ui.columns} closeButtonProps={{ "aria-label": ui.close }} returnFocus centered size={440} classNames={{ content: "orders-column-settings", header: "orders-column-settings-header", title: "orders-column-settings-title", body: "orders-column-settings-body" }}>
       <p className="orders-columns-hint">{ui.columnsHint}</p>
@@ -427,7 +509,11 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await refreshAfterMutation(paymentOrder.id); }} />}
     {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await refreshAfterMutation(deliveryOrder.id); }} />}
+    {deliveryContactOrder && <DeliveryContactModal order={deliveryContactOrder} request={request} onClose={() => setDeliveryContactOrderId(undefined)} onSaved={async () => { const orderId = deliveryContactOrder.id; setDeliveryContactOrderId(undefined); await refreshAfterMutation(orderId); }} />}
     {currencyChangeOrder && <CurrencyChangeModal order={currencyChangeOrder} request={request} onClose={() => setCurrencyOrderId(undefined)} onSaved={async () => { setCurrencyOrderId(undefined); await refreshAfterMutation(currencyChangeOrder.id); }} />}
+    {customerWishesOrder && <CustomerWishesModal order={customerWishesOrder} request={request} onClose={() => setCustomerWishesOrderId(undefined)} onSaved={async () => { const orderId = customerWishesOrder.id; setCustomerWishesOrderId(undefined); await refreshAfterMutation(orderId); }} />}
+    {clientEditOrder && <ClientEditModal order={orderDetails[clientEditOrder.id]??clientEditOrder} request={request} onClose={()=>setClientEditOrderId(undefined)} onSaved={async()=>{const orderId=clientEditOrder.id;setClientEditOrderId(undefined);await refreshAfterMutation(orderId)}}/>}
+    {addDesignOrder && <OrderDesignAddModal order={orderDetails[addDesignOrder.id]??addDesignOrder} request={request} onClose={()=>setAddDesignOrderId(undefined)} onSaved={async()=>{const orderId=addDesignOrder.id;setAddDesignOrderId(undefined);await refreshAfterMutation(orderId)}}/>}
     {editOrder && editOrderClient && <OrderPanel client={editOrderClient} order={editOrder} request={request} onClose={closeEditOrder} onSaved={async () => { closeEditOrder(); await refreshAfterMutation(editOrder.id); }} />}
     {editDesignOrder && editDesignItem && <OrderDesignEditModal order={editDesignOrder} item={editDesignItem} request={request} onClose={()=>setEditDesign(undefined)} onSaved={async()=>{const orderId=editDesignOrder.id;setEditDesign(undefined);await refreshAfterMutation(orderId)}}/>}
     {measurementTarget && (() => { const order = orderDetails[measurementTarget.orderId] ?? orders.find((item) => item.id === measurementTarget.orderId); const item = measurementTarget.itemId ? order?.items.find((entry) => entry.id === measurementTarget.itemId) : undefined; const athlete = item?.athlete ?? (order ? measurementAthlete(order) : undefined); const measurement = item?.measurement ?? (order ? primaryMeasurement(order) : undefined); return order && athlete ? <MeasurementPanel client={{ id: order.client.id, displayName: order.client.displayName, athletes: [athlete] }} request={request} orderId={order.id} orderItemId={item?.id} initialValues={measurement?.values} expectedMeasurementId={measurement?.id} title={measurement ? ui.editMeasurements : ui.addMeasurements} onClose={() => setMeasurementTarget(undefined)} onSaved={async () => { setMeasurementTarget(undefined); await refreshOrder(order.id); }} /> : null; })()}
@@ -457,16 +543,16 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
   if (id === "payment") { const received = paid(order), percent = order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div><small className={balance(order) > 0 ? "orders-balance-line" : "orders-paid-line"}>{balance(order) > 0 ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent}%</em></td>; }
   if (id === "production") return <td className="orders-col orders-col-production" style={style}>{order.productionSlot ? <><strong>{slotDateRange(order)}</strong><CrmStatusBadge domain="production" status={order.productionStatus}/></> : <><small>{ui.notSpecified}</small>{!NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</td>;
   if (id === "status") return <td className="orders-col orders-col-status" style={style}><CrmNativeSelect disabled={statusPending} className="orders-inline-status-control" classNames={{ input: `orders-inline-status orders-status--${crmStatusPresentation("sales",order.salesStatus).tone}` }} value={order.salesStatus} onChange={(event) => void onStatus(order, event.target.value)} aria-label={ui.changeStatus} data={SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))} /></td>;
-  if (id === "delivery") return <td className="orders-col orders-col-delivery" style={style}><UnstyledButton className="orders-delivery-cell-button" onClick={onDelivery} aria-label={`${ui.editDeliveryAddress}: ${order.number}`}><strong><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.addressMissing}</strong><small>{deliveryPlace(order)}</small><small>{[order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName, orderLabel("shipping", order.shippingStatus)].filter(Boolean).join(" · ")}</small>{(order.shipment?.trackingNumber || order.deliveryTrackingCode) && <small>{order.shipment?.trackingNumber || order.deliveryTrackingCode}</small>}</UnstyledButton></td>;
+  if (id === "delivery") { const shipped = orderHasShippedDelivery(order), tracking = orderTrackingNumber(order); return <td className="orders-col orders-col-delivery" style={style}><UnstyledButton className={shipped ? "orders-delivery-cell-button is-shipped" : "orders-delivery-cell-button"} onClick={onDelivery} aria-label={`${ui.editDeliveryAddress}: ${order.number}`}><strong><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.addressMissing}</strong>{shipped ? <small>{tracking || ui.trackingMissing}</small> : <><small>{deliveryPlace(order)}</small><small>{[order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName, orderLabel("shipping", order.shippingStatus)].filter(Boolean).join(" · ")}</small>{tracking && <small>{tracking}</small>}</>}</UnstyledButton></td>; }
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><strong>{date(order.createdAt)}</strong><small>{ageText(order.createdAt)}</small></td>;
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onExpand} aria-label={expanded ? ui.collapse : ui.expand} title={expanded ? ui.collapse : ui.expand} aria-expanded={expanded} aria-controls={detailsId}>•••</button></td>;
 }
 
-function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onMeasurements, onCurrency, onEdit, onEditItem, onImage }: { order: OrderDetail; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onMeasurements: (itemId?: string) => void; onCurrency: () => void; onEdit: () => void; onEditItem: (itemId:string)=>void; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
+function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClient, onEditClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onDeliveryContact, onMeasurements, onBindMeasurement, onCurrency, onCustomerWishes, onEdit, onAddDesign, onEditItem, onUploadFile, onImage }: { order: OrderDetail; paymentTrigger: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onEditClient:()=>void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onDeliveryContact: () => void; onMeasurements: (itemId?: string) => void; onBindMeasurement:(itemId:string,measurementId:string,expectedMeasurementId:string|null)=>Promise<void>; onCurrency: () => void; onCustomerWishes: () => void; onEdit: () => void; onAddDesign:()=>void; onEditItem: (itemId:string)=>void; onUploadFile:(file:File)=>Promise<void>; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void> }) {
   const [measurementId, setMeasurementId] = useState<string>();
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
-  const items = order.items.length ? order.items.map((item, index) => { const athlete = item.athlete || (!isMultiOrder(order) && index === 0 ? order.athlete : undefined); return { ...item, persistedItemId: item.id, athlete, measurement: ownedMeasurement(item.measurement, athlete) || (!isMultiOrder(order) && index === 0 ? legacyMeasurementForItem(order, item) : undefined), measurementHistory: item.measurementHistory?.length ? item.measurementHistory : (!isMultiOrder(order) && index === 0 ? order.measurementHistory : []) }; }) : [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete, measurement: ownedMeasurement(order.measurement, order.athlete), measurementHistory: order.measurementHistory ?? [] }];
+  const items = order.items.length ? order.items.map((item, index) => { const athlete = item.athlete || (!isMultiOrder(order) && index === 0 ? order.athlete : undefined); return { ...item, persistedItemId: item.id, athlete, measurement: ownedMeasurement(item.measurement, athlete) || (!isMultiOrder(order) && index === 0 ? legacyMeasurementForItem(order, item) : undefined), measurementHistory: item.measurementHistory?.length ? item.measurementHistory : athleteMeasurements(athlete).length ? athleteMeasurements(athlete) : (!isMultiOrder(order) && index === 0 ? order.measurementHistory : []) }; }) : [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, designNumber: undefined, athlete: order.athlete, measurement: ownedMeasurement(order.measurement, order.athlete), measurementHistory: athleteMeasurements(order.athlete).length ? athleteMeasurements(order.athlete) : order.measurementHistory ?? [] }];
   const historyItems = order.activities;
   const initialHistoryItems = historyItems.slice(0,5);
   const visibleActivities = historyExpanded ? order.activities : order.activities.slice(0, 5);
@@ -506,18 +592,43 @@ function ExpandedOrder({ order, paymentTrigger, statusPending, onStatus, onClien
     </section>
     <CrmTabList value={activeTab} onChange={setActiveTab} className="orders-order-tabs" ariaLabel={ui.orderDetails} tabs={tabs.map((tab) => ({ value: tab.key, label: tab.label, panelId: tabPanelId, tabId: `order-tab-${order.id}-${tab.key}`, icon: <UiIcon name={tab.icon} /> }))} />
     <section id={tabPanelId} aria-labelledby={`order-tab-${order.id}-${activeTab}`} className={`orders-order-tab-panel orders-order-tab-${activeTab}`} role="tabpanel">
-      {activeTab === "details" && <div className="orders-tab-details"><article><h3>{ui.orderInformation}</h3><div className="orders-details-grid"><Detail label={ui.orderNumber} value={order.number} /><Detail label={ui.orderTypeName} value={orderTypeLabel(order.type)} /><Detail label={ui.createdAt} value={date(order.createdAt)} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><Detail label={ui.manager} value={order.responsibleManager?.displayName || ui.notSpecified} /><Detail label={ui.modelName} value={items[0]?.name || ui.designMissing} /><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.quantity} value={quantitySummary(order)} /><Detail label={ui.currency} value={order.currency} /><Detail label={ui.total} value={money(order.priceMinor, order.currency)} /></div></article><article><h3>{ui.customerWishes}</h3><p>{order.notes || ui.notSpecified}</p><div className="orders-detail-tags">{order.promocode && <span>{order.promocode}</span>}{order.isGift && <span>{ui.gift}</span>}</div></article><article><h3>{ui.files} ({designPaths(order).length})</h3><div className="orders-detail-files">{designPaths(order).map((path) => <img key={path} src={path} alt={ui.orderDesignAlt} />)}{!designPaths(order).length && <p>{ui.noFiles}</p>}</div></article></div>}
-      {activeTab === "designs" && <div className="orders-tab-designs"><header><h3>{ui.designsInOrder} ({items.length})</h3><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></header>{items.map((item, index) => <article key={item.id}><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={itemImage(item)} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div><strong>{item.name}</strong><small>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : ui.notSpecified}</small><em>{item.quantity} {ui.pieces}</em></div><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><Detail label={ui.dimensions} value={item.measurement ? ui.measurementsReceived : ui.notReceived} /><CrmStatusBadge domain="production" status={item.productionStatus}/>{item.persistedItemId && <CrmButton tone="secondary" size="compact-xs" onClick={() => onEditItem(item.persistedItemId!)}>{ui.editDesign}</CrmButton>}</article>)}</div>}
-      {activeTab === "measurements" && <div className="orders-tab-measurements"><header><h3>{ui.tabs.measurements}</h3></header>{items.map((item) => { const panelId = `order-measurements-${order.id}-${item.id}`; const measurementHistory = itemMeasurementHistory(item); return <article key={item.id}><div><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small></div>{item.measurement ? <><p><b>{ui.currentMeasurement}</b> · {date(item.measurement.measuredAt)} · cm</p><ExpandedMeasurementGrid id={panelId} measurement={item.measurement} values={item.measurement.values} /></> : <p>{ui.noMeasurements}</p>}<div className="orders-measurement-actions">{item.athlete && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(item.persistedItemId)}>{item.measurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{measurementHistory.length > 0 && <details><summary>{ui.measurementHistory} ({measurementHistory.length})</summary>{measurementHistory.map((measurement) => <p key={measurement.id}>{date(measurement.measuredAt)}{measurement.notes ? ` · ${measurement.notes}` : ""}</p>)}</details>}</div></article>})}</div>}
-      {activeTab === "client" && <div className="orders-tab-columns"><article><h3>{ui.clientDetails}</h3><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.country} value={<><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.notSpecified}</>} /><Detail label={ui.language} value={order.client.language || ui.notSpecified} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><CrmButton tone="secondary" size="compact-sm" onClick={onClient}>{ui.openClient}</CrmButton></article><article><h3>{ui.groupsAthletes}</h3>{items.filter((item) => item.athlete).map((item) => <p key={item.id}>{item.athlete && [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ")} · {item.name}</p>)}{!items.some((item) => item.athlete) && <p>{ui.notSpecified}</p>}</article></div>}
+      {activeTab === "details" && <div className="orders-tab-details"><article><h3>{ui.orderInformation}</h3><div className="orders-details-grid"><Detail label={ui.orderNumber} value={order.number} /><Detail label={ui.orderTypeName} value={orderTypeLabel(order.type)} /><Detail label={ui.createdAt} value={date(order.createdAt)} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><Detail label={ui.manager} value={order.responsibleManager?.displayName || ui.notSpecified} /><Detail label={ui.modelName} value={items[0]?.name || ui.designMissing} /><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.quantity} value={quantitySummary(order)} /><Detail label={ui.currency} value={order.currency} /><Detail label={ui.total} value={money(order.priceMinor, order.currency)} /></div></article><article><h3>{ui.customerWishes}</h3><UnstyledButton className="orders-customer-wishes-button" onClick={onCustomerWishes}>{order.buyerComment || order.notes || ui.notSpecified}</UnstyledButton><div className="orders-detail-tags">{order.promocode && <span>{order.promocode}</span>}{order.isGift && <span>{ui.gift}</span>}</div></article><OrderFilesPanel order={order} onUpload={onUploadFile}/></div>}
+      {activeTab === "designs" && <div className="orders-tab-designs"><header><h3>{ui.designsInOrder} ({items.length})</h3><div><CrmButton tone="secondary" size="compact-sm" onClick={onAddDesign}>{ui.addDesign}</CrmButton><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></div></header>{items.map((item, index) => <article key={item.id}><span className="orders-item-index">{index + 1}</span><OrderImageEditor image={itemImage(item)} name={item.name} onChange={(file) => onImage(item.persistedItemId, item.modelImagePath ?? null, file)} /><div><strong>{item.name}</strong><small>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : ui.notSpecified}</small><small>{ui.illustratorDesignNumber}: {item.designNumber ? String(item.designNumber) : ui.notSpecified}</small><em>{item.quantity} {ui.pieces}</em></div><Detail label={ui.sport} value={discipline(order.discipline).label} /><Detail label={ui.price} value={money(item.priceMinor, order.currency)} /><Detail label={ui.dimensions} value={item.measurement ? ui.measurementsReceived : ui.notReceived} /><CrmStatusBadge domain="production" status={item.productionStatus}/>{item.persistedItemId && <CrmButton tone="secondary" size="compact-xs" onClick={() => onEditItem(item.persistedItemId!)}>{ui.editDesign}</CrmButton>}</article>)}</div>}
+      {activeTab === "measurements" && <div className="orders-tab-measurements"><header><h3>{ui.tabs.measurements}</h3></header>{items.map((item) => { const panelId = `order-measurements-${order.id}-${item.id}`; const measurementHistory = itemMeasurementHistory(item); const measurementOptions=clientMeasurementOptions(order,item); return <article key={item.id}><div><strong>{item.athlete ? [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ") : item.name}</strong><small>{item.name}</small></div>{item.measurement ? <><p><b>{ui.currentMeasurement}</b> · {date(item.measurement.measuredAt)} · cm</p><ExpandedMeasurementGrid id={panelId} measurement={item.measurement} values={item.measurement.values} /></> : <p>{ui.noMeasurements}</p>}<div className="orders-measurement-actions">{item.athlete && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(item.persistedItemId)}>{item.measurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{item.persistedItemId&&measurementOptions.length>0&&<CrmNativeSelect aria-label={`${ui.bindMeasurement}: ${item.name}`} value={item.measurement?.id||""} onChange={(event)=>event.target.value&&void onBindMeasurement(item.persistedItemId!,event.target.value,item.measurement?.id??null)} data={[{value:"",label:ui.bindMeasurement},...measurementOptions]}/>} {measurementHistory.length > 0 && <details><summary>{ui.measurementHistory} ({measurementHistory.length})</summary>{measurementHistory.map((measurement) => <p key={measurement.id}>{date(measurement.measuredAt)}{measurement.notes ? ` · ${measurement.notes}` : ""}</p>)}</details>}</div></article>})}</div>}
+      {activeTab === "client" && <div className="orders-tab-columns"><article><h3>{ui.clientDetails}</h3><Detail label={ui.recipient} value={order.client.displayName} /><Detail label={ui.country} value={<><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.notSpecified}</>} /><Detail label={ui.language} value={order.client.language || ui.notSpecified} /><Detail label={ui.phone} value={order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.source} value={orderLabel("source", order.client.source)} /><div className="orders-client-actions"><CrmButton tone="secondary" size="compact-sm" onClick={onEditClient}>{ui.editClient}</CrmButton><CrmButton tone="secondary" size="compact-sm" onClick={onClient}>{ui.openClient}</CrmButton></div></article><article><h3>{ui.groupsAthletes}</h3>{items.filter((item) => item.athlete).map((item) => <p key={item.id}>{item.athlete && [item.athlete.firstName, item.athlete.lastName].filter(Boolean).join(" ")} · {item.name}</p>)}{!items.some((item) => item.athlete) && <p>{ui.notSpecified}</p>}</article></div>}
       {activeTab === "finance" && <div className="orders-tab-columns"><section className="orders-expanded-card orders-expanded-finance"><div className="orders-expanded-section-heading"><h3>{ui.finance}</h3>{onFinance && <CrmButton tone="secondary" size="compact-sm" onClick={onFinance}>{ui.openFinance}</CrmButton>}<button className="orders-secondary-action" onClick={onCurrency}>{ui.changeCurrency}</button></div><MoneyLine label={`${ui.products} (${items.length})`} value={order.priceMinor - (order.deliveryMinor || 0) + (order.discountMinor || 0)} currency={order.currency} /><MoneyLine label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} muted /><MoneyLine label={ui.shipping} value={order.deliveryMinor || order.shipment?.costMinor || 0} currency={order.currency} /><MoneyLine label={ui.total} value={order.priceMinor} currency={order.currency} strong /><MoneyLine label={ui.requiredDeposit} value={order.depositRequiredMinor} currency={order.currency} /><MoneyLine label={ui.paid} value={paidMinor} currency={order.currency} success /><MoneyLine label={ui.balance} value={balance(order)} currency={order.currency} danger={balance(order) > 0} /></section><section className="orders-expanded-card orders-expanded-payments"><div className="orders-expanded-section-heading"><h3>{ui.paymentHistory}</h3><button className="orders-secondary-action" onClick={onPayment}>{ui.addPayment}</button></div><div className="orders-expanded-payment-history">{paymentHistory.length ? paymentHistory.map((payment) => <div key={payment.id} className={payment.voidedAt ? "voided" : undefined}><span>{date(payment.receivedAt)}</span><b>{money(payment.amountMinor, payment.currency)}</b><small>{payment.voidedAt ? `${ui.voidedPayment}${payment.voidReason ? ` · ${payment.voidReason}` : ""}` : paymentMethodLabel(payment.method)}</small>{payment.reference && <em>{ui.paymentReference}: {payment.reference}</em>}{payment.notes && <em>{ui.paymentNote}: {payment.notes}</em>}{payment.currency !== order.currency && payment.appliedCurrency === order.currency && payment.appliedAmountMinor != null && <em>{ui.appliedToOrder}: {money(payment.appliedAmountMinor, order.currency)}</em>}</div>) : <p>{ui.noPayments}</p>}</div></section><section className="orders-expanded-card orders-expanded-invoices"><h3>{ui.invoices}</h3>{order.invoices.length ? order.invoices.map((invoice) => <a key={invoice.id} href={`/api/finance/invoices/${invoice.id}/document?download=1`}><strong>{invoice.number}</strong><span>{money(invoice.totalMinor, invoice.currency || order.currency)}</span><small>{ui.download}</small></a>) : <p>{ui.noInvoices}</p>}</section></div>}
       {activeTab === "production" && <div className="orders-tab-columns"><article><h3>{ui.productionSlot}</h3>{order.productionSlot ? <><Detail label={ui.productionStart} value={formatDateTime(order.productionSlot.startsAt)} /><Detail label={ui.productionEnd} value={formatDateTime(order.productionSlot.endsAt)} /><Detail label={ui.slotCapacity} value={String(order.productionSlot.capacity)} /><CrmStatusBadge domain="production" status={order.productionStatus}/><p>{order.productionSlot.tentative ? ui.slotTentative : ui.slotConfirmed} · {order.productionSlot.locked ? ui.slotLocked : ui.slotUnlocked}</p></> : <p>{ui.notSpecified}</p>}{requiresProduction && <CrmButton tone="secondary" size="compact-sm" onClick={onProduction}>{ui.openProduction}</CrmButton>}</article><article><h3>{ui.productionStatus}</h3>{requiresProduction ? <CrmNativeSelect aria-label={ui.productionStatus} disabled={statusPending} value={order.productionStatus} onChange={(event) => onStatus("productionStatus", event.target.value)} data={PRODUCTION_STATUSES.map((status) => ({ value: status, label: orderLabel("production", status) }))} /> : <p>{ui.productionNotRequired}</p>}</article></div>}
-      {activeTab === "delivery" && <div className="orders-tab-columns"><article><h3>{ui.shippingDetails}</h3><EditableDetail label={ui.recipient} value={deliveryRecipient(order)} onClick={onDelivery} /><EditableDetail label={ui.address} value={deliveryPlace(order)} onClick={onDelivery} /><Detail label={ui.phone} value={order.deliveryRecipientPhone || order.client.phone || ui.notSpecified} /><Detail label={ui.email} value={order.client.email || ui.notSpecified} /><Detail label={ui.country} value={<><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.notSpecified}</>} /></article><article><h3>{ui.shipping}</h3><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName || ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.plannedShipping} value={ui.notSpecifiedFeminine} /><Detail label={ui.actualShipping} value={order.shipment?.shippedAt ? date(order.shipment.shippedAt) : ui.notSpecifiedFeminine} /><Detail label={ui.actualDelivery} value={order.shipment?.deliveredAt ? date(order.shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Detail label={ui.shippingStatus} value={orderLabel("shipping", order.shippingStatus)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /><CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton></article></div>}
-      {activeTab === "notes" && <div className="orders-tab-columns"><article><h3>{ui.customerWishes}</h3><p>{order.notes || order.buyerComment || ui.notSpecified}</p></article><article><h3>{ui.managerNotes}</h3><p>{order.managerComment || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></article></div>}
+      {activeTab === "delivery" && <div className="orders-tab-columns"><article><h3>{ui.shippingDetails}</h3><EditableDetail label={ui.recipient} value={deliveryRecipient(order)} onClick={onDelivery} /><EditableDetail label={ui.address} value={deliveryPlace(order)} onClick={onDelivery} /><EditableDetail label={ui.phone} value={order.deliveryRecipientPhone || order.client.phone || ui.notSpecified} onClick={onDeliveryContact} /><EditableDetail label={ui.email} value={deliveryEmail(order) || order.client.email || ui.notSpecified} onClick={onDeliveryContact} /><Detail label={ui.country} value={<><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.notSpecified}</>} /></article><article><h3>{ui.shipping}</h3><Detail label={ui.method} value={order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName || ui.notSpecified} /><Detail label={ui.cost} value={money(order.shipment?.costMinor || order.deliveryMinor || 0, order.shipment?.currency || order.currency)} /><Detail label={ui.readinessDeadline} value={deliveryDate(order)} /><Detail label={ui.plannedShipping} value={ui.notSpecifiedFeminine} /><Detail label={ui.actualShipping} value={order.shipment?.shippedAt ? date(order.shipment.shippedAt) : ui.notSpecifiedFeminine} /><Detail label={ui.actualDelivery} value={order.shipment?.deliveredAt ? date(order.shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Detail label={ui.shippingStatus} value={orderLabel("shipping", order.shippingStatus)} /><Detail label={ui.tracking} value={order.shipment?.trackingNumber || order.deliveryTrackingCode || ui.notSpecified} /><CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton></article></div>}
+      {activeTab === "notes" && <div className="orders-tab-columns"><article><h3>{ui.customerWishes}</h3><UnstyledButton className="orders-customer-wishes-button" onClick={onCustomerWishes}>{order.buyerComment || order.notes || ui.notSpecified}</UnstyledButton></article><article><h3>{ui.managerNotes}</h3><p>{order.managerComment || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-sm" onClick={onEdit}>{ui.editOrder}</CrmButton></article></div>}
       {activeTab === "history" && <section className="orders-expanded-card orders-expanded-history"><h3>{ui.orderHistory}</h3>{visibleActivities.length ? visibleActivities.map((activity) => <div key={activity.id}><i /><span><strong>{repairMojibake(activity.summary)}</strong><small>{formatDateTime(activity.createdAt)}</small></span></div>) : <p>{ui.noHistory}</p>}{order.activities.length > 5 && <CrmButton tone="secondary" className="orders-history-toggle" type="button" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded((value) => !value)}>{historyExpanded ? hideOlderHistory : `${showOlderHistory} (${order.activities.length - initialHistoryItems.length})`}</CrmButton>}</section>}
     </section>
   </div>;
 }
+
+function OrderFilesPanel({order,onUpload}:{order:OrderDetail;onUpload:(file:File)=>Promise<void>}){
+  const input=useRef<HTMLInputElement>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[preview,setPreview]=useState<{src:string;name:string}>();
+  const designImages=designPaths(order).map((src,index)=>({id:`design-${index}`,name:ui.orderDesignAlt,src,image:true}));
+  const attachments=(order.files??[]).map(file=>({id:file.id,name:file.name,src:`/api/orders/files/${file.path}`,image:file.mimeType.startsWith("image/")}));
+  async function pick(file?:File){if(!file||busy)return;setBusy(true);setError("");try{await onUpload(file)}catch(reason){setError((reason as Error).message)}finally{setBusy(false);if(input.current)input.current.value=""}}
+  return <article><h3>{ui.files} ({designImages.length+attachments.length})</h3><div className="orders-detail-files">{[...designImages,...attachments].map(file=>file.image?<UnstyledButton key={file.id} className="orders-file-image" aria-label={`${ui.openFile}: ${file.name}`} onClick={()=>setPreview({src:file.src,name:file.name})}><img src={file.src} alt={file.name}/></UnstyledButton>:<a key={file.id} className="orders-file-document" href={file.src} target="_blank" rel="noopener noreferrer"><UiIcon name="download"/><span>{file.name}</span></a>)}{!designImages.length&&!attachments.length&&<p>{ui.noFiles}</p>}</div><input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.docx,.xlsx,text/plain,.ai,application/postscript" onChange={event=>void pick(event.currentTarget.files?.[0])}/><CrmButton tone="secondary" size="compact-sm" loading={busy} onClick={()=>input.current?.click()}>{busy?ui.uploadingFile:ui.addFile}</CrmButton><small className="orders-file-hint">{ui.orderFileHint}</small>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<Modal opened={Boolean(preview)} onClose={()=>setPreview(undefined)} title={preview?.name||ui.imagePreview} aria-label={ui.imagePreview} closeButtonProps={{"aria-label":ui.closePreview}} centered size="auto"><div className="orders-file-preview">{preview&&<img src={preview.src} alt={preview.name}/>}</div></Modal></article>;
+}
+
+function ClientEditModal({order,request,onClose,onSaved}:{order:OrderDetail;request:(path:string,init?:RequestInit)=>Promise<unknown>;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const[name,setName]=useState(order.client.displayName),[country,setCountry]=useState(order.client.country||""),[language,setLanguage]=useState(order.client.language||""),[phone,setPhone]=useState(order.client.phone||""),[email,setEmail]=useState(order.client.email||""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  async function submit(event:React.FormEvent){event.preventDefault();setBusy(true);setError("");try{await request(`/clients/${order.client.id}`,{method:"PATCH",body:JSON.stringify({displayName:name.trim(),country:country.trim()||null,language:language.trim()||null,phone:phone.trim()||null,email:email.trim()||null,expectedUpdatedAt:order.client.updatedAt})});await onSaved()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  return <Modal opened onClose={onClose} title={ui.editClientTitle} aria-label={ui.editClientTitle} closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{"aria-label":ui.close}} centered size="lg"><form className="orders-client-edit-form" onSubmit={submit}><CrmTextInput data-autofocus highlighted required label={ui.clientName} value={name} onChange={event=>setName(event.currentTarget.value)}/><div><CrmTextInput highlighted label={ui.country} value={country} onChange={event=>setCountry(event.currentTarget.value)}/><CrmTextInput highlighted label={ui.language} value={language} onChange={event=>setLanguage(event.currentTarget.value)}/><CrmTextInput highlighted label={ui.phone} value={phone} onChange={event=>setPhone(event.currentTarget.value)}/><CrmTextInput highlighted type="email" label={ui.email} value={email} onChange={event=>setEmail(event.currentTarget.value)}/></div>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.saveClient}</CrmButton></footer></form></Modal>;
+}
+
+function OrderDesignAddModal({order,request,onClose,onSaved}:{order:OrderDetail;request:(path:string,init?:RequestInit)=>Promise<unknown>;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const athletes=order.client.athletes??uniqueOrderAthletes(order),input=useRef<HTMLInputElement>(null),[name,setName]=useState(""),[quantity,setQuantity]=useState("1"),[price,setPrice]=useState(""),[designNumber,setDesignNumber]=useState(""),[athleteId,setAthleteId]=useState(athletes.length===1?athletes[0]!.id:""),[file,setFile]=useState<File>(),[preview,setPreview]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
+  function selectFile(next?:File){if(preview)URL.revokeObjectURL(preview);setFile(next);setPreview(next?URL.createObjectURL(next):"")}
+  async function submit(event:React.FormEvent){event.preventDefault();const priceMinor=parseOrderPriceMinor(price),nextQuantity=Number(quantity),nextDesignNumber=designNumber.trim()?Number(designNumber):null;if(!name.trim()||priceMinor==null||!Number.isInteger(nextQuantity)||nextQuantity<1||(athletes.length>1&&!athleteId)||(nextDesignNumber!==null&&(!Number.isInteger(nextDesignNumber)||nextDesignNumber<1))){setError(ui.designValuesInvalid);return}setBusy(true);setError("");try{let modelImagePath:string|undefined;if(file){const uploaded=await request("/orders/model-image",{method:"POST",body:JSON.stringify({name:file.name,mime:file.type,data:await fileToData(file)})}) as {path:string};modelImagePath=uploaded.path}await request(`/orders/${order.id}/items`,{method:"POST",body:JSON.stringify({name:name.trim(),quantity:nextQuantity,priceMinor,designNumber:nextDesignNumber,...(athleteId?{athleteId}:{}),...(modelImagePath?{modelImagePath}:{})})});await onSaved()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  return <Modal opened onClose={onClose} title={`${ui.addDesignTitle}: ${order.number}`} aria-label={ui.addDesignTitle} closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{"aria-label":ui.close}} centered size="lg"><form className="orders-design-edit-form" onSubmit={submit}><div className="orders-edit-image">{preview?<img src={preview} alt={name}/>:<span><UiIcon name="image"/></span>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>selectFile(event.currentTarget.files?.[0])}/><CrmButton type="button" tone="secondary" onClick={()=>input.current?.click()}>{ui.changeOrderImage}</CrmButton></div><CrmTextInput data-autofocus highlighted label={ui.designDescription} value={name} onChange={event=>setName(event.currentTarget.value)} required/>{athletes.length>0&&<CrmNativeSelect label={orderFormUi.selectAthlete} value={athleteId} onChange={event=>setAthleteId(event.target.value)} data={[...(athletes.length>1?[{value:"",label:orderFormUi.selectAthlete}]:[]),...athletes.map(athlete=>({value:athlete.id,label:[athlete.firstName,athlete.lastName].filter(Boolean).join(" ")}))]}/>}<CrmTextInput highlighted label={ui.illustratorDesignNumber} type="number" min={1} step={1} value={designNumber} onChange={event=>setDesignNumber(event.currentTarget.value)}/><div className="orders-design-edit-grid"><CrmTextInput highlighted label={ui.quantity} type="number" min={1} value={quantity} onChange={event=>setQuantity(event.currentTarget.value)} required/><CrmTextInput highlighted label={`${ui.unitPrice}, ${order.currency}`} inputMode="decimal" value={price} onChange={event=>setPrice(event.currentTarget.value)} required/></div>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.createDesign}</CrmButton></footer></form></Modal>;
+}
+
+function uniqueOrderAthletes(order:Order){const values=[order.athlete,...order.items.map(item=>item.athlete)].filter((athlete):athlete is NonNullable<Order["athlete"]>=>Boolean(athlete));return [...new Map(values.map(athlete=>[athlete.id,athlete])).values()]}
+function clientMeasurementOptions(order:OrderDetail,item:DetailedOrderItem){return (order.client.athletes??[]).filter(athlete=>!item.athlete||athlete.id===item.athlete.id).flatMap(athlete=>athlete.measurements.map(measurement=>({value:measurement.id,label:`${[athlete.firstName,athlete.lastName].filter(Boolean).join(" ")} · ${date(measurement.measuredAt)}`})))}
 
 function OrderImageEditor({ image, name, onChange }: { image?: string | null; name: string; onChange: (file: File) => Promise<void> }) {
   const input = useRef<HTMLInputElement>(null);
@@ -538,17 +649,18 @@ function OrderImageEditor({ image, name, onChange }: { image?: string | null; na
 function fileToData(file: File) { return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 function OrderDesignEditModal({order,item,request,onClose,onSaved}:{order:Order;item:Order["items"][number];request:(path:string,init?:RequestInit)=>Promise<unknown>;onClose:()=>void;onSaved:()=>Promise<void>}){
-  const[name,setName]=useState(item.name),[quantity,setQuantity]=useState(String(item.quantity)),[price,setPrice]=useState((item.priceMinor/100).toFixed(2)),[file,setFile]=useState<File>(),[filePreview,setFilePreview]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const[name,setName]=useState(item.name),[quantity,setQuantity]=useState(String(item.quantity)),[price,setPrice]=useState((item.priceMinor/100).toFixed(2)),[designNumber,setDesignNumber]=useState(item.designNumber ? String(item.designNumber) : ""),[file,setFile]=useState<File>(),[filePreview,setFilePreview]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
   const input=useRef<HTMLInputElement>(null),image=itemImage(item);
   useEffect(()=>{if(!file){setFilePreview("");return}const url=URL.createObjectURL(file);setFilePreview(url);return()=>URL.revokeObjectURL(url)},[file]);
-  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();const priceMinor=parseOrderPriceMinor(price),nextQuantity=Number(quantity);if(!name.trim()){setError(ui.designNameRequired);return}if(priceMinor==null||!Number.isInteger(nextQuantity)||nextQuantity<1){setError(ui.designValuesInvalid);return}setBusy(true);setError("");try{let modelImagePath:string|undefined;if(file){const data=await fileToData(file);const uploaded=await request("/orders/model-image",{method:"POST",body:JSON.stringify({name:file.name,mime:file.type,data})}) as {path:string};modelImagePath=uploaded.path}await request(`/orders/${order.id}/items/${item.id}`,{method:"PATCH",body:JSON.stringify({name:name.trim(),quantity:nextQuantity,priceMinor,expectedName:item.name,expectedQuantity:item.quantity,expectedPriceMinor:item.priceMinor,expectedModelImagePath:item.modelImagePath??null,...(modelImagePath?{modelImagePath}:{})})});await onSaved()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
-  return <Modal opened onClose={onClose} title={`${ui.editDesign}: ${order.number}`} aria-label={ui.editDesign} closeButtonProps={{"aria-label":ui.close}} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus centered size="lg"><form className="orders-design-edit-form" onSubmit={submit}><div className="orders-edit-image">{filePreview?<img src={filePreview} alt={name}/>:image?<img src={image} alt={name}/>:<span><UiIcon name="image"/></span>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>setFile(event.currentTarget.files?.[0])}/><CrmButton type="button" tone="secondary" onClick={()=>input.current?.click()}>{ui.changeOrderImage}</CrmButton></div><CrmTextInput data-autofocus highlighted label={ui.designDescription} value={name} onChange={event=>setName(event.currentTarget.value)} required/><div className="orders-design-edit-grid"><CrmTextInput highlighted label={ui.quantity} type="number" min={1} max={1000} value={quantity} onChange={event=>setQuantity(event.currentTarget.value)} required/><CrmTextInput highlighted label={`${ui.unitPrice}, ${order.currency}`} inputMode="decimal" value={price} onChange={event=>setPrice(event.currentTarget.value)} required/></div><p className="orders-edit-hint">{ui.designTotalRecalculationHint}</p>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.saveDesign}</CrmButton></footer></form></Modal>
+  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();const priceMinor=parseOrderPriceMinor(price),nextQuantity=Number(quantity),nextDesignNumber=designNumber.trim()?Number(designNumber):null;if(!name.trim()){setError(ui.designNameRequired);return}if(priceMinor==null||!Number.isInteger(nextQuantity)||nextQuantity<1||(nextDesignNumber!==null&&(!Number.isInteger(nextDesignNumber)||nextDesignNumber<1))){setError(ui.designValuesInvalid);return}setBusy(true);setError("");try{let modelImagePath:string|undefined;if(file){const data=await fileToData(file);const uploaded=await request("/orders/model-image",{method:"POST",body:JSON.stringify({name:file.name,mime:file.type,data})}) as {path:string};modelImagePath=uploaded.path}await request(`/orders/${order.id}/items/${item.id}`,{method:"PATCH",body:JSON.stringify({name:name.trim(),quantity:nextQuantity,priceMinor,designNumber:nextDesignNumber,expectedName:item.name,expectedQuantity:item.quantity,expectedPriceMinor:item.priceMinor,expectedDesignNumber:item.designNumber??null,expectedModelImagePath:item.modelImagePath??null,...(modelImagePath?{modelImagePath}:{})})});await onSaved()}catch(reason){setError((reason as Error).message)}finally{setBusy(false)}}
+  return <Modal opened onClose={onClose} title={`${ui.editDesign}: ${order.number}`} aria-label={ui.editDesign} closeButtonProps={{"aria-label":ui.close}} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus centered size="lg"><form className="orders-design-edit-form" onSubmit={submit}><div className="orders-edit-image">{filePreview?<img src={filePreview} alt={name}/>:image?<img src={image} alt={name}/>:<span><UiIcon name="image"/></span>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event=>setFile(event.currentTarget.files?.[0])}/><CrmButton type="button" tone="secondary" onClick={()=>input.current?.click()}>{ui.changeOrderImage}</CrmButton></div><CrmTextInput data-autofocus highlighted label={ui.designDescription} value={name} onChange={event=>setName(event.currentTarget.value)} required/><CrmTextInput highlighted label={ui.illustratorDesignNumber} type="number" min={1} step={1} value={designNumber} onChange={event=>setDesignNumber(event.currentTarget.value)} placeholder={ui.illustratorDesignNumberPlaceholder}/><div className="orders-design-edit-grid"><CrmTextInput highlighted label={ui.quantity} type="number" min={1} max={1000} value={quantity} onChange={event=>setQuantity(event.currentTarget.value)} required/><CrmTextInput highlighted label={`${ui.unitPrice}, ${order.currency}`} inputMode="decimal" value={price} onChange={event=>setPrice(event.currentTarget.value)} required/></div><p className="orders-edit-hint">{ui.designTotalRecalculationHint}</p>{error&&<CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.saveDesign}</CrmButton></footer></form></Modal>
 }
 
 function ownedMeasurement(measurement: Order["measurement"], athlete: Order["athlete"]) { return measurement && athlete && measurement.athleteId === athlete.id ? measurement : undefined; }
 function legacyMeasurementForItem(order: Order, item: Order["items"][number]) { return ownedMeasurement(order.measurement, item.athlete || order.athlete); }
 function ExpandedMeasurementGrid({ id, measurement, values }: { id: string; measurement: { measuredAt: string }; values?: Record<string, number> }) { return <div id={id} role="region" aria-label={ui.allMeasurements} className="orders-expanded-measurements"><header><strong>{ui.allMeasurements}</strong><small>{ui.measurementTakenAt}: {date(measurement.measuredAt)}</small></header>{Array.from({ length: 17 }, (_, index) => index + 1).map((number) => { const tone = [1,2,3,15].includes(number) ? "measurement-primary" : [6,7,8].includes(number) ? "measurement-secondary" : ""; return <span className={tone || undefined} key={number}><small>№{number} · {measurementFieldLabels[number - 1]}</small><b>{values?.[`m${number}`] == null ? "—" : `${formatCm(values[`m${number}`]!)} см`}</b></span>; })}</div>; }
 function itemMeasurementHistory(item: unknown) { return ((item as { measurementHistory?: Array<{ id: string; measuredAt: string; notes?: string }> }).measurementHistory ?? []); }
+function athleteMeasurements(athlete: unknown) { return ((athlete as { measurements?: Array<{ id: string; athleteId: string; measuredAt: string; values?: Record<string,number>; notes?: string }> } | null | undefined)?.measurements ?? []); }
 function formatCm(value: number) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value); }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function slotDateRange(order: Order) { return order.productionSlot ? `${shortDate(order.productionSlot.startsAt)} – ${shortDate(order.productionSlot.endsAt)}` : ui.notSpecified; }
@@ -557,6 +669,27 @@ function orderTypeLabel(value: string) { return (orderFormUi.types as Record<str
 function paymentMethodLabel(value: string) { return ({ BANK_TRANSFER: ui.bankTransfer, CARD: ui.cardPayment, PAYPAL: "PayPal", CASH: ui.cashPayment, OTHER: ui.otherPayment } as Record<string, string>)[value] || value; }
 
 type ExchangeRateStatus = { provider: "ECB" | "NBU"; officialUrl: string; supportedPairs: readonly string[]; cache: null | { effectiveDate: string; fetchedAt: string } };
+
+function CustomerWishesModal({ order, request, onClose, onSaved }: { order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [value, setValue] = useState(order.buyerComment || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      await request(`/orders/${order.id}/buyer-comment`, { method: "PATCH", body: JSON.stringify({ buyerComment: value.trim() || null, expectedBuyerComment: order.buyerComment ?? null }) });
+      await onSaved();
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+  return <Modal opened onClose={onClose} centered size={480} aria-label={`${ui.editCustomerWishes}: ${order.number}`} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus title={ui.editCustomerWishes}>
+    <form className="orders-customer-wishes-form" onSubmit={submit}>
+      <CrmTextarea data-autofocus autoFocus highlighted label={ui.customerWishes} value={value} onChange={(event) => setValue(event.target.value)} autosize minRows={4} maxRows={10} maxLength={5000} />
+      {error && <CrmAlert>{error}</CrmAlert>}
+      <footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer>
+    </form>
+  </Modal>;
+}
 
 function CurrencyChangeModal({ order, request, onClose, onSaved }: { order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
   const [targetCurrency, setTargetCurrency] = useState(["EUR", "USD", "UAH"].find((currency) => currency !== order.currency) || "EUR");
@@ -581,6 +714,32 @@ function CurrencyChangeModal({ order, request, onClose, onSaved }: { order: Orde
       {status && !supported && <div className="phase2-error" role="alert">{ui.currencyPairUnsupported}</div>}
       {error && <div className="phase2-error" role="alert">{error}</div>}
       <footer><CrmButton tone="secondary" type="button" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" disabled={busy || !status?.cache || !supported}>{busy ? ui.currencyChanging : ui.confirmCurrencyChange}</CrmButton></footer>
+    </form>
+  </Modal>;
+}
+
+function DeliveryContactModal({ order, request, onClose, onSaved }: { order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
+  const initialPhone = order.deliveryRecipientPhone || order.client.phone || "";
+  const initialEmail = deliveryEmail(order) || order.client.email || "";
+  const [recipientPhone, setRecipientPhone] = useState(initialPhone);
+  const [email, setEmail] = useState(initialEmail);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      await request(`/orders/${order.id}/delivery-contact`, { method: "PATCH", body: JSON.stringify({ recipientPhone: recipientPhone.trim() || null, email: email.trim() || null, expectedRecipientPhone: order.deliveryRecipientPhone ?? null, expectedEmail: deliveryEmail(order) ?? null }) });
+      await onSaved();
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+  return <Modal opened onClose={onClose} centered size={440} aria-label={`${ui.editDeliveryContacts}: ${order.number}`} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus title={ui.editDeliveryContacts}>
+    <form className="orders-delivery-contact-form" onSubmit={submit}>
+      <CrmTextInput data-autofocus autoFocus highlighted label={ui.phone} value={recipientPhone} onChange={(event) => setRecipientPhone(event.target.value)} maxLength={80} />
+      <CrmTextInput highlighted label={ui.email} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} />
+      <p>{ui.deliveryContactHint}</p>
+      {error && <CrmAlert>{error}</CrmAlert>}
+      <footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer>
     </form>
   </Modal>;
 }
@@ -695,7 +854,10 @@ function deliveryDate(order: Order) { return order.requiredDeliveryAt ? date(ord
 function dayText(order: Order) { const value = days(order); return value === 9999 ? ui.noDeadline : value < 0 ? `${ui.overdueBy} ${Math.abs(value)} ${ui.daysShort}` : value === 0 ? ui.today : `${ui.inDays} ${value} ${ui.daysShort}`; }
 function ageText(value: string) { const count = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000)); return count === 0 ? ui.today : `${count} ${ui.daysAgo}`; }
 function deliveryCountry(order: Order) { return order.deliveryAddressSet ? order.country : order.country || order.client.country; }
+function orderTrackingNumber(order: Order) { return (order.shipment?.trackingNumber || order.deliveryTrackingCode || "").trim(); }
+function orderHasShippedDelivery(order: Order) { return ["SHIPPED", "IN_TRANSIT", "DELIVERED"].includes(order.shippingStatus) || Boolean(orderTrackingNumber(order)); }
 function deliveryRecipient(order: Order) { return order.deliveryAddressSet ? order.deliveryRecipient || ui.notSpecified : order.client.displayName; }
+function deliveryEmail(order: Order) { return (order as Order & { deliveryEmail?: string }).deliveryEmail; }
 function clientAddress(order: Order) { return [order.client.address, order.client.city, order.client.postalCode, order.client.country].filter(Boolean).join(", "); }
 function deliveryPlace(order: Order) { if (!order.deliveryAddressSet) return [order.client.address, order.client.city, order.client.postalCode, order.country || order.client.country].filter(Boolean).join(", ") || ui.addressMissing; return order.deliveryAddressText || [order.deliveryAddressLine1, order.deliveryAddressLine2, order.deliveryCity, order.deliveryRegion, order.deliveryPostalCode, order.country].filter(Boolean).join(", ") || ui.addressMissing; }
 function hasDeliveryAddress(order: Order) { return hasUsableDeliveryAddress(order); }

@@ -13,7 +13,7 @@ test("заказ принимает новый неизменяемый snapshot
 });
 
 test("snapshot создаётся или заменяется новым и связывается с заказом атомарно", () => {
-  const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload"));
+  const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload(dto"));
   assert.match(method, /\$transaction\(async \(tx\)/);
   assert.match(method, /pg_advisory_xact_lock/);
   assert.match(method, /measurementId/);
@@ -35,7 +35,7 @@ test("snapshot создаётся или заменяется новым и св
 });
 
 test("сервер сохраняет точность шага 0,5 см и не обновляет старый снимок", () => {
-  const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload"));
+  const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload(dto"));
   assert.match(method, /Number\.isInteger\(value \* 2\)/);
   assert.doesNotMatch(method, /measurement\.update/);
   assert.match(method, /measurement\.create/);

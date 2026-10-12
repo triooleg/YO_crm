@@ -95,7 +95,7 @@ for (const viewport of [
     expect(originalFaviconHref).toBeTruthy();
     state.releaseDelayedUnread();
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.43");
+    await expect(page.locator(".crm-version")).toContainText("0.1.44");
     await expect(page).toHaveTitle("(7) CRM Yoleotard");
     await expect(page.locator('link[data-yoleotard-unread-icon="true"]')).toHaveAttribute("href", /^data:image\/svg\+xml/);
     const bell = page.locator(".crm-topbar-notifications");
@@ -112,7 +112,12 @@ for (const viewport of [
     state.delayNextUnread();
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await state.waitForDelayedUnread();
-    await page.getByRole("button", { name: /Непрочитанный клиент/ }).click();
+    const unreadClient = page.getByRole("button", { name: /Непрочитанный клиент/ });
+    await expect(unreadClient).toBeVisible();
+    // Polling intentionally replaces this list while the unread request is held.
+    // Dispatch the native click in one DOM turn so the test exercises the handler
+    // without Playwright waiting for an element that the mocked poll keeps replacing.
+    await unreadClient.evaluate((button: HTMLButtonElement) => button.click());
     await expect(page).toHaveTitle("(2) CRM Yoleotard");
     state.releaseDelayedUnread();
     await page.waitForTimeout(100);

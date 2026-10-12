@@ -118,7 +118,7 @@ test("disabled mode and automatic messaging fail closed", () => {
 test("AI draft feedback is scoped to the current client and conversation", () => {
   assert.match(communications, /aiRun:\{clientId,conversationId:conversation\.id,operation:"REPLY",status:AiRunStatus\.COMPLETED\}/);
   assert.match(communications, /sentMessageId:null/);
-  assert.match(communications, /reserveAiFeedback\(tx,\{aiRunId:d\.aiRunId,clientId,conversationId:conversation\.id\}\)/);
+  assert.match(communications, /reserveAiFeedback\(tx,\{aiRunId:sendAiRunId,clientId,conversationId:conversation\.id\}\)/);
   assert.match(communications, /conversationIds\.length!==1/);
   assert.match(communications, /sourceRun\.conversationId!==selectedConversationId/);
   assert.match(communications, /sameMessageSet\(sourceRun\.retrievedMessageIds,selectedIds\)/);

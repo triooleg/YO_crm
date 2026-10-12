@@ -26,6 +26,7 @@ const orderRequire = specifier => {
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: () => true, resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
@@ -45,9 +46,9 @@ test("lazy detail returns the canonical order with expanded manager, finance, ac
   const voidedPayment = { id: "payment-voided", voidedAt: new Date("2026-10-10T12:00:00.000Z"), voidReason: "Отменён" };
   const historyMeasurement = { id: "measurement-history", values: { m1: 80 } };
   const row = {
-    id: "order-1", client: { id: "client-1", displayName: "Client" }, payments: [activePayment], invoices: [], activities: [],
-    athlete: { id: "legacy-athlete", firstName: "Legacy", measurements: [{ id: "legacy-history", values: { m1: 79 } }] },
-    items: [{ id: "item-1", measurement: { id: "measurement-current", values: { m1: 81 } }, athlete: { id: "athlete-1", firstName: "Anna", measurements: [historyMeasurement] } }],
+    id: "order-1", client: { id: "client-1", displayName: "Client", athletes: [{ id: "athlete-1", firstName: "Anna", measurements: [historyMeasurement] }] }, payments: [activePayment], invoices: [], activities: [],
+    athlete: { id: "legacy-athlete", clientId: "client-1", archivedAt: null, firstName: "Legacy", measurements: [{ id: "legacy-history", values: { m1: 79 } }] },
+    items: [{ id: "item-1", measurement: { id: "measurement-current", values: { m1: 81 } }, athlete: { id: "athlete-1", clientId: "client-1", archivedAt: null, firstName: "Anna", measurements: [historyMeasurement] } }],
   };
   const service = new OrdersService({
     order: { findFirst: async value => { query = value; return row; } },
@@ -68,6 +69,7 @@ test("lazy detail returns the canonical order with expanded manager, finance, ac
   assert.equal(query.select.invoices.select.dueDate, true);
   assert.equal(query.select.items.select.measurement.select.values, true);
   assert.equal(query.select.items.select.athlete.select.measurements.select.values, true);
+  assert.equal(query.select.client.select.athletes.select.measurements.select.values, true);
   assert.equal(query.select.athlete.select.measurements.select.values, true);
   assert.equal(result.client.presented, true);
   assert.deepEqual(JSON.parse(JSON.stringify(result.payments)), [{ id: "payment-active", voidedAt: null }]);

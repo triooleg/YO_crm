@@ -9,6 +9,7 @@ const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8
 const orderPanel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const api = readFileSync(new URL("../../api/src/orders/orders.service.ts", import.meta.url), "utf8");
+const schema = readFileSync(new URL("../../../packages/database/prisma/schema.prisma", import.meta.url), "utf8");
 const ui = source + dashboard + i18n;
 
 test("Orders redesign exposes the complete operational overview", () => {
@@ -32,6 +33,62 @@ test("Orders redesign keeps real controls and deterministic guidance", () => {
   assert.match(ui, /Открыть заказ/);
   assert.match(dashboard, /!loading && !error && !shown\.length/);
   assert.match(dashboard, /onClick=\{\(\) => void load\(\)\}/);
+});
+
+test("список сохраняет пагинацию текущей вкладки и позволяет выбрать размер страницы", () => {
+  assert.match(dashboard, /orders-dashboard-pagination-v1/);
+  assert.match(dashboard, /sessionStorage\.getItem/);
+  assert.match(dashboard, /sessionStorage\.setItem/);
+  assert.match(dashboard, /pageSize/);
+  assert.match(dashboard, /ORDER_PAGE_SIZES/);
+  assert.match(dashboard, /paginateOrders\(sorted, page, pageSize\)/);
+});
+
+test("переход по orderId открывает точный заказ и его страницу",()=>{
+  assert.match(dashboard,/initialOrderId/);
+  assert.match(dashboard,/request\(`\/orders\/\$\{encodeURIComponent\(initialOrderId\.current\)\}`\)/);
+  assert.match(dashboard,/setExpandedId\(contextOrder\.id\)/);
+  assert.match(dashboard,/targetIndex[\s\S]*Math\.floor\(targetIndex \/ pageSize\) \+ 1/);
+  assert.match(dashboard,/scrollIntoView\(\{ block: "center" \}\)/);
+});
+
+test("отправленная доставка компактна, а пожелания клиента редактируются отдельно от описания", () => {
+  assert.match(dashboard, /function orderHasShippedDelivery/);
+  assert.match(dashboard, /orders-delivery-cell-button is-shipped/);
+  assert.match(dashboard, /order\.buyerComment \|\| order\.notes \|\| ui\.notSpecified/);
+  assert.match(dashboard, /\/orders\/\$\{order\.id\}\/buyer-comment/);
+  assert.match(dashboard, /expectedBuyerComment/);
+  assert.match(dashboard, /CustomerWishesModal/);
+});
+
+test("подписи заказов используют редактирование заказа и существующую вкладку измерений", () => {
+  assert.match(i18n, /menu: "Редактирование заказа"/);
+  assert.match(i18n, /measurements: "Измерения"/);
+  assert.match(dashboard, /key: "measurements"/);
+  assert.match(dashboard, /<MeasurementPanel/);
+});
+
+test("каждый дизайн хранит и редактирует номер файла Adobe Illustrator", () => {
+  assert.match(schema, /designNumber\s+Int\?/);
+  assert.match(api, /designNumber: true/);
+  assert.match(dashboard, /ui\.illustratorDesignNumber/);
+  assert.match(dashboard, /expectedDesignNumber/);
+});
+
+test("детали поддерживают файлы и просмотр изображений, а дизайн можно добавить",()=>{
+  assert.match(schema,/model OrderFile/);
+  assert.match(dashboard,/OrderFilesPanel/);
+  assert.match(dashboard,/\/orders\/\$\{orderId\}\/files/);
+  assert.match(dashboard,/orders-file-preview/);
+  assert.match(dashboard,/OrderDesignAddModal/);
+  assert.match(dashboard,/\/orders\/\$\{order\.id\}\/items/);
+});
+
+test("клиент редактируется из заказа, а снимок замеров выбирается для позиции",()=>{
+  assert.match(dashboard,/ClientEditModal/);
+  assert.match(dashboard,/\/clients\/\$\{order\.client\.id\}/);
+  assert.match(dashboard,/bindOrderItemMeasurement/);
+  assert.match(dashboard,/expectedMeasurementId/);
 });
 
 test("быстрые продажи не предлагают передачу в производство", () => {

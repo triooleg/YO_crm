@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { Prisma, User } from "@prisma/client";
@@ -8,7 +8,7 @@ import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
 import { uploadsRoot } from "../uploads";
-import { AddOrderPaymentDto, ArchiveOrdersDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, WebsiteSalesCorrectionDto } from "./orders.dto";
+import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
 import { archiveOrdersTransaction, OrderArchiveError, ORDER_ARCHIVE_ERROR } from "./order-archive";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
@@ -17,8 +17,9 @@ import { loadProductionOrders, type ProductionOrderRepository } from "./producti
 import { isOrderImageName } from "./order-image-name";
 import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
 import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "./order-details";
-import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistOrderItemDetails } from "./order-item-details";
+import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails } from "./order-item-details";
 import { keycrmSourceChannel } from "../keycrm/keycrm-normalizer";
+import { buildOrderFileName, decodeOrderFile } from "./order-file-policy";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -82,7 +83,7 @@ export class OrdersService {
       orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
       select: {
         id: true, number: true, type: true, discipline: true, country: true,
-        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
+        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryEmail: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
         deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
         deliveryServiceName: true,
         deliveryTrackingCode: true,
@@ -93,11 +94,12 @@ export class OrdersService {
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
         sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
         createdAt: true, productionSlot: true,
-        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
+        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } },
-        items: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
+        items: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, measuredAt: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
+        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       },
     });
@@ -112,7 +114,7 @@ export class OrdersService {
       where: { id: orderId, archivedAt: null },
       select: {
         id: true, number: true, type: true, discipline: true, country: true,
-        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
+        deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryEmail: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
         deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
         deliveryServiceName: true,
         deliveryTrackingCode: true,
@@ -124,10 +126,16 @@ export class OrdersService {
         sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
         createdAt: true, updatedAt: true, productionSlot: true,
         responsibleManager: { select: { id: true, displayName: true } },
-        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true } },
+        client: { select: {
+          id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true,
+          athletes: { where: { archivedAt: null }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: {
+            id: true, firstName: true, lastName: true,
+            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+          } },
+        } },
         athlete: {
           select: {
-            id: true, firstName: true, lastName: true,
+            id: true, clientId: true, archivedAt: true, firstName: true, lastName: true,
             measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
           },
         },
@@ -135,10 +143,10 @@ export class OrdersService {
         items: {
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
-            id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, properties: true, productionStatus: true,
+            id: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true,
             athlete: {
               select: {
-                id: true, firstName: true, lastName: true,
+                id: true, clientId: true, archivedAt: true, firstName: true, lastName: true,
                 measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
               },
             },
@@ -146,6 +154,7 @@ export class OrdersService {
           },
         },
         activities: { select: { id: true, type: true, summary: true, metadata: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 100 },
+        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } },
         shipment: true,
         invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
@@ -157,15 +166,15 @@ export class OrdersService {
       select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true, voidedAt: true, voidReason: true, createdAt: true },
       orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
     });
-    const items = order.items.map(({ athlete, ...item }) => {
-      if (!athlete) return { ...item, athlete: null, measurementHistory: [] };
-      const { measurements, ...athleteSummary } = athlete;
-      return { ...item, athlete: athleteSummary, measurementHistory: measurements };
+    const items = order.items.map(({ athlete, measurement, ...item }) => {
+      if (!athlete || athlete.archivedAt || athlete.clientId !== order.client.id) return { ...item, athlete: null, measurement: null, measurementHistory: [] };
+      const { measurements, clientId: _clientId, archivedAt: _archivedAt, ...athleteSummary } = athlete;
+      return { ...item, athlete: athleteSummary, measurement, measurementHistory: measurements };
     });
-    const legacyAthlete = order.athlete;
+    const legacyAthlete = order.athlete && !order.athlete.archivedAt && order.athlete.clientId === order.client.id ? order.athlete : null;
     const measurementHistory = legacyAthlete?.measurements ?? [];
     const athlete = legacyAthlete ? { id: legacyAthlete.id, firstName: legacyAthlete.firstName, lastName: legacyAthlete.lastName } : null;
-    return { ...order, athlete, client: presentClientContact(order.client), items, paymentHistory, measurementHistory };
+    return { ...order, athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory, measurementHistory };
   }
 
   async productionList(orderId?: string, from?: string, to?: string) {
@@ -286,6 +295,68 @@ export class OrdersService {
       return updated;
     });
   }
+  async updateBuyerComment(orderId: string, dto: { buyerComment: string | null; expectedBuyerComment: string | null }, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const current = order.buyerComment ?? null;
+      if (current !== (dto.expectedBuyerComment ?? null)) {
+        throw new ConflictException("Пожелание клиента уже изменено. Обновите заказ и повторите действие");
+      }
+      const buyerComment = dto.buyerComment?.trim() || null;
+      if (current === buyerComment) return order;
+      const updated = await tx.order.update({ where: { id: orderId }, data: { buyerComment } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_BUYER_COMMENT_UPDATED", summary: "Изменены пожелания клиента" } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { buyerComment: current }, after: { buyerComment } } });
+      return updated;
+    });
+  }
+  async updateDeliveryContact(orderId: string, dto: UpdateOrderDeliveryContactDto, actor: User) {
+    try {
+      return await this.prisma.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+        const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null } });
+        if (!order) throw new NotFoundException("Заказ не найден");
+        const currentPhone = order.deliveryRecipientPhone ?? null;
+        const currentEmail = order.deliveryEmail ?? null;
+        if (currentPhone !== (dto.expectedRecipientPhone ?? null) || currentEmail !== (dto.expectedEmail ?? null)) {
+          throw new ConflictException("Контакты доставки уже изменены. Обновите заказ и повторите действие");
+        }
+        const recipientPhone = dto.recipientPhone?.trim() || null;
+        const email = dto.email?.trim().toLowerCase() || null;
+        if (currentPhone === recipientPhone && currentEmail === email) return order;
+        const updated = await tx.order.update({ where: { id: orderId }, data: { deliveryRecipientPhone: recipientPhone, deliveryEmail: email } });
+        await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_DELIVERY_CONTACT_UPDATED", summary: "Изменены телефон и e-mail доставки" } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { deliveryRecipientPhone: currentPhone, deliveryEmail: currentEmail }, after: { deliveryRecipientPhone: recipientPhone, deliveryEmail: email } } });
+        return updated;
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2002") throw new ConflictException("Этот e-mail уже используется другим клиентом");
+      throw error;
+    }
+  }
+  async uploadOrderFile(orderId: string, dto: UploadOrderFileDto, actor: User) {
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { id: true, clientId: true, number: true } });
+    if (!order) throw new NotFoundException("Заказ не найден");
+    const decoded = decodeOrderFile(dto), path = buildOrderFileName(decoded.mimeType), directory = join(uploadsRoot(), "order-files");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, path), decoded.content, { flag: "wx" });
+    try {
+      return await this.prisma.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+        const activeOrder = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { id: true, clientId: true, number: true } });
+        if (!activeOrder) throw new NotFoundException("Заказ не найден");
+        const file = await tx.orderFile.create({ data: { orderId, uploadedById: actor.id, name: decoded.originalName, path, mimeType: decoded.mimeType, sizeBytes: decoded.content.length } });
+        await tx.activity.create({ data: { clientId: activeOrder.clientId, orderId, type: "ORDER_FILE_UPLOADED", summary: `Добавлен файл к заказу ${activeOrder.number}`, metadata: { fileId: file.id, name: file.name, mimeType: file.mimeType, sizeBytes: file.sizeBytes } } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "OrderFile", entityId: file.id, after: { orderId, name: file.name, path: file.path, mimeType: file.mimeType, sizeBytes: file.sizeBytes } } });
+        return file;
+      });
+    } catch (error) {
+      await unlink(join(directory, path)).catch(() => undefined);
+      throw error;
+    }
+  }
   async updateModelImage(orderId: string, dto: UpdateOrderModelImageDto, actor: User) {
     if (!isOrderImageName(dto.modelImagePath)) throw new BadRequestException("Некорректное имя изображения заказа");
     try {
@@ -369,6 +440,27 @@ export class OrdersService {
       if(error.code===ORDER_ITEM_DETAILS_ERROR.totalTooLarge)throw new BadRequestException("Итоговая сумма заказа превышает допустимый предел");
       throw new ConflictException("Дизайн уже изменён другим пользователем. Обновите заказ и повторите действие");
     }
+  }
+  async addItem(orderId:string,dto:AddOrderItemDto,actor:User){
+    if(dto.modelImagePath){if(!isOrderImageName(dto.modelImagePath))throw new BadRequestException("Некорректное имя изображения заказа");try{const image=await stat(join(uploadsRoot(),"order-models",dto.modelImagePath));if(!image.isFile())throw new Error("not a file")}catch{throw new NotFoundException("Изображение заказа не найдено")}}
+    try{return await this.prisma.$transaction(tx=>persistAddedOrderItem(tx,orderId,dto,actor.id))}catch(error){if(!(error instanceof OrderItemDetailsError))throw error;if(error.code===ORDER_ITEM_DETAILS_ERROR.orderNotFound)throw new NotFoundException("Заказ не найден");if(error.code===ORDER_ITEM_DETAILS_ERROR.athleteNotFound)throw new BadRequestException("Спортсмен не принадлежит клиенту этого заказа");if(error.code===ORDER_ITEM_DETAILS_ERROR.depositWouldUnconfirmProduction)throw new BadRequestException("Сначала внесите оплату до новой суммы предоплаты");if(error.code===ORDER_ITEM_DETAILS_ERROR.totalTooLarge)throw new BadRequestException("Итоговая сумма заказа превышает допустимый предел");throw new ConflictException("Не удалось добавить дизайн")}
+  }
+  async bindItemMeasurement(orderId:string,itemId:string,dto:BindOrderItemMeasurementDto,actor:User){
+    return this.prisma.$transaction(async tx=>{
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))",orderId);
+      const item=await tx.orderItem.findFirst({where:{id:itemId,orderId,order:{archivedAt:null}},include:{order:{select:{clientId:true,number:true}}}});
+      if(!item)throw new NotFoundException("Позиция заказа не найдена");
+      if((item.measurementId??null)!==(dto.expectedMeasurementId??null))throw new ConflictException("Привязка замеров уже изменена. Обновите заказ и повторите действие");
+      const measurement=await tx.measurement.findFirst({where:{id:dto.measurementId,athlete:{clientId:item.order.clientId,archivedAt:null}}});
+      if(!measurement)throw new BadRequestException("Выбранные замеры не принадлежат спортсмену этой позиции");
+      if(item.athleteId&&item.athleteId!==measurement.athleteId)throw new BadRequestException("Выбранные замеры не принадлежат спортсмену этой позиции");
+      const athleteId=item.athleteId??measurement.athleteId;
+      if(item.measurementId===measurement.id&&item.athleteId===athleteId)return item;
+      const updated=await tx.orderItem.update({where:{id:item.id},data:{athleteId,measurementId:measurement.id}});
+      await tx.activity.create({data:{clientId:item.order.clientId,orderId,type:"ORDER_ITEM_MEASUREMENT_BOUND",summary:`К дизайну заказа ${item.order.number} привязан снимок замеров`,metadata:{itemId:item.id,measurementId:measurement.id,previousMeasurementId:item.measurementId,athleteId,previousAthleteId:item.athleteId}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"OrderItem",entityId:item.id,before:{athleteId:item.athleteId,measurementId:item.measurementId},after:{athleteId,measurementId:measurement.id}}});
+      return updated;
+    });
   }
   async updateDeliveryAddress(orderId: string, dto: UpdateOrderDeliveryAddressDto, actor: User) {
     try {

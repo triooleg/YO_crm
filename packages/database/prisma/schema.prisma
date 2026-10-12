@@ -263,6 +263,7 @@ model User {
   updatedAiRuntimeSettings AiRuntimeSetting[]         @relation("AiRuntimeSettingUpdatedBy")
   createdClientMergeOperations ClientMergeOperation[] @relation("ClientMergeOperationCreator")
   splitClientMergeOperations   ClientMergeOperation[] @relation("ClientMergeOperationSplitter")
+  uploadedOrderFiles        OrderFile[]                @relation("OrderFileUploader")
 }
 
 model Session {
@@ -419,6 +420,7 @@ model Order {
   deliveryAddressSet   Boolean          @default(false)
   deliveryRecipient    String?
   deliveryRecipientPhone String?
+  deliveryEmail          String?
   deliveryAddressLine1 String?
   deliveryAddressLine2 String?
   deliveryCity         String?
@@ -470,6 +472,7 @@ model Order {
   payments             Payment[]
   productionSlot       ProductionSlot?
   activities           Activity[]
+  files                OrderFile[]
 
   invoices   Invoice[]
   expenses   Expense[]
@@ -480,6 +483,21 @@ model Order {
   @@index([salesStatus, archivedAt])
   @@index([requiredDeliveryAt])
   @@index([clientId, createdAt])
+}
+
+model OrderFile {
+  id           String   @id @default(cuid())
+  orderId      String
+  uploadedById String
+  name         String
+  path         String   @unique
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime @default(now())
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  uploadedBy   User     @relation("OrderFileUploader", fields: [uploadedById], references: [id])
+
+  @@index([orderId, createdAt])
 }
 
 model Shipment {
@@ -513,6 +531,7 @@ model OrderItem {
   modelImagePath   String?
   externalImageUrl String?
   sku              String?
+  designNumber     Int?
   properties       Json?
   sourceSystem     String?
   sourceAccount    String?

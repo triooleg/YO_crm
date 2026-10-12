@@ -56,7 +56,7 @@ test("заказ из чата открывается поверх перепи�
   assert.match(communications, /<OrderPanel/);
   assert.match(communications, /initialAthleteId=\{selectedAthleteId\}/);
   assert.match(communications, /onSaved=\{async\(\)=>/);
-  assert.match(communications, /onNavigate\?\.\("finance",\{action:"new-invoice",orderId:activeOrders\[0\]\.id/);
+  assert.match(communications, /navigateFromInbox\("finance",\{action:"new-invoice",orderId:activeOrders\[0\]\.id/);
   assert.match(tasks, /params\.get\("action"\)!=="new"/);
   assert.match(finance, /params\.get\("action"\)==="new-invoice"/);
 });

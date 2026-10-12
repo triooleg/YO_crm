@@ -28,6 +28,7 @@ const orderRequire = specifier => {
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: () => true, resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
@@ -137,4 +138,57 @@ test("audit failure rolls back snapshot, item, activity, and legacy mirror", asy
   assert.equal(target.state.order.items[0].measurementId, "measurement-old");
   assert.equal(target.state.order.measurementId, "measurement-old");
   assert.equal(target.state.activities.length, 0);
+});
+
+function bindingFixture({ foreignMeasurement = false } = {}) {
+  const state = {
+    items: [
+      { id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old", order: { clientId: "client-1", number: "YO-26-0001" } },
+      { id: "item-2", orderId: "order-1", athleteId: "athlete-2", measurementId: "measurement-other", order: { clientId: "client-1", number: "YO-26-0001" } },
+    ],
+    activities: [], audits: [], locks: [],
+  };
+  const prisma = {
+    $transaction: async callback => {
+      const draft = structuredClone(state);
+      const tx = {
+        $executeRawUnsafe: async (_sql, key) => draft.locks.push(key),
+        orderItem: {
+          findFirst: async ({ where }) => structuredClone(draft.items.find(item => item.id === where.id && item.orderId === where.orderId) ?? null),
+          update: async ({ where, data }) => { const index = draft.items.findIndex(item => item.id === where.id); draft.items[index] = { ...draft.items[index], ...data }; return structuredClone(draft.items[index]); },
+        },
+        measurement: { findFirst: async ({ where }) => where.id === "measurement-new" && !foreignMeasurement ? { id: "measurement-new", athleteId: "athlete-1" } : null },
+        activity: { create: async ({ data }) => draft.activities.push(data) },
+        auditLog: { create: async ({ data }) => draft.audits.push(data) },
+      };
+      const result = await callback(tx);
+      Object.assign(state, draft);
+      return result;
+    },
+  };
+  return { state, service: new OrdersService(prisma, {}) };
+}
+
+test("binding an immutable snapshot changes only the selected order item and survives a reload", async () => {
+  const target = bindingFixture();
+  const result = await target.service.bindItemMeasurement("order-1", "item-1", { measurementId: "measurement-new", expectedMeasurementId: "measurement-old" }, { id: "owner-1" });
+  assert.equal(result.measurementId, "measurement-new");
+  assert.equal(target.state.items[0].measurementId, "measurement-new");
+  assert.equal(target.state.items[1].measurementId, "measurement-other");
+  assert.deepEqual(target.state.locks, ["order-1"]);
+  assert.equal(target.state.activities[0].type, "ORDER_ITEM_MEASUREMENT_BOUND");
+  assert.equal(JSON.stringify(target.state.audits[0].before), JSON.stringify({ athleteId: "athlete-1", measurementId: "measurement-old" }));
+  assert.equal(JSON.stringify(target.state.audits[0].after), JSON.stringify({ athleteId: "athlete-1", measurementId: "measurement-new" }));
+  assert.equal(target.state.items.find(item => item.id === "item-1").measurementId, "measurement-new");
+});
+
+test("stale or foreign measurement binding is rejected without mutations", async () => {
+  const stale = bindingFixture();
+  await assert.rejects(() => stale.service.bindItemMeasurement("order-1", "item-1", { measurementId: "measurement-new", expectedMeasurementId: "stale" }, { id: "owner-1" }), ConflictException);
+  assert.equal(stale.state.items[0].measurementId, "measurement-old");
+  assert.deepEqual(stale.state.activities, []);
+  const foreign = bindingFixture({ foreignMeasurement: true });
+  await assert.rejects(() => foreign.service.bindItemMeasurement("order-1", "item-1", { measurementId: "measurement-new", expectedMeasurementId: "measurement-old" }, { id: "owner-1" }), BadRequestException);
+  assert.equal(foreign.state.items[0].measurementId, "measurement-old");
+  assert.deepEqual(foreign.state.activities, []);
 });

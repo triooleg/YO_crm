@@ -36,8 +36,8 @@ const order = {
   invoices: [{ id: "invoice-usd", number: "INV-USD", status: "ISSUED", language: "ru", currency: "USD", totalMinor: 12345, issueDate: "2026-10-01T12:00:00.000Z" }],
 };
 
-async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number; primaryIndex?: number }) {
-  let currentOrder = structuredClone({ ...order, type: behavior?.orderType ?? order.type });
+async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number; primaryIndex?: number; primaryCreatedAt?: string }) {
+  let currentOrder = structuredClone({ ...order, type: behavior?.orderType ?? order.type, createdAt: behavior?.primaryCreatedAt ?? order.createdAt });
   let statusPatched = false;
   let paymentPosted = false;
   const updates: { path: string; body: Record<string, unknown> }[] = [];
@@ -75,7 +75,11 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
     if (method === "GET" && path === "/api/orders") {
       if (telemetry) telemetry.listGets += 1;
-      const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => ({ ...currentOrder, id: `visual-order-${index + 2}`, number: `YO-26-01${String(index + 2).padStart(2, "0")}`, requiredDeliveryAt: `2026-10-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`, createdAt: index < 2 ? `2026-09-0${3 - index}T12:00:00.000Z` : `2026-08-${31 - index}T12:00:00.000Z`, client: { ...currentOrder.client, id: `visual-client-${index + 2}`, displayName: ["Анна Коваленко", "Maria Rossi", "Sophie Martin", "Emma Wilson"][index] ?? `Клиент ${index + 2}` } }));
+      const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => {
+        const requiredDeliveryAt = new Date(Date.UTC(2026, 9, 21 + index, 12)).toISOString();
+        const createdAt = new Date(Date.UTC(2026, 8, 3 - index, 12)).toISOString();
+        return { ...currentOrder, id: `visual-order-${index + 2}`, number: `YO-26-01${String(index + 2).padStart(2, "0")}`, requiredDeliveryAt, createdAt, client: { ...currentOrder.client, id: `visual-client-${index + 2}`, displayName: ["Анна Коваленко", "Maria Rossi", "Sophie Martin", "Emma Wilson"][index] ?? `Клиент ${index + 2}` } };
+      });
       const result = [...additional];
       result.splice(Math.min(behavior?.primaryIndex ?? 0, result.length), 0, currentOrder);
       return route.fulfill({ json: result });
@@ -168,6 +172,30 @@ test("выбранная сортировка сохраняется после 
   await expect(page.getByRole("columnheader", { name: /Срок/ })).toHaveAttribute("aria-sort", "descending");
 });
 
+test("ссылка на заказ восстанавливает его страницу и раскрывает точную карточку", async ({ page }) => {
+  await mockOrdersApi(page, undefined, undefined, { additionalOrders: 25, primaryIndex: 24, primaryCreatedAt: "2026-07-01T12:00:00.000Z" });
+  await page.goto(`/?section=orders&orderId=${order.id}`);
+
+  await expect(page.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
+test("страница и размер списка восстанавливаются после перехода Заказы → Производство → Заказы", async ({ page }) => {
+  await mockOrdersApi(page, undefined, undefined, { additionalOrders: 55 });
+  await page.goto("/?section=orders");
+
+  await page.getByLabel("Заказов на странице").selectOption("50");
+  await page.getByRole("navigation", { name: "Пагинация заказов" }).getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Пагинация заказов" }).getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-current", "page");
+
+  await page.locator(".crm-topbar-nav").getByRole("button", { name: "Производство", exact: true }).click();
+  await expect(page).toHaveURL(/section=production/);
+  await page.locator(".crm-topbar-nav").getByRole("button", { name: "Заказы", exact: true }).click();
+
+  await expect(page.getByLabel("Заказов на странице")).toHaveValue("50");
+  await expect(page.getByRole("navigation", { name: "Пагинация заказов" }).getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
 for (const viewport of [
   { name: "approved", width: 1703, height: 895 },
   { name: "laptop", width: 1366, height: 768 },
@@ -257,7 +285,7 @@ for (const viewport of [
     expect(await designDialog.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false);
     await designDialog.getByRole("button", { name: "Сохранить дизайн" }).click();
     await expect(designDialog).toBeHidden();
-    expect(updates.find((update) => update.path.endsWith("/items/item-1"))).toEqual({ path: `/api/orders/${order.id}/items/item-1`, body: { name: "Купальник с рукавами", quantity: 2, priceMinor: 25000, expectedName: "Купальник", expectedQuantity: 1, expectedPriceMinor: 45000, expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
+    expect(updates.find((update) => update.path.endsWith("/items/item-1"))).toEqual({ path: `/api/orders/${order.id}/items/item-1`, body: { name: "Купальник с рукавами", quantity: 2, priceMinor: 25000, designNumber: null, expectedName: "Купальник", expectedQuantity: 1, expectedPriceMinor: 45000, expectedDesignNumber: null, expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
     await page.getByRole("tab", { name: /Дизайны/ }).click();
     await page.locator(".orders-item-image-editor input[type=file]").setInputFiles({ name: "item-updated.png", mimeType: "image/png", buffer: testPng });
     await expect.poll(() => updates.find((update) => update.path.endsWith("/model-image"))).toEqual({ path: `/api/orders/${order.id}/model-image`, body: { itemId: "item-1", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
@@ -288,7 +316,7 @@ for (const viewport of [
       expect(await page.locator(".orders-table-scroll").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     }
     if (viewport.name === "approved") {
-      for (const tabName of ["Дизайны", "Индивидуальные измерения", "Финансы", "Производство", "Доставка"]) {
+      for (const tabName of ["Дизайны", "Измерения", "Финансы", "Производство", "Доставка"]) {
         await page.getByRole("tab", { name: tabName }).click();
         await page.screenshot({ path: screenshotPath(testInfo, `keycrm-orders-tab-${tabName}-${viewport.width}x${viewport.height}.png`), fullPage: false });
       }

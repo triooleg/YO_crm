@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, Min, ValidateIf, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
@@ -7,6 +7,12 @@ import { CreateMeasurementDto } from "../clients/clients.dto";
 export class UploadModelImageDto {
   @ApiProperty() @IsString() @Length(1, 150) name!: string;
   @ApiProperty() @IsString() mime!: string;
+  @ApiProperty() @IsString() data!: string;
+}
+
+export class UploadOrderFileDto {
+  @ApiProperty() @IsString() @Length(1, 180) name!: string;
+  @ApiProperty() @IsString() @Length(1, 150) mimeType!: string;
   @ApiProperty() @IsString() data!: string;
 }
 
@@ -59,6 +65,22 @@ export class UpdateOrderItemDetailsDto {
   @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) expectedPriceMinor!: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 150) modelImagePath?: string;
   @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @ValidateIf((_, value) => value !== null) @IsInt() @Min(1) @Max(2_147_483_647) designNumber?: number | null;
+  @ApiPropertyOptional({ nullable: true }) @ValidateIf((input, value) => input.designNumber !== undefined && value !== null) @IsInt() @Min(1) @Max(2_147_483_647) expectedDesignNumber?: number | null;
+}
+
+export class AddOrderItemDto {
+  @ApiProperty() @IsString() @Length(1, 300) name!: string;
+  @ApiProperty() @IsInt() @Min(1) @Max(1000) quantity!: number;
+  @ApiProperty() @IsInt() @Min(0) @Max(2_147_483_647) priceMinor!: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 150) modelImagePath?: string;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @ValidateIf((_, value) => value !== null) @IsInt() @Min(1) @Max(2_147_483_647) designNumber?: number | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() athleteId?: string;
+}
+
+export class BindOrderItemMeasurementDto {
+  @ApiProperty() @IsString() measurementId!: string;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedMeasurementId!: string | null;
 }
 
 export class UpdateOrderDetailsDto {
@@ -128,6 +150,16 @@ export class UpdateOrderCurrencyDto {
 }
 export class UpdateOrderDisciplineDto {
  @ApiProperty({ enum: Discipline }) @IsEnum(Discipline) discipline!: Discipline;
+}
+export class UpdateOrderBuyerCommentDto {
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) buyerComment!: string | null;
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) expectedBuyerComment!: string | null;
+}
+export class UpdateOrderDeliveryContactDto {
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(80) recipientPhone!: string | null;
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsEmail({}, { message: "Введите корректный e-mail" }) @MaxLength(320) email!: string | null;
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(80) expectedRecipientPhone!: string | null;
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsEmail({}, { message: "Введите корректный e-mail" }) @MaxLength(320) expectedEmail!: string | null;
 }
 export class UpdateOrderDeliveryAddressDto {
   @ApiProperty() @IsBoolean() useClientAddress!: boolean;

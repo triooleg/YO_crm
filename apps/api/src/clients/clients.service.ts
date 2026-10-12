@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, type AiMode, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
@@ -263,6 +263,26 @@ export class ClientsService {
       await tx.activity.create({data:{clientId:id,type:"CLIENT_NOTE_UPDATED",summary:notes.trim()?"Обновлена заметка клиента":"Заметка клиента очищена"}});
       await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{notes:before.notes},after:{notes:client.notes}}});
       return client;
+    });
+  }
+  async updateProfile(id:string,dto:{displayName:string;country?:string|null;language?:string|null;phone?:string|null;email?:string|null;expectedUpdatedAt:string},actor:User){
+    return this.prisma.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${id} FOR UPDATE`;
+      const before=await tx.client.findFirst({where:{id,archivedAt:null}});
+      if(!before)throw new NotFoundException("Клиент не найден");
+      if(before.updatedAt.toISOString()!==dto.expectedUpdatedAt)throw new ConflictException("Карточка клиента уже изменена. Обновите данные и повторите действие");
+      const clean=(value:string|null|undefined)=>value?.trim()||null;
+      const data={displayName:dto.displayName.trim(),country:dto.country===undefined?before.country:clean(dto.country),language:dto.language===undefined?before.language:clean(dto.language),phone:dto.phone===undefined?before.phone:clean(dto.phone),email:dto.email===undefined?before.email:clean(dto.email)?.toLowerCase()||null};
+      if(before.displayName===data.displayName&&before.country===data.country&&before.language===data.language&&before.phone===data.phone&&before.email===data.email)return before;
+      const changed=await tx.client.updateMany({where:{id,archivedAt:null,updatedAt:before.updatedAt},data});
+      if(changed.count!==1)throw new ConflictException("Карточка клиента уже изменена. Обновите данные и повторите действие");
+      const client=await tx.client.findUnique({where:{id}});
+      if(!client)throw new NotFoundException("Клиент не найден");
+      await tx.activity.create({data:{clientId:id,type:"CLIENT_PROFILE_UPDATED",summary:"Изменены данные клиента"}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{displayName:before.displayName,country:before.country,language:before.language,phone:before.phone,email:before.email},after:{displayName:client.displayName,country:client.country,language:client.language,phone:client.phone,email:client.email}}});
+      return presentClientContact(client);
     });
   }
 

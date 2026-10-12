@@ -125,7 +125,7 @@ for (const viewport of [
     await expect(expandedOrder.locator(".orders-order-deadlines .orders-detail small").first()).toHaveCSS("font-size", "11px");
     await expect(expandedOrder.locator(".orders-order-deadlines .orders-detail strong").first()).toHaveCSS("font-size", "11px");
     await expect(expandedOrder.locator(".orders-order-deadlines h3").first()).toHaveCSS("font-size", "13px");
-    await expect(page.locator(".orders-discipline-select .mantine-NativeSelect-input")).toHaveCSS("font-size", "11px");
+    await expect(page.getByRole("button", { name: `Вид спорта: Художественная гимнастика, ${order.number}` })).toHaveCSS("font-size", "11px");
     await expect(page.locator(".orders-deadline-button strong")).toHaveCSS("color", "rgb(17, 122, 192)");
 
     const paid = page.locator('[data-domain="payment"][data-status="PAID"]');
@@ -151,7 +151,7 @@ for (const viewport of [
     await expect(production).toBeVisible();
     await expect(production).toHaveCSS("white-space", "nowrap");
 
-    await page.getByRole("tab", { name: "Индивидуальные измерения" }).click();
+    await page.getByRole("tab", { name: "Измерения" }).click();
     const itemBlocks = expandedOrder.locator(".orders-tab-measurements > article");
     const firstItem = itemBlocks.nth(0);
     const secondItem = itemBlocks.nth(1);

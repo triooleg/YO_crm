@@ -4,7 +4,7 @@ import type { Request } from "express";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateClientNotesDto } from "./clients.dto";
+import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
 
 type AuthRequest = Request & { user: User };
@@ -51,6 +51,10 @@ export class ClientsController {
   @Patch(":id/notes")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   updateNotes(@Param("id") id:string,@Body()dto:UpdateClientNotesDto,@Req()request:AuthRequest){return this.clients.updateNotes(id,dto.notes,request.user)}
+
+  @Patch(":id")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateProfile(@Param("id") id:string,@Body()dto:UpdateClientProfileDto,@Req()request:AuthRequest){return this.clients.updateProfile(id,dto,request.user)}
 
   @Post(":id/athletes")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

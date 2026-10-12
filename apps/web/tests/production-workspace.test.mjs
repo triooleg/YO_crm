@@ -55,7 +55,7 @@ test("выбранный заказ открывает нижнюю панель
   assert.match(planner, /production-details-notes/);
   assert.match(planner, /production-details-actions/);
   assert.match(workspace, /onOpenOrder\(selectedOrder\.id\)/);
-  assert.match(shell, /onOpenOrder=\{orderId=>navigate\("orders",\{orderId\}\)\}/);
+  assert.match(shell, /onOpenOrder=\{orderId=>void navigate\("orders",\{orderId\}\)\}/);
   assert.match(workspace, /production-board-shell/);
   assert.match(styles, /\.production-board-shell\{[^}]*position:relative[^}]*flex:1/);
   assert.match(styles, /\.production-board\{[^}]*height:100%/);

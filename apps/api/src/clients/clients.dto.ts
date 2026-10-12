@@ -26,6 +26,14 @@ export class PromoteInboxClientDto extends CreateClientDto {}
 export class UpdateClientNotesDto {
   @ApiProperty() @IsString() @MaxLength(2000) notes!: string;
 }
+export class UpdateClientProfileDto {
+  @ApiProperty() @Transform(({ value }) => optionalText(value)) @IsString() @Length(1, 200) displayName!: string;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) country?: string | null;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) language?: string | null;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) phone?: string | null;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsEmail({}, { message: "Введите корректный e-mail" }) email?: string | null;
+  @ApiProperty() @IsDateString() expectedUpdatedAt!: string;
+}
 export class MergeClientDto {
   @ApiProperty() @IsString() @Length(1,100) sourceClientId!: string;
 }
