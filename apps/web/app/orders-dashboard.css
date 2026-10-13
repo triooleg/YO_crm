@@ -231,6 +231,18 @@
 .orders-measurement-subtabs{display:flex;gap:18px;margin:8px 0;border-bottom:1px solid #e7e1ef}
 .orders-measurement-subtabs>*{padding:7px 4px;color:#706683;font-size:10px}
 .orders-measurement-subtabs>strong{border-bottom:2px solid #7040e7;color:#6232d4}
+.orders-measurement-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
+.orders-measurement-workspace>header{gap:12px;flex-wrap:wrap}
+.orders-measurement-side .orders-used-product{width:100%;text-align:left;border-radius:4px}
+.orders-measurement-side .orders-used-product:focus-visible{outline:2px solid var(--orders-purple)}
+.orders-tab-measurements-approved{grid-template-columns:minmax(240px,26%) minmax(0,1fr) minmax(240px,21%)}
+.orders-measurement-workspace>header>div:first-child{display:grid;grid-template-columns:54px 1fr;column-gap:12px;align-items:center}
+.orders-measurement-workspace>header .orders-avatar-small{grid-row:span 2;width:54px;height:54px;font-size:19px}
+.orders-measurement-workspace>header h3{font-size:16px}.orders-measurement-workspace>header p{font-size:12px}
+.orders-athlete-rail>button strong{font-size:13px}.orders-athlete-rail>button small{font-size:11px}
+.orders-measurement-subtabs{flex-wrap:wrap}.orders-measurement-workspace .orders-approved-measurement-grid small{font-size:11px}.orders-measurement-workspace .orders-approved-measurement-grid strong{font-size:13px}
+@media(max-width:1300px){.orders-tab-measurements-approved{grid-template-columns:220px minmax(0,1fr)}}
+@media(max-width:900px){.orders-tab-measurements-approved{grid-template-columns:1fr}.orders-measurement-workspace .orders-approved-measurement-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .orders-measurement-summary{display:grid;grid-template-columns:repeat(4,1fr);padding:8px;border:1px solid #e2dced;border-radius:8px;background:#fff}
 .orders-previous-orders article{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #eee9f4}
 .orders-previous-orders article:first-child{border-top:0}.orders-previous-orders article>div{display:grid}.orders-previous-orders strong{font-size:10px}.orders-previous-orders small{color:#716786;font-size:9px}

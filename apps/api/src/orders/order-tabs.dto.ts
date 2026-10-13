@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { OrderFileRole, OrderNoteCategory, OrderNoteVisibility, ProductionStatus } from "@prisma/client";
 import { IsDateString, IsEnum, IsObject, IsOptional, IsString, Length, MaxLength, ValidateIf } from "class-validator";
+import { CreateMeasurementDto } from "../clients/clients.dto";
+
+export class CreateInstanceMeasurementDto extends CreateMeasurementDto {
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @Length(1,100) expectedMeasurementId!: string | null;
+  @ApiProperty() @IsDateString() expectedUpdatedAt!: string;
+}
 
 export class CreateOrderNoteDto {
   @ApiProperty({ enum: OrderNoteCategory }) @IsEnum(OrderNoteCategory) category!: OrderNoteCategory;

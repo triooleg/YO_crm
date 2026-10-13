@@ -221,11 +221,123 @@ test("девять вкладок раскрытого заказа соотве
   }
 });
 
+for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+test(`измерения показывают снимок привязанный к экземпляру и редактируются ${viewport.width}`, async ({ page }, testInfo) => {
+  await page.setViewportSize(viewport);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await mockOrdersApi(page);
+  const detail = richOrderDetail(order);
+  const bound = detail.items[0].measurement;
+  const second = { ...bound, id: "measurement-2", measuredAt: "2026-09-06T12:00:00.000Z", values: { ...bound.values, m1: 74.5 } };
+  detail.client.athletes[0].measurements = [{ ...bound, id: "profile-new", measuredAt: "2026-10-13T12:00:00.000Z", values: { ...bound.values, m1: 99 } }];
+  const item = { ...detail.items[0], athlete: null, measurement: null, quantity: 2, instances: [{ ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z" }, { ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z", id: "instance-2", ordinal: 2, measurement: second }] };
+  const writes: { path: string; body: Record<string, unknown> }[] = [];
+  await page.route("**/api/clients/*/athletes/athlete-1", async route => {
+    const body = route.request().postDataJSON();
+    writes.push({ path: new URL(route.request().url()).pathname, body });
+    detail.client.athletes[0].firstName = body.firstName;
+    item.instances.forEach(instance => { instance.athlete = { ...instance.athlete, firstName: body.firstName }; });
+    await route.fulfill({ json: detail.client.athletes[0] });
+  });
+  await page.route(`**/api/order-tabs/${order.id}/instances/instance-2/measurement`, async route => {
+    const body = route.request().postDataJSON();
+    writes.push({ path: new URL(route.request().url()).pathname, body });
+    item.instances[1].measurement = { ...second, id: "edited-snapshot", measuredAt: body.measuredAt, values: { ...second.values, m1: body.m1 } };
+    await route.fulfill({ json: item.instances[1].measurement });
+  });
+  await page.route(`**/api/orders/${order.id}`, route => route.fulfill({ json: { ...detail, items: [item] } }));
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+  const grid = page.locator(".orders-approved-measurement-grid");
+  await expect(grid).toBeVisible();
+  await expect(grid.locator("strong").first()).toHaveText("50 см");
+  await expect(grid.locator("strong")).toHaveCount(8);
+  await page.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await expect(grid.locator("strong")).toHaveCount(9);
+  await expect(grid).toContainText("№17 · От талии до верхней линии плавок");
+  await page.getByRole("tab", { name: "Основные мерки", exact: true }).click();
+  await expect(page.locator(".orders-used-product")).toHaveCount(2);
+  await page.getByLabel("Изделие для просмотра мерок").selectOption("instance-2");
+  await expect(grid.locator("strong").first()).toHaveText("74,5 см");
+  await expect(page.locator(".orders-measurement-workspace")).not.toContainText("99 см");
+  await page.getByRole("button", { name: "Изменить имя спортсменки", exact: true }).click();
+  const nameDialog = page.getByRole("dialog", { name: "Изменить имя спортсменки" });
+  await nameDialog.getByRole("textbox", { name: /Имя спортсменки/ }).fill("Илана");
+  await nameDialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(nameDialog).toBeHidden();
+  await expect(page.locator(".orders-measurement-workspace h3")).toHaveText("Илана Коваленко");
+  await page.getByRole("button", { name: "Изменить замеры", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Изменить замеры" });
+  await expect(editor.getByLabel("1. Обхват груди (под мышками)")).toHaveValue("74.5");
+  await editor.getByLabel("1. Обхват груди (под мышками)").fill("75.5");
+  await editor.getByRole("button", { name: "Сохранить замеры", exact: true }).click();
+  await expect(editor).toBeHidden();
+  await expect(grid.locator("strong").first()).toHaveText("75,5 см");
+  expect(writes[1]).toMatchObject({ path: `/api/order-tabs/${order.id}/instances/instance-2/measurement`, body: { expectedMeasurementId: "measurement-2", expectedUpdatedAt: "2026-10-13T12:00:00.000Z", m1: 75.5 } });
+  expect(item.instances[0].measurement.id).toBe("measurement-1");
+  await page.getByLabel("Изделие для просмотра мерок").selectOption("instance-1");
+  await expect(grid.locator("strong").first()).toHaveText("50 см");
+  expect(errors).toEqual([]);
+  await page.locator(".orders-tab-measurements-approved").screenshot({ path: screenshotPath(testInfo, `instance-bound-measurements-${viewport.width}.png`) });
+  if (viewport.width === 390) {
+    for (const [name, target] of [["athlete", page.locator(".orders-athlete-rail")], ["values", grid], ["usage", page.locator(".orders-measurement-side .orders-approved-card").first()], ["history", page.locator(".orders-measurement-side .orders-approved-card").last()], ["summary", page.locator(".orders-measurement-summary")]] as const) {
+      await target.evaluate(element => element.scrollIntoView({ block: "center", behavior: "instant" }));
+      await page.screenshot({ path: screenshotPath(testInfo, `measurements-mobile-${name}.png`), style: "nextjs-portal{visibility:hidden}" });
+    }
+  }
+});
+}
+
+for (const field of ["name", "measurement"] as const) {
+test(`редактор ${field} сохраняет исходный контекст при обновлении заказа`, async ({ page }) => {
+  await mockOrdersApi(page);
+  const initial = richOrderDetail(order);
+  const item = { ...initial.items[0], athlete: null, measurement: null, instances: [{ ...initial.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z" }] };
+  await page.route("**/api/orders", route => route.fulfill({ json: [{ ...initial, items: [item] }] }));
+  let releaseDetail!: () => void;
+  const detailReady = new Promise<void>(resolve => { releaseDetail = resolve; });
+  await page.route(`**/api/orders/${order.id}`, async route => {
+    await detailReady;
+    const athlete = { ...initial.client.athletes[0], firstName: "Другой редактор" };
+    const measurement = { ...item.instances[0].measurement, id: "concurrent-snapshot", values: { ...item.instances[0].measurement.values, m1: 88 } };
+    await route.fulfill({ json: { ...initial, client: { ...initial.client, athletes: [athlete] }, items: [{ ...item, instances: [{ ...item.instances[0], athlete, measurement, updatedAt: "2026-10-13T13:00:00.000Z" }] }] } });
+  });
+  let submitted: Record<string, unknown> | undefined;
+  await page.route(field === "name" ? "**/api/clients/*/athletes/athlete-1" : "**/api/order-tabs/*/instances/instance-1/measurement", async route => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 409, json: { message: "Данные уже изменены другим пользователем" } });
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+  const title = field === "name" ? "Изменить имя спортсменки" : "Изменить замеры";
+  await page.getByRole("button", { name: title, exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: title });
+  releaseDetail();
+  await expect(page.locator(".orders-measurement-workspace h3")).toHaveText("Другой редактор Коваленко");
+  if (field === "name") {
+    await expect(dialog.getByRole("textbox", { name: /Имя спортсменки/ })).toHaveValue("Анна");
+    await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect.poll(() => submitted?.expectedFirstName).toBe("Анна");
+  } else {
+    await expect(dialog.getByLabel("1. Обхват груди (под мышками)")).toHaveValue("50");
+    await dialog.getByRole("button", { name: "Сохранить замеры", exact: true }).click();
+    await expect.poll(() => submitted?.expectedMeasurementId).toBe("measurement-1");
+    expect(submitted?.expectedUpdatedAt).toBe("2026-10-13T12:00:00.000Z");
+  }
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Данные уже изменены другим пользователем")).toBeVisible();
+});
+}
+
 test("кнопка добавления спортсменки в пустом заказе открывает форму создания", async ({ page }, testInfo) => {
   const updates = await mockOrdersApi(page);
   await page.goto("/?section=orders");
   await page.getByRole("button", { name: order.number, exact: true }).click();
   await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+  await expect(page.locator(".orders-used-product")).toHaveCount(0);
 
   const addAthlete = page.getByRole("button", { name: "Добавить спортсменку", exact: true });
   await expect(addAthlete).toBeVisible();

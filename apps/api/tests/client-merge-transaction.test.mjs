@@ -21,7 +21,10 @@ vm.runInNewContext(compile(provenanceSource),{module:provenanceModule,exports:pr
 class BadRequestException extends Error{}
 class NotFoundException extends Error{}
 const serviceModule={exports:{}};
+const measurementModule={exports:{}};
+vm.runInNewContext(compile(await readFile(new URL("../src/clients/measurement-data.ts",import.meta.url),"utf8")),{module:measurementModule,exports:measurementModule.exports,require:()=>({BadRequestException}),Date,Object,Array,Number});
 const localRequire=id=>{
+  if(id==="./measurement-data")return measurementModule.exports;
   if(id==="@nestjs/common")return{BadRequestException,NotFoundException,Injectable:()=>target=>target};
   if(id==="../communications/inbound-routing")return{presentClientContact:value=>value};
   if(id==="./client-merge-policy")return policyModule.exports;

@@ -6,13 +6,46 @@ import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor } from "../finance/exchange-rates";
 import { uploadsRoot } from "../uploads";
 import { buildOrderFileName, decodeOrderFile } from "./order-file-policy";
-import { CreateOrderNoteDto, CreateOrderTagDto, UpdateClientPreferencesDto, UpdateOrderFileRoleDto, UpdateOrderItemInstanceDto, UpdateOrderNoteDto, UploadClientFileDto } from "./order-tabs.dto";
+import { CreateInstanceMeasurementDto, CreateOrderNoteDto, CreateOrderTagDto, UpdateClientPreferencesDto, UpdateOrderFileRoleDto, UpdateOrderItemInstanceDto, UpdateOrderNoteDto, UploadClientFileDto } from "./order-tabs.dto";
+import { createMeasurementData } from "../clients/measurement-data";
 import { aggregateProductionStatus } from "./production-status-graph";
 import { requiresProduction } from "./production-rules";
 
 @Injectable()
 export class OrderTabsService {
   constructor(private readonly prisma: PrismaService) {}
+  async addInstanceMeasurement(orderId: string, instanceId: string, dto: CreateInstanceMeasurementDto, user: User) {
+    return this.prisma.$transaction(async tx => {
+      // Match merge and order mutation lock protocols before reading ownership.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      await this.lockOrder(tx, orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { clientId: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${order.clientId} FOR UPDATE`;
+      if (!await tx.client.findFirst({ where: { id: order.clientId, archivedAt: null }, select: { id: true } })) throw new NotFoundException("Клиент не найден");
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+      const current = await tx.orderItemInstance.findFirst({ where: { id: instanceId, archivedAt: null, orderItem: { orderId, order: { archivedAt: null, clientId: order.clientId } } } });
+      if (!current) throw new NotFoundException("Экземпляр изделия не найден");
+      const expectedUpdatedAt = new Date(dto.expectedUpdatedAt);
+      if (current.measurementId !== dto.expectedMeasurementId || current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) throw new ConflictException("Экземпляр уже изменён другим пользователем");
+      if (!current.athleteId) throw new ConflictException("Сначала выберите спортсмена");
+      await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${current.athleteId} FOR UPDATE`;
+      const athlete = await tx.athlete.findFirst({ where: { id: current.athleteId, clientId: order.clientId, archivedAt: null } });
+      if (!athlete) throw new ConflictException("Спортсмен не принадлежит клиенту заказа");
+      if (current.measurementId && !await tx.measurement.findFirst({ where: { id: current.measurementId, athleteId: athlete.id }, select: { id: true } })) throw new ConflictException("Снимок мерок не принадлежит выбранному спортсмену");
+      const measurement = await tx.measurement.create({ data: createMeasurementData(athlete.id, dto) });
+      const claimed = await tx.orderItemInstance.updateMany({
+        where: { id: instanceId, orderItemId: current.orderItemId, archivedAt: null, athleteId: athlete.id, measurementId: dto.expectedMeasurementId, updatedAt: expectedUpdatedAt, orderItem: { orderId, order: { archivedAt: null, clientId: order.clientId } } },
+        data: { measurementId: measurement.id }
+      });
+      if (claimed.count !== 1) throw new ConflictException("Экземпляр уже изменён другим пользователем");
+      const updated = await tx.orderItemInstance.findUniqueOrThrow({ where: { id: instanceId } });
+      await tx.activity.create({ data: { orderId, clientId: order.clientId, actorId: user.id, type: "ORDER_ITEM_INSTANCE_MEASUREMENT_UPDATED", summary: `Обновлены мерки экземпляра №${current.ordinal}: ${athlete.firstName}`, metadata: { instanceId, orderItemId: current.orderItemId, athleteId: athlete.id, previousMeasurementId: current.measurementId, measurementId: measurement.id, previousUpdatedAt: current.updatedAt.toISOString(), updatedAt: updated.updatedAt.toISOString() } } });
+      await tx.auditLog.create({ data: { actorId: user.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
+      await tx.auditLog.create({ data: { actorId: user.id, action: "UPDATE", entityType: "OrderItemInstance", entityId: instanceId, before: { athleteId: current.athleteId, measurementId: current.measurementId, updatedAt: current.updatedAt }, after: { athleteId: updated.athleteId, measurementId: updated.measurementId, updatedAt: updated.updatedAt } } });
+      return updated;
+    });
+  }
   detail(orderId:string) { return this.prisma.order.findFirstOrThrow({where:{id:orderId,archivedAt:null},select:{id:true,clientId:true,items:{orderBy:[{createdAt:"asc"},{id:"asc"}],include:{instances:{where:{archivedAt:null},orderBy:{ordinal:"asc"},include:{athlete:true,measurement:true,orderShipment:true}},files:{orderBy:[{sortOrder:"asc"},{createdAt:"asc"}]}}},orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}],include:{instances:{where:{archivedAt:null},include:{orderItem:true,athlete:true}},atelierExpense:true}},notesStructured:{where:{archivedAt:null},orderBy:{createdAt:"desc"},include:{author:{select:{id:true,displayName:true}},files:true}},tags:{where:{archivedAt:null},orderBy:{createdAt:"asc"}},files:{orderBy:{createdAt:"desc"}},activities:{orderBy:{createdAt:"desc"},take:250,include:{actor:{select:{id:true,displayName:true}}}},client:{select:{id:true,preferences:true,files:{orderBy:{createdAt:"desc"}}}}}}); }
   async createNote(orderId:string,dto:CreateOrderNoteDto,user:User){return this.prisma.$transaction(async tx=>{await this.lockOrder(tx,orderId);await this.assertNoteLinks(tx,orderId,dto);const order=await tx.order.findFirst({where:{id:orderId,archivedAt:null},select:{clientId:true}});if(!order)throw new NotFoundException("Заказ не найден");const note=await tx.orderNote.create({data:{orderId,authorId:user.id,...dto,title:dto.title.trim(),body:dto.body.trim()}});await tx.activity.create({data:{orderId,clientId:order.clientId,actorId:user.id,type:"ORDER_NOTE_CREATED",summary:`Добавлена заметка «${note.title}»`,metadata:{noteId:note.id,category:note.category}}});await tx.auditLog.create({data:{actorId:user.id,action:"CREATE",entityType:"OrderNote",entityId:note.id,after:note}});return note})}
   async updateNote(orderId:string,noteId:string,dto:UpdateOrderNoteDto,user:User){return this.prisma.$transaction(async tx=>{await this.lockOrder(tx,orderId);await this.assertNoteLinks(tx,orderId,dto);const current=await tx.orderNote.findFirst({where:{id:noteId,orderId,archivedAt:null},include:{order:{select:{clientId:true}}}});if(!current)throw new NotFoundException("Заметка не найдена");if(current.updatedAt.toISOString()!==new Date(dto.expectedUpdatedAt).toISOString())throw new ConflictException("Заметка уже изменена другим пользователем");await tx.orderNoteRevision.create({data:{noteId,editorId:user.id,category:current.category,visibility:current.visibility,title:current.title,body:current.body}});const {expectedUpdatedAt:_,...next}=dto;const note=await tx.orderNote.update({where:{id:noteId},data:{...next,title:next.title.trim(),body:next.body.trim()}});await tx.activity.create({data:{orderId,clientId:current.order.clientId,actorId:user.id,type:"ORDER_NOTE_UPDATED",summary:`Изменена заметка «${note.title}»`,metadata:{noteId}}});await tx.auditLog.create({data:{actorId:user.id,action:"UPDATE",entityType:"OrderNote",entityId:noteId,before:current,after:note}});return note})}

@@ -8,11 +8,14 @@ import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
 import { isOrderFileName } from "./order-file-policy";
-import { CreateOrderNoteDto, CreateOrderTagDto, UpdateClientPreferencesDto, UpdateOrderFileRoleDto, UpdateOrderItemInstanceDto, UpdateOrderNoteDto, UploadClientFileDto } from "./order-tabs.dto";
+import { CreateInstanceMeasurementDto, CreateOrderNoteDto, CreateOrderTagDto, UpdateClientPreferencesDto, UpdateOrderFileRoleDto, UpdateOrderItemInstanceDto, UpdateOrderNoteDto, UploadClientFileDto } from "./order-tabs.dto";
 import { OrderTabsService } from "./order-tabs.service";
 @Controller("order-tabs") @UseGuards(SessionGuard,RolesGuard)
 export class OrderTabsController {
   constructor(private readonly tabs:OrderTabsService){}
+  @Post(":orderId/instances/:instanceId/measurement")
+  @Roles(UserRole.OWNER,UserRole.ADMIN,UserRole.MANAGER,UserRole.PRODUCTION)
+  addInstanceMeasurement(@Param("orderId") orderId:string,@Param("instanceId") instanceId:string,@Body() dto:CreateInstanceMeasurementDto,@Req() req:Request&{user:User}){return this.tabs.addInstanceMeasurement(orderId,instanceId,dto,req.user)}
   @Get("orders/:orderId") @Roles(UserRole.OWNER,UserRole.ADMIN,UserRole.MANAGER) detail(@Param("orderId") orderId:string){return this.tabs.detail(orderId)}
   @Post(":orderId/notes") @Roles(UserRole.OWNER,UserRole.ADMIN,UserRole.MANAGER) createNote(@Param("orderId") orderId:string,@Body() dto:CreateOrderNoteDto,@Req() req:Request&{user:User}){return this.tabs.createNote(orderId,dto,req.user)}
   @Patch(":orderId/notes/:noteId") @Roles(UserRole.OWNER,UserRole.ADMIN,UserRole.MANAGER) updateNote(@Param("orderId") orderId:string,@Param("noteId") noteId:string,@Body() dto:UpdateOrderNoteDto,@Req() req:Request&{user:User}){return this.tabs.updateNote(orderId,noteId,dto,req.user)}

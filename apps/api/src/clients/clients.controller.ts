@@ -4,7 +4,7 @@ import type { Request } from "express";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
+import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateAthleteDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
 
 type AuthRequest = Request & { user: User };
@@ -66,5 +66,11 @@ export class ClientsController {
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION)
   addMeasurement(@Param("id") id: string, @Param("athleteId") athleteId: string, @Body() dto: CreateMeasurementDto, @Req() request: AuthRequest) {
     return this.clients.addMeasurement(id, athleteId, dto, request.user);
+  }
+
+  @Patch(":id/athletes/:athleteId")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateAthlete(@Param("id") id: string, @Param("athleteId") athleteId: string, @Body() dto: UpdateAthleteDto, @Req() request: AuthRequest) {
+    return this.clients.updateAthlete(id, athleteId, dto, request.user);
   }
 }

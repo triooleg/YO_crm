@@ -6,11 +6,15 @@ import vm from "node:vm";
 import ts from "typescript";
 
 const nativeRequire = createRequire(import.meta.url);
+const measurementModule = { exports: {} };
+const measurementJs = ts.transpileModule(readFileSync(new URL("../src/clients/measurement-data.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+new Function("require", "module", "exports", measurementJs)(nativeRequire, measurementModule, measurementModule.exports);
 function loadOrderTabsService() {
   const source = readFileSync(new URL("../src/orders/order-tabs.service.ts", import.meta.url), "utf8");
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
   const localRequire = specifier => {
+    if (specifier === "../clients/measurement-data") return measurementModule.exports;
     if (specifier === "../prisma.service") return { PrismaService: class PrismaService {} };
     if (specifier === "../uploads") return { uploadsRoot: () => ".local" };
     if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file", decodeOrderFile: () => ({ mimeType: "text/plain", originalName: "file", content: Buffer.from("x") }) };

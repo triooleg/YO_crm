@@ -58,11 +58,21 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.48");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.49");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.48\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.48\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.49\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.49\}"/);
   assert.match(compose, /CRM_COMMIT:/);
+});
+
+test("журнал 0.1.49 описывает мерки экземпляра и сохранность истории", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.49"'), i18n.indexOf('version: "0.1.48"'));
+  assert.match(release, /точный снимок мерок экземпляра/iu);
+  assert.match(release, /редактирование имени/iu);
+  assert.match(release, /17 канонических/iu);
+  assert.match(release, /Миграций базы данных нет/iu);
+  assert.match(release, /crm-v0\.1\.48/);
+  assert.match(changelog, /## \[0\.1\.49\] - 2026-10-14/);
 });
 
 test("журнал 0.1.48 описывает добавление спортсменки и неизменяемые мерки", () => {

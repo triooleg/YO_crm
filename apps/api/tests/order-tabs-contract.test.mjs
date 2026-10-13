@@ -8,7 +8,10 @@ test("order tab endpoints require session and role guards",()=>{
   assert.match(controller,/@UseGuards\(SessionGuard,RolesGuard\)/);
   for(const route of ["notes","tags","instances","files","preferences"])assert.match(controller,new RegExp(route));
   assert.match(controller,/@Roles\(UserRole\.OWNER,UserRole\.ADMIN/);
-  assert.doesNotMatch(controller,/UserRole\.PRODUCTION/);
+  const routes = controller.split(/(?=@(?:Get|Post|Patch|Delete)\()/).slice(1);
+  const measurement = routes.find(route => route.startsWith('@Post(":orderId/instances/:instanceId/measurement")'));
+  assert.match(measurement, /@Roles\(UserRole\.OWNER,UserRole\.ADMIN,UserRole\.MANAGER,UserRole\.PRODUCTION\)/);
+  for (const route of routes.filter(route => route !== measurement)) assert.doesNotMatch(route, /UserRole\.PRODUCTION/);
 });
 test("notes preserve revisions and archive instead of deleting",()=>{
   assert.match(service,/orderNoteRevision\.create/);

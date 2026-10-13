@@ -1,6 +1,6 @@
 import { ContactChannel, Discipline } from "@prisma/client";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsDateString, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Length, MaxLength, Min, IsIn } from "class-validator";
+import { IsDateString, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Length, MaxLength, Min, IsIn, ValidateIf } from "class-validator";
 import { Transform } from "class-transformer";
 
 function optionalText(value: unknown) {
@@ -49,6 +49,12 @@ export class CreateAthleteDto {
   @ApiPropertyOptional() @IsOptional() @IsString() coach?:string;
   @ApiPropertyOptional() @IsOptional() @IsString() country?:string;
   @ApiPropertyOptional() @IsOptional() @IsString() notes?:string;
+}
+export class UpdateAthleteDto {
+  @ApiProperty() @Transform(({ value }) => typeof value === "string" ? value.trim() : value) @IsString() @Length(1,100) firstName!: string;
+  @ApiProperty({ nullable: true }) @Transform(({ value }) => typeof value === "string" ? value.trim() || null : value) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(100) lastName!: string | null;
+  @ApiProperty() @IsString() @Length(1,100) expectedFirstName!: string;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedLastName!: string | null;
 }
 export class CreateMeasurementDto {
   @ApiProperty() @IsDateString() measuredAt!:string;
