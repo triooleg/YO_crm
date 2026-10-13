@@ -34,7 +34,7 @@ test("производственный слот удаляется отдель�
   const deleteSlot=service.slice(service.indexOf("async deleteProductionSlot"),service.indexOf("async addPayment"));
   assert.match(deleteSlot,/\$transaction\(async tx/);
   assert.match(deleteSlot,/productionSlot\.delete/);
-  assert.match(deleteSlot,/productionStatus:\s*"NOT_SCHEDULED"/);
+  assert.match(deleteSlot,/updateProductionStatusGraph[\s\S]*ProductionStatus\.NOT_SCHEDULED/);
   assert.match(deleteSlot,/PRODUCTION_SLOT_DELETED/);
   assert.match(deleteSlot,/action:\s*"DELETE"/);
   assert.match(deleteSlot,/productionSlot\.updatedAt\.toISOString\(\) !== dto\.expectedUpdatedAt/);

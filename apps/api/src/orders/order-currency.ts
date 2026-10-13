@@ -23,7 +23,7 @@ function provider(value: unknown) { return value === "ECB" || value === "NBU" ? 
 export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, orderId: string, targetCurrency: ExchangeRateCurrency, actorId: string, now = new Date(), expected?: OrderCurrencyExpectedState) {
   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
-  const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, invoices: true, expenses: true, shipment: true, items: true } });
+  const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: true, invoices: true, expenses: true, shipment: true, items: true, orderShipments: { where: { archivedAt: null } } } });
   if (!order) throw new OrderCurrencyChangeError("ORDER_NOT_FOUND", "Заказ не найден");
   if (expected && (order.currency !== expected.currency || order.type !== expected.type || (order.notes ?? null) !== expected.description || order.priceMinor !== expected.priceMinor || (order.requiredDeliveryAt?.toISOString() ?? null) !== expected.requiredDeliveryAt || (order.modelImagePath ?? null) !== expected.modelImagePath)) {
     throw new OrderCurrencyChangeError("ORDER_CHANGED", "Заказ уже изменён другим пользователем");
@@ -34,6 +34,7 @@ export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, or
   if (order.invoices.length) throw new OrderCurrencyChangeError("INVOICE_HISTORY_EXISTS", "Нельзя изменить валюту заказа с историей инвойсов");
   if (order.expenses.length) throw new OrderCurrencyChangeError("EXPENSE_HISTORY_EXISTS", "Нельзя изменить валюту заказа со связанными расходами");
   if (order.shipment?.costMinor) throw new OrderCurrencyChangeError("SHIPMENT_COST_EXISTS", "Нельзя изменить валюту заказа с расходами на доставку");
+  if ((order.orderShipments ?? []).some((shipment) => shipment.customerChargeMinor > 0 || shipment.atelierCostMinor > 0)) throw new OrderCurrencyChangeError("SHIPMENT_COST_EXISTS", "Нельзя изменить валюту заказа с доходами или расходами по посылкам");
   if (String(order.sourceSystem ?? "").toUpperCase() === "KEYCRM") throw new OrderCurrencyChangeError("KEYCRM_ORDER_OWNED", "Валюта заказа, управляемого KeyCRM, изменяется только в источнике");
   const [providerSetting, cacheSetting] = await Promise.all([
     tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } }),

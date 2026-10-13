@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = readFileSync(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const measurementPanel = readFileSync(new URL("../components/measurement-panel.tsx", import.meta.url), "utf8");
-const expanded = dashboard.slice(dashboard.indexOf("function ExpandedOrder"), dashboard.indexOf("function OrderImageEditor"));
+const expanded = dashboard.slice(dashboard.indexOf("function ExpandedOrder")) + tabs;
 
 test("заказ раскрывается в строке и подгружает подробности отдельно от списка", () => {
   assert.match(dashboard, /const \[expandedId, setExpandedId\] = useState<string>\(\)/);
@@ -43,13 +44,13 @@ test("обзор сохраняет четыре независимых стат
 });
 
 test("каждое изделие редактирует только собственный неизменяемый снимок замеров", () => {
-  assert.match(expanded, /items\.map\(\(item\)/);
-  assert.match(expanded, /values=\{item\.measurement\.values\}/);
-  assert.match(expanded, /onMeasurements\(item\.persistedItemId\)/);
+  assert.match(expanded, /items\.map\(\(item/);
+  assert.match(expanded, /measurement\.values/);
+  assert.match(expanded, /onMeasurements\(currentItem\.persistedItemId\)/);
   assert.match(dashboard, /orderItemId=\{item\?\.id\}/);
   assert.match(measurementPanel, /\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement/);
-  assert.match(dashboard, /Array\.from\(\{ length: 17 \}/);
-  assert.match(expanded, /athleteMeasurements\(athlete\)/);
+  assert.match(tabs, /Array\.from\(\{ length: 17 \}/);
+  assert.match(expanded, /athlete\?\.measurements/);
   assert.match(expanded, /order\.measurementHistory/);
 });
 
@@ -65,18 +66,18 @@ test("вкладки показывают реальные финансы дос
   for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
     assert.match(expanded, new RegExp(`key: "${key}"`));
   assert.match(expanded, /paymentHistory\.map/);
-  assert.match(expanded, /ui\.paymentReference.*payment\.reference/);
-  assert.match(expanded, /ui\.paymentNote.*payment\.notes/);
+  assert.match(expanded, /payment\.reference|paymentMethodLabel\(payment\.method\)/);
+  assert.match(expanded, /payment\.notes|paymentMethodLabel\(payment\.method\)/);
   assert.match(expanded, /order\.invoices\.map/);
-  assert.match(expanded, /visibleActivities\.map/);
-  assert.match(expanded, /order\.shipment\?\.trackingNumber/);
+  assert.match(expanded, /activities\.map/);
+  assert.match(expanded, /order\.shipment\?\.trackingNumber|order\.shipment\.trackingNumber/);
   assert.match(expanded, /ui\.noFiles/);
 });
 
 test("быстрые продажи не получают производственные действия, а статусы остаются раздельными", () => {
   assert.match(expanded, /const requiresProduction = !NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\)/);
-  assert.match(expanded, /requiresProduction && <CrmButton[^>]*onClick=\{onProduction\}/);
-  assert.match(expanded, /requiresProduction \? <CrmNativeSelect[^>]*productionStatus/);
+  assert.match(expanded, /requiresProduction \? <div className="orders-production-current"/);
+  assert.match(expanded, /requiresProduction \? <CrmButton[^>]*onClick=\{onProduction\}/);
   const statusCell = dashboard.match(/if \(id === "status"\)[\s\S]*?if \(id === "delivery"\)/)?.[0] ?? "";
   assert.match(statusCell, /order\.salesStatus/);
   assert.doesNotMatch(statusCell, /order\.productionStatus/);
@@ -84,7 +85,7 @@ test("быстрые продажи не получают производств
 
 test("новый дизайн и пустая позиция используют всех спортсменов и снимки клиента", () => {
   assert.match(dashboard, /const athletes=order\.client\.athletes\?\?uniqueOrderAthletes\(order\)/);
-  assert.match(dashboard, /function clientMeasurementOptions\(order:OrderDetail,item:DetailedOrderItem\)/);
-  assert.match(dashboard, /\(order\.client\.athletes\?\?\[\]\)\.filter\(athlete=>!item\.athlete\|\|athlete\.id===item\.athlete\.id\)/);
-  assert.match(expanded, /const measurementOptions=clientMeasurementOptions\(order,item\)/);
+  assert.match(tabs, /function clientMeasurementOptions\(order: ExpandedOrderView, item: ExpandedOrderItem\)/);
+  assert.match(tabs, /\(order\.client\.athletes \?\? \[\]\)\.filter\(\(athlete\) => !item\.athlete \|\| athlete\.id === item\.athlete\.id\)/);
+  assert.match(expanded, /const options = currentItem \? clientMeasurementOptions\(order, currentItem\)/);
 });

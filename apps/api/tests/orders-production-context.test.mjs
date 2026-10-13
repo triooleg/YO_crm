@@ -154,6 +154,26 @@ test("производство возвращает только признак 
   }
 });
 
+test("частично доставленные новые посылки не наследуют доставку из legacy projection", async () => {
+  const repository = {
+    findMany: async () => [{
+      id: "partial-delivery",
+      deliveryTrackingCode: null,
+      payments: [],
+      currency: "EUR",
+      shipment: { trackingNumber: "LEGACY", shippedAt: new Date("2026-10-02T00:00:00Z"), deliveredAt: new Date("2026-10-05T00:00:00Z") },
+      orderShipments: [
+        { trackingNumber: "ONE", shippedAt: new Date("2026-10-02T00:00:00Z"), deliveredAt: new Date("2026-10-05T00:00:00Z") },
+        { trackingNumber: "TWO", shippedAt: null, deliveredAt: null },
+      ],
+    }],
+    findFirst: async () => null,
+  };
+  const [order] = await loadProductionOrders(repository, undefined, "2026-10-01", "2026-11-01");
+  assert.equal(order.shippedAt?.toISOString(), "2026-10-02T00:00:00.000Z");
+  assert.equal(order.deliveredAt, null);
+});
+
 test("производство не теряет текущие слоты после импорта более 100 старых заказов", async () => {
   const historical = Array.from({ length: 100 }, (_, index) => ({ id: `historical-${index}`, productionSlot: { startsAt: "2023-01-01", endsAt: "2023-01-07" } }));
   const current = Array.from({ length: 20 }, (_, index) => ({ id: `current-${index}`, productionSlot: { startsAt: "2026-10-01", endsAt: "2026-10-07" } }));

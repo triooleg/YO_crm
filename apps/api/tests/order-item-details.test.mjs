@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails } from "../src/orders/order-item-details.ts";
+import vm from "node:vm";
+import ts from "typescript";
+
+const source = readFileSync(new URL("../src/orders/order-item-details.ts", import.meta.url), "utf8");
+const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const detailsModule = { exports: {} };
+const paymentStatus = { UNPAID: "UNPAID", PARTIALLY_PAID: "PARTIALLY_PAID", DEPOSIT_PAID: "DEPOSIT_PAID", PAID: "PAID", REFUNDED: "REFUNDED", CANCELLED: "CANCELLED" };
+vm.runInNewContext(javascript, {
+  module: detailsModule,
+  exports: detailsModule.exports,
+  require: specifier => specifier === "@prisma/client"
+    ? { PaymentStatus: paymentStatus }
+    : specifier === "./production-status-graph"
+      ? { updateProductionStatusGraph: async (tx, orderId, nextStatus, orderData = {}) => {
+          const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus: nextStatus } });
+          await tx.orderItem.updateMany({ where: { orderId }, data: { productionStatus: nextStatus } });
+          await tx.orderItemInstance.updateMany({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus: nextStatus } });
+          return order;
+        } }
+      : undefined,
+  Date,
+  Math,
+});
+const { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails } = detailsModule.exports;
 
 function fixture({ productionSlot = null } = {}) {
   const state = {
@@ -8,8 +32,8 @@ function fixture({ productionSlot = null } = {}) {
       id: "order-1", clientId: "client-1", currency: "EUR", type: "CUSTOM_ORDER", productionStatus: "NOT_SCHEDULED", archivedAt: null,
       priceMinor: 30000, depositRequiredMinor: 15000, paymentStatus: "UNPAID", modelImagePath: "first.jpg",
       items: [
-        { id: "item-1", name: "Первый", quantity: 1, priceMinor: 10000, modelImagePath: "first.jpg", designNumber: 17, createdAt: new Date("2026-01-01") },
-        { id: "item-2", name: "Второй", quantity: 2, priceMinor: 10000, modelImagePath: "second.jpg", designNumber: null, createdAt: new Date("2026-01-02") },
+        { id: "item-1", name: "Первый", quantity: 1, priceMinor: 10000, productionStatus: "NOT_SCHEDULED", modelImagePath: "first.jpg", designNumber: 17, createdAt: new Date("2026-01-01") },
+        { id: "item-2", name: "Второй", quantity: 2, priceMinor: 10000, productionStatus: "NOT_SCHEDULED", modelImagePath: "second.jpg", designNumber: null, createdAt: new Date("2026-01-02") },
       ],
       payments: [], productionSlot,
     },
@@ -28,6 +52,16 @@ function fixture({ productionSlot = null } = {}) {
         state.order.items[index] = { ...state.order.items[index], ...data };
         return structuredClone(state.order.items[index]);
       },
+      updateMany: async ({ data }) => {
+        state.order.items = state.order.items.map((item) => ({ ...item, ...data }));
+        return { count: state.order.items.length };
+      },
+    },
+    orderItemInstance: {
+      findMany: async () => [],
+      create: async ({ data }) => ({ id: `instance-${data.orderItemId}-${data.ordinal}`, ...data }),
+      update: async ({ where, data }) => ({ id: where.id, ...data }),
+      updateMany: async () => ({ count: 0 }),
     },
     productionSlot: {
       update: async ({ data }) => { state.order.productionSlot = { ...state.order.productionSlot, ...data }; return structuredClone(state.order.productionSlot); },
@@ -52,6 +86,7 @@ test("снижение цены дизайна подтверждает пред
   await persistOrderItemDetails(tx, "order-1", "item-2", { ...expectedSecond, name: "Второй", quantity: 1, priceMinor: 5000 }, "owner-1");
   assert.equal(state.order.productionSlot.tentative, false);
   assert.equal(state.order.productionStatus, "SCHEDULED");
+  assert.ok(state.order.items.every((item) => item.productionStatus === "SCHEDULED"));
   assert.deepEqual(state.activities.map(activity=>activity.type), ["PRODUCTION_SLOT_CONFIRMED","ORDER_ITEM_DETAILS_UPDATED"]);
 });
 

@@ -103,10 +103,17 @@ preview and requires a new review before apply.
 
 ### Order Item
 
-One line inside an order, stored as `OrderItem`. It carries name, quantity,
-minor-unit price, optional model image, production status, athlete and
-measurement references. Pair and group orders use items to keep athletes and
-measurement snapshots separate.
+One commercial line inside an order, stored as `OrderItem`. It owns the product
+or design description, quantity and unit `priceMinor`; its line amount is
+`quantity * priceMinor`. Pair and group orders use items to group equal products,
+while operationally distinct physical pieces are Order Item Instances.
+
+### Order Item Instance
+
+One physical piece represented by an Order Item. It has a stable identity and
+ordinal inside the item and may own its athlete, immutable measurement-snapshot
+reference and production state. An active instance is not another priced line:
+commercial price remains on the Order Item.
 
 ### Imported Order Provenance
 
@@ -162,9 +169,29 @@ means `ProductionStatus`; it is not a separate entity.
 
 ### Shipment
 
-The optional one-to-one fulfilment record for an order. Stored as `Shipment`
-with carrier, tracking number, costs and shipped/delivered timestamps. Shipping
-status is an order dimension controlled by shipment flows.
+A fulfilment record for all or part of an order, with carrier, tracking number,
+cost and shipped/delivered timestamps. An order may ultimately require several
+Shipments; its shipping status and shipping summary are aggregate order
+projections, not attributes copied from an arbitrary Shipment.
+
+### Structured Order Note
+
+An authored, categorized note attached to an order and optionally to an Order
+Item, Order Item Instance or athlete. Its revisions and attachments remain part
+of order history; customer wishes and internal notes are distinct visibility
+meanings rather than interchangeable free text.
+
+### Order File
+
+A retained file belonging to an order and optionally classified for a design,
+note or other order context. Replacing or archiving a file does not erase its
+business provenance or audit evidence.
+
+### Order History
+
+The chronological projection of order Activities and Audit Logs, including the
+actor and affected business object. It is not a separately editable narrative
+and does not replace the authoritative records that produced each event.
 
 ## Finance
 
@@ -248,13 +275,22 @@ content are separate. `MessageTemplate` stores reusable communication text.
 ## Cross-cutting invariants
 
 - Client and athlete remain separate; one client may own several athletes.
-- Measurements are dated snapshots and referenced by orders/items.
+- Measurements are dated snapshots and referenced by orders, items and item
+  instances.
+- For every Order Item, its quantity equals the number of active Order Item
+  Instances; archived instances preserve history but do not count.
 - Sales, production, payment and shipping statuses stay independent.
 - Production commitment is gated by the required deposit.
-- Money uses integer minor units and ISO currency.
+- Money uses integer minor units and ISO currency. Orders own commercial totals,
+  adjustments and required deposits; Order Items own unit prices; Order Item
+  Instances do not duplicate money.
+- Order shipping status, tracking and cost summaries aggregate all active
+  Shipments. Amounts in different currencies are never added without a recorded
+  conversion snapshot.
 - Important mutations append `Activity` and `AuditLog` records.
-- Business history, payments, messages and files are archived or retained rather
-  than silently erased.
+- Business records are never hard-deleted through ordinary workflows. History,
+  payments, messages, files, instances, shipments and notes are archived or
+  retained rather than silently erased.
 - User-facing text is Russian through `apps/web/lib/i18n.ts`; customer names,
   addresses and messages are preserved in their original language.
 

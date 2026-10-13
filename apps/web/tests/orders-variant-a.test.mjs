@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = readFileSync(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 const expanded = dashboard.slice(dashboard.indexOf("function ExpandedOrder"), dashboard.indexOf("function OrderImageEditor"));
 
@@ -32,8 +33,8 @@ test("визуальные подсказки редактируемых зна�
 });
 
 test("основные и рукавные замеры различаются цветом", () => {
-  assert.match(dashboard, /\[1,2,3,15\]\.includes\(number\).*measurement-primary/);
-  assert.match(dashboard, /\[6,7,8\]\.includes\(number\).*measurement-secondary/);
-  assert.match(styles, /\.orders-expanded-measurements span\.measurement-primary\{[^}]*background:/);
-  assert.match(styles, /\.orders-expanded-measurements span\.measurement-secondary\{[^}]*background:/);
+  assert.match(tabs, /\[1, 2, 3, 15\]\.includes\(number\).*is-required/);
+  assert.match(tabs, /\[6, 7, 8\]\.includes\(number\).*is-sleeve/);
+  assert.match(styles, /\.orders-approved-measurement-grid>div\.is-required\{[^}]*background:/);
+  assert.match(styles, /\.orders-approved-measurement-grid>div\.is-sleeve\{[^}]*background:/);
 });

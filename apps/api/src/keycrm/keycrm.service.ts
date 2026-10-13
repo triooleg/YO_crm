@@ -8,8 +8,11 @@ import { normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-norma
 import { materializeKeycrmOrderImage, removeMaterializedKeycrmOrderImage } from "./keycrm-image";
 import { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
 import { requiresProduction, subtractUtcDays } from "../orders/production-rules";
+import { reconcileOrderItemInstances } from "../orders/order-item-details";
 import { appliedPaymentMinor } from "../finance/exchange-rates";
 import type { CreateKeycrmSyncRunDto, UpdateKeycrmSettingsDto } from "./keycrm.dto";
+import { keycrmShipmentWriteMode, keycrmShippingFinanceWrite, selectKeycrmProviderShipment } from "./keycrm-shipment-policy";
+import { updateProductionStatusGraph } from "../orders/production-status-graph";
 
 const SECTION = "integration.keycrm";
 const SOURCE_SYSTEM = "KEYCRM";
@@ -44,11 +47,16 @@ type RollbackScope = {
 };
 
 type RollbackSnapshot = {
+  version: 2;
   scope: RollbackScope;
   order: Record<string, unknown> | null;
+  orderItemInstances: Array<Record<string, unknown>>;
+  orderShipments: Array<Record<string, unknown>>;
   clients: Array<Record<string, unknown>>;
   keycrmLinks: Array<Record<string, unknown>>;
 };
+
+type ParsedRollbackSnapshot = Omit<RollbackSnapshot, "version"> & { version: 1 | 2 };
 
 @Injectable()
 export class KeycrmService {
@@ -249,7 +257,7 @@ export class KeycrmService {
       for (const mutation of run.mutations) {
         const after = rollbackSnapshotValue(mutation.afterSnapshot);
         const currentSnapshot = await this.rollbackSnapshot(tx, after.scope);
-        if (!jsonValuesEqual(currentSnapshot, mutation.afterSnapshot)) throw new ConflictException(`Заказ KeyCRM #${mutation.externalOrderId} изменён после импорта; автоматический откат заблокирован`);
+        if (!rollbackSnapshotMatches(currentSnapshot, mutation.afterSnapshot)) throw new ConflictException(`Заказ KeyCRM #${mutation.externalOrderId} изменён после импорта; автоматический откат заблокирован`);
         const before = rollbackSnapshotValue(mutation.beforeSnapshot);
         const current = after.order as { clientId: string; number: string };
         await this.restoreRollbackSnapshot(tx, before, after, mutation.kind, runId, rolledBackAt);
@@ -440,6 +448,13 @@ export class KeycrmService {
         await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "ORDER_CURRENCY_CHANGED", message: `KeyCRM передал валюту ${order.currency}, но заказ ${existing.number} и его история сохранены в ${existing.currency}. Заказ пропущен без изменений.` } });
         return "SKIPPED" as const;
       }
+      const matchedCarrierBeforeWrite = matchedShippingCarrier(order.delivery.serviceName);
+      const activeShipmentsBeforeWrite = existing && tx.orderShipment
+        ? await tx.orderShipment.findMany({ where: { orderId: existing.id, archivedAt: null }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] })
+        : [];
+      const providerShipmentBeforeWrite = selectKeycrmProviderShipment(activeShipmentsBeforeWrite, order.delivery.serviceId);
+      const shipmentWriteModeBeforeWrite = keycrmShipmentWriteMode(activeShipmentsBeforeWrite, providerShipmentBeforeWrite);
+      const preserveManualShipmentFinance = Boolean(existing && matchedCarrierBeforeWrite && shipmentWriteModeBeforeWrite === "AMBIGUOUS");
       const buyerLinkBefore = order.client.keycrmBuyerId
         ? await tx.keycrmClientLink.findUnique({ where: { connectionKey_keycrmBuyerId: { connectionKey: order.sourceAccount, keycrmBuyerId: order.client.keycrmBuyerId } } })
         : null;
@@ -471,7 +486,12 @@ export class KeycrmService {
           : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
         const replaceOrderImage = shouldReplaceImportedImage(existing.modelImagePath, importedModelImagePath);
         if (replaceOrderImage && existing.modelImagePath && IMPORTED_IMAGE_NAME.test(existing.modelImagePath)) replacedImagePaths.add(existing.modelImagePath);
-        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId, manualPriceOverride), ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
+        const shippingFinance = keycrmShippingFinanceWrite(
+          { priceMinor: existing.priceMinor, deliveryMinor: existing.deliveryMinor, depositRequiredMinor: existing.depositRequiredMinor },
+          { priceMinor: manualPriceOverride ? existing.priceMinor : order.priceMinor, deliveryMinor: order.deliveryMinor, depositRequiredMinor },
+          preserveManualShipmentFinance ? "AMBIGUOUS" : shipmentWriteModeBeforeWrite,
+        );
+        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId, manualPriceOverride), priceMinor: shippingFinance.priceMinor, deliveryMinor: shippingFinance.deliveryMinor, ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor: shippingFinance.depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
         if (!externallyLinked) await tx.auditLog.create({ data: { actorId, action: "LINK", entityType: "Order", entityId: persisted.id, before: existing, after: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       }
       const matchedExistingOrder = Boolean(existing && (!externallyLinked || existing.sourceLinkMode === "MATCHED_EXISTING"));
@@ -487,11 +507,13 @@ export class KeycrmService {
           const replaceItemImage = shouldReplaceImportedImage(beforeItem?.modelImagePath, localImage);
           if (replaceItemImage && beforeItem?.modelImagePath && IMPORTED_IMAGE_NAME.test(beforeItem.modelImagePath)) replacedImagePaths.add(beforeItem.modelImagePath);
           const syncedItem = manualItemOverride && beforeItem ? beforeItem : await tx.orderItem.upsert({ where: { sourceSystem_sourceAccount_externalId: identity }, create: { orderId: persisted.id, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(localImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue, ...identity }, update: { name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(replaceItemImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue } });
+          if (!manualItemOverride) await reconcileOrderItemInstances(tx, syncedItem, syncedItem.quantity);
           if (!manualItemOverride) await tx.auditLog.create({ data: { actorId, action: beforeItem ? "UPDATE" : "CREATE", entityType: "OrderItem", entityId: syncedItem.id, before: beforeItem ?? undefined, after: syncedItem } });
         }
         else if (!externallyLinked) {
           const localImage = item.externalImageUrl === mainExternalImageUrl ? importedModelImagePath : null;
           const createdItem = await tx.orderItem.create({ data: { orderId: persisted.id, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, notes: item.notes, sku: item.sku, externalImageUrl: item.externalImageUrl, ...(localImage ? { modelImagePath: localImage } : {}), properties: item.properties as Prisma.InputJsonValue, sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount } });
+          await reconcileOrderItemInstances(tx, createdItem, createdItem.quantity);
           await tx.auditLog.create({ data: { actorId, action: "CREATE", entityType: "OrderItem", entityId: createdItem.id, after: createdItem } });
         }
       }
@@ -566,10 +588,10 @@ export class KeycrmService {
       }
       if (slot && !slot.tentative && persisted.productionStatus === "NOT_SCHEDULED") {
         const previousProductionStatus = persisted.productionStatus;
-        persisted = await tx.order.update({ where: { id: persisted.id }, data: { productionStatus: "SCHEDULED" } });
+        persisted = await updateProductionStatusGraph(tx, persisted.id, "SCHEDULED", {}, { preserveProgress: true });
         await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Order", entityId: persisted.id, before: { productionStatus: previousProductionStatus }, after: { productionStatus: persisted.productionStatus } } });
       }
-      const matchedCarrier = matchedShippingCarrier(order.delivery.serviceName);
+      const matchedCarrier = matchedCarrierBeforeWrite;
       if (matchedCarrier && (order.delivery.trackingCode || order.delivery.serviceId || order.delivery.serviceName)) {
         const shipment = await tx.shipment.findUnique({ where: { orderId: persisted.id } });
         if (!shipment) {
@@ -578,6 +600,19 @@ export class KeycrmService {
         } else if (!shipment.shippedAt && order.delivery.shippedAt) {
           const updatedShipment = await tx.shipment.update({ where: { orderId: persisted.id }, data: { shippedAt: order.delivery.shippedAt } });
           await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "Shipment", entityId: shipment.id, before: shipment, after: updatedShipment } });
+        }
+        if (tx.orderShipment) {
+        const activeShipments = activeShipmentsBeforeWrite;
+        const providerShipment = providerShipmentBeforeWrite;
+        const shipmentWriteMode = shipmentWriteModeBeforeWrite;
+        const parcelData = { carrier: matchedCarrier, status: persisted.shippingStatus, trackingNumber: order.delivery.trackingCode, customerChargeMinor: order.deliveryMinor, currency: order.currency, shippedAt: order.delivery.shippedAt, serviceName: order.delivery.serviceName, externalServiceId: order.delivery.serviceId, externalStatus: order.delivery.externalStatus };
+        if (shipmentWriteMode === "UPDATE") {
+          const updatedParcel = await tx.orderShipment.update({ where: { id: providerShipment!.id }, data: parcelData });
+          await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "OrderShipment", entityId: updatedParcel.id, before: providerShipment!, after: updatedParcel } });
+        } else if (shipmentWriteMode === "CREATE") {
+          const createdParcel = await tx.orderShipment.create({ data: { orderId: persisted.id, ...parcelData, isPrimary: true } });
+          await tx.auditLog.create({ data: { actorId, action: "CREATE", entityType: "OrderShipment", entityId: createdParcel.id, after: createdParcel } });
+        } else await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "AMBIGUOUS_ORDER_SHIPMENT_LINK", message: "Доставка KeyCRM не привязана: у заказа уже есть ручная посылка без provider identity" } });
         }
       }
       const action = existing ? "KEYCRM_ORDER_SYNCED" : "KEYCRM_ORDER_IMPORTED";
@@ -665,18 +700,26 @@ export class KeycrmService {
       invoices: { orderBy: { id: "asc" } }, expenses: { orderBy: { id: "asc" } }, agreements: { orderBy: { id: "asc" } },
     } }) : null;
     if (scope.orderId && !order) throw new ConflictException("Заказ из снимка отката не найден");
+    const orderItemInstances = scope.orderId
+      ? await tx.orderItemInstance.findMany({ where: { orderItem: { orderId: scope.orderId } }, orderBy: { id: "asc" } })
+      : [];
+    const orderShipments = scope.orderId && tx.orderShipment
+      ? await tx.orderShipment.findMany({ where: { orderId: scope.orderId }, orderBy: { id: "asc" } })
+      : [];
     const clients = scope.clientIds.length && tx.client.findMany ? await tx.client.findMany({ where: { id: { in: scope.clientIds } }, orderBy: { id: "asc" } }) : [];
     const keycrmLinks = scope.keycrmBuyerId
       ? tx.keycrmClientLink.findMany ? await tx.keycrmClientLink.findMany({ where: { connectionKey: scope.connectionKey, keycrmBuyerId: scope.keycrmBuyerId }, orderBy: { id: "asc" } }) : []
       : [];
-    return jsonSnapshot({ scope, order, clients, keycrmLinks }) as unknown as RollbackSnapshot;
+    return jsonSnapshot({ version: 2, scope, order, orderItemInstances, orderShipments, clients, keycrmLinks }) as unknown as RollbackSnapshot;
   }
 
-  private async restoreRollbackSnapshot(tx: Prisma.TransactionClient, before: RollbackSnapshot, after: RollbackSnapshot, kind: string, runId: string, rolledBackAt: Date) {
+  private async restoreRollbackSnapshot(tx: Prisma.TransactionClient, before: ParsedRollbackSnapshot, after: ParsedRollbackSnapshot, kind: string, runId: string, rolledBackAt: Date) {
     const afterOrder = after.order;
     if (!afterOrder || typeof afterOrder.id !== "string") throw new ConflictException("Снимок отката не содержит заказ");
     if (kind === "IMPORTED_ORDER" && !before.order) {
       await tx.payment.updateMany({ where: { orderId: afterOrder.id, sourceSystem: SOURCE_SYSTEM, voidedAt: null }, data: { voidedAt: rolledBackAt, voidReason: `Откат KeyCRM sync ${runId}` } });
+      await tx.orderItemInstance.updateMany({ where: { orderItem: { orderId: afterOrder.id }, archivedAt: null }, data: { archivedAt: rolledBackAt } });
+      if (tx.orderShipment) await tx.orderShipment.updateMany({ where: { orderId: afterOrder.id, archivedAt: null }, data: { archivedAt: rolledBackAt, isPrimary: false } });
       await tx.orderItem.updateMany({ where: { orderId: afterOrder.id, modelImagePath: { startsWith: "keycrm-" } }, data: { modelImagePath: null } });
       await tx.order.update({ where: { id: afterOrder.id }, data: { archivedAt: rolledBackAt, ...(typeof afterOrder.modelImagePath === "string" && /^keycrm-[a-f0-9]{32}\.jpg$/.test(afterOrder.modelImagePath) ? { modelImagePath: null } : {}) } });
     } else {
@@ -684,6 +727,14 @@ export class KeycrmService {
       await tx.order.update({ where: { id: afterOrder.id }, data: restorableData(before.order, ["id", "createdAt", "updatedAt", "items", "payments", "productionSlot", "shipment", "invoices", "expenses", "agreements"]) });
       const beforePayments = rowsById(before.order.payments);
       for (const item of rows(before.order.items)) await tx.orderItem.update({ where: { id: item.id as string }, data: restorableData(item, ["id", "orderId", "createdAt", "updatedAt"]) });
+      const beforeInstances = rowsById(before.orderItemInstances);
+      for (const instance of before.orderItemInstances) await tx.orderItemInstance.update({ where: { id: instance.id as string }, data: restorableData(instance, ["id", "orderItemId", "createdAt", "updatedAt"]) });
+      for (const instance of after.orderItemInstances) if (!beforeInstances.has(instance.id as string)) await tx.orderItemInstance.update({ where: { id: instance.id as string }, data: { archivedAt: rolledBackAt } });
+      if (tx.orderShipment) {
+        const beforeShipments = rowsById(before.orderShipments);
+        for (const shipment of before.orderShipments) await tx.orderShipment.update({ where: { id: shipment.id as string }, data: restorableData(shipment, ["id", "orderId", "createdAt", "updatedAt"]) });
+        for (const shipment of after.orderShipments) if (!beforeShipments.has(shipment.id as string)) await tx.orderShipment.update({ where: { id: shipment.id as string }, data: { archivedAt: rolledBackAt, isPrimary: false } });
+      }
       for (const payment of rows(before.order.payments)) await tx.payment.update({ where: { id: payment.id as string }, data: restorableData(payment, ["id", "orderId", "amountMinor", "currency", "method", "receivedAt", "createdAt"]) });
       for (const payment of rows(afterOrder.payments)) if (!beforePayments.has(payment.id as string)) await tx.payment.update({ where: { id: payment.id as string }, data: { voidedAt: rolledBackAt, voidReason: `Откат KeyCRM sync ${runId}` } });
       if (before.order.productionSlot) await tx.productionSlot.update({ where: { orderId: afterOrder.id }, data: restorableData(before.order.productionSlot as Record<string, unknown>, ["id", "orderId", "createdAt", "updatedAt"]) });
@@ -1021,11 +1072,22 @@ function canonicalJson(value: unknown): string {
 }
 function jsonValuesEqual(left: unknown, right: unknown) { return canonicalJson(left) === canonicalJson(right); }
 
-function rollbackSnapshotValue(value: unknown): RollbackSnapshot {
+function rollbackSnapshotValue(value: unknown): ParsedRollbackSnapshot {
   const snapshot = jsonObject(value);
   const scope = jsonObject(snapshot.scope);
   if (typeof scope.connectionKey !== "string" || !Array.isArray(scope.clientIds)) throw new ConflictException("Снимок отката имеет несовместимый формат");
-  return snapshot as unknown as RollbackSnapshot;
+  const version = snapshot.version === undefined ? 1 : snapshot.version === 2 ? 2 : null;
+  if (!version) throw new ConflictException("Снимок отката имеет несовместимую версию");
+  if (version === 2 && (!Array.isArray(snapshot.orderItemInstances) || !Array.isArray(snapshot.orderShipments))) throw new ConflictException("Снимок отката имеет несовместимый формат");
+  return { ...snapshot, version, orderItemInstances: version === 2 ? rows(snapshot.orderItemInstances) : [], orderShipments: version === 2 ? rows(snapshot.orderShipments) : [] } as unknown as ParsedRollbackSnapshot;
+}
+
+function rollbackSnapshotMatches(current: RollbackSnapshot, storedValue: unknown) {
+  const stored = rollbackSnapshotValue(storedValue);
+  if (stored.version === 2) return jsonValuesEqual(current, stored);
+  if (current.orderItemInstances.length || current.orderShipments.length) return false;
+  const { version: _version, orderItemInstances: _instances, orderShipments: _shipments, ...legacyCurrent } = current;
+  return jsonValuesEqual(legacyCurrent, storedValue);
 }
 
 function rows(value: unknown): Array<Record<string, unknown>> { return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : []; }

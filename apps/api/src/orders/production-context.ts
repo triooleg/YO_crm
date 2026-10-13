@@ -24,6 +24,7 @@ export const productionOrderSelect = {
     select: { amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, receivedAt: true },
   },
   shipment: { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } },
+  orderShipments: { where:{archivedAt:null}, orderBy:[{isPrimary:"desc" as const},{createdAt:"asc" as const}], select:{trackingNumber:true,shippedAt:true,deliveredAt:true} },
   client: { select: { displayName: true, country: true } },
   items: { select: { name: true, quantity: true, modelImagePath: true, externalImageUrl: true, athlete: { select: { firstName: true, lastName: true } } } },
 } satisfies Prisma.OrderSelect;
@@ -34,7 +35,7 @@ export function includeRequestedProductionOrder<T extends { id: string }>(orders
 }
 
 type ProductionOrder = Prisma.OrderGetPayload<{ select: typeof productionOrderSelect }>;
-type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment"> & {
+type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment" | "orderShipments"> & {
   hasTrackingNumber: boolean;
   paidMinor: number;
   latestPaymentAt: Date | null;
@@ -48,6 +49,7 @@ export type ProductionOrderRepository = {
 
 function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
   const { deliveryTrackingCode, payments, shipment, ...safeOrder } = order;
+  const { orderShipments = [], ...safeOrderWithoutShipments } = safeOrder;
   const activePayments = payments ?? [];
   const appliedPayments = activePayments.map((payment) => ({ payment, appliedMinor: appliedPaymentMinor(payment, order.currency) }));
   const paidMinor = appliedPayments.reduce((sum, entry) => sum + entry.appliedMinor, 0);
@@ -55,13 +57,16 @@ function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
   for (let index = appliedPayments.length - 1; index >= 0; index--) {
     if (appliedPayments[index]!.appliedMinor > 0) { latestPaymentAt = appliedPayments[index]!.payment.receivedAt; break; }
   }
-  return {
-    ...safeOrder,
+  const legacyShipmentProjection = {
     hasTrackingNumber: Boolean(shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim()),
+  };
+  return {
+    ...safeOrderWithoutShipments,
+    hasTrackingNumber: orderShipments.some((parcel) => parcel.trackingNumber?.trim()) || legacyShipmentProjection.hasTrackingNumber,
     paidMinor,
     latestPaymentAt,
-    shippedAt: shipment?.shippedAt ?? null,
-    deliveredAt: shipment?.deliveredAt ?? null,
+    shippedAt: orderShipments.length>0?orderShipments.find(parcel=>parcel.shippedAt)?.shippedAt??null:shipment?.shippedAt??null,
+    deliveredAt: orderShipments.length>0?(orderShipments.every(parcel=>parcel.deliveredAt)?orderShipments.reduce<Date|null>((latest,parcel)=>!latest||parcel.deliveredAt!>latest?parcel.deliveredAt!:latest,null):null):shipment?.deliveredAt??null,
   };
 }
 

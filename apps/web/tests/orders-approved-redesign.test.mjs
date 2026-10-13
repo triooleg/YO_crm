@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = await readFile(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 const i18n = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
@@ -23,9 +24,9 @@ test("раскрытый заказ использует обзорную пан
     "orders-order-actions",
     "orders-order-tabs",
     "orders-order-tab-panel",
-  ]) assert.match(dashboard, new RegExp(token));
+  ]) assert.match(dashboard + tabs, new RegExp(token));
   for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
-    assert.match(dashboard, new RegExp(`key: "${key}"`));
+    assert.match(tabs, new RegExp(`key: "${key}"`));
   assert.match(css, /\.orders-order-overview/);
   assert.match(css, /\.orders-order-tabs/);
 });
@@ -41,8 +42,8 @@ test("смена статуса обновляет локальное состо
 
 test("срок готовности не подменяет плановую отправку, а инвойс сохраняет собственную валюту", () => {
   assert.match(dashboard, /label=\{ui\.plannedShipping\} value=\{ui\.notSpecifiedFeminine\}/);
-  assert.doesNotMatch(dashboard, /label=\{ui\.plannedShipping\} value=\{deliveryDate\(order\)\}/);
-  assert.match(dashboard, /money\(invoice\.totalMinor, invoice\.currency \|\| order\.currency\)/);
+  assert.doesNotMatch(dashboard + tabs, /label=\{ui\.plannedShipping\} value=\{deliveryDate\(order\)\}/);
+  assert.match(tabs, /money\(invoice\.totalMinor, invoice\.currency \|\| order\.currency\)/);
 });
 
 test("активная Mantine-вкладка получает утверждённое визуальное состояние", () => {

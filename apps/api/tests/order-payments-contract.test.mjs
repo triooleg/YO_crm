@@ -28,7 +28,7 @@ test("достижение порога предоплаты атомарно п
   assert.match(addPayment,/order\.productionSlot\?\.tentative/);
   assert.match(addPayment,/productionSlot\.update/);
   assert.match(addPayment,/tentative:\s*false/);
-  assert.match(addPayment,/productionStatus:\s*"SCHEDULED"/);
+  assert.match(addPayment,/updateProductionStatusGraph[\s\S]*ProductionStatus\.SCHEDULED/);
   assert.match(addPayment,/PRODUCTION_SLOT_CONFIRMED/);
   assert.match(addPayment,/depositRequiredMinor:\s*order\.depositRequiredMinor,\s*currency:\s*order\.currency,\s*paymentCurrency:\s*currency/);
   assert.match(addPayment,/entityType:\s*"ProductionSlot"/);

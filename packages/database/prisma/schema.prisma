@@ -184,6 +184,29 @@ enum ShippingStatus {
   LOST
 }
 
+enum OrderFileRole {
+  GENERAL
+  DESIGN_FRONT
+  DESIGN_BACK
+  DESIGN_GALLERY
+  NOTE_ATTACHMENT
+}
+
+enum OrderNoteCategory {
+  GENERAL
+  CLIENT
+  DESIGNS
+  MEASUREMENTS
+  PRODUCTION
+  SHIPPING
+  FINANCE
+}
+
+enum OrderNoteVisibility {
+  INTERNAL
+  CUSTOMER_WISH
+}
+
 enum ShippingCarrier {
   NOVA_POSHTA
   NOVA_GLOBAL
@@ -264,6 +287,10 @@ model User {
   createdClientMergeOperations ClientMergeOperation[] @relation("ClientMergeOperationCreator")
   splitClientMergeOperations   ClientMergeOperation[] @relation("ClientMergeOperationSplitter")
   uploadedOrderFiles        OrderFile[]                @relation("OrderFileUploader")
+  uploadedClientFiles       ClientFile[]               @relation("ClientFileUploader")
+  authoredActivities        Activity[]                 @relation("ActivityActor")
+  authoredOrderNotes        OrderNote[]                @relation("OrderNoteAuthor")
+  editedOrderNoteRevisions  OrderNoteRevision[]        @relation("OrderNoteRevisionEditor")
 }
 
 model Session {
@@ -301,6 +328,7 @@ model Client {
   source                  ContactChannel           @default(MANUAL)
   status                  ClientStatus             @default(LEAD)
   notes                   String?
+  preferences             Json?
   responsibleManagerId    String?
   nextActionAt            DateTime?
   lastContactAt           DateTime?
@@ -325,6 +353,7 @@ model Client {
   mergeOperationsAsSource ClientMergeOperation[]    @relation("ClientMergeOperationSource")
   mergeOperationsAsTarget ClientMergeOperation[]    @relation("ClientMergeOperationTarget")
   keycrmLinks             KeycrmClientLink[]
+  files                   ClientFile[]
 
   @@index([displayName])
   @@index([email])
@@ -383,6 +412,8 @@ model Athlete {
   measurements Measurement[]
   orders       Order[]
   orderItems   OrderItem[]
+  orderItemInstances OrderItemInstance[]
+  orderNotes   OrderNote[]
 
   @@index([clientId, archivedAt])
 }
@@ -404,6 +435,7 @@ model Measurement {
   athlete    Athlete     @relation(fields: [athleteId], references: [id])
   orders     Order[]
   orderItems OrderItem[]
+  orderItemInstances OrderItemInstance[]
 
   @@index([athleteId, measuredAt])
 }
@@ -473,10 +505,13 @@ model Order {
   productionSlot       ProductionSlot?
   activities           Activity[]
   files                OrderFile[]
+  notesStructured      OrderNote[]
+  tags                 OrderTag[]
 
   invoices   Invoice[]
   expenses   Expense[]
   shipment   Shipment?
+  orderShipments OrderShipment[]
   agreements Agreement[]
 
   @@unique([sourceSystem, sourceAccount, externalId])
@@ -489,15 +524,38 @@ model OrderFile {
   id           String   @id @default(cuid())
   orderId      String
   uploadedById String
+  orderItemId  String?
+  noteId       String?
+  name         String
+  path         String   @unique
+  mimeType     String
+  sizeBytes    Int
+  role         OrderFileRole @default(GENERAL)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime @default(now())
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  uploadedBy   User     @relation("OrderFileUploader", fields: [uploadedById], references: [id])
+  orderItem    OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  note         OrderNote? @relation(fields: [noteId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([orderItemId, role, sortOrder])
+  @@index([noteId, createdAt])
+}
+
+model ClientFile {
+  id           String   @id @default(cuid())
+  clientId     String
+  uploadedById String
   name         String
   path         String   @unique
   mimeType     String
   sizeBytes    Int
   createdAt    DateTime @default(now())
-  order        Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  uploadedBy   User     @relation("OrderFileUploader", fields: [uploadedById], references: [id])
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  uploadedBy   User     @relation("ClientFileUploader", fields: [uploadedById], references: [id])
 
-  @@index([orderId, createdAt])
+  @@index([clientId, createdAt])
 }
 
 model Shipment {
@@ -516,7 +574,37 @@ model Shipment {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   order          Order           @relation(fields: [orderId], references: [id])
+  @@index([carrier, trackingNumber])
+}
 
+model OrderShipment {
+  id                  String          @id @default(cuid())
+  orderId             String
+  carrier             ShippingCarrier
+  status              ShippingStatus  @default(NOT_READY)
+  trackingNumber      String?
+  customerChargeMinor Int             @default(0)
+  atelierCostMinor    Int             @default(0)
+  atelierExpenseId    String?         @unique
+  currency            String
+  weightGrams         Int?
+  lengthMm            Int?
+  widthMm             Int?
+  heightMm            Int?
+  isPrimary           Boolean         @default(false)
+  shippedAt           DateTime?
+  deliveredAt         DateTime?
+  serviceName         String?
+  externalServiceId   String?
+  externalStatus      String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  archivedAt          DateTime?
+  order               Order           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  atelierExpense      Expense?        @relation(fields: [atelierExpenseId], references: [id], onDelete: SetNull)
+  instances           OrderItemInstance[]
+
+  @@index([orderId, archivedAt])
   @@index([carrier, trackingNumber])
 }
 
@@ -543,10 +631,97 @@ model OrderItem {
   order            Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   athlete          Athlete?         @relation(fields: [athleteId], references: [id])
   measurement      Measurement?     @relation(fields: [measurementId], references: [id])
+  instances         OrderItemInstance[]
+  files             OrderFile[]
+  structuredNotes   OrderNote[]
 
   @@unique([sourceSystem, sourceAccount, externalId])
   @@index([orderId, productionStatus])
   @@index([athleteId])
+}
+
+model OrderItemInstance {
+  id               String           @id @default(cuid())
+  orderItemId      String
+  ordinal          Int
+  athleteId        String?
+  measurementId    String?
+  orderShipmentId  String?
+  productionStatus ProductionStatus @default(NOT_SCHEDULED)
+  plannedStartAt   DateTime?
+  plannedEndAt     DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  archivedAt       DateTime?
+  orderItem        OrderItem        @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  athlete          Athlete?         @relation(fields: [athleteId], references: [id], onDelete: Restrict)
+  measurement      Measurement?     @relation(fields: [measurementId], references: [id], onDelete: Restrict)
+  orderShipment    OrderShipment?   @relation(fields: [orderShipmentId], references: [id], onDelete: SetNull)
+  notes            OrderNote[]
+
+  @@unique([orderItemId, ordinal])
+  @@index([athleteId])
+  @@index([measurementId])
+  @@index([orderShipmentId])
+  @@index([productionStatus, archivedAt])
+}
+
+model OrderTag {
+  id        String   @id @default(cuid())
+  orderId   String
+  label     String
+  color     String?
+  createdAt DateTime @default(now())
+  archivedAt DateTime?
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, label])
+  @@index([orderId, archivedAt, createdAt])
+}
+
+model OrderNote {
+  id             String              @id @default(cuid())
+  orderId        String
+  authorId       String?
+  designItemId   String?
+  itemInstanceId String?
+  athleteId      String?
+  category       OrderNoteCategory   @default(GENERAL)
+  visibility     OrderNoteVisibility @default(INTERNAL)
+  title          String
+  body           String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  archivedAt     DateTime?
+  order          Order               @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  author         User?               @relation("OrderNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  designItem     OrderItem?          @relation(fields: [designItemId], references: [id], onDelete: SetNull)
+  itemInstance   OrderItemInstance?  @relation(fields: [itemInstanceId], references: [id], onDelete: SetNull)
+  athlete        Athlete?            @relation(fields: [athleteId], references: [id], onDelete: SetNull)
+  revisions      OrderNoteRevision[]
+  files          OrderFile[]
+
+  @@index([orderId, category, archivedAt, createdAt])
+  @@index([designItemId])
+  @@index([itemInstanceId])
+  @@index([athleteId])
+}
+
+model OrderNoteRevision {
+  id         String              @id @default(cuid())
+  noteId     String
+  editorId   String?
+  category   OrderNoteCategory
+  visibility OrderNoteVisibility
+  title      String
+  body       String
+  createdAt  DateTime            @default(now())
+  note       OrderNote           @relation(fields: [noteId], references: [id], onDelete: Restrict)
+  editor     User?               @relation("OrderNoteRevisionEditor", fields: [editorId], references: [id], onDelete: SetNull)
+
+  @@index([noteId, createdAt])
 }
 
 model Payment {
@@ -1209,6 +1384,7 @@ model Expense {
   archivedAt  DateTime?
   category    ExpenseCategory @relation(fields: [categoryId], references: [id])
   order       Order?          @relation(fields: [orderId], references: [id])
+  orderShipment OrderShipment?
 
   @@index([incurredAt, archivedAt])
   @@index([orderId])
@@ -1261,15 +1437,18 @@ model Activity {
   id        String   @id @default(cuid())
   clientId  String?
   orderId   String?
+  actorId   String?
   type      String
   summary   String
   metadata  Json?
   createdAt DateTime @default(now())
   client    Client?  @relation(fields: [clientId], references: [id])
   order     Order?   @relation(fields: [orderId], references: [id])
+  actor     User?    @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([clientId, createdAt])
   @@index([orderId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model AuditLog {

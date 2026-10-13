@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
-import type { Prisma, User } from "@prisma/client";
+import { ProductionStatus, type Prisma, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
@@ -17,9 +17,10 @@ import { loadProductionOrders, type ProductionOrderRepository } from "./producti
 import { isOrderImageName } from "./order-image-name";
 import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
 import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "./order-details";
-import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails } from "./order-item-details";
+import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails, reconcileOrderItemInstances } from "./order-item-details";
 import { keycrmSourceChannel } from "../keycrm/keycrm-normalizer";
 import { buildOrderFileName, decodeOrderFile } from "./order-file-policy";
+import { updateProductionStatusGraph as applyProductionStatusGraph } from "./production-status-graph";
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -38,6 +39,22 @@ function keycrmOrderSource(externalData: Prisma.JsonValue | null, sourceNames: R
 function calculateDepositMinor(priceMinor: number, percent: number) {
   const scaled = BigInt(priceMinor) * BigInt(percent);
   return Number((scaled + 50n) / 100n);
+}
+
+async function reconcileAndPropagateOrderItemInstances(
+  tx: Prisma.TransactionClient,
+  item: { id: string; athleteId: string | null; measurementId: string | null; productionStatus: string; quantity: number },
+  previous?: { athleteId: string | null; measurementId: string | null },
+) {
+  await reconcileOrderItemInstances(tx, item, item.quantity);
+  if (previous) await tx.orderItemInstance.updateMany({
+    where: { orderItemId: item.id, archivedAt: null, athleteId: previous.athleteId, measurementId: previous.measurementId },
+    data: { athleteId: item.athleteId, measurementId: item.measurementId },
+  });
+}
+
+async function updateProductionStatusGraph(tx: Prisma.TransactionClient, orderId: string, productionStatus: ProductionStatus, orderData: Prisma.OrderUpdateInput = {}, options: { preserveProgress?: boolean } = {}) {
+  return applyProductionStatusGraph(tx, orderId, productionStatus, orderData, options);
 }
 
 async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
@@ -127,7 +144,9 @@ export class OrdersService {
         createdAt: true, updatedAt: true, productionSlot: true,
         responsibleManager: { select: { id: true, displayName: true } },
         client: { select: {
-          id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true,
+          id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true, preferences:true,
+          files:{orderBy:{createdAt:"desc"},select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,createdAt:true}},
+          orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:8,select:{id:true,number:true,createdAt:true,priceMinor:true,currency:true,salesStatus:true,productionStatus:true,shippingStatus:true,modelImagePath:true,externalImageUrl:true}},
           athletes: { where: { archivedAt: null }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: {
             id: true, firstName: true, lastName: true,
             measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
@@ -151,12 +170,18 @@ export class OrdersService {
               },
             },
             measurement: { select: { id: true, athleteId: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+            instances:{where:{archivedAt:null},orderBy:{ordinal:"asc"},select:{id:true,ordinal:true,productionStatus:true,plannedStartAt:true,plannedEndAt:true,startedAt:true,completedAt:true,updatedAt:true,athlete:{select:{id:true,firstName:true,lastName:true}},measurement:{select:{id:true,athleteId:true,measuredAt:true,values:true}},orderShipment:{select:{id:true,status:true,trackingNumber:true}}}},
+            files:{orderBy:[{sortOrder:"asc"},{createdAt:"asc"}],select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,role:true,sortOrder:true,createdAt:true}},
           },
         },
-        activities: { select: { id: true, type: true, summary: true, metadata: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 100 },
-        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+        activities: { select: { id: true, type: true, summary: true, metadata: true, createdAt: true,actor:{select:{id:true,displayName:true}} }, orderBy: { createdAt: "desc" }, take: 250 },
+        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true,role:true,orderItemId:true,noteId:true,sortOrder:true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } },
         shipment: true,
+        orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}],include:{instances:{where:{archivedAt:null},select:{id:true,ordinal:true,orderItemId:true}},atelierExpense:true}},
+        notesStructured:{where:{archivedAt:null},orderBy:{createdAt:"desc"},include:{author:{select:{id:true,displayName:true}},files:true}},
+        tags:{where:{archivedAt:null},orderBy:{createdAt:"asc"}},
+        expenses:{where:{archivedAt:null},include:{category:true},orderBy:{incurredAt:"desc"}},
         invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
       },
     });
@@ -226,7 +251,7 @@ export class OrdersService {
           await tx.productionSlot.delete({ where: { orderId: order.id } });
           await tx.auditLog.create({ data: { actorId: actor.id, action: "DELETE", entityType: "ProductionSlot", entityId: order.productionSlot.id, before: order.productionSlot } });
         }
-        const updated = await tx.order.update({ where: { id: order.id }, data: { type: "WEBSITE_SALE", productionStatus: "NOT_SCHEDULED" } });
+        const updated = await updateProductionStatusGraph(tx, order.id, ProductionStatus.NOT_SCHEDULED, { type: "WEBSITE_SALE" });
         await tx.activity.create({ data: { clientId: order.clientId, orderId: order.id, type: "ORDER_WEBSITE_SALE_CORRECTED", summary: "Тип заказа исправлен на «Продажа с сайта»", metadata: { hadProductionSlot: Boolean(order.productionSlot), trackingNumber: order.shipment?.trackingNumber ?? order.deliveryTrackingCode } } });
         await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: order.id, before: { type: order.type, productionStatus: order.productionStatus }, after: { type: updated.type, productionStatus: updated.productionStatus } } });
       }
@@ -250,7 +275,9 @@ export class OrdersService {
         const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
         if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
       }
-      const updated = await tx.order.update({ where: { id: orderId }, data });
+      const updated = dto.productionStatus
+        ? await updateProductionStatusGraph(tx, orderId, dto.productionStatus, dto.salesStatus ? { salesStatus: dto.salesStatus } : {})
+        : await tx.order.update({ where: { id: orderId }, data });
       const summary = "Изменены рабочие статусы заказа";
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_STATUSES_UPDATED", summary, metadata: data } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
@@ -455,8 +482,9 @@ export class OrdersService {
       if(!measurement)throw new BadRequestException("Выбранные замеры не принадлежат спортсмену этой позиции");
       if(item.athleteId&&item.athleteId!==measurement.athleteId)throw new BadRequestException("Выбранные замеры не принадлежат спортсмену этой позиции");
       const athleteId=item.athleteId??measurement.athleteId;
-      if(item.measurementId===measurement.id&&item.athleteId===athleteId)return item;
+      if(item.measurementId===measurement.id&&item.athleteId===athleteId){await reconcileAndPropagateOrderItemInstances(tx,item);return item}
       const updated=await tx.orderItem.update({where:{id:item.id},data:{athleteId,measurementId:measurement.id}});
+      await reconcileAndPropagateOrderItemInstances(tx,updated,item);
       await tx.activity.create({data:{clientId:item.order.clientId,orderId,type:"ORDER_ITEM_MEASUREMENT_BOUND",summary:`К дизайну заказа ${item.order.number} привязан снимок замеров`,metadata:{itemId:item.id,measurementId:measurement.id,previousMeasurementId:item.measurementId,athleteId,previousAthleteId:item.athleteId}}});
       await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"OrderItem",entityId:item.id,before:{athleteId:item.athleteId,measurementId:item.measurementId},after:{athleteId,measurementId:measurement.id}}});
       return updated;
@@ -501,7 +529,7 @@ export class OrdersService {
       if (!order.productionSlot) throw new NotFoundException("Производственный слот не найден");
       if (order.productionSlot.updatedAt.toISOString() !== dto.expectedUpdatedAt) throw new ConflictException("Производственный слот уже изменён. Обновите план и повторите действие");
       const slot = await tx.productionSlot.delete({ where: { orderId } });
-      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { productionStatus: "NOT_SCHEDULED" } });
+      const updatedOrder = await updateProductionStatusGraph(tx, orderId, ProductionStatus.NOT_SCHEDULED);
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_DELETED", summary: "Производственный слот удалён", metadata: { slotId: slot.id, startsAt: slot.startsAt, endsAt: slot.endsAt } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "DELETE", entityType: "ProductionSlot", entityId: slot.id, before: slot, after: { orderId, productionStatus: updatedOrder.productionStatus } } });
       return { deleted: true, orderId, productionStatus: updatedOrder.productionStatus };
@@ -530,7 +558,10 @@ export class OrdersService {
       const paymentStatus = totalPaid >= order.priceMinor ? "PAID" : totalPaid >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
       const confirmsProductionSlot = requiresProduction(order.type) && totalPaid >= order.depositRequiredMinor && order.productionSlot?.tentative;
       const payment = await tx.payment.create({ data: { orderId, amountMinor: dto.amountMinor, currency, appliedAmountMinor: conversion?.appliedAmountMinor, appliedCurrency: conversion?.appliedCurrency, exchangeRateSnapshot: conversion?.snapshot as Prisma.InputJsonValue | undefined, method: dto.method, receivedAt: new Date(dto.receivedAt), reference: dto.reference?.trim() || null, notes: dto.notes?.trim() || null } });
-      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(confirmsProductionSlot && order.productionStatus === "NOT_SCHEDULED" ? { productionStatus: "SCHEDULED" } : {}) } });
+      const shouldSchedule = confirmsProductionSlot && order.productionStatus === "NOT_SCHEDULED";
+      const updatedOrder = shouldSchedule
+        ? await updateProductionStatusGraph(tx, orderId, ProductionStatus.SCHEDULED, { paymentStatus }, { preserveProgress: true })
+        : await tx.order.update({ where: { id: orderId }, data: { paymentStatus } });
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PAYMENT_RECEIVED", summary: `Получена оплата ${(dto.amountMinor / 100).toFixed(2)} ${currency}`, metadata: { paymentId: payment.id, method: dto.method, appliedAmountMinor, appliedCurrency: order.currency, exchangeRateSnapshot: conversion?.snapshot } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Payment", entityId: payment.id, after: payment } });
       if (confirmsProductionSlot && order.productionSlot) {
@@ -584,7 +615,10 @@ export class OrdersService {
         },
       });
       const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { athleteId: athlete.id, measurementId: measurement.id } });
-      if (item) await tx.orderItem.update({ where: { id: item.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
+      if (item) {
+        const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
+        await reconcileAndPropagateOrderItemInstances(tx, updatedItem, item);
+      }
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: previousMeasurementId ? "MEASUREMENT_REPLACED" : "MEASUREMENT_CREATED", summary: previousMeasurementId ? `Обновлены замеры для заказа ${order.number}` : `Добавлены замеры для заказа ${order.number}`, metadata: { measurementId: measurement.id, previousMeasurementId, athleteId: athlete.id, standardHeight } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Measurement", entityId: measurement.id, after: measurement } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { athleteId: order.athleteId, measurementId: order.measurementId }, after: { athleteId: updatedOrder.athleteId, measurementId: updatedOrder.measurementId } } });
@@ -630,6 +664,7 @@ export class OrdersService {
         },
       });
       const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { measurementId: measurement.id } });
+      await reconcileAndPropagateOrderItemInstances(tx, updatedItem, item);
       const mirrorsExistingItem = previousMeasurementId !== null && order.athleteId === athlete.id && order.measurementId === previousMeasurementId;
       const mirrorsSingleItem = order.items.length === 1
         && (order.athleteId === null || order.athleteId === athlete.id)
@@ -704,6 +739,9 @@ export class OrdersService {
       }
       const number = await nextOrderNumber(tx);
       const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", order.id);
+      const createdItems = await tx.orderItem.findMany({ where: { orderId: order.id }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+      for (const item of createdItems) await reconcileAndPropagateOrderItemInstances(tx, item);
       if (order.requiredDeliveryAt && requiresProduction(order.type)) {
         const defaultDurationDays = productionSetting(durationSetting?.value, DEFAULT_PRODUCTION_DURATION_DAYS, 1, 90);
         const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);

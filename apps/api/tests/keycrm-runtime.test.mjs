@@ -15,6 +15,7 @@ import {
   normalizedPhoneDigits,
 } from "../src/keycrm/keycrm-sync-policy.ts";
 import { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, subtractUtcDays } from "../src/orders/production-rules.ts";
+import { keycrmShipmentWriteMode, keycrmShippingFinanceWrite, selectKeycrmProviderShipment } from "../src/keycrm/keycrm-shipment-policy.ts";
 
 const nativeRequire = createRequire(import.meta.url);
 
@@ -29,7 +30,21 @@ function loadKeycrmService(imageHooks = {}) {
     if (specifier === "./keycrm-normalizer") return { normalizeKeycrmOrder: value => value };
     if (specifier === "./keycrm-image") return { materializeKeycrmOrderImage: imageHooks.materialize ?? (async () => "keycrm-test.jpg"), removeMaterializedKeycrmOrderImage: imageHooks.remove ?? (async () => true) };
     if (specifier === "./keycrm-sync-policy") return { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits };
+    if (specifier === "./keycrm-shipment-policy") return { keycrmShipmentWriteMode, keycrmShippingFinanceWrite, selectKeycrmProviderShipment };
     if (specifier === "../orders/production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS, DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, productionWindow, requiresProduction, subtractUtcDays };
+    if (specifier === "../orders/production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, nextStatus, orderData = {}) => {
+      const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus: nextStatus } });
+      await tx.orderItem?.updateMany?.({ where: { orderId }, data: { productionStatus: nextStatus } });
+      await tx.orderItemInstance?.updateMany?.({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus: nextStatus } });
+      return order;
+    } };
+    if (specifier === "../orders/order-item-details") return { reconcileOrderItemInstances: async (tx, item, quantity) => {
+      if (!tx.orderItemInstance) return;
+      const existing = await tx.orderItemInstance.findMany({ where: { orderItemId: item.id } });
+      for (let ordinal = 1; ordinal <= quantity; ordinal += 1) if (!existing.some(instance => instance.ordinal === ordinal && !instance.archivedAt)) {
+        await tx.orderItemInstance.create({ data: { orderItemId: item.id, ordinal, athleteId: item.athleteId ?? null, measurementId: item.measurementId ?? null, productionStatus: item.productionStatus } });
+      }
+    } };
     if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency ? payment.appliedAmountMinor ?? 0 : 0 };
     if (specifier === "./keycrm.dto") return {};
     return nativeRequire(specifier);
@@ -749,6 +764,7 @@ test("ручные позиции и неоднозначные оплаты с�
     clientMergeRedirect: { findUnique: async () => null },
     client: { findUniqueOrThrow: async () => ({ id: "client-1", email: null, phone: null, country: null, city: null, address: null, postalCode: null }) },
     orderItem: { count: async () => 1, findUnique: async () => null, upsert: async () => { writes.item++; }, create: async () => { writes.item++; } },
+    orderItemInstance: { findMany: async () => [], create: async () => undefined },
     payment: {
       findUnique: async () => null,
       findMany: async ({ where }) => where.sourceSystem === null ? [{ id: "p1" }, { id: "p2" }] : [],
@@ -766,7 +782,7 @@ test("ручные позиции и неоднозначные оплаты с�
     payments: [{ externalId: "pay-1", amountMinor: 5000, currency: "EUR", isPaid: true, receivedAt: new Date("2026-10-01T10:00:00Z"), method: "OTHER", reference: null, notes: null, externalStatus: "paid" }],
   }), "owner-1", "run-1");
   assert.equal(result, "UPDATED");
-  assert.equal(orderUpdateData.priceMinor, undefined);
+  assert.equal(orderUpdateData.priceMinor, 11000);
   assert.equal(orderUpdateData.depositRequiredMinor, 5500);
   assert.equal(orderUpdateData.modelImagePath, undefined);
   assert.deepEqual(writes, { item: 0, payment: 0 });
@@ -825,6 +841,7 @@ test("foreign-currency cancellation гасит существующую опла
     client: { findUniqueOrThrow: async () => ({ id: "client-1", email: null, phone: null, country: null, city: null, address: null, postalCode: null }) },
     keycrmClientLink: { findUnique: async () => null },
     orderItem: { count: async () => 0 },
+    orderItemInstance: { findMany: async () => [] },
     payment: {
       findUnique: async () => paymentRow,
       findMany: async () => paymentRow && !paymentRow.voidedAt ? [paymentRow] : [],
@@ -854,12 +871,13 @@ test("foreign-currency cancellation без прежней оплаты не ма
 test("rollback неудачного APPLY архивирует новый заказ и аннулирует provider payments", async () => {
   const removedImages = [];
   const KeycrmService = loadKeycrmService({ remove: async name => { removedImages.push(name); return true; } });
-  const fingerprint = { id: "order-1", clientId: "client-1", number: "KC-77", modelImagePath: `keycrm-${"a".repeat(32)}.jpg`, items: [], payments: [], productionSlot: null, shipment: null, invoices: [], expenses: [], agreements: [] };
+  const fingerprint = { id: "order-1", clientId: "client-1", number: "KC-77", modelImagePath: `keycrm-${"a".repeat(32)}.jpg`, items: [{ id: "item-1" }], payments: [], productionSlot: null, shipment: null, invoices: [], expenses: [], agreements: [] };
+  const instance = { id: "instance-1", orderItemId: "item-1", ordinal: 1, archivedAt: null };
   const scope = { orderId: "order-1", clientIds: [], connectionKey: "connection-1", keycrmBuyerId: null };
   const persistedFingerprint = Object.fromEntries(Object.entries(fingerprint).reverse());
-  const mutation = { id: "mutation-1", externalOrderId: "77", orderId: "order-1", kind: "IMPORTED_ORDER", beforeSnapshot: { scope: { ...scope, orderId: null }, order: null, clients: [], keycrmLinks: [] }, afterSnapshot: { keycrmLinks: [], clients: [], order: persistedFingerprint, scope: Object.fromEntries(Object.entries(scope).reverse()) }, rollbackEligible: true, rollbackBlockedReason: null, createdClientId: null, rolledBackAt: null };
+  const mutation = { id: "mutation-1", externalOrderId: "77", orderId: "order-1", kind: "IMPORTED_ORDER", beforeSnapshot: { version: 2, scope: { ...scope, orderId: null }, order: null, orderItemInstances: [], orderShipments: [], clients: [], keycrmLinks: [] }, afterSnapshot: { version: 2, keycrmLinks: [], clients: [], orderItemInstances: [instance], orderShipments: [], order: persistedFingerprint, scope: Object.fromEntries(Object.entries(scope).reverse()) }, rollbackEligible: true, rollbackBlockedReason: null, createdClientId: null, rolledBackAt: null };
   const run = { id: "run-1", mode: "APPLY", status: "FAILED", rolledBackAt: null, rollbackEligible: true, mutations: [mutation] };
-  const writes = { paymentsVoided: false, orderArchived: false, mutationRolledBack: false, runRolledBack: false, audit: false };
+  const writes = { paymentsVoided: false, instancesArchived: false, orderArchived: false, mutationRolledBack: false, runRolledBack: false, audit: false };
   const tx = {
     $executeRaw: async () => undefined,
     $executeRawUnsafe: async () => undefined,
@@ -873,6 +891,7 @@ test("rollback неудачного APPLY архивирует новый зак
       count: async () => 0,
     },
     orderItem: { updateMany: async () => undefined, count: async () => 0 },
+    orderItemInstance: { findMany: async () => [instance], updateMany: async ({ data }) => { writes.instancesArchived = Boolean(data.archivedAt); } },
     client: { findMany: async () => [] }, keycrmClientLink: { findMany: async () => [] },
     payment: { updateMany: async ({ data }) => { writes.paymentsVoided = Boolean(data.voidedAt && data.voidReason); } },
     activity: { create: async () => undefined },
@@ -886,7 +905,7 @@ test("rollback неудачного APPLY архивирует новый зак
   };
   const result = await new KeycrmService(prisma).rollback("run-1", { id: "owner-1" });
   assert.equal(Boolean(result.rolledBackAt), true);
-  assert.deepEqual(writes, { paymentsVoided: true, orderArchived: true, mutationRolledBack: true, runRolledBack: true, audit: true });
+  assert.deepEqual(writes, { paymentsVoided: true, instancesArchived: true, orderArchived: true, mutationRolledBack: true, runRolledBack: true, audit: true });
   assert.deepEqual(removedImages, [`keycrm-${"a".repeat(32)}.jpg`]);
   assert.deepEqual(JSON.parse(JSON.stringify(transactionOptions)), { maxWait: 10_000, timeout: 120_000 });
 });
@@ -917,6 +936,7 @@ test("rollback двух заказов одного покупателя вос�
     }, update: async ({ data }) => Object.assign(run, data) },
     order: { findUnique: async ({ where }) => structuredClone(state.orders.get(where.id)), update: async ({ where, data }) => { const row = { ...state.orders.get(where.id), ...data }; state.orders.set(where.id, row); return row; } },
     orderItem: { updateMany: async () => undefined },
+    orderItemInstance: { findMany: async () => [], updateMany: async () => undefined },
     client: { findMany: async () => [structuredClone(state.client)], update: async ({ data }) => (state.client = { ...state.client, ...data }) },
     keycrmClientLink: { findMany: async () => [structuredClone(state.link)], update: async ({ data }) => (state.link = { ...state.link, ...data }) },
     payment: { updateMany: async () => undefined },
@@ -955,9 +975,69 @@ test("созданный импортом клиент не архивирует
 test("rollback snapshot охватывает клиента, provider link и поздние бизнес-сущности", () => {
   const source = readFileSync(new URL("../src/keycrm/keycrm.service.ts", import.meta.url), "utf8");
   const snapshot = source.slice(source.indexOf("private async rollbackSnapshot("), source.indexOf("private async attachBuyerToExistingClient("));
-  for (const relation of ["invoices", "expenses", "agreements", "keycrmLinks", "client"]) assert.match(snapshot, new RegExp(relation));
+  for (const relation of ["invoices", "expenses", "agreements", "orderItemInstances", "keycrmLinks", "client"]) assert.match(snapshot, new RegExp(relation));
   assert.match(source, /rollbackEligible/);
   assert.match(source, /rollbackBlockedReason/);
+});
+
+test("KeyCRM upsert materializes stable instances for every imported quantity", async () => {
+  const KeycrmService = loadKeycrmService();
+  let orderRow;
+  let itemRow;
+  const instances = [];
+  const tx = {
+    $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined, $queryRaw: async () => [],
+    order: {
+      findUnique: async ({ where }) => where.number ? null : orderRow || null,
+      create: async ({ data }) => (orderRow = { id: "order-1", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", ...data }),
+      update: async ({ data }) => (orderRow = { ...orderRow, ...data }),
+    },
+    client: { create: async ({ data }) => ({ id: "client-1", ...data }) },
+    orderItem: {
+      count: async () => 0,
+      findUnique: async () => itemRow || null,
+      upsert: async ({ create, update }) => itemRow ? (itemRow = { ...itemRow, ...update }) : (itemRow = { id: "item-1", productionStatus: "NOT_SCHEDULED", athleteId: null, measurementId: null, ...create }),
+    },
+    orderItemInstance: {
+      findMany: async ({ where }) => structuredClone(instances.filter(instance => instance.orderItemId === where.orderItemId)),
+      create: async ({ data }) => { const row = { id: `instance-${data.ordinal}`, archivedAt: null, ...data }; instances.push(row); return row; },
+    },
+    payment: { findUnique: async () => null, findMany: async () => [] },
+    productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
+    activity: { findFirst: async () => null, create: async () => undefined }, auditLog: { create: async () => undefined },
+  };
+  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  await service.importOrder(normalizedOrder({ items: [{ externalId: "item-1", name: "Leotard", quantity: 3, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }] }), "owner-1", "run-1");
+  assert.deepEqual(instances.map(instance => instance.ordinal), [1, 2, 3]);
+});
+
+test("KeyCRM create path without external item id materializes instances", async () => {
+  const KeycrmService = loadKeycrmService();
+  let orderRow;
+  const instances = [];
+  const tx = {
+    $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined, $queryRaw: async () => [],
+    order: {
+      findUnique: async ({ where }) => where.number ? null : orderRow || null,
+      create: async ({ data }) => (orderRow = { id: "order-1", paymentStatus: "UNPAID", productionStatus: "NOT_SCHEDULED", ...data }),
+      update: async ({ data }) => (orderRow = { ...orderRow, ...data }),
+    },
+    client: { create: async ({ data }) => ({ id: "client-1", ...data }) },
+    orderItem: {
+      count: async () => 0,
+      create: async ({ data }) => ({ id: "item-created", productionStatus: "NOT_SCHEDULED", athleteId: null, measurementId: null, ...data }),
+    },
+    orderItemInstance: {
+      findMany: async () => [],
+      create: async ({ data }) => { const row = { id: `instance-${data.ordinal}`, archivedAt: null, ...data }; instances.push(row); return row; },
+    },
+    payment: { findUnique: async () => null, findMany: async () => [] },
+    productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
+    activity: { create: async () => undefined }, auditLog: { create: async () => undefined },
+  };
+  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  await service.importOrder(normalizedOrder({ items: [{ externalId: null, name: "Custom row", quantity: 2, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }] }), "owner-1", "run-1");
+  assert.deepEqual(instances.map(instance => instance.ordinal), [1, 2]);
 });
 
 test("повторный APPLY после rollback явно реактивирует order и buyer link", () => {
@@ -986,6 +1066,7 @@ test("rollback fail-closed блокирует позднее изменение 
       $executeRawUnsafe: async () => undefined,
       keycrmSyncRun: { findUnique: async () => ({ id: "run-1", mode: "APPLY", status: "PARTIAL", rolledBackAt: null, mutations: [mutation] }) },
       order: { findUnique: async () => current },
+      orderItemInstance: { findMany: async () => [] },
       client: { findMany: async () => [] }, keycrmClientLink: { findMany: async () => [] },
     }),
   });
@@ -993,6 +1074,65 @@ test("rollback fail-closed блокирует позднее изменение 
     makeService({ id: "m2", externalOrderId: "2", orderId: "o2", kind: "IMPORTED_ORDER", afterSnapshot: { order: { id: "o2", value: "before" }, clients: [], keycrmLinks: [], scope: { orderId: "o2", clientIds: [], connectionKey: "c", keycrmBuyerId: null } }, rollbackEligible: true, rollbackBlockedReason: null, rolledBackAt: null }, { id: "o2", value: "after" }).rollback("run-1", { id: "owner-1" }),
     /изменён после импорта/,
   );
+});
+
+test("legacy rollback snapshot fails closed once item instances exist", async () => {
+  const KeycrmService = loadKeycrmService();
+  const order = { id: "o2", clientId: "client-1", number: "K-2", items: [], payments: [], productionSlot: null, shipment: null, invoices: [], expenses: [], agreements: [] };
+  const scope = { orderId: "o2", clientIds: [], connectionKey: "c", keycrmBuyerId: null };
+  const mutation = { id: "m2", externalOrderId: "2", orderId: "o2", kind: "IMPORTED_ORDER", afterSnapshot: { order, clients: [], keycrmLinks: [], scope }, rollbackEligible: true, rollbackBlockedReason: null, rolledBackAt: null };
+  const service = new KeycrmService({
+    $transaction: callback => callback({
+      $executeRaw: async () => undefined,
+      $executeRawUnsafe: async () => undefined,
+      keycrmSyncRun: { findUnique: async () => ({ id: "run-1", mode: "APPLY", status: "PARTIAL", rolledBackAt: null, mutations: [mutation] }) },
+      order: { findUnique: async () => order },
+      orderItemInstance: { findMany: async () => [{ id: "instance-1", orderItemId: "item-1", ordinal: 1, archivedAt: null }] },
+      client: { findMany: async () => [] }, keycrmClientLink: { findMany: async () => [] },
+    }),
+  });
+  await assert.rejects(() => service.rollback("run-1", { id: "owner-1" }), /изменён после импорта/);
+});
+
+test("legacy rollback snapshot fails closed once plural shipments exist", async () => {
+  const KeycrmService = loadKeycrmService();
+  const order = { id: "o2", clientId: "client-1", number: "K-2", items: [], payments: [], productionSlot: null, shipment: null, invoices: [], expenses: [], agreements: [] };
+  const scope = { orderId: "o2", clientIds: [], connectionKey: "c", keycrmBuyerId: null };
+  const mutation = { id: "m2", externalOrderId: "2", orderId: "o2", kind: "IMPORTED_ORDER", afterSnapshot: { order, clients: [], keycrmLinks: [], scope }, rollbackEligible: true, rollbackBlockedReason: null, rolledBackAt: null };
+  const service = new KeycrmService({
+    $transaction: callback => callback({
+      $executeRaw: async () => undefined,
+      $executeRawUnsafe: async () => undefined,
+      keycrmSyncRun: { findUnique: async () => ({ id: "run-1", mode: "APPLY", status: "PARTIAL", rolledBackAt: null, mutations: [mutation] }) },
+      order: { findUnique: async () => order },
+      orderItemInstance: { findMany: async () => [] },
+      orderShipment: { findMany: async () => [{ id: "shipment-1", orderId: "o2", archivedAt: null }] },
+      client: { findMany: async () => [] }, keycrmClientLink: { findMany: async () => [] },
+    }),
+  });
+  await assert.rejects(() => service.rollback("run-1", { id: "owner-1" }), /изменён после импорта/);
+});
+
+test("unknown rollback snapshot versions fail closed before writes", async () => {
+  const KeycrmService = loadKeycrmService();
+  const mutation = { id: "m2", externalOrderId: "2", orderId: "o2", kind: "IMPORTED_ORDER", afterSnapshot: { version: 3, order: { id: "o2" }, orderItemInstances: [], clients: [], keycrmLinks: [], scope: { orderId: "o2", clientIds: [], connectionKey: "c", keycrmBuyerId: null } }, rollbackEligible: true, rollbackBlockedReason: null, rolledBackAt: null };
+  const service = new KeycrmService({ $transaction: callback => callback({
+    $executeRaw: async () => undefined,
+    $executeRawUnsafe: async () => undefined,
+    keycrmSyncRun: { findUnique: async () => ({ id: "run-1", mode: "APPLY", status: "PARTIAL", rolledBackAt: null, mutations: [mutation] }) },
+  }) });
+  await assert.rejects(() => service.rollback("run-1", { id: "owner-1" }), /несовместимую версию/);
+});
+
+test("version 2 rollback snapshot without plural shipments fails closed", async () => {
+  const KeycrmService = loadKeycrmService();
+  const mutation = { id: "m2", externalOrderId: "2", orderId: "o2", kind: "IMPORTED_ORDER", afterSnapshot: { version: 2, order: { id: "o2" }, orderItemInstances: [], clients: [], keycrmLinks: [], scope: { orderId: "o2", clientIds: [], connectionKey: "c", keycrmBuyerId: null } }, rollbackEligible: true, rollbackBlockedReason: null, rolledBackAt: null };
+  const service = new KeycrmService({ $transaction: callback => callback({
+    $executeRaw: async () => undefined,
+    $executeRawUnsafe: async () => undefined,
+    keycrmSyncRun: { findUnique: async () => ({ id: "run-1", mode: "APPLY", status: "PARTIAL", rolledBackAt: null, mutations: [mutation] }) },
+  }) });
+  await assert.rejects(() => service.rollback("run-1", { id: "owner-1" }), /несовместимый формат/);
 });
 
 test("повтор страницы после сбоя до checkpoint не дублирует импортированные сущности", async () => {
@@ -1068,6 +1208,7 @@ test("повторный sync восстанавливает главное из
       findUnique: async () => itemRow || null,
       upsert: async ({ create, update }) => itemRow ? (itemRow = { ...itemRow, ...update }) : (itemRow = { id: "item-image", ...create }),
     },
+    orderItemInstance: { findMany: async () => [], create: async () => undefined },
     payment: { findUnique: async () => null, findMany: async () => [] }, productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
     activity: { findFirst: async () => null, create: async () => undefined }, auditLog: { create: async () => undefined }, keycrmSyncIssue: { findFirst: async () => null, create: async () => undefined },
   };

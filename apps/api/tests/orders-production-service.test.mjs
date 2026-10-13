@@ -37,6 +37,7 @@ const requireForOrders = specifier => {
     requiresProduction: type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type),
     violatesShippingLead: () => true,
   };
+  if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => { const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }); await tx.orderItem?.updateMany?.({ where: { orderId }, data: { productionStatus } }); await tx.orderItemInstance?.updateMany?.({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus } }); return order; } };
   if (specifier === "./production-context") return { loadProductionOrders: (...args) => productionLoader(...args) };
   if (specifier === "sharp") return () => ({});
   return nativeRequire(specifier);

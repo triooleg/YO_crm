@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = readFileSync(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const panel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
 test("раскрытый заказ позволяет заменить изображение конкретной позиции", () => {
-  assert.match(dashboard, /type="file"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
-  assert.match(dashboard, /ui\.changeOrderItemImage/);
+  assert.match(tabs, /type="file"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(tabs, /ui\.changeOrderItemImage/);
   assert.match(dashboard, /request\("\/orders\/model-image"/);
   assert.match(dashboard, /`\/orders\/\$\{order\.id\}\/model-image`/);
   assert.match(dashboard, /JSON\.stringify\(\{ itemId, modelImagePath: image\.path, expectedModelImagePath \}\)/);

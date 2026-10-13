@@ -33,6 +33,7 @@ const orderRequire = specifier => {
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
   if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type), resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
+  if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({ metadata: async () => ({}), jpeg: () => ({ toBuffer: async () => Buffer.alloc(0) }) });
   return nativeRequire(specifier);
@@ -101,6 +102,8 @@ test("валютная оплата атомарно сохраняет офиц
       findFirst: async () => order,
       update: async ({ data }) => (writes.order = { ...order, ...data }),
     },
+    orderItem: { updateMany: async () => ({ count: 1 }) },
+    orderItemInstance: { updateMany: async () => ({ count: 1 }) },
     appSetting: { findUnique: async () => ({ value: cache }) },
     payment: { create: async ({ data }) => (writes.payment = { id: "payment-1", ...data }) },
     activity: { create: async ({ data }) => { writes.activities.push(data); return data; } },

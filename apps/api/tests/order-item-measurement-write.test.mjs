@@ -11,6 +11,14 @@ class BadRequestException extends Error {}
 class ConflictException extends Error {}
 class NotFoundException extends Error {}
 const common = { BadRequestException, ConflictException, Injectable: () => target => target, NotFoundException };
+const reconcileOrderItemInstances = async (tx, item, quantity) => {
+  const existing = await tx.orderItemInstance.findMany({ where: { orderItemId: item.id } });
+  for (let ordinal = 1; ordinal <= quantity; ordinal += 1) {
+    if (!existing.some(instance => instance.ordinal === ordinal && !instance.archivedAt)) {
+      await tx.orderItemInstance.create({ data: { orderItemId: item.id, ordinal, athleteId: item.athleteId ?? null, measurementId: item.measurementId ?? null, productionStatus: item.productionStatus } });
+    }
+  }
+};
 const compile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, esModuleInterop: true } }).outputText;
 const ordersModule = { exports: {} };
 const orderRequire = specifier => {
@@ -27,9 +35,10 @@ const orderRequire = specifier => {
   if (specifier === "./order-image-name") return { isOrderImageName: () => true };
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
-  if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistAddedOrderItem: async () => ({}), persistOrderItemDetails: async () => ({}), reconcileOrderItemInstances };
   if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: () => true, resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
+  if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
   return nativeRequire(specifier);
@@ -49,12 +58,18 @@ function fixture({ order = {}, athlete = {}, failAudit = false } = {}) {
     id: "order-1", number: "YO-26-0001", clientId: "client-1", archivedAt: null,
     athleteId: "athlete-other", measurementId: "measurement-other",
     items: [
-      { id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old" },
-      { id: "item-2", orderId: "order-1", athleteId: "athlete-other", measurementId: "measurement-other" },
+      { id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", quantity: 2 },
+      { id: "item-2", orderId: "order-1", athleteId: "athlete-other", measurementId: "measurement-other", productionStatus: "NOT_SCHEDULED", quantity: 1 },
     ],
     ...order,
   };
-  const state = { order: structuredClone(base), measurements: [], activities: [], audits: [], locks: [] };
+  const state = {
+    order: structuredClone(base), measurements: [], activities: [], audits: [], locks: [],
+    instances: [
+      { id: "instance-1", orderItemId: "item-1", ordinal: 1, athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", archivedAt: null },
+      { id: "instance-2", orderItemId: "item-1", ordinal: 2, athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", archivedAt: null },
+    ],
+  };
   const transaction = async callback => {
     const draft = structuredClone(state);
     const tx = {
@@ -66,6 +81,11 @@ function fixture({ order = {}, athlete = {}, failAudit = false } = {}) {
       athlete: { findFirst: async ({ where }) => where.id === "athlete-1" && where.clientId === "client-1" && athlete.exists !== false ? { id: "athlete-1", firstName: "Anna" } : null },
       measurement: { create: async ({ data }) => { const value = { id: "measurement-new", ...data }; draft.measurements.push(value); return value; } },
       orderItem: { update: async ({ where, data }) => { const index = draft.order.items.findIndex(item => item.id === where.id); draft.order.items[index] = { ...draft.order.items[index], ...data }; return structuredClone(draft.order.items[index]); } },
+      orderItemInstance: {
+        findMany: async ({ where }) => structuredClone(draft.instances.filter(instance => instance.orderItemId === where.orderItemId)),
+        create: async ({ data }) => { const row = { id: `instance-${draft.instances.length + 1}`, archivedAt: null, ...data }; draft.instances.push(row); return structuredClone(row); },
+        updateMany: async ({ where, data }) => { for (const instance of draft.instances) if (instance.orderItemId === where.orderItemId && instance.archivedAt === null) Object.assign(instance, data); },
+      },
       activity: { create: async ({ data }) => { draft.activities.push(data); } },
       auditLog: { create: async ({ data }) => { if (failAudit) throw new Error("audit unavailable"); draft.audits.push(data); } },
     };
@@ -84,9 +104,18 @@ test("item-specific measurement creates an immutable snapshot and updates only t
   assert.equal(target.state.measurements.length, 1);
   assert.equal(target.state.order.items[0].measurementId, "measurement-new");
   assert.equal(target.state.order.items[1].measurementId, "measurement-other");
+  assert.deepEqual(target.state.instances.map(instance => instance.measurementId), ["measurement-new", "measurement-new"]);
   assert.equal(target.state.order.measurementId, "measurement-other");
   assert.equal(target.state.activities[0].metadata.itemId, "item-1");
   assert.deepEqual(target.state.audits.map(entry => entry.entityType), ["Measurement", "OrderItem"]);
+});
+
+test("single-item order measurement propagates the immutable snapshot to every active instance", async () => {
+  const target = fixture({ order: { athleteId: "athlete-1", measurementId: "measurement-old", items: [{ id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", quantity: 2 }] } });
+  await target.service.addMeasurement("order-1", dto, { id: "owner-1" });
+  assert.equal(target.state.order.measurementId, "measurement-new");
+  assert.equal(target.state.order.items[0].measurementId, "measurement-new");
+  assert.deepEqual(target.state.instances.map(instance => instance.measurementId), ["measurement-new", "measurement-new"]);
 });
 
 test("matching legacy top-level references mirror the target item measurement", async () => {
@@ -143,8 +172,12 @@ test("audit failure rolls back snapshot, item, activity, and legacy mirror", asy
 function bindingFixture({ foreignMeasurement = false } = {}) {
   const state = {
     items: [
-      { id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old", order: { clientId: "client-1", number: "YO-26-0001" } },
-      { id: "item-2", orderId: "order-1", athleteId: "athlete-2", measurementId: "measurement-other", order: { clientId: "client-1", number: "YO-26-0001" } },
+      { id: "item-1", orderId: "order-1", athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", quantity: 2, order: { clientId: "client-1", number: "YO-26-0001" } },
+      { id: "item-2", orderId: "order-1", athleteId: "athlete-2", measurementId: "measurement-other", productionStatus: "NOT_SCHEDULED", quantity: 1, order: { clientId: "client-1", number: "YO-26-0001" } },
+    ],
+    instances: [
+      { id: "instance-1", orderItemId: "item-1", ordinal: 1, athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", archivedAt: null },
+      { id: "instance-2", orderItemId: "item-1", ordinal: 2, athleteId: "athlete-1", measurementId: "measurement-old", productionStatus: "NOT_SCHEDULED", archivedAt: null },
     ],
     activities: [], audits: [], locks: [],
   };
@@ -156,6 +189,11 @@ function bindingFixture({ foreignMeasurement = false } = {}) {
         orderItem: {
           findFirst: async ({ where }) => structuredClone(draft.items.find(item => item.id === where.id && item.orderId === where.orderId) ?? null),
           update: async ({ where, data }) => { const index = draft.items.findIndex(item => item.id === where.id); draft.items[index] = { ...draft.items[index], ...data }; return structuredClone(draft.items[index]); },
+        },
+        orderItemInstance: {
+          findMany: async ({ where }) => structuredClone(draft.instances.filter(instance => instance.orderItemId === where.orderItemId)),
+          create: async ({ data }) => { const row = { id: `instance-${draft.instances.length + 1}`, archivedAt: null, ...data }; draft.instances.push(row); return structuredClone(row); },
+          updateMany: async ({ where, data }) => { for (const instance of draft.instances) if (instance.orderItemId === where.orderItemId && instance.archivedAt === null && (where.athleteId === undefined || instance.athleteId === where.athleteId) && (where.measurementId === undefined || instance.measurementId === where.measurementId)) Object.assign(instance, data); },
         },
         measurement: { findFirst: async ({ where }) => where.id === "measurement-new" && !foreignMeasurement ? { id: "measurement-new", athleteId: "athlete-1" } : null },
         activity: { create: async ({ data }) => draft.activities.push(data) },
@@ -175,11 +213,23 @@ test("binding an immutable snapshot changes only the selected order item and sur
   assert.equal(result.measurementId, "measurement-new");
   assert.equal(target.state.items[0].measurementId, "measurement-new");
   assert.equal(target.state.items[1].measurementId, "measurement-other");
+  assert.deepEqual(target.state.instances.map(instance => instance.measurementId), ["measurement-new", "measurement-new"]);
   assert.deepEqual(target.state.locks, ["order-1"]);
   assert.equal(target.state.activities[0].type, "ORDER_ITEM_MEASUREMENT_BOUND");
   assert.equal(JSON.stringify(target.state.audits[0].before), JSON.stringify({ athleteId: "athlete-1", measurementId: "measurement-old" }));
   assert.equal(JSON.stringify(target.state.audits[0].after), JSON.stringify({ athleteId: "athlete-1", measurementId: "measurement-new" }));
   assert.equal(target.state.items.find(item => item.id === "item-1").measurementId, "measurement-new");
+});
+
+test("item-level measurement binding preserves an individually assigned sibling instance", async () => {
+  const target = bindingFixture();
+  target.state.instances[1].athleteId = "athlete-2";
+  target.state.instances[1].measurementId = "measurement-individual";
+  await target.service.bindItemMeasurement("order-1", "item-1", { measurementId: "measurement-new", expectedMeasurementId: "measurement-old" }, { id: "owner-1" });
+  assert.deepEqual(target.state.instances.map(instance => [instance.athleteId, instance.measurementId]), [
+    ["athlete-1", "measurement-new"],
+    ["athlete-2", "measurement-individual"],
+  ]);
 });
 
 test("stale or foreign measurement binding is rejected without mutations", async () => {

@@ -3,11 +3,12 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 
 const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = await readFile(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const copy = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const settings = await readFile(new URL("../components/settings-workspace.tsx", import.meta.url), "utf8");
 
 test("expanded order exposes an explicit audited currency change action", () => {
-  assert.match(dashboard, /changeCurrency/);
+  assert.match(tabs, /onCurrency/);
   assert.match(dashboard, /\/orders\/\$\{[^}]+\}\/currency/);
   assert.match(dashboard, /currencyChangeOrder/);
   assert.match(dashboard, /<Modal[\s\S]*currencyChange/);

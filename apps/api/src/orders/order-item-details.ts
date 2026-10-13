@@ -1,4 +1,29 @@
 import { PaymentStatus, type Prisma } from "@prisma/client";
+import { updateProductionStatusGraph } from "./production-status-graph";
+
+type InstanceRow = { id:string; ordinal:number; athleteId?:string|null; measurementId?:string|null; productionStatus:string; orderShipmentId?:string|null; plannedStartAt?:Date|null; plannedEndAt?:Date|null; startedAt?:Date|null; completedAt?:Date|null; archivedAt?:Date|null };
+type InstanceItem = { id:string; athleteId?:string|null; measurementId?:string|null; productionStatus:string };
+type InstanceTransaction = { orderItemInstance:{ findMany(input:unknown):Promise<InstanceRow[]>; create(input:unknown):Promise<unknown>; update(input:unknown):Promise<unknown> } };
+
+export class OrderItemInstanceConflictError extends Error {
+  constructor(){super("Нельзя уменьшить количество: экземпляр уже участвует в производстве или доставке")}
+}
+
+function hasOperationalHistory(instance:InstanceRow){return Boolean(instance.athleteId||instance.measurementId||instance.orderShipmentId||instance.plannedStartAt||instance.plannedEndAt||instance.startedAt||instance.completedAt||!["NOT_SCHEDULED","TENTATIVE"].includes(instance.productionStatus))}
+
+export async function reconcileOrderItemInstances(tx:InstanceTransaction,item:InstanceItem,quantity:number,now=new Date()){
+  if(!Number.isInteger(quantity)||quantity<1)throw new OrderItemInstanceConflictError();
+  const existing=await tx.orderItemInstance.findMany({where:{orderItemId:item.id},orderBy:{ordinal:"asc"}});
+  const byOrdinal=new Map(existing.map(instance=>[instance.ordinal,instance]));
+  const surplus=existing.filter(instance=>instance.ordinal>quantity&&!instance.archivedAt);
+  if(surplus.some(hasOperationalHistory))throw new OrderItemInstanceConflictError();
+  for(let ordinal=1;ordinal<=quantity;ordinal+=1){
+    const current=byOrdinal.get(ordinal);
+    if(current){if(current.archivedAt)await tx.orderItemInstance.update({where:{id:current.id},data:{archivedAt:null}});continue}
+    await tx.orderItemInstance.create({data:{orderItemId:item.id,ordinal,athleteId:item.athleteId??null,measurementId:item.measurementId??null,productionStatus:item.productionStatus}});
+  }
+  for(const instance of surplus)await tx.orderItemInstance.update({where:{id:instance.id},data:{archivedAt:now}});
+}
 
 export const ORDER_ITEM_DETAILS_ERROR = {
   orderNotFound: "ORDER_ITEM_DETAILS_ORDER_NOT_FOUND",
@@ -7,6 +32,7 @@ export const ORDER_ITEM_DETAILS_ERROR = {
   depositWouldUnconfirmProduction: "ORDER_ITEM_DETAILS_DEPOSIT_WOULD_UNCONFIRM_PRODUCTION",
   totalTooLarge: "ORDER_ITEM_DETAILS_TOTAL_TOO_LARGE",
   athleteNotFound: "ORDER_ITEM_DETAILS_ATHLETE_NOT_FOUND",
+  instanceInUse: "ORDER_ITEM_DETAILS_INSTANCE_IN_USE",
 } as const;
 
 type Input={name:string;quantity:number;priceMinor:number;expectedName:string;expectedQuantity:number;expectedPriceMinor:number;modelImagePath?:string;expectedModelImagePath:string|null;designNumber?:number|null;expectedDesignNumber?:number|null};
@@ -33,9 +59,18 @@ export async function persistOrderItemDetails(tx:Prisma.TransactionClient,orderI
   const paymentStatus=order.paymentStatus===PaymentStatus.REFUNDED||order.paymentStatus===PaymentStatus.CANCELLED?order.paymentStatus:paid===0?PaymentStatus.UNPAID:paid>=nextTotal?PaymentStatus.PAID:paid>=depositRequiredMinor?PaymentStatus.DEPOSIT_PAID:PaymentStatus.PARTIALLY_PAID;
   const terminalPaymentStatus=order.paymentStatus===PaymentStatus.REFUNDED||order.paymentStatus===PaymentStatus.CANCELLED;
   const confirmsProductionSlot=Boolean(itemRequiresProduction(order.type)&&!terminalPaymentStatus&&order.productionSlot?.tentative&&depositRequiredMinor>0&&paid>=depositRequiredMinor);
+  try {
+    await reconcileOrderItemInstances(tx, item, input.quantity);
+  } catch (error) {
+    if (error instanceof OrderItemInstanceConflictError) throw new OrderItemDetailsError(ORDER_ITEM_DETAILS_ERROR.instanceInUse);
+    throw error;
+  }
   const updatedItem=await tx.orderItem.update({where:{id:itemId},data:{name,quantity:input.quantity,priceMinor:input.priceMinor,...(input.modelImagePath?{modelImagePath:input.modelImagePath}:{}),...(input.designNumber!==undefined?{designNumber:input.designNumber}:{})}});
   const isPrimary=order.items[0]?.id===itemId;
-  const updatedOrder=await tx.order.update({where:{id:orderId},data:{priceMinor:nextTotal,depositRequiredMinor,paymentStatus,...(confirmsProductionSlot&&order.productionStatus==="NOT_SCHEDULED"?{productionStatus:"SCHEDULED"}:{}),...(isPrimary&&input.modelImagePath?{modelImagePath:input.modelImagePath}:{})}});
+  const orderData={priceMinor:nextTotal,depositRequiredMinor,paymentStatus,...(isPrimary&&input.modelImagePath?{modelImagePath:input.modelImagePath}:{})};
+  const updatedOrder=confirmsProductionSlot&&order.productionStatus==="NOT_SCHEDULED"
+    ?await updateProductionStatusGraph(tx,orderId,"SCHEDULED",orderData,{preserveProgress:true})
+    :await tx.order.update({where:{id:orderId},data:orderData});
   if(confirmsProductionSlot&&order.productionSlot){const slot=await tx.productionSlot.update({where:{orderId},data:{tentative:false}});await tx.auditLog.create({data:{actorId,action:"UPDATE",entityType:"ProductionSlot",entityId:slot.id,before:order.productionSlot,after:slot}});await tx.activity.create({data:{clientId:order.clientId,orderId,type:"PRODUCTION_SLOT_CONFIRMED",summary:"Производственный слот подтверждён после изменения дизайна",metadata:{itemId,depositRequiredMinor,paidMinor:paid,currency:order.currency}}})}
   await tx.activity.create({data:{clientId:order.clientId,orderId,type:"ORDER_ITEM_DETAILS_UPDATED",summary:`Изменён дизайн «${name}»`,metadata:{itemId,name,quantity:input.quantity,priceMinor:input.priceMinor,designNumber:input.designNumber,orderPriceMinor:nextTotal,manualOverride:true}}});
   await tx.auditLog.create({data:{actorId,action:"UPDATE",entityType:"OrderItem",entityId:itemId,before:item,after:updatedItem}});
@@ -58,6 +93,7 @@ export async function persistAddedOrderItem(tx:Prisma.TransactionClient,orderId:
   if(itemRequiresProduction(order.type)&&order.productionSlot&&!order.productionSlot.tentative&&paid<depositRequiredMinor)throw new OrderItemDetailsError(ORDER_ITEM_DETAILS_ERROR.depositWouldUnconfirmProduction);
   const paymentStatus=order.paymentStatus===PaymentStatus.REFUNDED||order.paymentStatus===PaymentStatus.CANCELLED?order.paymentStatus:paid===0?PaymentStatus.UNPAID:paid>=nextTotal?PaymentStatus.PAID:paid>=depositRequiredMinor?PaymentStatus.DEPOSIT_PAID:PaymentStatus.PARTIALLY_PAID;
   const item=await tx.orderItem.create({data:{orderId,name,quantity:input.quantity,priceMinor:input.priceMinor,modelImagePath:input.modelImagePath,designNumber:input.designNumber,athleteId}});
+  await reconcileOrderItemInstances(tx, item, item.quantity);
   const updatedOrder=await tx.order.update({where:{id:orderId},data:{priceMinor:nextTotal,depositRequiredMinor,paymentStatus}});
   await tx.activity.create({data:{clientId:order.clientId,orderId,type:"ORDER_ITEM_CREATED",summary:`Добавлен дизайн «${item.name}»`,metadata:{itemId:item.id,quantity:item.quantity,priceMinor:item.priceMinor,designNumber:item.designNumber,orderPriceMinor:nextTotal}}});
   await tx.auditLog.create({data:{actorId,action:"CREATE",entityType:"OrderItem",entityId:item.id,after:item}});

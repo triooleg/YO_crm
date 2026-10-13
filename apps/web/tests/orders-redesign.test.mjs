@@ -4,13 +4,14 @@ import test from "node:test";
 
 const source = readFileSync(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+const tabs = readFileSync(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const orderPanel = readFileSync(new URL("../components/order-panel.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const api = readFileSync(new URL("../../api/src/orders/orders.service.ts", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../../../packages/database/prisma/schema.prisma", import.meta.url), "utf8");
-const ui = source + dashboard + i18n;
+const ui = source + dashboard + tabs + i18n;
 
 test("Orders redesign exposes the complete operational overview", () => {
   for (const label of ["Все заказы", "Нужна предоплата", "Срок ≤ 7 дней", "Просрочены", "Готовы к отправке", "Завершенные"]) {
@@ -26,7 +27,7 @@ test("Orders redesign keeps real controls and deterministic guidance", () => {
   for (const token of ["orders-filter-trigger", "orders-filter-chips", "orders-export", "orders-pagination", "refreshOrder", "orderProblems", "OrderChannelIcon"]) {
     assert.match(dashboard, new RegExp(token));
   }
-  assert.match(dashboard, /orders-tab-designs/);
+  assert.match(tabs, /orders-tab-designs/);
   assert.match(ui, /Финансы по заказу/);
   assert.match(ui, /Пожелания клиента/);
   assert.match(ui, /Заметки менеджера/);
@@ -55,7 +56,7 @@ test("переход по orderId открывает точный заказ и 
 test("отправленная доставка компактна, а пожелания клиента редактируются отдельно от описания", () => {
   assert.match(dashboard, /function orderHasShippedDelivery/);
   assert.match(dashboard, /orders-delivery-cell-button is-shipped/);
-  assert.match(dashboard, /order\.buyerComment \|\| order\.notes \|\| ui\.notSpecified/);
+  assert.match(tabs, /order\.buyerComment \|\| order\.notes \|\| ui\.notSpecified/);
   assert.match(dashboard, /\/orders\/\$\{order\.id\}\/buyer-comment/);
   assert.match(dashboard, /expectedBuyerComment/);
   assert.match(dashboard, /CustomerWishesModal/);
@@ -64,7 +65,7 @@ test("отправленная доставка компактна, а поже�
 test("подписи заказов используют редактирование заказа и существующую вкладку измерений", () => {
   assert.match(i18n, /menu: "Редактирование заказа"/);
   assert.match(i18n, /measurements: "Измерения"/);
-  assert.match(dashboard, /key: "measurements"/);
+  assert.match(tabs, /key: "measurements"/);
   assert.match(dashboard, /<MeasurementPanel/);
 });
 
@@ -77,9 +78,9 @@ test("каждый дизайн хранит и редактирует номе�
 
 test("детали поддерживают файлы и просмотр изображений, а дизайн можно добавить",()=>{
   assert.match(schema,/model OrderFile/);
-  assert.match(dashboard,/OrderFilesPanel/);
+  assert.match(tabs,/OrderFilesCard/);
   assert.match(dashboard,/\/orders\/\$\{orderId\}\/files/);
-  assert.match(dashboard,/orders-file-preview/);
+  assert.match(tabs,/orders-file-preview/);
   assert.match(dashboard,/OrderDesignAddModal/);
   assert.match(dashboard,/\/orders\/\$\{order\.id\}\/items/);
 });
@@ -151,10 +152,10 @@ test("Orders sport remains visible in the combined model column and editable thr
   assert.match(dashboard, /onClick=\{onEdit\}/);
 });
 
-test("история заказа сначала показывает пять последних записей",()=>{
-  assert.match(dashboard,/historyItems\.slice\(0,5\)/);
-  assert.match(dashboard,/showOlderHistory/);
-  assert.match(dashboard,/hideOlderHistory/);
+test("история заказа показывает первые восемь событий и поддерживает подгрузку",()=>{
+  assert.match(tabs,/useState\(8\)/);
+  assert.match(tabs,/filtered\.slice\(0, limit\)/);
+  assert.match(tabs,/setLimit\(\(value\) => value \+ 8\)/);
 });
 
 test("New order button opens the existing order form through client selection", () => {

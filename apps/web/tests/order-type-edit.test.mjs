@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const dashboard=await readFile(new URL("../components/orders-dashboard.tsx",import.meta.url),"utf8");
+const tabs=await readFile(new URL("../components/orders/order-expanded-tabs.tsx",import.meta.url),"utf8");
 const panel=await readFile(new URL("../components/order-panel.tsx",import.meta.url),"utf8");
 const i18n=await readFile(new URL("../lib/i18n.ts",import.meta.url),"utf8");
 
@@ -17,7 +18,7 @@ test("редактор заказа позволяет выбрать прода
 });
 
 test("каждый доступный тип заказа использует полный централизованный русский словарь",()=>{
-  assert.match(dashboard,/orderFormUi\.types as Record<string, string>/);
+  assert.match(tabs,/orderFormUi\.types as Record<string, string>/);
   for(const [type,label] of [
     ["CUSTOM_ORDER","Индивидуальный заказ"],["PAIR","Парный заказ"],["GROUP_ORDER","Групповой заказ"],
     ["READY_MODEL","Готовая модель"],["WEBSITE_SALE","Продажа с сайта"],["STOCK_SALE","Продажа со склада"],

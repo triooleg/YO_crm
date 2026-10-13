@@ -10,7 +10,7 @@ const detailsModule = { exports: {} };
 const paymentStatus = { UNPAID: "UNPAID", PARTIALLY_PAID: "PARTIALLY_PAID", DEPOSIT_PAID: "DEPOSIT_PAID", PAID: "PAID", REFUNDED: "REFUNDED", CANCELLED: "CANCELLED" };
 const productionStatus = { NOT_SCHEDULED: "NOT_SCHEDULED", SCHEDULED: "SCHEDULED" };
 const requiresProduction = type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type);
-vm.runInNewContext(javascript, { module: detailsModule, exports: detailsModule.exports, require: specifier => specifier === "@prisma/client" ? { OrderType: {}, PaymentStatus: paymentStatus, ProductionStatus: productionStatus } : specifier === "./production-rules" ? { DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: (value, fallback) => Number.isInteger(value) ? value : fallback, requiresProduction, violatesShippingLead: () => false } : undefined, BigInt, Date, Math });
+vm.runInNewContext(javascript, { module: detailsModule, exports: detailsModule.exports, require: specifier => specifier === "@prisma/client" ? { OrderType: {}, PaymentStatus: paymentStatus, ProductionStatus: productionStatus } : specifier === "./production-rules" ? { DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: (value, fallback) => Number.isInteger(value) ? value : fallback, requiresProduction, violatesShippingLead: () => false } : specifier === "./production-status-graph" ? { updateProductionStatusGraph: async (tx, orderId, nextStatus, orderData = {}) => { const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus: nextStatus } }); await tx.orderItem.updateMany({ where: { orderId }, data: { productionStatus: nextStatus } }); await tx.orderItemInstance.updateMany({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus: nextStatus } }); return order; } } : undefined, BigInt, Date, Math });
 const { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } = detailsModule.exports;
 
 const expected = { expectedDescription: "Старое описание", expectedPriceMinor: 20000, expectedModelImagePath: "old.jpg" };
@@ -29,7 +29,11 @@ function fixture({
         findFirst: async () => draft.order?.archivedAt ? null : structuredClone(draft.order),
         update: async ({ data }) => { draft.order = { ...draft.order, ...data }; return structuredClone(draft.order); },
       },
-      orderItem: { update: async ({ where, data }) => { const index = draft.order.items.findIndex((item) => item.id === where.id); draft.order.items[index] = { ...draft.order.items[index], ...data }; return structuredClone(draft.order.items[index]); } },
+      orderItem: {
+        update: async ({ where, data }) => { const index = draft.order.items.findIndex((item) => item.id === where.id); draft.order.items[index] = { ...draft.order.items[index], ...data }; return structuredClone(draft.order.items[index]); },
+        updateMany: async ({ data }) => { draft.order.items = draft.order.items.map(item => ({ ...item, ...data })); return { count: draft.order.items.length }; },
+      },
+      orderItemInstance: { updateMany: async () => ({ count: 0 }) },
       productionSlot: {
         update: async ({ data }) => { draft.order.productionSlot = { ...draft.order.productionSlot, ...data }; return structuredClone(draft.order.productionSlot); },
         delete: async () => { const deleted = structuredClone(draft.order.productionSlot); draft.order.productionSlot = null; return deleted; },

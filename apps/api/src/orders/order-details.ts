@@ -1,5 +1,6 @@
 import { OrderType, PaymentStatus, ProductionStatus, type Prisma } from "@prisma/client";
 import { DEFAULT_SHIPPING_LEAD_DAYS, productionSetting, requiresProduction, violatesShippingLead } from "./production-rules";
+import { updateProductionStatusGraph } from "./production-status-graph";
 
 export const ORDER_DETAILS_ERROR = {
   orderNotFound: "ORDER_DETAILS_ORDER_NOT_FOUND",
@@ -89,6 +90,7 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
   if (productionOrder && order.productionSlot && !order.productionSlot.tentative && input.priceMinor > order.priceMinor && totalPaid < depositRequiredMinor) {
     throw new OrderDetailsOperationError(ORDER_DETAILS_ERROR.depositWouldUnconfirmProduction);
   }
+  const nextProductionStatus = becameNonProduction ? ProductionStatus.NOT_SCHEDULED : confirmsProductionSlot && order.productionStatus === ProductionStatus.NOT_SCHEDULED ? ProductionStatus.SCHEDULED : undefined;
   const orderData = {
     type: nextType,
     requiredDeliveryAt,
@@ -97,7 +99,6 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
     depositRequiredMinor,
     paymentStatus,
     ...(input.modelImagePath ? { modelImagePath: input.modelImagePath } : {}),
-    ...(becameNonProduction ? { productionStatus: ProductionStatus.NOT_SCHEDULED } : confirmsProductionSlot && order.productionStatus === ProductionStatus.NOT_SCHEDULED ? { productionStatus: ProductionStatus.SCHEDULED } : {}),
   };
 
   const primaryItem = order.items[0];
@@ -115,7 +116,9 @@ export async function persistOrderDetails(tx: Prisma.TransactionClient, orderId:
     await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "PRODUCTION_SLOT_DELETED", summary: "Производственный слот удалён после изменения типа заказа", metadata: { slotId: deletedSlot.id, previousType: order.type, type: nextType } } });
     await tx.auditLog.create({ data: { actorId, action: "DELETE", entityType: "ProductionSlot", entityId: deletedSlot.id, before: order.productionSlot } });
   }
-  const updatedOrder = await tx.order.update({ where: { id: orderId }, data: orderData });
+  const updatedOrder = nextProductionStatus
+    ? await updateProductionStatusGraph(tx, orderId, nextProductionStatus, orderData, { preserveProgress: !becameNonProduction })
+    : await tx.order.update({ where: { id: orderId }, data: orderData });
   if (confirmsProductionSlot && order.productionSlot) {
     const slot = await tx.productionSlot.update({ where: { orderId }, data: { tentative: false } });
     await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });

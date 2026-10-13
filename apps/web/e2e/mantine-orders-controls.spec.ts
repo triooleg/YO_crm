@@ -36,7 +36,33 @@ const order = {
   invoices: [{ id: "invoice-usd", number: "INV-USD", status: "ISSUED", language: "ru", currency: "USD", totalMinor: 12345, issueDate: "2026-10-01T12:00:00.000Z" }],
 };
 
-async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number; primaryIndex?: number; primaryCreatedAt?: string }) {
+function richOrderDetail(base: typeof order) {
+  const measurement = { id: "measurement-1", athleteId: "athlete-1", measuredAt: "2026-09-05T12:00:00.000Z", values: Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`m${index + 1}`, 50 + index])) };
+  const athlete = { id: "athlete-1", firstName: "Анна", lastName: "Коваленко", measurements: [measurement] };
+  const previousOrder = { id: "order-previous-1", number: "YO-26-0094", createdAt: "2026-06-12T12:00:00.000Z", priceMinor: 39000, currency: "EUR", salesStatus: "COMPLETED", productionStatus: "READY", shippingStatus: "DELIVERED", modelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" };
+  return {
+    ...base,
+    buyerComment: "Учесть запас по росту и согласовать декор перед пошивом.",
+    managerComment: "Начать после подтверждения предоплаты.",
+    client: { ...base.client, phone: "+380501234567", email: "client@example.test", preferences: { "Любимые цвета": "фиолетовый и золото", "Посадка": "плотная" }, files: [], athletes: [athlete], orders: [{ ...base }, previousOrder] },
+    items: [{ ...base.items[0], designNumber: "AI-1842", sku: "AURORA-01", properties: { technicalRequirements: ["Серебряные стразы", "Запас по росту"], materials: ["Фиолетовая лайкра", "Подкладка"] }, athlete, measurement, instances: [{ id: "instance-1", ordinal: 1, productionStatus: "READY", plannedStartAt: "2026-10-02T12:00:00.000Z", plannedEndAt: "2026-10-09T12:00:00.000Z", athlete, measurement }] }],
+    productionSlot: { id: "slot-1", startsAt: "2026-10-02T12:00:00.000Z", endsAt: "2026-10-09T12:00:00.000Z", capacity: 1, tentative: false, locked: false },
+    payments: [{ id: "payment-1", amountMinor: 22500, currency: "EUR", method: "BANK_TRANSFER", receivedAt: "2026-09-10T12:00:00.000Z" }],
+    paymentHistory: [{ id: "payment-1", amountMinor: 22500, currency: "EUR", method: "BANK_TRANSFER", receivedAt: "2026-09-10T12:00:00.000Z" }],
+    activities: [
+      { id: "activity-4", type: "SHIPMENT_CREATED", summary: "Создана посылка Nova Global", createdAt: "2026-10-10T12:00:00.000Z", actor: { id: "manager-1", displayName: "QA Manager" } },
+      { id: "activity-3", type: "PRODUCTION_STATUS_CHANGED", summary: "Производство завершено", createdAt: "2026-10-09T12:00:00.000Z", actor: { id: "manager-1", displayName: "QA Manager" } },
+      { id: "activity-2", type: "PAYMENT_RECEIVED", summary: "Получена предоплата", createdAt: "2026-09-10T12:00:00.000Z", actor: { id: "manager-1", displayName: "QA Manager" } },
+      { id: "activity-1", type: "ORDER_CREATED", summary: "Заказ создан", createdAt: "2026-09-01T12:00:00.000Z", actor: { id: "manager-1", displayName: "QA Manager" } },
+    ],
+    orderShipments: [{ id: "shipment-1", updatedAt: "2026-10-10T12:00:00.000Z", carrier: "NOVA_GLOBAL", status: "LABEL_CREATED", trackingNumber: "NP000012345", customerChargeMinor: 2500, atelierCostMinor: 1800, currency: "EUR", isPrimary: true, weightGrams: 500, lengthMm: 300, widthMm: 200, heightMm: 100, instances: [{ id: "instance-1", ordinal: 1, orderItemId: "item-1" }] }],
+    expenses: [{ id: "expense-1", amountMinor: 1800, currency: "EUR", incurredAt: "2026-10-10T12:00:00.000Z", notes: "Перевозчик", category: { id: "category-shipping", name: "Доставка" } }],
+    tags: [{ id: "tag-1", label: "Срочно", color: "violet" }],
+    notesStructured: [{ id: "note-1", category: "DESIGNS", visibility: "INTERNAL", title: "Декор", body: "Добавить золотые стразы по линии талии", createdAt: "2026-09-03T12:00:00.000Z", updatedAt: "2026-09-03T12:00:00.000Z", author: { displayName: "QA Manager" } }],
+  };
+}
+
+async function mockOrdersApi(page: Page, detailsFailure?: { status: number; message: string }, telemetry?: { listGets: number }, behavior?: { statusPatchFails?: boolean; detailFailsAfterStatusPatch?: boolean; detailFailsAfterPayment?: boolean; orderType?: string; additionalOrders?: number; primaryIndex?: number; primaryCreatedAt?: string; richDetail?: boolean }) {
   let currentOrder = structuredClone({ ...order, type: behavior?.orderType ?? order.type, createdAt: behavior?.primaryCreatedAt ?? order.createdAt });
   let statusPatched = false;
   let paymentPosted = false;
@@ -87,7 +113,7 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
     if (method === "GET" && path === `/api/orders/${order.id}`) {
       if (statusPatched && behavior?.detailFailsAfterStatusPatch) return route.fulfill({ status: 503, json: { message: "Детали временно недоступны" } });
       if (paymentPosted && behavior?.detailFailsAfterPayment) return route.fulfill({ status: 503, json: { message: "Детали временно недоступны" } });
-      return route.fulfill({ json: { ...currentOrder, responsibleManager: { id: "manager-1", displayName: "QA Manager" } } });
+      return route.fulfill({ json: { ...(behavior?.richDetail ? richOrderDetail(currentOrder) : currentOrder), responsibleManager: { id: "manager-1", displayName: "QA Manager" } } });
     }
     if (method === "GET" && path === "/api/finance/exchange-rates") return route.fulfill({ json: { provider: "ECB", officialUrl: "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html", supportedPairs: ["EUR/USD", "EUR/UAH", "USD/UAH"], cache: { effectiveDate: "2026-10-10", fetchedAt: "2026-10-10T12:00:00.000Z", rates: [{ baseCurrency: "EUR", quoteCurrency: "USD", decimal: "1.16" }] } } });
     if (method === "GET" && path === "/api/orders/images/keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg") return route.fulfill({
@@ -156,6 +182,27 @@ test("вид спорта выглядит как текст и карточка
   await expect(detailRow).toHaveClass(/orders-expanded-row/);
   await expect(detailRow.getByRole("region", { name: `Данные заказа ${order.number}` })).toBeVisible();
   await page.screenshot({ path: screenshotPath(testInfo, "orders-inline-details-1703x895.png"), fullPage: false });
+});
+
+test("девять вкладок раскрытого заказа соответствуют единому визуальному контракту", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1536, height: 1024 });
+  await mockOrdersApi(page, undefined, undefined, { richDetail: true });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const tabs = [
+    ["Детали", "01-details.png"], ["Дизайны (1)", "02-designs.png"], ["Измерения", "03-measurements.png"],
+    ["Клиент", "04-client.png"], ["Финансы", "05-finance.png"], ["Производство", "06-production.png"],
+    ["Доставка", "07-shipping.png"], ["Заметки", "08-notes.png"], ["История", "09-history.png"],
+  ] as const;
+  for (const [label, fileName] of tabs) {
+    await page.getByRole("tab", { name: label, exact: true }).click();
+    await expect(page.getByRole("tabpanel")).toBeVisible();
+    await page.evaluate(() => {
+      const overview = document.querySelector<HTMLElement>(".orders-order-overview");
+      if (overview) window.scrollTo({ top: Math.max(0, window.scrollY + overview.getBoundingClientRect().top - 64), behavior: "instant" });
+    });
+    await page.screenshot({ path: screenshotPath(testInfo, fileName), fullPage: false });
+  }
 });
 
 test("выбранная сортировка сохраняется после обновления страницы", async ({ page }) => {
@@ -291,7 +338,7 @@ for (const viewport of [
     await expect.poll(() => updates.find((update) => update.path.endsWith("/model-image"))).toEqual({ path: `/api/orders/${order.id}/model-image`, body: { itemId: "item-1", modelImagePath: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg", expectedModelImagePath: "keycrm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg" } });
 
     await page.getByRole("tab", { name: "Финансы" }).click();
-    await page.getByRole("button", { name: "Изменить валюту" }).click();
+    await page.getByRole("button", { name: "Изменить валюту", exact: true }).click();
     const currencyDialog = page.getByRole("dialog", { name: new RegExp(order.number) });
     await expect(currencyDialog).toBeVisible();
     await expect(page.getByRole("link", { name: "Открыть источник" })).toBeVisible();

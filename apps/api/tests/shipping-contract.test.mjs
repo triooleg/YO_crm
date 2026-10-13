@@ -6,16 +6,21 @@ const controller=await readFile(new URL("../src/shipping/shipping.controller.ts"
 const service=await readFile(new URL("../src/shipping/shipping.service.ts",import.meta.url),"utf8");
 const ordersDto=await readFile(new URL("../src/orders/orders.dto.ts",import.meta.url),"utf8");
 const ordersService=await readFile(new URL("../src/orders/orders.service.ts",import.meta.url),"utf8");
+const productionStatusGraph=await readFile(new URL("../src/orders/production-status-graph.ts",import.meta.url),"utf8");
 test("один заказ имеет только одну посылку",()=>{assert.match(schema,/orderId\s+String\s+@unique/);assert.match(schema,/shipment\s+Shipment\?/)});
 test("поддерживаются четыре службы доставки и настройки",()=>{for(const x of["NOVA_POSHTA","NOVA_GLOBAL","UKRPOSHTA","DHL"])assert.match(schema,new RegExp(x));assert.match(controller,/@Patch\("carriers\/:carrier"\)/)});
-test("посылка сохраняется с историей и аудитом",()=>{assert.match(controller,/@Put\("orders\/:orderId"\)/);assert.match(service,/shipment\.upsert/);assert.match(service,/tx\.activity\.create/);assert.match(service,/tx\.auditLog\.create/);assert.match(service,/deliveryMinor:d\.costMinor/)});
-test("отправленная посылка требует трек номер",()=>{assert.match(service,/sentStatuses\.includes\(d\.status\)/);assert.match(service,/trackingNumber/);assert.match(service,/трек-номер/)});
-test("настройки служб скрыты от менеджера и отключенная служба запрещена",()=>{assert.match(controller,/@Get\("carrier-settings"\)@Roles\("OWNER","ADMIN"\)/);assert.match(service,/enabled===false/);assert.match(service,/Недопустимый переход/);assert.match(service,/deliveredAt<shippedAt/)});
+test("посылка сохраняется с историей и аудитом",()=>{assert.match(controller,/@Put\("orders\/:orderId"\)/);assert.match(service,/shipment\.upsert/);assert.match(service,/tx\.activity\.create/);assert.match(service,/tx\.auditLog\.create/);assert.match(service,/refreshOrderShipping/)});
+test("отправленная посылка требует трек номер",()=>{assert.match(service,/assertDates\(d\.status/);assert.match(service,/trackingNumber/);assert.match(service,/трек-номер/)});
+test("настройки служб скрыты от менеджера и отключенная служба запрещена",()=>{assert.match(controller,/@Get\("carrier-settings"\)\s*@Roles\("OWNER","ADMIN"\)/);assert.match(service,/enabled===false/);assert.match(service,/Недопустимый переход/);assert.match(service,/deliveredAt<shippedAt/)});
 test("терминальные статусы нельзя вернуть назад",()=>{assert.match(service,/RETURNED:\[\]/);assert.match(service,/LOST:\[\]/);assert.match(service,/transitions\[from\]\.includes\(to\)/)});
 test("даты соответствуют статусу и поля можно очистить явно",()=>{assert.match(service,/Дата отправки недопустима/);assert.match(service,/d\.trackingNumber===undefined/);assert.match(service,/d\.notes===undefined/);assert.match(service,/d\.shippedAt===undefined/)});
 test("runtime строки доставки имеют корректный UTF-8",()=>{for(const x of["Новая почта","Укрпочта","Заказ не найден","Обновлены данные доставки"])assert.match(service,new RegExp(x));assert.doesNotMatch(service,/Рќ|РЎ|Р”|вЂ|Г—|пїЅ|�/)});
 
 test("shipping updates are serialized per order",()=>{assert.match(service,/pg_advisory_xact_lock/);assert.ok(service.indexOf("pg_advisory_xact_lock")<service.indexOf("order.findFirst"))});
+test("legacy write fails closed for multiple parcels and all updates use optimistic concurrency",()=>{assert.match(service,/order\.orderShipments\.length>1/);assert.match(service,/order\.shipment&&\(!d\.expectedUpdatedAt/);assert.match(service,/current\.updatedAt\.toISOString\(\)!==new Date\(d\.expectedUpdatedAt\)\.toISOString\(\)/);assert.match(controller,/ArchiveOrderShipmentDto/)});
+test("plural shipment financial projection is not exposed to production role",()=>{const route=controller.match(/@Get\("orders\/:orderId\/shipments"\)[^\n]+/)?.[0]??"";assert.doesNotMatch(route,/PRODUCTION/)});
+test("customer delivery charge updates the order total exactly once",()=>{assert.match(service,/calculateShippingFinance/);assert.match(service,/depositRequiredMinor/);assert.match(service,/paymentStatus/)});
+test("carrier expenses and legacy plural projection have independent audit records",()=>{assert.match(service,/entityType:"Expense"/);assert.match(service,/entityType:"OrderShipment"/);assert.match(service,/persistAtelierExpense/)});
 test("generic order status endpoint cannot bypass shipment invariants",()=>{
   const statusDto=ordersDto.match(/export class UpdateOrderStatusesDto \{([\s\S]*?)\n\}/)?.[1]??"";
   const updateStatuses=ordersService.match(/async updateStatuses\([\s\S]*?\n  \}\n  async updateDeadline/)?.[0]??"";
@@ -23,3 +28,4 @@ test("generic order status endpoint cannot bypass shipment invariants",()=>{
   assert.doesNotMatch(updateStatuses,/shippingStatus/);
   assert.match(controller,/@Put\("orders\/:orderId"\)/);
 });
+test("order production status updates the physical instances in the same transaction",()=>{assert.match(ordersService,/updateProductionStatusGraph/);assert.match(productionStatusGraph,/order\.update/);assert.match(productionStatusGraph,/orderItem\.updateMany/);assert.match(productionStatusGraph,/orderItemInstance\.updateMany/)});

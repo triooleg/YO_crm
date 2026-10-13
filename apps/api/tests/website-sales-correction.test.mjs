@@ -29,7 +29,7 @@ test("коррекция выбирает источник конкретног�
 test("применение коррекции удаляет слот, меняет тип и сохраняет аудит", () => {
   const section = service.slice(service.indexOf("async correctWebsiteSales"), service.indexOf("async updateStatuses"));
   assert.match(section, /productionSlot\.delete/);
-  assert.match(section, /type:\s*"WEBSITE_SALE", productionStatus:\s*"NOT_SCHEDULED"/);
+  assert.match(section, /updateProductionStatusGraph[\s\S]*ProductionStatus\.NOT_SCHEDULED[\s\S]*type:\s*"WEBSITE_SALE"/);
   assert.match(section, /ORDER_WEBSITE_SALE_CORRECTED/);
   assert.match(section, /entityType:\s*"ProductionSlot"/);
   assert.match(section, /entityType:\s*"Order"/);
