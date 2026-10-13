@@ -109,6 +109,7 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
     if (method === "PATCH" && path === "/api/orders/archive") { const body=route.request().postDataJSON() as Record<string,unknown>; updates.push({path,body}); return route.fulfill({json:{archived:1,orderIds:[order.id]}}); }
     if (method === "GET" && path === "/api/auth/me") return route.fulfill({ json: { user: { email: "qa@yoleotard.local", displayName: "QA", role: "OWNER" } } });
     if (method === "GET" && path === "/api/branding") return route.fulfill({ json: {} });
+    if (method === "GET" && path === "/api/communications/unread-count") return route.fulfill({ json: { count: 0 } });
     if (method === "GET" && path === "/api/orders") {
       if (telemetry) telemetry.listGets += 1;
       const additional = Array.from({ length: behavior?.additionalOrders ?? 0 }, (_, index) => {
@@ -253,9 +254,12 @@ test(`измерения показывают снимок привязанны�
   const grid = page.locator(".orders-approved-measurement-grid");
   await expect(grid).toBeVisible();
   await expect(grid.locator("strong").first()).toHaveText("50 см");
-  await expect(grid.locator("strong")).toHaveCount(8);
+  await expect(grid.locator("strong")).toHaveCount(4);
+  await expect(grid).toContainText("№15 · Обхват через пах и плечо");
+  await expect(grid).not.toContainText("№4 ·");
   await page.getByRole("tab", { name: "Дополнительные", exact: true }).click();
-  await expect(grid.locator("strong")).toHaveCount(9);
+  await expect(grid.locator("strong")).toHaveCount(13);
+  await expect(grid).toContainText("№4 · От талии до основания шеи спереди");
   await expect(grid).toContainText("№17 · От талии до верхней линии плавок");
   await page.getByRole("tab", { name: "Основные мерки", exact: true }).click();
   await expect(page.locator(".orders-used-product")).toHaveCount(2);
@@ -270,6 +274,12 @@ test(`измерения показывают снимок привязанны�
   await expect(page.locator(".orders-measurement-workspace h3")).toHaveText("Илана Коваленко");
   await page.getByRole("button", { name: "Изменить замеры", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Изменить замеры" });
+  await expect(editor).toHaveClass(/measurement-editor/);
+  await expect(editor.locator('input[type="number"]:visible')).toHaveCount(4);
+  await editor.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await expect(editor.locator('input[type="number"]:visible')).toHaveCount(13);
+  await editor.getByRole("tab", { name: "Основные мерки", exact: true }).click();
+  await page.screenshot({ path: screenshotPath(testInfo, `unified-editor-basic-${viewport.width}.png`) });
   await expect(editor.getByLabel("1. Обхват груди (под мышками)")).toHaveValue("74.5");
   await editor.getByLabel("1. Обхват груди (под мышками)").fill("75.5");
   await editor.getByRole("button", { name: "Сохранить замеры", exact: true }).click();
@@ -279,6 +289,12 @@ test(`измерения показывают снимок привязанны�
   expect(item.instances[0].measurement.id).toBe("measurement-1");
   await page.getByLabel("Изделие для просмотра мерок").selectOption("instance-1");
   await expect(grid.locator("strong").first()).toHaveText("50 см");
+  await page.getByRole("tab", { name: "История замеров", exact: true }).click();
+  await expect(page.locator(".orders-measurement-history-compact li")).toHaveCount(3);
+  await expect(page.locator(".orders-measurement-workspace .orders-approved-measurement-grid")).toHaveCount(0);
+  await expect(page.locator(".orders-measurement-history-compact")).toContainText("99 см");
+  await page.locator(".orders-measurement-workspace").screenshot({ path: screenshotPath(testInfo, `compact-measurement-history-${viewport.width}.png`) });
+  await page.getByRole("tab", { name: "Основные мерки", exact: true }).click();
   expect(errors).toEqual([]);
   await page.locator(".orders-tab-measurements-approved").screenshot({ path: screenshotPath(testInfo, `instance-bound-measurements-${viewport.width}.png`) });
   if (viewport.width === 390) {
@@ -350,12 +366,16 @@ test("кнопка добавления спортсменки в пустом �
   await dialog.getByLabel("Имя *").fill("Анна");
   await dialog.getByRole("button", { name: /Далее/ }).click();
   await dialog.getByLabel("Стандарт по росту").selectOption("148");
+  await expect(dialog).toHaveClass(/measurement-editor/);
+  await expect(dialog.locator('input[type="number"]:visible')).toHaveCount(4);
   await expect(dialog.getByLabel("1. Обхват груди (под мышками)" )).toHaveValue("74");
   await expect(dialog.getByLabel("2. Обхват талии (по резинке)" )).toHaveValue("61");
   await expect(dialog.getByLabel("3. Обхват бёдер" )).toHaveValue("78");
   await expect(dialog.getByLabel("15. Обхват через пах и плечо" )).toHaveValue("131");
   await expect(dialog.getByRole("button", { name: /Далее/ })).toBeVisible();
   await page.screenshot({ path: screenshotPath(testInfo, "add-athlete-measurements-drawer-top.png") });
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await expect(dialog.locator('input[type="number"]:visible')).toHaveCount(13);
   await dialog.getByLabel("17. От талии до верхней линии плавок").scrollIntoViewIfNeeded();
   await expect(dialog.getByLabel("17. От талии до верхней линии плавок")).toBeVisible();
   await page.screenshot({ path: screenshotPath(testInfo, "add-athlete-measurements-drawer.png") });
@@ -387,6 +407,7 @@ test(`ручное изменение мерок после выбора рос�
   await waist.fill("");
   await waist.pressSequentially("59.5");
   await expect(waist).toHaveValue("59.5");
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
   const biceps = dialog.getByLabel("8. Обхват бицепса");
   await biceps.pressSequentially("2");
   await expect(biceps).toHaveValue("2");
@@ -394,9 +415,16 @@ test(`ручное изменение мерок после выбора рос�
   await expect(biceps).toHaveValue("20");
   await biceps.pressSequentially(".5");
   await expect(biceps).toHaveValue("20.5");
+  await dialog.getByRole("tab", { name: "Основные мерки", exact: true }).click();
+  await expect(waist).toHaveValue("59.5");
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await expect(biceps).toHaveValue("20.5");
   await expect(dialog).toBeVisible();
   expect(errors).toEqual([]);
   await page.screenshot({ path: screenshotPath(testInfo, `athlete-wizard-manual-input-${viewport.width}.png`) });
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByRole("button", { name: "Назад", exact: true }).click();
+  await expect(dialog.getByLabel("8. Обхват бицепса")).toHaveValue("20.5");
   await dialog.getByRole("button", { name: /Далее/ }).click();
   await dialog.getByRole("button", { name: "Сохранить спортсменку" }).click();
   await expect(dialog).toBeHidden();
@@ -404,6 +432,53 @@ test(`ручное изменение мерок после выбора рос�
   expect(errors).toEqual([]);
 });
 }
+
+test("общий редактор показывает ошибочное поле из скрытого раздела и не отправляет невалидные мерки", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(`${message.text()} ${message.location().url}`); });
+  const updates = await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+  await page.getByRole("button", { name: "Добавить спортсменку", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Добавить спортсменку и измерения" });
+  await dialog.getByLabel("Имя *").fill("Анна");
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await expect(dialog.getByRole("tab", { name: "Основные мерки", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("1. Обхват груди (под мышками)")).toBeFocused();
+  await dialog.getByLabel("Стандарт по росту").selectOption("140");
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await dialog.getByLabel("8. Обхват бицепса").fill("20.2");
+  await dialog.getByRole("tab", { name: "Основные мерки", exact: true }).click();
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await expect(dialog.getByRole("tab", { name: "Дополнительные", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("8. Обхват бицепса")).toBeFocused();
+  expect(updates).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("общий редактор сохраняет автоматическое создание спортсменки из профиля клиента", async ({ page }) => {
+  const updates = await mockOrdersApi(page);
+  await page.route(`**/api/clients/${order.client.id}`, route => route.fulfill({ json: { ...order.client, athletes: [], orders: [], activities: [] } }));
+  await page.route(`**/api/clients/${order.client.id}/merge-suggestions`, route => route.fulfill({ json: [] }));
+  await page.goto(`/?section=clients&clientId=${order.client.id}`);
+  const trigger = page.getByRole("button", { name: "+ Замеры", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Новые замеры", exact: true });
+  await expect(dialog).toHaveClass(/measurement-editor/);
+  await expect(dialog.getByLabel("Для кого")).toHaveValue("auto");
+  await dialog.getByLabel("Стандарт по росту").selectOption("140");
+  await dialog.getByRole("tab", { name: "Дополнительные", exact: true }).click();
+  await dialog.getByLabel("8. Обхват бицепса").fill("20.5");
+  await dialog.getByRole("button", { name: "Сохранить замеры", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(updates[0]).toMatchObject({ path: `/api/clients/${order.client.id}/athletes`, body: { firstName: order.client.displayName } });
+  expect(updates[1]).toMatchObject({ path: `/api/clients/${order.client.id}/athletes/athlete-new/measurements`, body: { standardHeight: 140, m1: 70, m2: 58, m3: 74, m8: 20.5, m15: 125 } });
+});
 
 test("карточка заказа сохраняет утверждённую геометрию на рабочих разрешениях", async ({ page }, testInfo) => {
   await mockOrdersApi(page, undefined, undefined, { richDetail: true });

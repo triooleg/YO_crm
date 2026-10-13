@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const workspace = await readFile(new URL("../components/orders-workspace.tsx", import.meta.url), "utf8");
 const panel = await readFile(new URL("../components/measurement-panel.tsx", import.meta.url), "utf8");
+const form = await readFile(new URL("../components/measurement-editor.tsx", import.meta.url), "utf8");
 const i18n = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/orders-workspace.css", import.meta.url), "utf8");
 
@@ -36,15 +37,16 @@ test("замеры из заказа открываются модально и 
   assert.match(workspace, /await load\(\)/);
   assert.match(i18n, /addMeasurements:\s*"\+ Добавить замеры"/);
   assert.match(i18n, /measurementDialogTitle:\s*"Замеры для заказа"/);
-  assert.match(panel, /<Drawer opened/);
-  assert.match(panel, /trapFocus returnFocus/);
+  assert.match(form, /<Drawer opened/);
+  assert.match(form, /trapFocus returnFocus/);
   assert.match(panel, /previousFocus/);
-  assert.match(panel, /closeOnEscape/);
+  assert.match(form, /closeOnEscape/);
 });
 
 test("ростовой стандарт заполняет редактируемые поля до создания snapshot", () => {
   assert.match(panel, /function usePreset\(h:number\)/);
   assert.match(panel, /setValues/);
-  assert.match(panel, /onChange=\{e=>setValues/);
+  assert.match(panel, /onValue=\{\(key,value\)=>setValues/);
+  assert.match(form, /const value = event.currentTarget.value; onValue\(`m\$\{number\}`, value\)/);
   assert.match(panel, /orderItemId\?`\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement`:`\/orders\/\$\{orderId\}\/measurement`/);
 });
