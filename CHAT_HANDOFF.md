@@ -1,5 +1,12 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-14 — release candidate CRM 0.1.50: сбой при вводе второй цифры мерок
+
+- User-сценарий воспроизведён до исправления: после выбора роста 140 см ручная правка №2 обрушала страницу с `TypeError: Cannot read properties of null (reading 'value')` в `athlete-measurement-wizard.tsx`. Причина — чтение `event.currentTarget.value` внутри отложенного функционального updater React.
+- Изменён один обработчик: строковое значение поля сохраняется синхронно и затем передаётся в `setValues`. JSX/CSS, 17 названий, ростовые стандарты, шаг 0,5, сохранение immutable-снимка, API, схема, права и аудит не менялись.
+- RED→GREEN закреплён браузерной регрессией: рост 140, ввод второго знака `2 → 20`, дробь `20.5`, очистка и повторный ввод `59.5`, сохранность остальных мерок, отсутствие pageerror и отправка изменённых значений. Новый сценарий прошёл на 1920×1080, 1366×768 и 390×844; полный `mantine-orders-controls` — 34/34. `quality:check` с metadata 0.1.50 — API 795/795, web 437/437, database 17/17, typecheck/build PASS. Четыре независимых review роли — PASS.
+- Для web-only hotfix в рамках ранее разрешённого deployment создан verified FULL backup `20261013T215204Z-64c4360-pre-v050`: `COMPLETED`, размер 331374868 байт, SHA256SUMS/dump/uploads/manifest валидны. Production перед переключением: `64c436004bb1eab560242a78d501e1735e4f4982`/0.1.49; API/PostgreSQL/Redis не требуют пересоздания. Посторонний `artifacts/` исключён; основной dirty-checkout сохранён.
+
 # 2026-10-14 — production deployment CRM 0.1.49: мерки экземпляров и редактирование спортсменки
 
 - Runtime commit `64c436004bb1eab560242a78d501e1735e4f4982` fast-forward опубликован в `origin/main`, развёрнут из exact-SHA Git archive и закреплён неизменяемым тегом `crm-v0.1.49`. GitHub Actions `Quality gates` run `38471570205` и `CRM release` run `38472429142` завершились со статусом `success`; GitHub Release `https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.49` опубликован. Release metadata и журнал изменений согласованы на 0.1.49.

@@ -366,6 +366,45 @@ test("кнопка добавления спортсменки в пустом �
   expect(updates.some((update) => update.path.endsWith("/items/item-1/measurement"))).toBe(false);
 });
 
+for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+test(`ручное изменение мерок после выбора роста не обрушает мастер спортсменки ${viewport.width}`, async ({ page }, testInfo) => {
+  await page.setViewportSize(viewport);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const updates = await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+  await page.getByRole("button", { name: "Добавить спортсменку", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Добавить спортсменку и измерения" });
+  await dialog.getByLabel("Имя *").fill("Проверка ручного ввода");
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByLabel("Стандарт по росту").selectOption("140");
+  const waist = dialog.getByLabel("2. Обхват талии (по резинке)");
+  await expect(waist).toHaveValue("58");
+  await waist.fill("60.5");
+  await expect(waist).toHaveValue("60.5");
+  await waist.fill("");
+  await waist.pressSequentially("59.5");
+  await expect(waist).toHaveValue("59.5");
+  const biceps = dialog.getByLabel("8. Обхват бицепса");
+  await biceps.pressSequentially("2");
+  await expect(biceps).toHaveValue("2");
+  await biceps.pressSequentially("0");
+  await expect(biceps).toHaveValue("20");
+  await biceps.pressSequentially(".5");
+  await expect(biceps).toHaveValue("20.5");
+  await expect(dialog).toBeVisible();
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: screenshotPath(testInfo, `athlete-wizard-manual-input-${viewport.width}.png`) });
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByRole("button", { name: "Сохранить спортсменку" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => updates.find(update => update.path.endsWith("/athlete-new/measurements"))?.body).toMatchObject({ standardHeight: 140, m1: 70, m2: 59.5, m3: 74, m8: 20.5, m15: 125 });
+  expect(errors).toEqual([]);
+});
+}
+
 test("карточка заказа сохраняет утверждённую геометрию на рабочих разрешениях", async ({ page }, testInfo) => {
   await mockOrdersApi(page, undefined, undefined, { richDetail: true });
   for (const viewport of [
