@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useMemo, useRef, useState } from "react";
 import { Modal, UnstyledButton } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
@@ -117,6 +117,8 @@ type TabCallbacks = {
   onDelivery: () => void;
   onDeliveryContact: () => void;
   onMeasurements: (itemId?: string) => void;
+  onAddAthlete?: () => void;
+  addAthleteButtonRef: RefObject<HTMLButtonElement | null>;
   onBindMeasurement: (itemId: string, measurementId: string, expectedMeasurementId: string | null) => Promise<void>;
   onCurrency: () => void;
   onCustomerWishes: () => void;
@@ -304,7 +306,7 @@ function OrderInstanceAssignmentForm({ order, item, instance, onCancel, onSubmit
   </form>;
 }
 
-function OrderMeasurementsTab({ order, items, onMeasurements, onBindMeasurement }: Props & { items: ExpandedOrderItem[] }) {
+function OrderMeasurementsTab({ order, items, onMeasurements, onAddAthlete, addAthleteButtonRef, onBindMeasurement }: Props & { items: ExpandedOrderItem[] }) {
   const athletes = order.client.athletes?.length ? order.client.athletes : uniqueAthletes(order, items);
   const [selectedAthleteId, setSelectedAthleteId] = useState(athletes[0]?.id);
   const [query, setQuery] = useState("");
@@ -315,7 +317,7 @@ function OrderMeasurementsTab({ order, items, onMeasurements, onBindMeasurement 
   const currentMeasurement = currentItem?.measurement;
   const options = currentItem ? clientMeasurementOptions(order, currentItem) : [];
   return <div className="orders-tab-measurements-approved">
-    <aside className="orders-athlete-rail"><header><h3>{ui.athletesInOrder}</h3><span>{athletes.length}</span></header><CrmButton tone="secondary" size="compact-xs" onClick={() => onMeasurements()}>{ui.addAthlete}</CrmButton><CrmTextInput aria-label={ui.searchAthletes} placeholder={ui.searchAthletes} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />{visibleAthletes.length ? visibleAthletes.map((athlete) => { const index = athletes.indexOf(athlete); return <button key={athlete.id} className={athlete.id === selectedAthlete?.id ? "active" : ""} onClick={() => setSelectedAthleteId(athlete.id)}><b>{index + 1}</b><span><strong>{athleteName(athlete)}</strong><small>{latestMeasurement(athlete) ? `${ui.measurementTakenAt}: ${formatDate(latestMeasurement(athlete)!.measuredAt)}` : ui.noMeasurements}</small></span></button>; }) : <EmptyState text={athletes.length ? ui.noSearchResults : ui.noAthletesInOrder} />}</aside>
+    <aside className="orders-athlete-rail"><header><h3>{ui.athletesInOrder}</h3><span>{athletes.length}</span></header>{onAddAthlete && <CrmButton ref={addAthleteButtonRef} tone="secondary" size="compact-xs" onClick={onAddAthlete}>{ui.addAthlete}</CrmButton>}<CrmTextInput aria-label={ui.searchAthletes} placeholder={ui.searchAthletes} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />{visibleAthletes.length ? visibleAthletes.map((athlete) => { const index = athletes.indexOf(athlete); return <button key={athlete.id} className={athlete.id === selectedAthlete?.id ? "active" : ""} onClick={() => setSelectedAthleteId(athlete.id)}><b>{index + 1}</b><span><strong>{athleteName(athlete)}</strong><small>{latestMeasurement(athlete) ? `${ui.measurementTakenAt}: ${formatDate(latestMeasurement(athlete)!.measuredAt)}` : ui.noMeasurements}</small></span></button>; }) : <EmptyState text={athletes.length ? ui.noSearchResults : ui.noAthletesInOrder} />}</aside>
     <div className="orders-measurement-workspace">
       {selectedAthlete ? <>
         <header><div><h3>{athleteName(selectedAthlete)}</h3><p>{currentMeasurement ? `${ui.currentMeasurement} · ${formatDate(currentMeasurement.measuredAt)}` : ui.noMeasurements}</p></div><div>{currentItem?.persistedItemId && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(currentItem.persistedItemId)}>{currentMeasurement ? ui.newMeasurementVersion : ui.addMeasurements}</CrmButton>}</div></header>

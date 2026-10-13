@@ -71,6 +71,16 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if (method === "POST" && path === `/api/clients/${order.client.id}/athletes`) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      updates.push({ path, body });
+      return route.fulfill({ json: { id: "athlete-new", ...body } });
+    }
+    if (method === "POST" && path === `/api/clients/${order.client.id}/athletes/athlete-new/measurements`) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      updates.push({ path, body });
+      return route.fulfill({ json: { id: "measurement-new", athleteId: "athlete-new", ...body } });
+    }
     if (method === "PATCH" && path.endsWith("/statuses") && behavior?.statusPatchFails) return route.fulfill({ status: 409, json: { message: "Статус уже изменён" } });
     if (method === "PATCH" && path.startsWith(`/api/orders/${order.id}/`)) {
       if (path.endsWith("/details") && detailsFailure) return route.fulfill({ status: detailsFailure.status, json: { message: detailsFailure.message } });
@@ -209,6 +219,39 @@ test("девять вкладок раскрытого заказа соотве
     });
     await page.locator(".orders-approved-expanded").screenshot({ path: screenshotPath(testInfo, fileName) });
   }
+});
+
+test("кнопка добавления спортсменки в пустом заказе открывает форму создания", async ({ page }, testInfo) => {
+  const updates = await mockOrdersApi(page);
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  await page.getByRole("tab", { name: "Измерения", exact: true }).click();
+
+  const addAthlete = page.getByRole("button", { name: "Добавить спортсменку", exact: true });
+  await expect(addAthlete).toBeVisible();
+  await addAthlete.click();
+
+  const dialog = page.getByRole("dialog", { name: "Добавить спортсменку и измерения" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Далее/ })).toBeVisible();
+  await page.screenshot({ path: screenshotPath(testInfo, "add-athlete-information-modal.png") });
+  await dialog.getByLabel("Имя *").fill("Анна");
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByLabel("Стандарт по росту").selectOption("148");
+  await expect(dialog.getByLabel("1. Обхват груди (под мышками)" )).toHaveValue("74");
+  await expect(dialog.getByLabel("2. Обхват талии (по резинке)" )).toHaveValue("61");
+  await expect(dialog.getByLabel("3. Обхват бёдер" )).toHaveValue("78");
+  await expect(dialog.getByLabel("15. Обхват через пах и плечо" )).toHaveValue("131");
+  await expect(dialog.getByRole("button", { name: /Далее/ })).toBeVisible();
+  await page.screenshot({ path: screenshotPath(testInfo, "add-athlete-measurements-drawer-top.png") });
+  await dialog.getByLabel("17. От талии до верхней линии плавок").scrollIntoViewIfNeeded();
+  await expect(dialog.getByLabel("17. От талии до верхней линии плавок")).toBeVisible();
+  await page.screenshot({ path: screenshotPath(testInfo, "add-athlete-measurements-drawer.png") });
+  await dialog.getByRole("button", { name: /Далее/ }).click();
+  await dialog.getByRole("button", { name: "Сохранить спортсменку" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => updates.find((update) => update.path.endsWith("/athlete-new/measurements"))?.body).toMatchObject({ standardHeight: 148, m1: 74, m2: 61, m3: 78, m15: 131 });
+  expect(updates.some((update) => update.path.endsWith("/items/item-1/measurement"))).toBe(false);
 });
 
 test("карточка заказа сохраняет утверждённую геометрию на рабочих разрешениях", async ({ page }, testInfo) => {
