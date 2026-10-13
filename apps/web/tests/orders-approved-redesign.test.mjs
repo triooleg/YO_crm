@@ -50,6 +50,27 @@ test("активная Mantine-вкладка получает утверждё�
   assert.match(css, /\.orders-order-tabs button\[data-active\]/);
 });
 
+test("вкладки остаются компактной группой слева и не растягиваются на ширину карточки", () => {
+  assert.match(css, /\.orders-dashboard-table \.orders-expanded-row \.orders-order-tabs\{[^}]*justify-content:flex-start/);
+  assert.match(css, /\.orders-dashboard-table \.orders-expanded-row \.orders-order-tabs \.mantine-Tabs-tab\{[^}]*min-width:auto/);
+  assert.doesNotMatch(css, /\.orders-dashboard-table \.orders-expanded-row \.orders-order-tabs\{[^}]*justify-content:space-between/);
+});
+
+test("номер выбранного заказа остаётся однострочным на рабочих разрешениях", () => {
+  assert.match(css, /\.orders-order-identity h2\{[^}]*white-space:nowrap/);
+});
+
+test("нижние блоки деталей следуют утверждённой сетке три карточки и история на всю строку", () => {
+  assert.match(css, /\.orders-tab-details-approved>\.orders-approved-card\.orders-tab-span-4\{grid-column:span 4/);
+  assert.match(css, /\.orders-tab-details-approved>\.orders-approved-card\.orders-tab-span-full\{grid-column:1\/-1/);
+});
+
+test("раскрытая карточка ограничена viewport и получает одноколоночную мобильную раскладку", () => {
+  assert.match(css, /\.orders-dashboard-table \.orders-expanded-row>td\{[^}]*position:sticky;left:0;[^}]*width:calc\(100vw - 44px\)!important/);
+  assert.match(css, /\.orders-dashboard-table \.orders-expanded-row \.orders-approved-expanded\{width:calc\(100vw - 34px\);min-width:0/);
+  assert.match(css, /\.orders-tab-details-approved,\.orders-tab-measurements-approved,\.orders-tab-client-approved,\.orders-tab-delivery-approved,\.orders-tab-notes-approved,\.orders-tab-history-approved\{grid-template-columns:1fr\}/);
+});
+
 test("первая колонка компактнее и не создаёт лишний разрыв перед моделью", () => {
   assert.match(css, /\.orders-dashboard-table \.orders-col-client\{width:190px!important\}/);
 });

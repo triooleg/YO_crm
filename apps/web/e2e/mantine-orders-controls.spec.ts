@@ -189,6 +189,12 @@ test("девять вкладок раскрытого заказа соотве
   await mockOrdersApi(page, undefined, undefined, { richDetail: true });
   await page.goto("/?section=orders");
   await page.getByRole("button", { name: order.number, exact: true }).click();
+  const tabList = page.getByRole("tablist", { name: "Данные заказа" });
+  const tabListBox = await tabList.boundingBox();
+  const lastTabBox = await page.getByRole("tab", { name: "История", exact: true }).boundingBox();
+  expect(tabListBox).not.toBeNull();
+  expect(lastTabBox).not.toBeNull();
+  expect(lastTabBox!.x + lastTabBox!.width).toBeLessThan(tabListBox!.x + tabListBox!.width - 120);
   const tabs = [
     ["Детали", "01-details.png"], ["Дизайны (1)", "02-designs.png"], ["Измерения", "03-measurements.png"],
     ["Клиент", "04-client.png"], ["Финансы", "05-finance.png"], ["Производство", "06-production.png"],
@@ -201,7 +207,44 @@ test("девять вкладок раскрытого заказа соотве
       const overview = document.querySelector<HTMLElement>(".orders-order-overview");
       if (overview) window.scrollTo({ top: Math.max(0, window.scrollY + overview.getBoundingClientRect().top - 64), behavior: "instant" });
     });
-    await page.screenshot({ path: screenshotPath(testInfo, fileName), fullPage: false });
+    await page.locator(".orders-approved-expanded").screenshot({ path: screenshotPath(testInfo, fileName) });
+  }
+});
+
+test("карточка заказа сохраняет утверждённую геометрию на рабочих разрешениях", async ({ page }, testInfo) => {
+  await mockOrdersApi(page, undefined, undefined, { richDetail: true });
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1703, height: 895 },
+    { width: 1440, height: 900 },
+    { width: 1366, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/?section=orders");
+    await page.getByRole("button", { name: order.number, exact: true }).click();
+    await page.evaluate(() => {
+      const overview = document.querySelector<HTMLElement>(".orders-order-overview");
+      if (overview) window.scrollTo({ top: Math.max(0, window.scrollY + overview.getBoundingClientRect().top - 64), behavior: "instant" });
+    });
+    await expect(page.locator(".orders-order-overview")).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Детали", exact: true })).toBeVisible();
+    const expandedBox = await page.locator(".orders-approved-expanded").boundingBox();
+    expect(expandedBox).not.toBeNull();
+    expect(expandedBox!.x).toBeGreaterThanOrEqual(0);
+    expect(expandedBox!.x + expandedBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+    await page.screenshot({ path: screenshotPath(testInfo, `details-${viewport.width}x${viewport.height}.png`), fullPage: false });
+    if (viewport.width === 390) {
+      await page.locator(".orders-order-overview").screenshot({ path: screenshotPath(testInfo, "details-390x844-overview.png") });
+      await page.locator(".orders-order-tabs").screenshot({ path: screenshotPath(testInfo, "details-390x844-tabs.png") });
+      const mobileCards = page.locator(".orders-order-tab-panel .orders-approved-card");
+      const cardCount = await mobileCards.count();
+      expect(cardCount).toBeGreaterThan(2);
+      for (const [name, index] of [["top", 0], ["middle", Math.floor(cardCount / 2)], ["bottom", cardCount - 1]] as const) {
+        await mobileCards.nth(index).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: screenshotPath(testInfo, `details-390x844-panel-${name}.png`), fullPage: false });
+      }
+    }
   }
 });
 
