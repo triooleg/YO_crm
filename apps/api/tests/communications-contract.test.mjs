@@ -48,7 +48,8 @@ const { withPreferredItem } = await import("../src/communications/preferred-page
 test("inbox list uses server pagination, full search and complete buyer aggregates", () => {
   assert.match(dto, /classCommunicationsListQueryDto/);
   assert.match(controller.replace(/\s+/g, ""), /list\(@Query\(\)query:CommunicationsListQueryDto\)/);
-  assert.match(service, /skip:query\.offset\?\?0,take:limit/);
+  assert.match(service, /orderInboxClientRows/);
+  assert.match(service, /\.slice\(query\.offset\?\?0,\(query\.offset\?\?0\)\+limit\)/);
   for (const field of ["displayName", "phone", "email", "instagram"]) assert.match(service, new RegExp(`\\{${field}:\\{contains:search`));
   assert.match(service,/orders:\{some:\{number:\{contains:search/);
   assert.match(service,/athletes:\{some:\{archivedAt:null,OR:\[\{firstName:\{contains:search/);
@@ -56,7 +57,7 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
   assert.match(service, /websiteсайт/);
   assert.match(service, /manualвручную/);
   assert.match(service, /conversations:\{some:\{channel:channelSearch/);
-  assert.match(service, /orderBy:\[\{lastContactAt:"desc"\},\{displayName:"asc"\},\{id:"asc"\}\]/);
+  assert.match(service, /pagePosition/);
   assert.match(service, /salesStatus:\{notIn:\["COMPLETED","CANCELLED"\]\}/);
   assert.match(service, /buyerSummary:\{purchaseCount:/);
   assert.match(service, /paymentTotals:/);
@@ -355,6 +356,7 @@ test("inbox secondary filters and channel counters are server complete", () => {
 
 test("waiting for reply is based on the latest visible delivered message, not unread state",()=>{
   assert.match(service,/latestReplyStateRows/);
+  assert.match(service,/m\."createdAt"AS"createdAt"/);
   assert.match(service,/DISTINCTON\(m\."conversationId"\)/);
   assert.match(service,/m\."direction"IN\('INBOUND','OUTBOUND'\)/);
   assert.match(service,/m\."status"IN\('RECEIVED','SENT'\)/);

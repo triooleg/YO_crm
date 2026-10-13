@@ -58,20 +58,20 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.1.44");
+  assert.equal(JSON.parse(rootPackage).version, "0.1.45");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.44\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.44\}"/);
+  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.45\}"/);
+  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.1\.45\}"/);
   assert.match(compose, /CRM_COMMIT:/);
 });
 
-test("журнал 0.1.44 описывает безопасный Inbox и расширение заказов", () => {
-  const release = i18n.slice(i18n.indexOf('version: "0.1.44"'), i18n.indexOf('version: "0.1.43"'));
-  assert.match(release, /свернуто и неактивно/iu);
-  assert.match(release, /AI provenance/iu);
-  assert.match(release, /Adobe Illustrator/iu);
-  assert.match(release, /f873c4128ebfd78c4a497835b87bda56da933173/);
-  assert.match(changelog, /## \[0\.1\.44\] - 2026-10-12/);
+test("журнал 0.1.45 описывает приоритет ожидающих ответа", () => {
+  const release = i18n.slice(i18n.indexOf('version: "0.1.45"'), i18n.indexOf('version: "0.1.44"'));
+  assert.match(release, /неотвеченным входящим/iu);
+  assert.match(release, /последнего исходящего ответа/iu);
+  assert.match(release, /до серверной пагинации/iu);
+  assert.match(release, /crm-v0\.1\.44/);
+  assert.match(changelog, /## \[0\.1\.45\] - 2026-10-13/);
 });
 
 test("журнал 0.1.43 описывает контекстную карточку и устойчивую сортировку", () => {

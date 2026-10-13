@@ -69,6 +69,7 @@ import { CRM_SUMMARY_TIMEZONE, crmDateKey, crmDateStart, formatMinorMoney, MAX_S
 import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmission } from "./ai-generation-lease";
 import { channelAccountName, conversationOwnerSourceId, hasValidMovedEntityIds, legacyConversationOwnerSourceId, legacyMergeTargetClientId, legacySourceChannels } from "../clients/client-merge-provenance";
 import { withPreferredItem } from "./preferred-page";
+import { orderInboxClientRows } from "./inbox-client-order";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -149,12 +150,13 @@ export class CommunicationsService {
   }
   private async latestReplyStateRows(where: Prisma.ClientWhereInput) {
     const clientIds = (await this.p.client.findMany({ where, select: { id: true } })).map(client => client.id);
-    if (!clientIds.length) return [] as { clientId: string; channel: ContactChannel; direction: MessageDirection }[];
-    return this.p.$queryRaw<{ clientId: string; channel: ContactChannel; direction: MessageDirection }[]>(Prisma.sql`
+    if (!clientIds.length) return [] as { clientId: string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[];
+    return this.p.$queryRaw<{ clientId: string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[]>(Prisma.sql`
       SELECT DISTINCT ON (m."conversationId")
         c."clientId" AS "clientId",
         c."channel" AS "channel",
-        m."direction" AS "direction"
+        m."direction" AS "direction",
+        m."createdAt" AS "createdAt"
       FROM "Message" m
       INNER JOIN "Conversation" c ON c."id" = m."conversationId"
       WHERE c."clientId" IN (${Prisma.join(clientIds)})
@@ -231,18 +233,24 @@ export class CommunicationsService {
         include: { messages: { where: { messageType: { not: "reaction" } }, orderBy: { createdAt: "desc" }, take: 1 } },
       },
     });
-    const [pageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal] = await Promise.all([this.p.client.findMany({
+    const orderedClientRows = orderInboxClientRows(await this.p.client.findMany({
       where,
-      orderBy: [{ lastContactAt: "desc" }, { displayName: "asc" }, { id: "asc" }],
+      select: { id: true, displayName: true, lastContactAt: true },
+    }), scopedReplyStateRows);
+    const pageClientIds = orderedClientRows
+      .slice(query.offset ?? 0, (query.offset ?? 0) + limit)
+      .map(client => client.id);
+    const pagePosition = new Map(pageClientIds.map((id, index) => [id, index]));
+    const [unorderedPageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal] = await Promise.all([pageClientIds.length ? this.p.client.findMany({
+      where: { AND: [where, { id: { in: pageClientIds } }] },
       include: clientListInclude,
-      skip: query.offset ?? 0,
-      take: limit,
-    }), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>query.conversationScope === "WAITING"
+    }) : Promise.resolve([]), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>query.conversationScope === "WAITING"
       ? new Set(replyStateRows.filter(row=>row.channel===channel&&row.direction===MessageDirection.INBOUND).map(row=>row.clientId)).size
       : this.p.client.count({where:{...baseWhere,conversations:{some:{channel,archivedAt:null,...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {})}}}}))),
       this.p.client.count({where:scopeBaseWhere}),
       this.p.client.count({where:{...baseWhere,conversations:{some:{archivedAt:null,...(selectedChannels?{channel:{in:selectedChannels}}:{}),unreadCount:{gt:0}}}}}),
     ]);
+    const pageClients = unorderedPageClients.sort((left, right) => pagePosition.get(left.id)! - pagePosition.get(right.id)!);
     const requestedClient = (query.offset ?? 0) === 0 && query.clientId && !pageClients.some(client => client.id === query.clientId)
       ? await this.p.client.findFirst({ where: { id: query.clientId, archivedAt: null }, include: clientListInclude })
       : null;

@@ -150,7 +150,7 @@ test("черновик восстанавливается в редактор, �
   assert.match(component,/displayMessages/);
   assert.doesNotMatch(component,/async function sendSavedDraft/);
   assert.match(component,/function promoteClient/);
-  assert.match(component,/setClients\(current=>sortClients/);
+  assert.match(component,/setClients\(current=>current\.map/);
   assert.match(component,/promoteClient\(operationClientId/);
   assert.match(component,/draftMessageId:draftId/);
   assert.doesNotMatch(component,/communications-send-saved-draft/);
@@ -270,7 +270,7 @@ test("удаление сообщения вызывает API и перечит
   assert.match(component,/resolveDelivery:target\.status==="DRAFT"\|\|target\.status==="FAILED"/);
   assert.match(component,/fetchClientWindow\(currentClientCount\.current,currentSearch\.current,currentSocialFilters\.current,currentOrderScope\.current,currentConversationScope\.current\)/);
   assert.match(component,/conversationDetailPath\(operationClientId\)/);
-  assert.match(component,/setClients\(sortClients\(page\.items\)\)/);
+  assert.match(component,/setClients\(page\.items\)/);
   assert.match(component,/setMessages\(detail\.messages\|\|\[\]\)/);
   assert.match(component,/target\.id===composerDraftId\.current/);
   assert.match(component,/composerDraftId\.current=undefined;composerDraftKey\.current=undefined/);
@@ -495,8 +495,8 @@ test("под каналами можно отфильтровать клиент
 });
 
 test("новые входящие автоматически поднимаются наверх и обновляются без перезагрузки", () => {
-  assert.match(component, /conversationTimestamp/);
-  assert.match(component, /sort\([\s\S]*conversationTimestamp\(b\)\s*-\s*conversationTimestamp\(a\)/);
+  assert.doesNotMatch(component, /function sortClients/);
+  assert.match(component, /const data = page\.items/);
   assert.match(component, /setInterval\(\(\)\s*=>\s*void refreshInbox\(\),\s*5000\)/);
   assert.match(component, /selectedClientId\.current/);
   assert.match(component, /clearInterval\(timer\)/);

@@ -187,17 +187,6 @@ function connectedAccountUrl(c: Client | undefined, activeChannel: string) {
     .filter((conversation) => conversation.channel === activeChannel && conversation.connectedAccountUrl)
     .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime())[0]?.connectedAccountUrl || "";
 }
-function conversationTimestamp(c: Client) {
-  const latest = latestConversation(c);
-  return new Date(
-    latest?.lastMessageAt || latest?.messages?.[0]?.createdAt || 0,
-  ).getTime();
-}
-function sortClients(data: Client[]) {
-  return [...data].sort(
-    (a, b) => conversationTimestamp(b) - conversationTimestamp(a),
-  );
-}
 function safeAttachmentUrl(url?: string) {
   if (!url) return;
   if (/^\/api\/communications\/files\/[a-zA-Z0-9._-]+$/.test(url)) return url;
@@ -843,7 +832,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     try {
       const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope,id);
       if(request!==listRequestSequence.current)return;
-      const data = sortClients(page.items);
+      const data = page.items;
       setClients(data);
       setClientsHasMore(page.hasMore);
       setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
@@ -873,7 +862,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     try {
       const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current,currentConversationScope.current);
       setConnectionLost(false);
-      const data = sortClients(page.items).map(
+      const data = page.items.map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
           if (!pending) return candidate;
@@ -1033,7 +1022,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   }
   function promoteClient(clientId:string,message:Message){
     refreshRequestSequence.current++;
-    setClients(current=>sortClients(current.map(item=>{
+    setClients(current=>current.map(item=>{
       if(item.id!==clientId)return item;
       let updated=false;
       const conversations=item.conversations.map(conversation=>{
@@ -1042,7 +1031,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         return {...conversation,lastMessageAt:message.createdAt,messages:[{content:message.content,createdAt:message.createdAt}]};
       });
       return updated?{...item,conversations}:item;
-    })));
+    }));
   }
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
@@ -1199,7 +1188,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         api(conversationDetailPath(operationClientId)),
       ]) as [ClientPage,{messages?:Message[]}];
       if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;
-      setClients(sortClients(page.items));setClientsHasMore(page.hasMore);setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
+      setClients(page.items);setClientsHasMore(page.hasMore);setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
       const updatedClient=page.items.find(item=>item.id===operationClientId);if(updatedClient)setClient(updatedClient);
       setMessages(detail.messages||[]);
       setDeleteTarget(undefined);requestAnimationFrame(()=>deleteTrigger.current?.focus());
