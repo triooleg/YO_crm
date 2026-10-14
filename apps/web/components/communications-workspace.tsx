@@ -102,6 +102,7 @@ type ContextTarget = "clients" | "orders" | "production" | "tasks" | "finance";
 type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onUnreadDelta?:(delta:number)=>void; onUnreadRefresh?:()=>void; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void; onRegisterBeforeLeave?:(handler:(()=>Promise<boolean>)|null)=>void };
 type ScopeCounts = { all:number; unread:number; waiting:number; spam?:number };
 type ClientPage = { items: Client[]; preferredItem?: Client; total: number; hasMore: boolean; scopeCounts:ScopeCounts; channelCounts:Partial<Record<SocialChannel,number>> };
+type ClientWindow = ClientPage & {nextOffset:number};
 type Message = {
   id: string;
   externalId?: string;
@@ -294,6 +295,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [channelTotals,setChannelTotals]=useState<Partial<Record<SocialChannel,number>>>({}),
     [visibleClientCount,setVisibleClientCount]=useState(15),
     [clientsHasMore,setClientsHasMore]=useState(false),
+    [clientsAppending,setClientsAppending]=useState(false),
+    [clientsAppendError,setClientsAppendError]=useState(false),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [messagesLoading, setMessagesLoading] = useState(false),
@@ -342,6 +345,12 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     skipNextFilterReload=useRef(false),
     filterReloadReady=useRef(false),
     listLoading = useRef(false),
+    clientListViewport=useRef<HTMLDivElement|null>(null),
+    clientListSentinel=useRef<HTMLDivElement|null>(null),
+    clientNextOffset=useRef(0),
+    clientListRevision=useRef(0),
+    appliedClientScope=useRef<string|undefined>(undefined),
+    appendRequest=useRef<number|null>(null),
     clientDetailRequest = useRef(0),
     orderRequestVersion = useRef(0),
     taskRequestVersion = useRef(0),
@@ -568,7 +577,15 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);
   }
   useEffect(()=>{onRegisterBeforeLeave?.(flushComposerDraftBeforeNavigation);return()=>onRegisterBeforeLeave?.(null)},[onRegisterBeforeLeave,activeChannel,composerAiRunId]);
-  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope, selectedConversationScope:ConversationScope="ALL", preferredClientId?:string) {
+  function clientScopeKey(query=currentSearch.current,channels=currentSocialFilters.current,orders=currentOrderScope.current,scope=currentConversationScope.current,spam=currentSpamScope.current){return JSON.stringify([query.trim(),channels,orders,scope,spam])}
+  async function fetchClientPage(offset:number,limit:number,query:string,selectedChannels:SocialChannel[],selectedOrderScope:OrderScope|undefined,selectedConversationScope:ConversationScope,spam:boolean,preferredClientId?:string):Promise<ClientPage>{
+    const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
+    const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
+    const conversationScopeParam=selectedConversationScope!=="ALL"?`&conversationScope=${encodeURIComponent(selectedConversationScope)}`:"";
+    const clientParam=offset===0&&preferredClientId?`&clientId=${encodeURIComponent(preferredClientId)}`:"";
+    return api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}${clientParam}${spam?"&spamScope=SPAM":""}`) as Promise<ClientPage>;
+  }
+  async function fetchClientWindow(count: number, query: string, selectedChannels: SocialChannel[] = [], selectedOrderScope?: OrderScope, selectedConversationScope:ConversationScope="ALL", preferredClientId?:string,spam=currentSpamScope.current):Promise<ClientWindow> {
     const items: Client[] = [];
     const seenIds = new Set<string>();
     let offset = 0;
@@ -579,19 +596,45 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     let scopeCounts:ScopeCounts={all:0,unread:0,waiting:0};
     while (items.length < count && hasMore && requests++ < 100) {
       const limit = Math.min(60, Math.max(15, count - items.length));
-      const channelParam=selectedChannels.length?`&channels=${encodeURIComponent(selectedChannels.join(","))}`:"";
-      const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
-      const conversationScopeParam=selectedConversationScope!=="ALL"?`&conversationScope=${encodeURIComponent(selectedConversationScope)}`:"";
-      const clientParam=offset===0&&preferredClientId?`&clientId=${encodeURIComponent(preferredClientId)}`:"";
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}${clientParam}${currentSpamScope.current?"&spamScope=SPAM":""}`) as ClientPage;
+      const page = await fetchClientPage(offset,limit,query,selectedChannels,selectedOrderScope,selectedConversationScope,spam,preferredClientId);
       total=page.total;channelCounts=page.channelCounts||{};scopeCounts=page.scopeCounts||scopeCounts;
       if(page.preferredItem&&!seenIds.has(page.preferredItem.id)){seenIds.add(page.preferredItem.id);items.push(page.preferredItem)}
-      for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
-      offset += page.items.length;
-      hasMore = page.hasMore;
+      let consumed=0;
+      for(const item of page.items){
+        if(items.length>=count)break;
+        consumed++;
+        if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
+      }
+      offset += consumed;
+      hasMore = page.hasMore||consumed<page.items.length;
       if (!page.items.length) break;
     }
-    return { items:items.slice(0,count), total, scopeCounts, channelCounts, hasMore:hasMore||items.length>count };
+    return { items:items.slice(0,count), total, scopeCounts, channelCounts, hasMore, nextOffset:offset };
+  }
+  function reconcileClientPagination(page:ClientWindow,scope:string){
+    clientListRevision.current++;
+    clientNextOffset.current=page.nextOffset;appliedClientScope.current=scope;
+    currentClientCount.current=Math.max(15,page.items.length);setVisibleClientCount(currentClientCount.current);
+    setClientsHasMore(page.hasMore);
+  }
+  async function appendClientPage(retry=false){
+    const scope=clientScopeKey();
+    if(listLoading.current||appendRequest.current!==null||!clientsHasMore||appliedClientScope.current!==scope||(!retry&&clientsAppendError))return;
+    const request=++listRequestSequence.current;refreshRequestSequence.current++;
+    appendRequest.current=request;listLoading.current=true;setClientsAppending(true);setClientsAppendError(false);
+    const offset=clientNextOffset.current;
+    try{
+      const page=await fetchClientPage(offset,15,currentSearch.current,currentSocialFilters.current,currentOrderScope.current,currentConversationScope.current,currentSpamScope.current);
+      if(request!==listRequestSequence.current||scope!==clientScopeKey())return;
+      setClients(current=>{const seen=new Set(current.map(item=>item.id));return [...current,...page.items.filter(item=>{if(seen.has(item.id))return false;seen.add(item.id);return true})]});
+      clientListRevision.current++;
+      clientNextOffset.current=offset+page.items.length;
+      const seen=new Set(clients.map(item=>item.id));let added=0;
+      for(const item of page.items)if(!seen.has(item.id)){seen.add(item.id);added++}
+      currentClientCount.current+=added;setVisibleClientCount(currentClientCount.current);
+      setClientsHasMore(page.hasMore&&page.items.length>0);setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
+    }catch(reason){if(request===listRequestSequence.current&&scope===clientScopeKey()){setClientsAppendError(true);setError((reason as Error).message)}}
+    finally{if(appendRequest.current===request){appendRequest.current=null;listLoading.current=false;setClientsAppending(false)}}
   }
   async function saveClientNote(event:FormEvent<HTMLFormElement>){
     event.preventDefault();
@@ -835,15 +878,17 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope, requestedConversationScope=conversationScope) {
     refreshRequestSequence.current++;
     const request=++listRequestSequence.current;
+    const spam=currentSpamScope.current,scope=clientScopeKey(requestedSearch,requestedChannels,requestedOrderScope,requestedConversationScope,spam);
+    appendRequest.current=null;setClientsAppending(false);setClientsAppendError(false);
     listLoading.current=true;
     setLoading(true);
     setError("");
     try {
-      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope,id);
-      if(request!==listRequestSequence.current)return;
+      const page = await fetchClientWindow(requestedCount, requestedSearch, requestedChannels, requestedOrderScope,requestedConversationScope,id,spam);
+      if(request!==listRequestSequence.current||scope!==clientScopeKey())return;
       const data = page.items;
       setClients(data);
-      setClientsHasMore(page.hasMore);
+      reconcileClientPagination(page,scope);
       setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
       const selected = id ? data.find((x) => x.id === id) : data[0];
       if(id&&!selected&&id===initialClientId.current){setError(ui.contextClientUnavailable);initialClientId.current=undefined;initialOrderId.current=undefined;clearInboxContextAction()}
@@ -857,7 +902,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       }
       return selected;
     } catch (e) {
-      if(request===listRequestSequence.current)setError((e as Error).message);
+      if(request===listRequestSequence.current&&scope===clientScopeKey())setError((e as Error).message);
       return undefined;
     } finally {
       if(request===listRequestSequence.current){setLoading(false);listLoading.current=false}
@@ -867,10 +912,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     if (listLoading.current||!canRefreshInbox(manualLoading.current, refreshing.current)) return;
     refreshing.current = true;
     const refreshRequest=++refreshRequestSequence.current;
+    const scope=clientScopeKey();
     const observedReadVersion = readVersion.current;
     try {
       const page = await fetchClientWindow(currentClientCount.current, currentSearch.current, currentSocialFilters.current, currentOrderScope.current,currentConversationScope.current);
-      setConnectionLost(false);
       const data = page.items.map(
         (candidate) => {
           const pending = pendingReads.current.get(candidate.id);
@@ -888,9 +933,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           };
         },
       );
-      if (!isCurrentInboxRefresh(refreshRequest,refreshRequestSequence.current,observedReadVersion,readVersion.current)) return;
+      if (!isCurrentInboxRefresh(refreshRequest,refreshRequestSequence.current,observedReadVersion,readVersion.current)||scope!==clientScopeKey()) return;
+      setConnectionLost(false);
       setClients(data);
-      setClientsHasMore(page.hasMore);
+      reconcileClientPagination(page,scope);
       setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
       const selected = data.find((x) => x.id === selectedClientId.current);
       if (selected) {
@@ -914,7 +960,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         }
       }
     } catch {
-      setConnectionLost(true);
+      if(refreshRequest===refreshRequestSequence.current&&scope===clientScopeKey())setConnectionLost(true);
     } finally {
       refreshing.current = false;
     }
@@ -941,7 +987,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       .then(setTemplates)
       .catch((e) => setError((e as Error).message));
     const timer = setInterval(() => void refreshInbox(), 5000);
-    return () => clearInterval(timer);
+    return () => {clearInterval(timer);listRequestSequence.current++;refreshRequestSequence.current++};
   }, []);
   useEffect(() => {
     if (!preview) return;
@@ -996,17 +1042,27 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   },[text,client?.id,activeChannel,busy,splitBusy,composerAiRunId]);
   const visibleClients=clients;
   useEffect(()=>{
+    const root=clientListViewport.current,target=clientListSentinel.current;
+    if(!root||!target||loading||clientsAppending||clientsAppendError||!clientsHasMore)return;
+    const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))void appendClientPage()},{root,rootMargin:"0px 0px 80px 0px"});
+    observer.observe(target);return()=>observer.disconnect();
+  },[loading,clientsAppending,clientsAppendError,clientsHasMore,clients.length,search,socialFilters,orderScope,conversationScope,spamScope,mobileClientListOpen]);
+  useEffect(()=>{
     if(!filterReloadReady.current){filterReloadReady.current=true;return}
     if(skipNextFilterReload.current){skipNextFilterReload.current=false;return}
+    listRequestSequence.current++;refreshRequestSequence.current++;
+    let cancelled=false;
+    const scope=clientScopeKey();
     const timer=setTimeout(()=>{void(async()=>{
       if(!await flushComposerDraftBeforeNavigation())return;
+      if(cancelled||scope!==clientScopeKey())return;
       selectedClientId.current=undefined;
       setClient(undefined);
       setMessages([]);
       setVisibleClientCount(15);
       await loadClients(undefined,15,search,socialFilters,orderScope,conversationScope);
     })()},250);
-    return()=>clearTimeout(timer);
+    return()=>{cancelled=true;clearTimeout(timer)};
   },[search,socialFilters,orderScope,conversationScope,spamScope]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
@@ -1212,12 +1268,16 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       if(target.id===composerDraftId.current){draftSequence.current++;draftSavePromise.current=null;composerDraftId.current=undefined;composerDraftKey.current=undefined;lastAutosavedText.current="";lastAutosavedAiRunId.current=undefined;setDraftStatus("IDLE");setText("");setComposerAiRunId(undefined)}
       setSelectedMessageIds(current=>current.filter(id=>id!==target.id));
       if(targetWasSelected||aiReply?.messageIds.includes(target.id)){invalidateAiOperation();setAiReply(null);setAiDraftText("")}
+      const listVersion=listRequestSequence.current,listRevision=clientListRevision.current,listScope=clientScopeKey();
       const [page,detail]=await Promise.all([
         fetchClientWindow(currentClientCount.current,currentSearch.current,currentSocialFilters.current,currentOrderScope.current,currentConversationScope.current),
         api(conversationDetailPath(operationClientId)),
-      ]) as [ClientPage,{messages?:Message[]}];
+      ]) as [ClientWindow,{messages?:Message[]}];
       if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch)return;
-      setClients(page.items);setClientsHasMore(page.hasMore);setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
+      if(listVersion===listRequestSequence.current&&listRevision===clientListRevision.current&&listScope===clientScopeKey()){
+        refreshRequestSequence.current++;listRequestSequence.current++;
+        setClients(page.items);reconcileClientPagination(page,listScope);setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
+      }
       const updatedClient=page.items.find(item=>item.id===operationClientId);if(updatedClient)setClient(updatedClient);
       setMessages(detail.messages||[]);
       setDeleteTarget(undefined);requestAnimationFrame(()=>deleteTrigger.current?.focus());
@@ -1371,7 +1431,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             <button type="button" aria-pressed={spamScope} onClick={()=>void changeSpamScope(!spamScope)}>{ui.spam} <b>{scopeCounts.spam||0}</b></button>
             <CrmNativeSelect className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)} data={[{value:"",label:ui.orderScopeMenu},{value:"WITH_ORDERS",label:ui.clientsWithOrders},{value:"ACTIVE_ORDERS",label:ui.clientsWithActiveOrders}]}/>
           </div>
-          <div className="communications-client-list">
+          <div className="communications-client-list" ref={clientListViewport}>
           {loading ? (
             <InboxSkeleton kind="conversations" rows={6}/>
           ) : (
@@ -1427,7 +1487,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               );
             })
           )}
-          {!loading&&clientsHasMore&&<button type="button" className="communications-load-more" aria-label={ui.loadMoreChats} onClick={()=>{const next=visibleClientCount+15;setVisibleClientCount(next);void loadClients(selectedClientId.current,next,search,socialFilters,orderScope,conversationScope)}}><span aria-hidden="true">＋</span><b>{ui.loadMoreChats}</b></button>}
+          {!loading&&clientsHasMore&&<div className="communications-client-pagination" ref={clientListSentinel} role="status" aria-live="polite">{clientsAppending?ui.loadingMoreChats:clientsAppendError?<CrmButton type="button" tone="secondary" onClick={()=>void appendClientPage(true)}>{ui.retryLoadChats}</CrmButton>:null}</div>}
           {!loading && !visibleClients.length && (
             <State text={orderScope ? ui.noOrderFilterResults : socialFilters.length ? ui.noSocialNetworkResults : search ? ui.noSearchResults : ui.noClients} />
           )}

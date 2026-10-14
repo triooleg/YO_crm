@@ -1,5 +1,21 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-14 — подготовка deployment CRM 0.1.55
+
+- Пользователь разрешил deployment автоподгрузки Inbox; commit/publication ранее разрешены в сессии. Metadata package/compose/changelog/i18n/version-test 0.1.55; `release-quality-v055.log` exit0 API813/web438/DB17/typecheck/build. Runtime уже проверен 16 browser tests и четырьмя review-ролями; generated next-env восстановлен.
+- Fresh FULL backup `20261014T163436Z-b5e41df-pre-v055` COMPLETED, 331682733 байт; SHA256SUMS `0a266e0169f7440b20ececafd38c5860b6dc6fe2cdfdad84ba4ffe80de608eee`, dump `35647ef4b054c1357867da6168acc504b81a9f55ccfcb632d2abf58f74e8ae55`, uploads `eb5fbbce69a234edbe21e8f5ca5d7d6f9096db5a7c521666c7b650901e7102da`, manifest `b194c5f26a537cfc95cb7d149d94b3902e1b1fc82e9c31e7ea1e5f32d90ca1fb`; checksum/dump/archive/manifest verified.
+- План web-only guarded build/switch с prepared image ID и baseline API/DB/Redis/web IDs; source/API/schema сравниваются, migrate/seed не запускаются, no-db override сохраняется. Read-only live smoke: 15→30→45 contacts при scroll на трёх viewport, retained DOM/scroll/chat/draft, console0/business writes0.
+- Новое уточнение пользователя: country selector с флагами и поиском в edit-client dialog раскрытого заказа. Оно выполняется после завершения текущего deployment, в этот release не включено.
+
+# 2026-10-14 — автоматическая подгрузка контактов Inbox (локально)
+
+- По просьбе пользователя убрана кнопка «Загрузить ещё»: IntersectionObserver внутри прокручиваемого списка подгружает следующую страницу `offset/limit=15`. Existing rows сохраняют keys/DOM, данные добавляются снизу без полного skeleton, навигации/open(), сброса scroll или черновика. Индикатор загрузки локален; при ошибке список/offset сохраняются и появляется «Повторить», успешный polling не сбрасывает retry latch.
+- `fetchClientPage` использует прежние REST search/channel/order/conversation/Spam scopes. `ClientWindow.nextOffset` учитывает только реально включённые raw строки; отдельно закреплённый preferredItem не пропускает overflow regular row. Дубли удаляются по client ID. Append cursor/loaded count/hasMore согласуются при full load, polling и message-deletion window replacement; нет новых API/schema/provider изменений.
+- Guards request sequence, captured scope и clientListRevision защищают обе последовательности poll/append и deletion15-after-append30. Отменённый debounce callback повторно проверяет scope после draft flush. Append invalidates старый poll и временно блокирует новый; background chronological reconciliation сохраняется. Offset pagination не является snapshot cursor при изменении серверного порядка.
+- RED до implementation подтвердил прежнюю кнопку вместо autoload. `infinite-scroll-browser-verified-final.log` 16/16 PASS: 3 viewport (1920×1080/1366×768/390×844), repeated append15/exhaustion, retained row DOM/scroll/selected chat/draft, stale search и delayed draft flush, failure/retry latch across polls, preferred overflow, dedupe, оба poll completion orders, deletion race и прежние 4 Spam checks. Скриншоты `.local/order-finance-fix/visuals/inbox-infinite-scroll-{1920,1366,390}.png`.
+- `infinite-scroll-quality-final.log` exit0 API813/web438/DB17 + typecheck/build. Generated next-env восстановлен, diff-check PASS. Все четыре роли PASS; supplemental Standards (compatibility reviewer) и Spec (regression reviewer), выполнявшиеся параллельно, PASS. Финальный локальный release gate 1–6 и 9 PASS, блокеров нет; live gates 7–8 UNVERIFIED.
+- Worktree `D:/CodexData/.codex/worktrees/orders-approved-redesign/YO_crm`, baseline `671614a`. Изменения не закоммичены/не опубликованы/не развёрнуты; production остаётся 0.1.54. Основной dirty checkout и unrelated artifacts сохранены; реальные business/provider mutations не выполнялись.
+
 # 2026-10-14 — production deployment CRM 0.1.54: явная кнопка Spam
 
 - Runtime `b5e41dfeb8ff435bc3104e6bfa49760dccce5e5d` опубликован в origin/main, exact-SHA развёрнут и закреплён тегом `crm-v0.1.54`. GitHub Quality gates `38591948465` и CRM release `38592649346` success. GitHub Release https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.54. Commit/publication и deployment разрешены пользователем в текущей сессии.

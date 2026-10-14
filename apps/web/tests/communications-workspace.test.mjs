@@ -441,14 +441,14 @@ test("список входящих показывает по 15 чатов и �
   assert.match(component, /seenIds/);
   assert.match(component, /items\.slice\(0,count\)/);
   assert.match(component, /const selected = id \? data\.find\(\(x\) => x\.id === id\) : data\[0\]/);
-  assert.match(component, /const next=visibleClientCount\+15/);
+  assert.doesNotMatch(component, /className="communications-load-more"/);
   assert.match(component, /setVisibleClientCount\(15\)/);
   assert.match(component, /listRequestSequence/);
   assert.match(component, /currentSearch\.current/);
   assert.match(component, /currentClientCount\.current/);
   assert.match(component, /const visibleClients=clients/);
   assert.match(locale, /loadMoreChats:/);
-  assert.match(css, /communications-load-more/);
+  assert.match(locale, /loadingMoreChats:/);
 });
 
 test("под поиском можно отфильтровать входящие по социальной сети", () => {
