@@ -58,7 +58,7 @@ test("заказ из чата открывается поверх перепи�
   assert.match(communications, /onSaved=\{async\(\)=>/);
   assert.match(communications, /navigateFromInbox\("finance",\{action:"new-invoice",orderId:activeOrders\[0\]\.id/);
   assert.match(tasks, /params\.get\("action"\)!=="new"/);
-  assert.match(finance, /params\.get\("action"\)==="new-invoice"/);
+  assert.match(finance, /params\.get\(["']action["']\)===["']new-invoice["']/);
 });
 
 test("задача из чата создаётся для активного клиента без перехода из Входящих", () => {

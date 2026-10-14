@@ -5,6 +5,7 @@ import {
   mantineHtmlProps,
 } from "@mantine/core";
 import "@mantine/core/styles.css";
+import "@mantine/dates/styles.css";
 import { Notifications } from "@mantine/notifications";
 import "@mantine/notifications/styles.css";
 import "flag-icons/css/flag-icons.min.css";
@@ -28,6 +29,7 @@ import "./branding-settings.css";
 import "./workspace-layout-standard.css";
 import "./inbox-reference.css";
 import "./mantine-overrides.css";
+import "./finance-report.css";
 
 export const metadata: Metadata = {
   title: "CRM Yoleotard",

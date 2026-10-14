@@ -16,8 +16,8 @@ test("операционные диалоги используют единый 
  assert.match(tasks,/if \(submittingRef\.current\) return/);
 });
 test("денежные и временные контракты не изменены",()=>{
- const shipping=read("../components/shipping-workspace.tsx"),finance=read("../components/finance-workspace.tsx"),invoice=read("../components/invoice-editor.tsx");
+ const shipping=read("../components/shipping-workspace.tsx"),finance=read("../components/finance-report-dialogs.tsx"),invoice=read("../components/invoice-editor.tsx");
  assert.match(shipping,/costMinor:Math\.round\(Number\(f\.get\("cost"\)\)\*100\)/); assert.match(shipping,/T12:00:00Z/);
- assert.match(finance,/amountMinor:Math\.round\(Number\(form\.get\("amount"\)\)\*100\)/); assert.match(finance,/T12:00:00Z/);
+ assert.match(finance,/parseOrderPriceMinor\(amount\)/); assert.match(finance,/T12:00:00Z/);
  assert.match(invoice,/amountMinor: Math\.round\(Number\(e\.target\.value\) \* 100\)/); assert.match(invoice,/T12:00:00Z/);
 });

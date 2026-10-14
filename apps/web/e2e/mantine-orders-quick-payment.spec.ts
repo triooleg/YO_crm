@@ -49,6 +49,22 @@ async function mockOrdersApi(page: Page) {
   return paymentRequests;
 }
 
+test('быстрая оплата блокирует повторный submit до ответа API', async ({ page }) => {
+  const requests = await mockOrdersApi(page);
+  await page.goto('/?section=orders');
+  await page.getByRole('button', { name: order.number, exact: true }).click();
+  await page.getByRole('button', { name: /Добавить оплату/ }).click();
+  const dialog = page.getByRole('dialog', { name: `ОПЛАТА ПО ЗАКАЗУ ${order.number}` });
+  await dialog.getByLabel('Сумма').fill('0,29');
+  await dialog.locator('form').evaluate(form => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await expect(dialog).toBeHidden();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ amountMinor: 29, currency: 'EUR' });
+});
+
 for (const viewport of [
   { name: "desktop", width: 1920, height: 1080 },
   { name: "laptop", width: 1366, height: 768 },

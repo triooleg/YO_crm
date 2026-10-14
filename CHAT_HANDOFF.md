@@ -1,5 +1,23 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-15 — Finance CRM 0.1.58 release preparation
+
+- Пользователь отдельно разрешил deployment после локальной приёмки; ранее разрешены commit/publication вместе с выпуском. Выпускается только Finance, отдельный Inbox WIP и primary checkout сохранены.
+- Fresh FULL backup `20261014T220605Z-72761eb-pre-v058` COMPLETED332781986; dump/uploads/manifest/checksums и pg_restore list PASS. SHA256SUMS `7640eeda9baac0e29963bfd23cfa40829ff3a33cb58a37246ade05aa6472a24a`, dump `7b5878085b30cbb85149f518d32c2d3c2cfe79627aaca7ad52c82d56d8bf7cdb`, uploads `4f44b8a12d5bfb232d78c0975834074d3721be139b53efa74556464dd4d8ce99`, manifest `0fda360041dabf1464762ec10e2b4aed9cad20e01d2116eb054c3b72978c0267`.
+- Live baseline exact72761eb0.1.57 healthy/restart0; business counts598/269/3026/504/579/827/407/4/13/780. No migrations/seed planned; existing no-db API startup retained. Release metadata bumped0.1.58, application/runtime unchanged from accepted candidate aside from release history.
+- Deployment and post-deploy gates pending; do not interpret preparation as a completed deployment.
+
+# 2026-10-15 — Finance approved redesign: local implementation verified, no deployment
+
+- Latest user specification `D:/download/YO_CRM_Finance_Redesign_Codex_TZ.md`; final visual `D:/download/YO_CRM_Finance_Approved_Design.png`. Implementation contract and architecture audit: `docs/ui/finance-approved-redesign.md`. Base b41da28, isolated Finance worktree. User explicitly requires separate confirmation before production deployment. No commit/push/deploy performed for this scope.
+- Additive read-only report layer preserves existing financial mutation APIs. Exact original-receipt conversion, immutable applied settlement, expense-ledger deduplication, current debt/30-day forecast, unknown invoice allocation, stable table filters/pagination and same-valuation CSV; no rate refresh in GET.
+- Read-only production financial snapshot stored only in ignored `.local/finance/live-finance-sources.json`; no credentials/customer data in tracked fixtures. Actual new model checked EUR/USD/UAH: category sum equals expense KPI, zero economic writes. Snapshot is not a production deployment of the new report API.
+- Implemented six KPI, bar chart, donut, three server-filtered/paged tables, right informers, EUR/USD/UAH display valuation and CSV, both month arrows and manual year/month picker. Preserve original payment/expense/invoice mutation APIs and operational currencies; shared payment dialog prevents parallel submit; archived-order invoice editing and Finance context/deep links retained. Input references copied unchanged under `docs/ui/finance-*`; report `docs/ui/finance-redesign-validation.md` records formulas, source/rate policy, screenshots and model limitations.
+- Final `corepack pnpm quality:check` exit0: `.local/finance/quality-acceptance.log`, API835/web451/database17 plus typecheck/build PASS. Only subsequent test-fixture expansion adds REFUNDED/COMPLETED cohorts: pure10/10 and fullAPI835/835 PASS (`.local/finance/api-acceptance.log`), no runtime delta. Generated next-env restored; diff-check PASS.
+- Browser final exact-runtime `.local/finance-acceptance-final.log`:27/27 PASS (17 Finance,6 real-source viewport,4 payment). Includes actual USD/UAH KPI/chart/table/sidebar and exact full CSV, manual month/year preserving filters, stale actions, page-size/RBAC, archived invoice edit and visible/removable order context. Neighbor Orders/Inbox/Settings `.local/finance-neighbors-final.log`:81/81 PASS. Screens `apps/web/.local/finance/screenshots/`, including1703/1920/1440/1366/820/390, open currency, USD/UAH and all lower tabs.
+- Independent Compatibility/Standards, Regression/Spec, Business/RBAC and UI Visual roles PASS including final small UI delta. Final LOCAL release gate1–6 and9 PASS, no blockers; frozen manifest33 runtime/test/package files,0 SHA256 mismatches. Production gates7–8 NOT RUN/UNVERIFIED under the user's no-deployment instruction. No commit/push/deploy for this scope.
+- Separate uncommitted Inbox follow-up remains in `D:/CodexData/.codex/worktrees/orders-approved-redesign/YO_crm`; see that tree's handoff for final local checks and specifically authorized old Gaelle blocker recovery. Do not combine it with this Finance diff. Primary `D:/Projects/YO_crm` unrelated dirty candidate remains untouched.
+
 # 2026-10-14 — deployment CRM 0.1.57: статусы производства
 
 - Пользователь разрешил deploy; commit/publication разрешены ранее. Runtime exact `72761eb6a75bb16cbf218c8b65696f09cc274859` опубликован origin/main, tag `crm-v0.1.57`, release https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.57. Quality38629630358/release38629635163 success.

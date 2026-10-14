@@ -16,7 +16,7 @@ test("корневой интерфейс CRM использует единый 
   assert.equal(dependencies["@mantine/core"], "9.6.0");
   assert.equal(dependencies["@mantine/hooks"], "9.6.0");
   assert.equal(dependencies["@mantine/form"], undefined);
-  assert.equal(dependencies["@mantine/dates"], undefined);
+  assert.equal(dependencies["@mantine/dates"], dependencies["@mantine/core"]);
   assert.equal(dependencies["@mantine/notifications"], "9.6.0");
   assert.match(layout, /@mantine\/core\/styles\.css/);
   assert.match(layout, /@mantine\/notifications\/styles\.css/);

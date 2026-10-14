@@ -4,6 +4,7 @@ import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } 
 import { ActionIcon, Badge, Menu, Modal, UnstyledButton } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
+import { orderInitialTab } from "../../lib/order-context";
 import { repairMojibake } from "../../lib/text-encoding.mjs";
 import { CrmAlert } from "../crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "../crm/settings-controls";
@@ -159,6 +160,7 @@ const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE
 export function OrderExpandedTabs(props: Props) {
   const { order } = props;
   const [activeTab, setActiveTab] = useState("details");
+  useEffect(() => { setActiveTab(orderInitialTab(window.location.search, order.id)); }, [order.id]);
   const items = expandedOrderItems(order);
   const tabPanelId = `order-tab-panel-${order.id}`;
   const tabs = [

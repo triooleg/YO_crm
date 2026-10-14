@@ -87,7 +87,7 @@ export function InvoiceEditor({ order, invoice, request, close, done }: Props) {
         </div>)}
       </div>
       <label className="wide">{financeUi.notes}<textarea value={notes} onChange={e => setNotes(e.target.value)} /></label>
-      <div className="invoice-total wide"><span>{financeUi.invoiceTotal}</span><strong>{money(total, order.currency)}</strong></div>
+      <div className="invoice-total wide"><span>{financeUi.invoiceTotal}</span><strong>{money(total, invoice?.currency || order.currency)}</strong></div>
       <button disabled={saving || !total} className="phase2-primary">{saving ? financeUi.saving : invoice ? financeUi.saveInvoice : financeUi.createInvoiceAction}</button>
     </form>
   </CrmModal>;

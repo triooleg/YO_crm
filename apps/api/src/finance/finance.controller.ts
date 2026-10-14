@@ -1,10 +1,16 @@
-import { Body,Controller,Delete,Get,Param,Patch,Post,Query,Req,Res,UseGuards } from "@nestjs/common";
+import { Body,Controller,Delete,Get,Header,Param,Patch,Post,Query,Req,Res,UseGuards } from "@nestjs/common";
 import type { Request,Response } from "express";import type { User } from "@prisma/client";
 import { Roles } from "../auth/roles.decorator";import { RolesGuard } from "../auth/roles.guard";import { SessionGuard } from "../auth/session.guard";
 import { CreateExpenseCategoryDto,CreateExpenseDto,UpdateExpenseCategoryDto,UpdateExpenseDto,CreateInvoiceDto,UpdateInvoiceDto,UpdateProductionSettingsDto,UpdateSettingDto,UpdateExchangeRateProviderDto } from "./finance.dto";import { FinanceService } from "./finance.service";
 import { ExchangeRatesService } from "./exchange-rates";
+import { FinanceReportService } from "./finance-report.service";
+import { FinanceReportQueryDto } from "./finance-report.dto";
 @Controller("finance") @UseGuards(SessionGuard,RolesGuard) export class FinanceController{
- constructor(private readonly finance:FinanceService,private readonly exchangeRates:ExchangeRatesService){}
+ constructor(private readonly finance:FinanceService,private readonly exchangeRates:ExchangeRatesService,private readonly reports:FinanceReportService){}
+ @Get("report") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") report(@Query() query:FinanceReportQueryDto){return this.reports.report(query)}
+ @Get("report/export") @Roles("OWNER","ADMIN","ACCOUNTANT") async exportReport(@Query() query:FinanceReportQueryDto,@Res() res:Response){const csv=await this.reports.report(query,true);res.setHeader("Content-Type","text/csv; charset=utf-8");res.setHeader("Content-Disposition",'attachment; filename="finance-report.csv"');res.setHeader("Cache-Control","no-store");return res.send(csv)}
+ @Get("report/options") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") reportOptions(@Query() query:FinanceReportQueryDto){return this.reports.options(query.search)}
+ @Get("report/orders/:id") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") reportOrder(@Param("id") id:string,@Query() query:FinanceReportQueryDto){return this.reports.order(id,query)}
  @Get() @Roles("OWNER","ADMIN","ACCOUNTANT") summary(@Query("month") month?:string){return this.finance.summary(month)}
  @Get("settings") @Roles("OWNER","ADMIN") settings(){return this.finance.settings()}
  @Patch("settings") @Roles("OWNER","ADMIN") saveSetting(@Body() dto:UpdateSettingDto,@Req() req:Request&{user:User}){return this.finance.saveSetting(dto,req.user)}

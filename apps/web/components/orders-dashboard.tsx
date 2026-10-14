@@ -1,5 +1,6 @@
 "use client";
 
+import { QuickPayment } from "./order-payment-dialog";
 import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
@@ -831,24 +832,6 @@ function DeliveryAddressModal({ order, request, onClose, onSaved }: { order: Ord
   </Modal>;
 }
 
-function QuickPayment({ order, request, onClose, onSaved }: { order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [amount, setAmount] = useState(""); const [currency, setCurrency] = useState(order.currency); const [method, setMethod] = useState("BANK_TRANSFER"); const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10)); const [reference, setReference] = useState(""); const [notes, setNotes] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
-  async function submit(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); const value = Number(amount.replace(",", ".")); if (!Number.isFinite(value) || value <= 0) { setError(ui.paymentAmountError); return; } setBusy(true); setError(""); try { await request(`/orders/${order.id}/payments`, { method: "POST", body: JSON.stringify({ amountMinor: Math.round(value * 100), currency, method, receivedAt: new Date(`${receivedAt}T12:00:00`).toISOString(), reference: reference.trim() || undefined, notes: notes.trim() || undefined }) }); await onSaved(); } catch (reason) { setError((reason as Error).message); } finally { setBusy(false); } }
-  return <Modal opened onClose={onClose} centered size={420} aria-label={`${ui.paymentTitle} ${order.number}`} closeButtonProps={{ "aria-label": ui.close }} classNames={{ content: "orders-quick-payment", header: "orders-quick-payment-header", body: "orders-quick-payment-body" }} title={<div><small>{ui.paymentTitle}</small><h2>{order.number}</h2></div>}>
-    <form className="orders-quick-payment-form" onSubmit={submit}>
-      <p>{ui.balance}: <strong>{money(balance(order), order.currency)}</strong></p>
-      <CrmTextInput data-autofocus autoFocus label={ui.amount} value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" required />
-      <CrmNativeSelect label={ui.paymentCurrency} value={currency} onChange={(event) => setCurrency(event.target.value)} data={["EUR", "USD", "UAH"]} />
-      {currency !== order.currency && <p className="orders-payment-conversion-note">{ui.automaticRateHint} {order.currency}.</p>}
-      <CrmNativeSelect label={ui.paymentMethod} value={method} onChange={(event) => setMethod(event.target.value)} data={[{ value: "BANK_TRANSFER", label: ui.bankTransfer }, { value: "CARD", label: ui.cardPayment }, { value: "PAYPAL", label: "PayPal" }, { value: "CASH", label: ui.cashPayment }, { value: "OTHER", label: ui.otherPayment }]} />
-      <CrmTextInput label={ui.paymentDate} type="date" value={receivedAt} onChange={(event) => setReceivedAt(event.target.value)} required />
-      <CrmTextInput label={ui.paymentReference} value={reference} onChange={(event) => setReference(event.target.value)} />
-      <CrmTextInput label={ui.paymentNote} value={notes} onChange={(event) => setNotes(event.target.value)} />
-      {error && <CrmAlert>{error}</CrmAlert>}
-      <footer><CrmButton tone="secondary" type="button" onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" disabled={busy}>{busy ? ui.saving : ui.addPaymentPlain}</CrmButton></footer>
-    </form>
-  </Modal>;
-}
 
 function OrderClientPicker({ clients, loading, query, onQuery, onSelect, onClose }: { clients: OrderClientBrief[]; loading: boolean; query: string; onQuery: (value: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
   return <Modal opened onClose={onClose} centered size={520} aria-label={ui.selectClient} closeButtonProps={{ "aria-label": ui.close }} classNames={{ content: "orders-client-picker", header: "orders-client-picker-header", body: "orders-client-picker-body" }} title={<div><small>{ui.newOrder}</small><h2>{ui.selectClient}</h2></div>}>

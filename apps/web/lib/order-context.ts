@@ -1,5 +1,10 @@
 export type OrderContextResult<T> = { requested: boolean; order: T | undefined };
 
+export function orderInitialTab(search: string, orderId: string) {
+  const params = new URLSearchParams(search);
+  return params.get("orderId") === orderId && params.get("tab") === "finance" ? "finance" : "details";
+}
+
 export function orderContextId(search: string) {
   return new URLSearchParams(search).get("orderId") || undefined;
 }

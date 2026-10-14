@@ -9,6 +9,6 @@ const finance=await readFile(new URL("../components/finance-workspace.tsx",impor
 test("новые действия производства и финансов используют общие Mantine-контролы",()=>{
   assert.match(production,/import \{ CrmButton \} from "\.\/crm\/settings-controls"/);
   assert.ok(((production+planner).match(/<CrmButton[^>]*tone="secondary"/g)||[]).length>=2);
-  assert.match(finance,/import \{ CrmActionIcon \} from "\.\/crm\/settings-controls"/);
-  assert.match(finance,/<CrmActionIcon onClick=\{\(\)=>setFocusedOrderId\(undefined\)\}/);
+  assert.match(finance,/import \{ CrmButton \} from ['"]\.\/crm\/settings-controls['"]/);
+  assert.match(finance,/<CrmButton[^>]*tone="secondary"/);
 });
