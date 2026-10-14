@@ -1,6 +1,6 @@
 # Повторная сверка «Финансов» с утверждённым макетом
 
-Дата: 15.10.2026. База: `e180e24`, deployed runtime `4707c4c` (0.1.58). Доработки находятся локально в Finance worktree; новая версия не развёрнута и не закоммичена.
+Дата: 15.10.2026. База: `e180e24`, deployed runtime `4707c4c` (0.1.58). Доработки после отдельного разрешения пользователя развёрнуты в CRM0.1.59; точный runtime и live-проверки приведены в разделе deployment.
 
 ## Что найдено и исправлено
 
@@ -38,3 +38,11 @@
 Production branding в финальном harness прочитан без записи и его реальный webp корректно обслужен локально. Старые снимки с отсутствующим ассетом заменены финальными; это была ошибка harness, не регрессия сайта.
 
 Предыдущие ограничения отчёта (текущий, а не исторический долг; отсутствие ledger распределения оплаты по инвойсам; PDF в исходной валюте) не изменены и описаны в `finance-redesign-validation.md`.
+
+## Deployment0.1.59 —15.10.2026
+
+После отдельного разрешения пользователя runtime `85c50ecd46a2b57462b0519722537a38a6886b3f` опубликован и развёрнут. [Release](https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.59). FreshFULLbackup проверен, API/webhealthy, root/health200. PostgreSQL/Redis и бизнес-записи сохранены; экономический API source/schema byte-identical, миграций нет.
+
+Release quality1305тестов/typecheck/build и GitHubCI PASS. Реальный live-smoke без mocks:9сочетаний viewport/currency,6KPI/графики/3вкладки/CSV PASS. Оба monthpicker и строгий русский ввод дат/ISO/reset PASS на1920/1366/390; светлая схема сохраняется при входе/выходе. Runtime/console/networkerrors0, экономическихзаписей0. Neighbors Orders/Production3viewportPASS. Скриншоты `.local/finance-release/visuals/live-finance-0.1.59-*.png` остаются ignored из-за клиентских данных. Полные rollback/hash/container/live records в CHAT_HANDOFF.
+
+Независимые final live visual9/9 и release gates1–9 PASS, блокеров нет.
