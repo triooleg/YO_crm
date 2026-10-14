@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {join} from 'node:path';
 for(const width of [1920,1366,390])test(`спам скрывает клиента и позволяет восстановить переписку ${width}`,async({page},info)=>{
-  await page.setViewportSize({width,height:width===390?844:900});
+  await page.setViewportSize({width,height:width===390?844:width===1920?1080:768});
   let spamAt:string|null=null;
   const writes:unknown[]=[];
   const client=()=>({id:'spam-client',displayName:'Клиент для проверки спама',source:'CHATWOOT',status:'LEAD',inboxSpamAt:spamAt,orders:[],conversations:[{id:'spam-conversation',channel:'CHATWOOT',unreadCount:0,lastMessageAt:'2026-10-14T12:58:00Z',messages:[{id:'reply',content:'Последний реальный ответ',createdAt:'2026-10-14T12:00:00Z',sentAt:'2026-10-14T12:58:00Z',direction:'OUTBOUND',status:'SENT'}]}]});
@@ -29,12 +29,17 @@ for(const width of [1920,1366,390])test(`спам скрывает клиент�
   if(width!==390)await row.click();
   await expect(page.locator('.communications-message-stack')).toContainText('Последний реальный ответ');
   await page.screenshot({path:process.env.YO_CRM_VISUAL_DIR?join(process.env.YO_CRM_VISUAL_DIR,`inbox-chronology-${width}.png`):info.outputPath('inbox-chronology.png')});
-  await page.getByRole('button',{name:'Действия с перепиской',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Действия с перепиской',exact:true})).toHaveAttribute('aria-expanded','true');
-  await page.screenshot({path:process.env.YO_CRM_VISUAL_DIR?join(process.env.YO_CRM_VISUAL_DIR,`inbox-spam-menu-${width}.png`):info.outputPath('inbox-spam-menu.png')});
-  await page.getByRole('menuitem',{name:'Пометить как спам',exact:true}).click();
+  const mark=page.locator('.communications-chat-header').getByRole('button',{name:'Пометить как спам',exact:true});
+  await expect(mark).toBeVisible();
+  const markBox=await mark.boundingBox();
+  expect(markBox).not.toBeNull();expect(markBox!.x).toBeGreaterThanOrEqual(0);expect(markBox!.x+markBox!.width).toBeLessThanOrEqual(width);
+  await page.screenshot({path:process.env.YO_CRM_VISUAL_DIR?join(process.env.YO_CRM_VISUAL_DIR,`inbox-spam-button-${width}.png`):info.outputPath('inbox-spam-button.png')});
+  await mark.click();
   const dialog=page.getByRole('dialog',{name:'Пометить как спам',exact:true});
   await expect(dialog).toBeVisible();
+  await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
+  await expect(dialog).toBeHidden();expect(writes).toEqual([]);
+  await mark.click();
   await dialog.getByRole('button',{name:'Пометить как спам',exact:true}).click();
   await expect(dialog).toBeHidden();
   await expect(row).toHaveCount(0);
@@ -45,8 +50,11 @@ for(const width of [1920,1366,390])test(`спам скрывает клиент�
   await row.click();
   await expect(page.locator('.communications-message-stack')).toContainText('Входящее сообщение');
   await expect(page.locator('.communications-message-stack')).not.toContainText('Черновик не является сообщением');
-  await page.getByRole('button',{name:'Действия с перепиской',exact:true}).click();
-  await page.getByRole('menuitem',{name:'Вернуть из спама',exact:true}).click();
+  const restoreButton=page.locator('.communications-chat-header').getByRole('button',{name:'Вернуть из спама',exact:true});
+  await expect(restoreButton).toBeVisible();
+  const restoreBox=await restoreButton.boundingBox();
+  expect(restoreBox).not.toBeNull();expect(restoreBox!.x).toBeGreaterThanOrEqual(0);expect(restoreBox!.x+restoreBox!.width).toBeLessThanOrEqual(width);
+  await restoreButton.click();
   const restore=page.getByRole('dialog',{name:'Вернуть из спама',exact:true});
   await page.screenshot({path:process.env.YO_CRM_VISUAL_DIR?join(process.env.YO_CRM_VISUAL_DIR,`inbox-spam-restore-${width}.png`):info.outputPath(`inbox-spam-restore-${width}.png`)});
   await restore.getByRole('button',{name:'Вернуть из спама',exact:true}).click();

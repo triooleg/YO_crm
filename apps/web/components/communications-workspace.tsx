@@ -1451,7 +1451,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
-            {client&&<CrmMenu label={ui.conversationActions} children="•••" items={[{label:client.inboxSpamAt?ui.restoreSpam:ui.markSpam,onClick:()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}]}/>}
+            {client&&<CrmButton type="button" tone="secondary" onClick={()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}>{client.inboxSpamAt?ui.restoreSpam:ui.markSpam}</CrmButton>}
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={openSplitDialog}>⇄</CrmActionIcon>:null}
             {client && (availableChannels.length > 1 ? (
               <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>

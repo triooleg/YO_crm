@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-14 — подготовка deployment CRM 0.1.54
+
+- Пользователь разрешил deployment явной кнопки Spam; ранее в сессии разрешены commit/publication. Release metadata package/compose/i18n/changelog/version-test обновлена до 0.1.54; финальный `release-quality-v054-final.log` exit0 (API813/web438/DB17, typecheck/build). Generated next-env восстановлен в baseline. Runtime scope — только один web-trigger, schema/API/shared source совпадают с 0.1.53.
+- Fresh FULL backup `20261014T153844Z-40ac05b-pre-v054` COMPLETED, 331669746 байт; checksums/dump/uploads/manifest verified. SHA256SUMS `e9d19c3463cdb85fae53dbfd61fb59c38607dc1291c7b66f3238c71366940453`; postgres.dump `0f9106f2163dc5d07d18dae22976238a2f97a5a04acf5785e59139a0dbac780d`; uploads `b8d10fd290d856670308090ee6c15e2f9cd8bf44c8a11dc53b6ee5d1e12e924c`; manifest `e9887262e5433f89aa195be0f573664ad5961b3c6f7501ad4228c17a72594faf`.
+- План: exact source archive/build web-only; no-deps recreate только web, API/PostgreSQL/Redis IDs сохраняются; no-db override сохраняется, миграций/seed нет. Rollback source/image и прежний checkout будут сохранены. Live read-only smoke откроет/отменит confirmation на трёх размерах без Spam-мутаций реальных клиентов или provider sends.
+
+# 2026-10-14 — явная кнопка Спам в шапке переписки (локально)
+
+- По уточнению пользователя маленькое меню «•••» в шапке переписки заменено существующим Mantine `CrmButton` с подписью «Пометить как спам» / «Вернуть из спама». Сохранены прежние i18n labels, client guard, payload `setSpamTarget` и confirmation Modal. Backend, RBAC, CAS, audit, данные, provider flows и версии не менялись.
+- Существующий e2e теперь нажимает явную кнопку; проверяет Cancel без spam writes, mark/restore с прежним expectedSpamAt и границы обеих кнопок на 1920×1080, 1366×768, 390×844. Browser 4/4 PASS (включая unread conflict guard). Скриншоты `.local/order-finance-fix/visuals/inbox-spam-button-{1920,1366,390}.png`, логи `spam-button-{red,browser,quality}.log`; RED до замены подтвердил отсутствие явной кнопки. `pnpm quality:check` exit0: API813/web438/DB17, typecheck/build PASS. Compatibility, regression, business и visual reviews PASS; финальный локальный release gate 1–6 и 9 PASS, live gates 7–8 UNVERIFIED.
+- Работа в `D:/CodexData/.codex/worktrees/orders-approved-redesign/YO_crm`, baseline `a29ecea`; основной dirty checkout и `artifacts/` сохранены. Эта правка ещё не закоммичена, не опубликована и не развёрнута; production остаётся 0.1.53 с прежним меню.
+
 # 2026-10-14 — production deployment CRM 0.1.53: хронология Inbox и обратимый Спам
 
 - Runtime commit `40ac05b120de22f9bc8fa3099a29d871e007f285` опубликован в `origin/main`, exact-SHA развёрнут и закреплён тегом `crm-v0.1.53`. GitHub Quality gates `38580942064` и CRM release `38581933129` success. GitHub Release: https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.53. Пользователь явно разрешил deployment, commit/publication и ранее согласовал nullable Spam-поле.
