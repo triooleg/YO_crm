@@ -1,5 +1,20 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-15 — CRM0.1.59 release preparation
+
+- User explicitly authorized deploy of Finance polish. Earlier commit/publication authorization applies. Only reviewed Finance follow-up, no Inbox/primary WIP.
+- Frozen12file manifest matched before metadata bump; subsequent runtime delta is additive release history only. All4reviews and prior localgatePASS. Version0.1.59 package/compose/test/history/changelog synchronized; release-quality running, deployment/live verification pending.
+- Fresh FULL backup20261014T224751Z-4707c4c-pre-v059 COMPLETED332782102; checksum/dump-list/uploads/manifestPASS exactbaseline4707c4c0.1.58. SHA256SUMS245c1dcf9991c4b12ea82aa637f0f36273bd5ba089384a077596723b0683d8cd; dump93c2506f5fccfaaea88c2c3798a284dd1d9d73e1bfd30ed7299e3938449e29fd; uploadseb6b296ac1ef85734538df2f14f1e513f40ee62afbc3ab4725564652f9e7bc4a; manifest62842a379691de531dd36f807cf051395915cfcdeb471bf24653c78d295ebd52.
+- No migration/seed needed; economic API source, schema and integrations preserved. Guarded isolated build/switch will retain no-db API command, rollback source/images and PG/Redis identity.
+
+# 2026-10-15 — Finance strict visual follow-up (local, no deploy)
+
+- User requested another strict comparison with original Finance PNG and clarified income must include only actually paid amounts. Base e180e24; production remains0.1.58/4707c4c. No new commit/push/deploy for this follow-up.
+- Fixed KPI/workspace vertical drift, unreadable10/11px table text, absent expense-month selector, system date inputs, chart185/205SVG compression, muted action styles, ambiguous/clipped date header, wrapping methods and pagination placement. Both month controls share period/filter state. Scoped Mantine variant in central theme preserves other pages; explicit light provider protects global color scheme with saved dark/auto.
+- Mantine dates initially exposed ambiguous US parsing; strict DD.MM.YYYY helper now preserves day/month and rejects impossible dates, with failing browser→green regression. Payment income already uses actual active Payment amounts/receivedAt only; new EUR/USD/UAH regression excludes unpaid order/invoice/forecast amounts, voids and adjacent months. API economic runtime unchanged.
+- Independent Compatibility/Standards, Regression/Spec, Business and final strict Visual P2 review PASS. Frozen12file manifest0mismatches. Final quality-acceptance.log exit0: API836/web452/database17, typecheck/Nest/Nextbuild PASS. Browser-acceptance.log32/32 exit0:19Financecases,7real-snapshotviewports,2themeentry/exit,4sharedpaymentcases. Earlier HMR-interrupted run is superseded. Generatednext-env restored; finaldiff-checkPASS. Final independent LOCAL release gates1–6 and9 PASS; gates7–8 UNVERIFIED because this follow-up is not deployed. Report `docs/ui/finance-redesign-polish-validation.md`; before/after screenshots ignored `.local/finance-polish/`.
+- Separate Inbox WIP and primary checkout untouched. No migration/seed/provider calls/economic writes. New runtime is local only; production smoke for this follow-up is UNVERIFIED until separately authorized deployment.
+
 # 2026-10-15 — deployed CRM 0.1.58: approved Finance redesign
 
 - User separately authorized deployment; commit/publication authorized earlier. Exact runtime `4707c4c7786fded4f8cfc210e626dc14aef7afbf` published origin/main and `crm-v0.1.58`; GitHub Release https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.58. Quality Actions38645692768 and Release38645697518 SUCCESS. Only Finance candidate included; separate Inbox WIP and unrelated primary checkout preserved.

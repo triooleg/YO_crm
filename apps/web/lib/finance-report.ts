@@ -47,6 +47,15 @@ export function moneyLabel(value:number|null|undefined,currency:string){
     .formatToParts(minor<0n&&whole===0n?-0:whole).map(part=>part.type==='fraction'?fraction.toString().padStart(2,'0'):part.value).join('');
 }
 export function comparisonPercent(current:number,previous:number){return previous===0?(current===0?0:null):Math.round((current-previous)/Math.abs(previous)*100);}
-export function financeDate(value:string|null|undefined){return value?new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(value)):'—';}
-export function financeMonth(value:string){return new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${value}-01T12:00:00Z`));}
+export function financeDate(value:string|null|undefined){return value?new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(value)).replace(/\s?г\.$/,''):'—';}
+export function financeMonth(value:string){return new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${value}-01T12:00:00Z`)).replace(/\s?г\.$/,'').replace(/^./,letter=>letter.toUpperCase());}
 export class FinanceRequestError extends Error { status:number; constructor(message:string,status:number){super(message);this.status=status;} }
+
+/** Russian date entry must not fall back to the browser's US month/day parser. */
+export function parseFinanceDateInput(value:string):string|null{
+ const parts=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value);
+ if(!parts)return null;
+ const iso=`${parts[3]}-${parts[2]}-${parts[1]}`;
+ const date=new Date(`${iso}T12:00:00Z`);
+ return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===iso?iso:null;
+}

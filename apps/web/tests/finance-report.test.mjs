@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { moveFinanceMonth, financeReportQuery, comparisonPercent, moneyLabel, originalMinor, patchFinanceFilters, FINANCE_PAGE_SIZES } from '../lib/finance-report.ts';
+import { parseFinanceDateInput, moveFinanceMonth, financeReportQuery, comparisonPercent, moneyLabel, originalMinor, patchFinanceFilters, FINANCE_PAGE_SIZES } from '../lib/finance-report.ts';
 
 test('month navigation crosses year boundaries without losing the month',()=>{
   assert.equal(moveFinanceMonth('2026-01',-1),'2025-12');
@@ -52,4 +52,11 @@ test('tab transitions clear only incompatible filters and use API page sizes',()
   for(const tab of ['payments','invoices'])assert.equal(patchFinanceFilters(expense,{tab}).categoryId,'');
   assert.equal(patchFinanceFilters(current,{search:'new'}).clientId,'client-1');
   assert.equal(patchFinanceFilters(current,{page:2}).page,2);
+});
+
+test('Russian date entry preserves day/month and rejects impossible calendar dates',()=>{
+ assert.equal(parseFinanceDateInput('01.03.2026'),'2026-03-01');
+ assert.equal(parseFinanceDateInput('31.12.2027'),'2027-12-31');
+ assert.equal(parseFinanceDateInput('29.02.2024'),'2024-02-29');
+ for(const invalid of ['29.02.2026','31.04.2026','01.13.2026','03/01/2026','01.03.',''])assert.equal(parseFinanceDateInput(invalid),null);
 });

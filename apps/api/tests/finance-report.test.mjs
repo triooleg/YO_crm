@@ -37,6 +37,38 @@ test('mixed original receipts counted once; applied snapshot settles order only;
   assert.equal(result.forecastMinor,8000);
   assert.equal(result.table.rows[0].number,'KC-602');
 });
+
+test('cash income, monthly trend and result use only actual active original receipts',()=>{
+  const data=base({
+    orders:[order({priceMinor:1000000}),order({id:'unpaid',priceMinor:2000000,paymentStatus:'UNPAID'})],
+    payments:[],
+    invoices:['DRAFT','ISSUED','PAID'].map((status,index)=>({id:`invoice-${index}`,number:`INV-${index}`,orderId:'o',order:{number:'KC-602',clientId:'c',client:{displayName:'Клиент'}},issueDate:now,currency:'EUR',totalMinor:500000,status})),
+  });
+  const snapshot=JSON.stringify(data);
+  for(const [currency,received,previous,expenses] of [['EUR',2000,300,1000],['USD',2500,375,1250],['UAH',100000,15000,50000]]){
+    const empty=build(data,{currency});
+    assert.equal(empty.current.receivedMinor,0);
+    assert.equal(empty.current.resultMinor,-expenses);
+    assert.ok(empty.debtMinor>0&&empty.forecastMinor>0&&empty.invoiceTotalMinor>0);
+    assert.ok(empty.monthlyTrend.every(month=>month.receivedMinor===0));
+    const paid=build({...data,payments:[
+      payment('actual',2500,'USD',undefined,{appliedCurrency:'EUR',appliedAmountMinor:1999}),
+      payment('previous',300,'EUR','2026-09-30T23:59:59Z'),
+      payment('future',500,'EUR','2026-11-01T00:00:00Z'),
+      payment('voided',999999,'EUR',undefined,{voidedAt:now}),
+    ]},{currency});
+    assert.equal(paid.current.receivedMinor,received);
+    assert.equal(paid.current.resultMinor,received-expenses);
+    assert.equal(paid.previous.receivedMinor,previous);
+    assert.equal(paid.previous.resultMinor,previous);
+    assert.deepEqual(Array.from(paid.monthlyTrend,month=>[month.month,month.receivedMinor,month.resultMinor]),[
+      ['2026-05',0,0],['2026-06',0,0],['2026-07',0,0],['2026-08',0,0],
+      ['2026-09',previous,previous],['2026-10',received,received-expenses],
+    ]);
+    assert.equal(paid.table.rows.find(row=>row.id==='o').originalPaidMinor,2799);
+  }
+  assert.equal(JSON.stringify(data),snapshot);
+});
 test('half-open months, void/archive exclusions, current debt cohort and forecast horizon',()=>{
   const result=build(base({orders:[order(),order({id:'cancel',salesStatus:'CANCELLED'}),order({id:'completed',salesStatus:'COMPLETED'}),order({id:'refunded',paymentStatus:'REFUNDED'}),order({id:'returned',shippingStatus:'RETURNED'}),order({id:'old',requiredDeliveryAt:date('2026-10-01T00:00:00Z')})],payments:[payment('a',300,'EUR','2026-09-30T23:59:59Z'),payment('b',200),payment('void',999,'EUR',undefined,{voidedAt:now}),payment('next',500,'EUR','2026-11-01T00:00:00Z')],expenses:[expense('e',1000),{...expense('arch',999),archivedAt:now}]}));
   assert.equal(result.current.receivedMinor,200);

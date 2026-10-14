@@ -34,11 +34,11 @@ async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;del
  });return calls;
 }
 
-for(const [width,height] of [[1703,895],[1920,1080],[1440,900],[1366,768],[820,1180],[390,844]])test(`approved finance report keeps controls and bounded layout ${width}`,async({page},info)=>{
+for(const [width,height] of [[1536,1024],[1703,895],[1920,1080],[1440,900],[1366,768],[820,1180],[390,844]])test(`approved finance report keeps controls and bounded layout ${width}`,async({page},info)=>{
  await page.setViewportSize({width,height});const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));const calls=await setup(page);await page.goto('/?section=finance');
  await expect(page.locator('.finance-report-kpi')).toHaveCount(6);await expect(page.getByRole('button',{name:'Предыдущий месяц',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Следующий месяц',exact:true})).toBeVisible();
  await expect(page.locator('.finance-report-table')).toContainText('TEST-001');
- await expect(page.getByText('От даты',{exact:true})).toBeVisible();await expect(page.getByText('До даты',{exact:true})).toBeVisible();
+ await expect(page.getByPlaceholder('От даты',{exact:true})).toBeVisible();await expect(page.getByPlaceholder('До даты',{exact:true})).toBeVisible();
  await expect.poll(()=>page.locator('.finance-report-bar-chart').evaluate((node:SVGSVGElement)=>Math.abs(node.viewBox.baseVal.width-node.clientWidth))).toBeLessThan(2);
  if(width===390)await expect(page.locator('.finance-chart-value')).toHaveCount(0);
  const number=page.locator('.finance-report-table .finance-report-link').first();expect(await number.evaluate(node=>getComputedStyle(node).whiteSpace)).toBe('nowrap');
@@ -121,7 +121,7 @@ test('manual month and year selection preserves currency tab and report filters'
  await page.getByRole('combobox',{name:'Клиент',exact:true}).click();await page.getByRole('option',{name:'Тестовый клиент',exact:true}).click();
  await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:'Выставлен',exact:true}).click();
  const search=page.getByRole('textbox',{name:'Поиск по клиенту, заказу…'});await search.fill('INV-001');
- await page.getByLabel('От даты',{exact:true}).fill('2025-01-01');await page.getByLabel('До даты',{exact:true}).fill('2027-12-31');
+ await page.getByLabel('От даты',{exact:true}).fill('01.01.2025');await page.getByLabel('До даты',{exact:true}).fill('31.12.2027');
  await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('to')).toBe('2027-12-31');
  const before=calls.filter(call=>call.path==='/api/finance/report').at(-1)!.query;
  const currentYear=Number(before.get('month')!.slice(0,4)),targetYear=currentYear%10===0?currentYear+1:currentYear-1;
@@ -130,13 +130,31 @@ test('manual month and year selection preserves currency tab and report filters'
  await page.getByRole('button',{name:String(targetYear),exact:true}).click();
  await page.getByRole('button',{name:/^март\.?$/i}).click();
  await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('month')).toBe(`${targetYear}-03`);
- await expect(trigger).toHaveAttribute('aria-expanded','false');await expect(trigger).toContainText(`март ${targetYear}`);
+ await expect(trigger).toHaveAttribute('aria-expanded','false');await expect(trigger).toContainText(`Март ${targetYear}`);
  const after=calls.filter(call=>call.path==='/api/finance/report').at(-1)!.query;
  for(const key of ['currency','tab','clientId','status','search','from','to'])expect(after.get(key)).toBe(before.get(key));
  await expect(page.getByRole('combobox',{name:'Валюта отчёта'})).toHaveValue('$ USD');
  await expect(page.getByRole('tab',{name:'Инвойсы',exact:true})).toHaveAttribute('aria-selected','true');
  await expect(page.getByRole('combobox',{name:'Клиент',exact:true})).toHaveValue('Тестовый клиент');
  await expect(page.getByRole('combobox',{name:'Статус',exact:true})).toHaveValue('Выставлен');await expect(search).toHaveValue('INV-001');
- await expect(page.getByLabel('От даты',{exact:true})).toHaveValue('2025-01-01');await expect(page.getByLabel('До даты',{exact:true})).toHaveValue('2027-12-31');
+ await expect(page.getByLabel('От даты',{exact:true})).toHaveValue('01.01.2025');await expect(page.getByLabel('До даты',{exact:true})).toHaveValue('31.12.2027');
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+
+test('reference-size layout has readable rows, aligned date controls and working expense month selector',async({page})=>{
+ await page.setViewportSize({width:1536,height:1024});const calls=await setup(page);await page.goto('/?section=finance');
+ await expect(page.locator('.finance-report-kpi')).toHaveCount(6);
+ const controls=await page.locator('.finance-report-filters > *').evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect()).filter(rect=>rect.width&&rect.height).map(rect=>rect.bottom));
+ expect(Math.max(...controls)-Math.min(...controls)).toBeLessThan(2);
+ expect(await page.locator('.finance-report-bar-chart').evaluate((node:SVGSVGElement)=>Math.abs(node.viewBox.baseVal.height-node.clientHeight))).toBeLessThan(2);
+ expect(await page.locator('.finance-report-table tbody td').first().evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12);
+ expect(await page.locator('.finance-report-mini-table td').first().evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12);
+ const initial=calls.filter(call=>call.path==='/api/finance/report').at(-1)!.query.get('month')!;
+ await page.getByRole('button',{name:'Месяц структуры расходов',exact:true}).click();
+ await page.getByRole('button',{name:/^март\.?$/i}).click();
+ await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('month')).toBe(`${initial.slice(0,4)}-03`);
+ await page.getByLabel('От даты',{exact:true}).fill('01.03.2026');await page.getByLabel('От даты',{exact:true}).press('Tab');
+ await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('from')).toBe('2026-03-01');
  expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
 });
