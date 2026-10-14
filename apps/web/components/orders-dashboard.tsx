@@ -4,8 +4,8 @@ import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
-import { orderFormUi, ordersDashboardUi as ui } from "../lib/i18n";
+import { Badge, Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { orderFormUi, ordersDashboardUi as ui, productionUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
@@ -13,6 +13,7 @@ import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, C
 import { CrmSearchField } from "./crm/search-field";
 import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
 import { canOpenOrderFinance } from "../lib/order-context";
+import { orderProductionStatusPresentation } from "../lib/production-view";
 import { orderMeasurementState } from "../lib/order-measurement-state";
 import { ORDER_PAGE_SIZES, type OrderPageSize, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination";
 import { defaultOrderSort, nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
@@ -634,7 +635,12 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") { const received = paid(order), percent = order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div><small className={balance(order) > 0 ? "orders-balance-line" : "orders-paid-line"}>{balance(order) > 0 ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent}%</em></td>; }
-  if (id === "production") return <td className="orders-col orders-col-production" style={style}>{order.productionSlot ? <><strong>{slotDateRange(order)}</strong><CrmStatusBadge domain="production" status={order.productionStatus}/></> : <><small>{ui.notSpecified}</small>{!NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</td>;
+  if (id === "production") {
+    const presentation = orderProductionStatusPresentation(order);
+    const shippingLabels: Record<string, string> = { SHIPPED: productionUi.shippingShipped, DELIVERED: productionUi.shippingDelivered, RETURNED: productionUi.shippingReturned, LOST: productionUi.shippingLost };
+    const badge = presentation.domain === "shipping" ? <Badge component="span" className="crm-status-badge" color={crmStatusPresentation("shipping", presentation.status).color} data-domain="shipping" data-status={presentation.status} radius="xl" size="sm" variant="light">{shippingLabels[presentation.status]}</Badge> : <CrmStatusBadge {...presentation}/>;
+    return <td className="orders-col orders-col-production" style={style}>{order.productionSlot ? <><strong>{slotDateRange(order)}</strong>{badge}</> : <>{presentation.domain === "shipping" ? badge : <small>{ui.notSpecified}</small>}{!NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</td>;
+  }
   if (id === "status") return <td className="orders-col orders-col-status" style={style}><SalesStatusSelect disabled={statusPending} value={order.salesStatus} statuses={SALES_STATUSES} onChange={value => void onStatus(order,value)} /></td>;
   if (id === "delivery") { const shipped = orderHasShippedDelivery(order), tracking = orderTrackingNumber(order); return <td className="orders-col orders-col-delivery" style={style}><UnstyledButton className={shipped ? "orders-delivery-cell-button is-shipped" : "orders-delivery-cell-button"} onClick={onDelivery} aria-label={`${ui.editDeliveryAddress}: ${order.number}`}><strong><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.addressMissing}</strong>{shipped ? <small>{tracking || ui.trackingMissing}</small> : <><small>{deliveryPlace(order)}</small><small>{[order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName, orderLabel("shipping", order.shippingStatus)].filter(Boolean).join(" · ")}</small>{tracking && <small>{tracking}</small>}</>}</UnstyledButton></td>; }
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><strong>{date(order.createdAt)}</strong><small>{ageText(order.createdAt)}</small></td>;

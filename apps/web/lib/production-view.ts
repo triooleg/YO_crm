@@ -22,6 +22,7 @@ export type ProductionOrderView = {
   latestPaymentAt?: string | null;
   hasTrackingNumber: boolean;
   productionStatus: string;
+  salesStatus?: string;
   shippingStatus: string;
   paymentStatus: string;
   priceMinor: number;
@@ -98,18 +99,39 @@ export function paymentPresentation(order: Pick<ProductionOrderView, "paidMinor"
   return { code: "unpaid" as const };
 }
 
-export function shippingPresentation(order: Pick<ProductionOrderView, "requiredDeliveryAt" | "shippedAt" | "deliveredAt" | "hasTrackingNumber" | "shippingStatus">) {
-  if (order.shippingStatus === "RETURNED") return { code: "returned" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : order.shippedAt ? productionIso(order.shippedAt) : order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : null };
-  if (order.shippingStatus === "LOST") return { code: "lost" as const, date: order.shippedAt ? productionIso(order.shippedAt) : order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : null };
-  if (order.deliveredAt) return { code: "delivered" as const, date: productionIso(order.deliveredAt) };
-  if (order.shippedAt) return { code: "shipped" as const, date: productionIso(order.shippedAt) };
-  if (order.hasTrackingNumber) return { code: "tracking" as const, date: order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : null };
+export function shippingPresentation(order: Pick<ProductionOrderView, "requiredDeliveryAt" | "shippedAt" | "deliveredAt" | "hasTrackingNumber" | "shippingStatus" | "salesStatus">) {
+  if (order.shippingStatus === "RETURNED") return { code: "returned" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : order.shippedAt ? productionIso(order.shippedAt) : null };
+  if (order.shippingStatus === "LOST") return { code: "lost" as const, date: order.shippedAt ? productionIso(order.shippedAt) : null };
+  if (order.deliveredAt || order.shippingStatus === "DELIVERED" || order.salesStatus === "DELIVERED") return { code: "delivered" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : null };
+  // Approved production presentation: a tracking number also means dispatched.
+  // Stored statuses and factual timestamps remain independent and unchanged.
+  if (order.shippedAt || ["SHIPPED", "IN_TRANSIT"].includes(order.shippingStatus) || order.salesStatus === "SHIPPED" || order.hasTrackingNumber) return { code: "shipped" as const, date: order.shippedAt ? productionIso(order.shippedAt) : null };
   if (order.requiredDeliveryAt) return { code: "planned" as const, date: productionIso(order.requiredDeliveryAt) };
   return { code: "none" as const, date: null };
 }
 
-export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shippedAt" | "deliveredAt" | "shippingStatus">) {
-  return Boolean(order.shippedAt || order.deliveredAt || ["SHIPPED", "IN_TRANSIT", "DELIVERED", "RETURNED", "LOST"].includes(order.shippingStatus));
+export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shippedAt" | "deliveredAt" | "shippingStatus" | "salesStatus" | "hasTrackingNumber">) {
+  return ["shipped", "delivered", "returned", "lost"].includes(shippingPresentation(order).code);
+}
+
+/** Adapt the existing Orders projection to the shared presentation; never write a status. */
+export function orderProductionStatusPresentation(order: {
+  productionStatus: string;
+  shippingStatus: string;
+  salesStatus?: string;
+  deliveryTrackingCode?: string;
+  shipment?: { trackingNumber?: string; shippedAt?: string; deliveredAt?: string };
+}) {
+  const shipping = shippingPresentation({
+    shippingStatus: order.shippingStatus,
+    salesStatus: order.salesStatus,
+    hasTrackingNumber: Boolean(order.shipment?.trackingNumber?.trim() || order.deliveryTrackingCode?.trim()),
+    shippedAt: order.shipment?.shippedAt,
+    deliveredAt: order.shipment?.deliveredAt,
+  });
+  const statuses = { shipped: "SHIPPED", delivered: "DELIVERED", returned: "RETURNED", lost: "LOST" } as const;
+  if (shipping.code in statuses) return { domain: "shipping" as const, status: statuses[shipping.code as keyof typeof statuses] };
+  return { domain: "production" as const, status: order.productionStatus };
 }
 
 export function sortProductionOrdersByShippingProximity(orders: ProductionOrderView[], today: Date = new Date()) {
@@ -130,7 +152,7 @@ export function groupProductionOrdersBySchedule(orders: ProductionOrderView[]) {
   return [...orders.filter((order) => order.productionSlot), ...orders.filter((order) => !order.productionSlot)];
 }
 
-export function productionSlotTimingPresentation(order: Pick<ProductionOrderView, "productionStatus" | "productionSlot" | "shippedAt" | "deliveredAt" | "shippingStatus">, today: Date = new Date()) {
+export function productionSlotTimingPresentation(order: Pick<ProductionOrderView, "productionStatus" | "productionSlot" | "shippedAt" | "deliveredAt" | "shippingStatus" | "salesStatus" | "hasTrackingNumber">, today: Date = new Date()) {
   const slot = order.productionSlot;
   if (!slot) return null;
   const duration = productionDayDiff(slot.endsAt, slot.startsAt) + 1;
@@ -173,7 +195,7 @@ export function orderMatchesProductionFilters(order: ProductionOrderView, filter
   const queryMatches = haystack.includes(filters.query.trim().toLocaleLowerCase());
   const paymentMatches = filters.payment === "all" || payment === filters.payment;
   const productionMatches = filters.production === "all" || order.productionStatus === filters.production;
-  const shippingMatches = filters.shipping === "all" || shipping === filters.shipping;
+  const shippingMatches = filters.shipping === "all" || (filters.shipping === "tracking" ? order.hasTrackingNumber : shipping === filters.shipping);
   const slotMatches = filters.slot === "all" || slotState === filters.slot;
   const overdue = Boolean(order.requiredDeliveryAt) && productionLocalDate(order.requiredDeliveryAt!) < productionLocalDate(today) && !["shipped", "delivered", "returned"].includes(shipping);
   const deadlineMatches = filters.deadline === "all" || overdue;

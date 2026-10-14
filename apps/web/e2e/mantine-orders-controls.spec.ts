@@ -146,6 +146,35 @@ async function mockOrdersApi(page: Page, detailsFailure?: { status: number; mess
   return updates;
 }
 
+for (const viewport of [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1366, height: 768 }, { name: "mobile", width: 390, height: 844 }]) test(`столбец Производство показывает отправку по общему правилу: ${viewport.name}`, async ({ page }, testInfo) => {
+  await page.setViewportSize(viewport);
+  const updates = await mockOrdersApi(page);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const cases = [
+    { id: "active", salesStatus: "IN_PRODUCTION", shippingStatus: "NOT_READY", expected: "Запланирован" },
+    { id: "sales", salesStatus: "SHIPPED", expected: "Отправлено" },
+    { id: "tracking", deliveryTrackingCode: "TRACK-1", expected: "Отправлено" },
+    { id: "transport", shippingStatus: "SHIPPED", expected: "Отправлено" },
+    { id: "fact", shipment: { shippedAt: "2026-10-14" }, expected: "Отправлено" },
+    { id: "returned", shippingStatus: "RETURNED", deliveryTrackingCode: "TRACK", expected: "Возвращено" },
+    { id: "lost", shippingStatus: "LOST", salesStatus: "DELIVERED", expected: "Утеряно" },
+    { id: "delivered", salesStatus: "DELIVERED", expected: "Доставлено" },
+  ].map(candidate => ({ ...order, productionStatus: "SCHEDULED", productionSlot: { startsAt: "2026-10-02", endsAt: "2026-10-09", tentative: false, locked: false, capacity: 1 }, ...candidate, number: `TEST-${candidate.id}` }));
+  await page.route(/\/api\/orders(?:\?.*)?$/, route => route.fulfill({ json: cases }));
+  await page.goto("/?section=orders");
+  await expect(page.locator(".orders-summary-row")).toHaveCount(cases.length);
+  for (const candidate of cases) {
+    const cell = page.locator(".orders-summary-row").filter({ hasText: candidate.number }).locator(".orders-col-production");
+    await expect(cell.locator(".mantine-Badge-root")).toHaveText(candidate.expected);
+    await expect(cell.locator("strong")).toHaveText("02 окт – 09 окт");
+  }
+  await page.locator(".orders-col-production").last().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath(`orders-production-statuses-${viewport.name}.png`) });
+  expect(updates).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("ошибка параллельного редактирования остаётся в окне заказа", async ({ page }) => {
   await mockOrdersApi(page, { status: 409, message: "Описание или цена уже изменены другим пользователем" });
   await page.goto("/?section=orders");

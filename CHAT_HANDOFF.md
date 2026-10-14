@@ -1,5 +1,15 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-14 — локально: отправка и цветные статусы производства
+
+- Пользователь подтвердил правило отображения: трек-номер ИЛИ статус отправки ИЛИ фактическая дата означают «Отправлено» на странице «Производство» и в одноимённом столбце списка заказов. Returned/Lost сохраняют приоритет; Delivered остаётся доставленным. Сохранённые независимые статусы и даты не переписываются.
+- Общая классификация `shippingPresentation` и адаптер Orders `orderProductionStatusPresentation`; API production projection дополнен только `salesStatus`. Отсутствующая фактическая дата не заменяется плановой. Фильтр наличия трека остаётся независимым.
+- Следующий разрешённый deploy должен обновить и API, и web: web-only не доставит новое поле `salesStatus` производственной выборки. Миграция/seed не требуются; схему и инфраструктуру не менять.
+- Mantine theme окрашивает только badges/полосы/маркеры; фон календарных ячеек и строк, размеры сетки, даты слотов, действия планирования и депозитные правила сохранены. Терминальная подпись видна также в левой сводке, когда слот вне календаря; полный этап доступен в hover/aria.
+- Worktree `D:\CodexData\.codex\worktrees\orders-approved-redesign\YO_crm`, база `9a03a6f`. Старый dirty candidate в primary `D:\Projects\YO_crm` и unrelated `artifacts/` не изменены. Commit/push/deploy этого изменения не выполнялись; production остаётся 0.1.56.
+- RED воспроизведён для status-only отправки и отсутствующего API salesStatus. Финальный `pnpm quality:check` exit0 (API813/web443/database17, typecheck/build), `.local/order-finance-fix/production-status-quality-complete.log`; helper/API26/26 PASS. Полный Production browser29/29 PASS в `production-status-browser-complete.log`, refreshed screenshots трёх viewport и mobile timeline в `apps/web/.local/order-finance-fix/production-browser-complete`.
+- Orders: existing61 PASS в `orders-production-browser-reviewed.log`; три новых сценария первоначально падали на неверном mock route (без query). После исправления только тестового route новые3/3 PASS в `orders-production-browser-final.log`; скриншоты `apps/web/.local/order-finance-fix/orders-production-final`. Не называть исходный полный прогон успешным: результаты подтверждены двумя прогонами. Compatibility/Standards, Regression/Spec, Business и Visual финальный PASS; generated `next-env.d.ts` восстановлен, diff-check PASS. Финальный local release gate1–6,9 PASS без блокеров; live7–8 UNVERIFIED. Commit/push/deploy не выполнялись.
+
 # 2026-10-14 — production deployment CRM 0.1.56: уточнения карточки заказа
 
 - Runtime `15ffe73a1c57a370291a3a27ac218fee5325daef` опубликован origin/main FF и exact-SHA развёрнут. Tag `crm-v0.1.56`, GitHub Release https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.56. Quality Actions38608810115 и CRM release38609351692 success. Deployment разрешён пользователем; commit/publication ранее разрешены в сессии.

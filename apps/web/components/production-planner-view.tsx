@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { ActionIcon, Collapse, HoverCard, Menu, NumberInput, SegmentedControl, Select, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Collapse, HoverCard, Menu, NumberInput, SegmentedControl, Select, TextInput, Tooltip, alpha, useMantineTheme, type MantineTheme } from "@mantine/core";
 import { labels, productionUi } from "../lib/i18n";
 import {
   paymentPresentation,
@@ -20,7 +20,14 @@ import {
   type ProductionSortMode,
 } from "../lib/production-view";
 import { CrmButton } from "./crm/settings-controls";
-import { CrmStatusBadge } from "./crm/status-badge";
+import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
+
+const PAYMENT_COLORS: Record<ReturnType<typeof paymentPresentation>["code"],string> = { unpaid:"red",partial:"yellow",deposit:"green",paid:"green",refunded:"orange",cancelled:"gray" };
+const SHIPPING_COLORS: Record<ReturnType<typeof shippingPresentation>["code"],string> = {none:"gray",planned:"cyan",shipped:"green",delivered:"teal",returned:"orange",lost:"red"};
+function productionStatusStyle(theme:MantineTheme,color:string):CSSProperties {
+  const palette=theme.colors[color] ?? theme.colors.gray!;
+  return {"--production-status-background":alpha(palette[6]!,0.15),"--production-status-text":palette[9],"--production-status-border":palette[3]} as CSSProperties;
+}
 
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const COUNTRY_CODES: Record<string, string> = { ukraine: "UA", украина: "UA", україна: "UA", usa: "US", "united states": "US", "united states of america": "US", "united kingdom": "GB", britain: "GB", "czech republic": "CZ", uae: "AE" };
@@ -201,6 +208,7 @@ function TimelineOrderRow({ order, days, base, selected, onSelect, onDrag, onTog
   onToggleLock: () => void;
   onPreview: (preview?: PreviewPayload) => void;
 }) {
+  const theme=useMantineTheme();
   const slot = order.productionSlot!;
   const start = productionDayDiff(slot.startsAt, base);
   const end = productionDayDiff(slot.endsAt, base);
@@ -208,23 +216,25 @@ function TimelineOrderRow({ order, days, base, selected, onSelect, onDrag, onTog
   const shippingDay = shipping.date ? productionDayDiff(shipping.date, base) : undefined;
   const payment = paymentPresentation(order);
   const isSent = productionOrderIsShipped(order);
+  const stageColor=crmStatusPresentation("production",order.productionStatus).color;
+  const shippingCaption=isSent?shippingLabel(shipping.code):productionUi.shippingSegment;
   const timing = productionSlotTimingPresentation(order)!;
   const duration = timing.duration;
   const shippingGap = shippingDay === undefined ? undefined : shippingDay - end;
   return <div className={`production-order-row ${selected ? "is-selected" : ""}`}>
     <OrderSummary order={order} onSelect={onSelect} onPreview={onPreview}/>
     {end >= 0 && start < days.length && <HoverCard withinPortal shadow="md" openDelay={350} closeDelay={100} position="top" withArrow>
-      <HoverCard.Target><button type="button" className={`timeline-bar production-flow-bar ${slot.tentative ? "tentative" : ""} ${slot.locked ? "locked" : ""} ${isSent ? "is-sent" : order.hasTrackingNumber ? "is-tracked" : ""}`} style={{ gridColumn: `${Math.max(0, start) + 2}/${Math.min(days.length, end + 1) + 2}` }} onClick={(event) => { if (event.currentTarget.dataset.dragged !== "true") onSelect(); }} onPointerDown={(event) => onDrag(order, "move", event)} aria-label={isSent ? `${order.number}: ${productionUi.shippingShipped}` : `${order.number}: ${paymentLabel(payment.code)}, ${productionUi.productionSegment}, ${shippingLabel(shipping.code)}`}>
+      <HoverCard.Target><button type="button" className={`timeline-bar production-flow-bar production-status-color ${slot.tentative ? "tentative" : ""} ${slot.locked ? "locked" : ""} ${isSent ? "is-sent" : order.hasTrackingNumber ? "is-tracked" : ""}`} style={{...productionStatusStyle(theme,isSent?SHIPPING_COLORS[shipping.code]:stageColor), gridColumn: `${Math.max(0, start) + 2}/${Math.min(days.length, end + 1) + 2}` }} onClick={(event) => { if (event.currentTarget.dataset.dragged !== "true") onSelect(); }} onPointerDown={(event) => onDrag(order, "move", event)} aria-label={isSent ? `${order.number}: ${shippingCaption}` : `${order.number}: ${paymentLabel(payment.code)}, ${productionLabel(order.productionStatus)}, ${shippingLabel(shipping.code)}`}>
         <span className="resize left" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "left", event); }}/>
-        {isSent ? <span className="timeline-shipped-segment"><b>{productionUi.shippingShipped}</b></span> : <><span className={`timeline-payment-segment is-${payment.code}`}>▣ <b>{paymentLabel(payment.code)}</b></span><span className="timeline-production-segment">♙ <b>{productionUi.productionSegment}</b><small>{duration} {productionUi.daysShort}</small></span></>}
+        {isSent ? <span className="timeline-shipped-segment production-status-color"><b>{shippingCaption}</b></span> : <><span className={`timeline-payment-segment production-status-color is-${payment.code}`} style={productionStatusStyle(theme,PAYMENT_COLORS[payment.code])}>▣ <b>{paymentLabel(payment.code)}</b></span><span className="timeline-production-segment production-status-color" data-status={order.productionStatus} style={productionStatusStyle(theme,stageColor)}>♙ <b>{productionLabel(order.productionStatus)}</b><small>{duration} {productionUi.daysShort}</small></span></>}
         {slot.locked && <span className="timeline-lock-indicator" aria-label={productionUi.slotLocked}>🔒</span>}
         {!isSent && order.hasTrackingNumber && <span className="timeline-tracking-indicator">{productionUi.trackingAvailable}</span>}
         <span className="resize right" onPointerDown={(event) => { event.stopPropagation(); onDrag(order, "right", event); }}/>
       </button></HoverCard.Target>
-      <HoverCard.Dropdown className="production-slot-preview"><strong>{order.number} · {order.client.displayName}</strong><dl><div><dt>{productionUi.startDate}</dt><dd>{formatDate(slot.startsAt)}</dd></div><div><dt>{productionUi.endDate}</dt><dd>{formatDate(slot.endsAt)}</dd></div><div><dt>{productionUi.totalDuration}</dt><dd>{duration} {productionUi.daysShort}</dd></div><div><dt>{timing.code === "completed" ? productionUi.productionCompleted : timing.code === "overdue" ? productionUi.productionOverdue : productionUi.remainingProduction}</dt><dd>{timing.days} {productionUi.daysShort}</dd></div></dl></HoverCard.Dropdown>
+      <HoverCard.Dropdown className="production-slot-preview"><strong>{order.number} · {order.client.displayName}</strong><dl><div><dt>{productionUi.stage}</dt><dd>{isSent ? shippingCaption : productionLabel(order.productionStatus)}</dd></div><div><dt>{productionUi.startDate}</dt><dd>{formatDate(slot.startsAt)}</dd></div><div><dt>{productionUi.endDate}</dt><dd>{formatDate(slot.endsAt)}</dd></div><div><dt>{productionUi.totalDuration}</dt><dd>{duration} {productionUi.daysShort}</dd></div><div><dt>{timing.code === "completed" ? productionUi.productionCompleted : timing.code === "overdue" ? productionUi.productionOverdue : productionUi.remainingProduction}</dt><dd>{timing.days} {productionUi.daysShort}</dd></div></dl></HoverCard.Dropdown>
     </HoverCard>}
-    {shippingGap !== undefined && shippingGap > 0 && end >= 0 && shippingDay !== undefined && <span className={`timeline-shipping-segment is-${shipping.code}`} style={{ gridColumn: `${Math.max(0, end + 1) + 2}/${Math.min(days.length, shippingDay + 1) + 2}` }}><b>🚚</b><span>{productionUi.shippingSegment}</span></span>}
-    {shippingDay !== undefined && shippingDay >= 0 && shippingDay < days.length && <Tooltip label={`${shippingLabel(shipping.code)}: ${formatDate(shipping.date)}`}><span className={`shipping-date-marker is-${shipping.code}`} style={{ gridColumn: `${shippingDay + 2}/${shippingDay + 3}` }}><b>🚚</b><small>{productionLocalDate(shipping.date!).getDate()}</small></span></Tooltip>}
+    {shippingGap !== undefined && shippingGap > 0 && end >= 0 && shippingDay !== undefined && <span className={`timeline-shipping-segment production-status-color is-${shipping.code}`} style={{...productionStatusStyle(theme,SHIPPING_COLORS[shipping.code]), gridColumn: `${Math.max(0, end + 1) + 2}/${Math.min(days.length, shippingDay + 1) + 2}` }}><b>🚚</b><span>{shippingCaption}</span></span>}
+    {shippingDay !== undefined && shippingDay >= 0 && shippingDay < days.length && <Tooltip label={`${shippingLabel(shipping.code)}: ${formatDate(shipping.date)}`}><span className={`shipping-date-marker production-status-color is-${shipping.code}`} style={{...productionStatusStyle(theme,SHIPPING_COLORS[shipping.code]), gridColumn: `${shippingDay + 2}/${shippingDay + 3}` }}><b>🚚</b><small>{productionLocalDate(shipping.date!).getDate()}</small></span></Tooltip>}
     <Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon className="timeline-row-menu" variant="subtle" aria-label={`${order.number}: ${productionUi.filters}`}>⋮</ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item onClick={onSelect}>{productionUi.selectedOrder}</Menu.Item><Menu.Item onClick={onToggleLock}>{slot.locked ? productionUi.unlockSlot : productionUi.lockSlot}</Menu.Item></Menu.Dropdown></Menu>
   </div>;
 }
@@ -233,12 +243,13 @@ function OrderSummary({ order, onSelect, onPreview }: { order: ProductionOrderVi
   const image = productionOrderImage(order);
   const payment = paymentPresentation(order);
   const quantity = productionOrderQuantity(order);
+  const shipping = shippingPresentation(order);
   const model = order.items.map((item) => item.name).filter(Boolean).join(", ") || order.notes || productionUi.noDescription;
   return <button type="button" className="production-order-summary" onClick={onSelect}>
     <span className="production-order-main">{image ? <img src={image} alt={productionUi.modelImage} onMouseMove={(event) => onPreview?.({ src: event.currentTarget.src, x: event.clientX, y: event.clientY, country: `${countryFlag(order.client.country)} ${order.client.country || productionUi.countryMissing}`, quantity, total: formatMoney(order.priceMinor, order.currency) })} onMouseLeave={() => onPreview?.(undefined)}/> : <i>{productionUi.modelFallback}</i>}<span><strong>{order.number}</strong><small>{countryFlag(order.client.country)} {order.client.country || productionUi.countryMissing}</small></span></span>
     <span className="production-order-description"><b>{order.client.displayName}</b><small title={model}>{model}</small>{quantity > 1 && <em>{quantity} {productionUi.pieces}</em>}</span>
-    <span className={`production-payment-badge is-${payment.code}`}>{paymentLabel(payment.code)}</span>
-    <span className="production-order-shipping">{formatDate(order.requiredDeliveryAt)}</span>
+    <Badge variant="light" component="span" radius="sm" size="sm" color={PAYMENT_COLORS[payment.code]} className={`production-payment-badge is-${payment.code}`}>{paymentLabel(payment.code)}</Badge>
+    <span className="production-order-shipping">{productionOrderIsShipped(order) ? <Tooltip label={`${shippingLabel(shipping.code)}: ${formatDate(shipping.date)}`}><Badge variant="light" component="span" radius="sm" size="xs" color={SHIPPING_COLORS[shipping.code]}>{shippingLabel(shipping.code)}</Badge></Tooltip> : formatDate(order.requiredDeliveryAt)}</span>
   </button>;
 }
 
@@ -259,9 +270,9 @@ export function ProductionOrderDetails({ order, onClose, onOpenOrder, onSaveSlot
     <button type="button" className="production-details-close" aria-label={productionUi.closeDetails} onClick={onClose}>×</button>
     <section className="production-details-identity">{image ? <img src={image} alt={productionUi.modelImage}/> : <i>{productionUi.modelFallback}</i>}<div><small>{productionUi.selectedOrder}</small><h2>{order.number}</h2><b>{countryFlag(order.client.country)} {order.client.displayName}</b><p>{order.items.map((item) => item.name).filter(Boolean).join(", ") || order.notes || productionUi.noDescription}</p><span>{productionUi.items}: {quantity} {productionUi.pieces}</span></div></section>
     <section className="production-lifecycle">
-      <div className={`is-${payment.code}`}><span>✓</span><b>{productionUi.lifecyclePayment}</b><small>{paymentLabel(payment.code)}</small><em>{formatMoney(order.paidMinor, order.currency)} / {formatMoney(order.depositRequiredMinor, order.currency)}</em></div>
-      <div className={`is-${order.productionStatus.toLocaleLowerCase()}`}><span>♙</span><b>{productionUi.lifecycleProduction}</b><small>{productionLabel(order.productionStatus)}</small><em>{order.productionSlot ? `${formatDate(order.productionSlot.startsAt)} – ${formatDate(order.productionSlot.endsAt)}` : "—"}</em></div>
-      <div className={`is-${shipping.code}`}><span>🚚</span><b>{productionUi.lifecycleShipping}</b><small>{shippingLabel(shipping.code)}</small><em>{formatDate(shipping.date)}</em></div>
+      <div className={`is-${payment.code}`}><span>✓</span><b>{productionUi.lifecyclePayment}</b><Badge variant="light" component="small" color={PAYMENT_COLORS[payment.code]} radius="sm" size="sm">{paymentLabel(payment.code)}</Badge><em>{formatMoney(order.paidMinor, order.currency)} / {formatMoney(order.depositRequiredMinor, order.currency)}</em></div>
+      <div className={`is-${order.productionStatus.toLocaleLowerCase()}`}><span>♙</span><b>{productionUi.lifecycleProduction}</b><Badge variant="light" component="small" color={crmStatusPresentation("production",order.productionStatus).color} radius="sm" size="sm">{productionLabel(order.productionStatus)}</Badge><em>{order.productionSlot ? `${formatDate(order.productionSlot.startsAt)} – ${formatDate(order.productionSlot.endsAt)}` : "—"}</em></div>
+      <div className={`is-${shipping.code}`}><span>🚚</span><b>{productionUi.lifecycleShipping}</b><Badge variant="light" component="small" color={SHIPPING_COLORS[shipping.code]} radius="sm" size="sm">{shippingLabel(shipping.code)}</Badge><em>{formatDate(shipping.date)}</em></div>
     </section>
     <section className="production-details-dates"><h3>{productionUi.productionPeriod}</h3>{order.productionSlot ? <>
       <label>{productionUi.startDate}<input type="date" value={productionIso(order.productionSlot.startsAt)} onChange={(event) => onSaveSlot({ ...order.productionSlot!, startsAt: event.currentTarget.value })}/></label>

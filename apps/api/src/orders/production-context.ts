@@ -12,6 +12,7 @@ export const productionOrderSelect = {
   requiredDeliveryAt: true,
   deliveryTrackingCode: true,
   productionStatus: true,
+  salesStatus: true,
   shippingStatus: true,
   priceMinor: true,
   depositRequiredMinor: true,

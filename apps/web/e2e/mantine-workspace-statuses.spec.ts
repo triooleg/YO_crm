@@ -45,7 +45,7 @@ const productionOrder = {
   productionStatus: "ON_HOLD",
   shippingStatus: "READY",
   paymentStatus: "DEPOSIT_PAID",
-  hasTrackingNumber: true,
+  hasTrackingNumber: false,
   priceMinor: 32000,
   depositRequiredMinor: 16000,
   paidMinor: 16000,
@@ -65,7 +65,7 @@ const productionOrder = {
   },
 };
 
-async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: boolean; productionLoadError?: boolean; shippedProductionOrder?: boolean; legacyShippedProductionOrder?: boolean; shippedWithoutTracking?: boolean; denseProduction?: boolean } = {}) {
+async function mockWorkspaceApi(page: Page, options: { trackedProductionOrder?: boolean; lockedProductionSlot?: boolean; productionLoadError?: boolean; shippedProductionOrder?: boolean; legacyShippedProductionOrder?: boolean; shippedWithoutTracking?: boolean; denseProduction?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
   const slotDeletes: unknown[] = [];
@@ -108,6 +108,7 @@ async function mockWorkspaceApi(page: Page, options: { lockedProductionSlot?: bo
       ["/api/shipping", { orders: shippingOrders, carriers: [{ carrier: "NOVA_GLOBAL", label: "Nova Global", enabled: true }, { carrier: "DHL", label: "DHL", enabled: true }] }],
       ["/api/orders/production", [{
         ...productionOrder,
+        ...(options.trackedProductionOrder?{hasTrackingNumber:true}:{}),
         ...(options.shippedProductionOrder ? {
           shippingStatus: "SHIPPED",
           shippedAt: `${productionDate(24)}T12:00:00.000Z`,
@@ -167,7 +168,7 @@ for (const viewport of [
     const { consoleErrors } = await mockWorkspaceApi(page, { productionLoadError: true });
     await page.goto("/?section=production");
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.47");
+    await expect(page.locator(".crm-version")).toContainText(/CRM v\d+\.\d+\.\d+/);
     const alert = page.locator("main.production-page").getByRole("alert");
     await expect(alert).toHaveText("Не удалось загрузить производственную очередь");
     await expect(alert).toHaveClass(/mantine-Alert-root/);
@@ -411,7 +412,7 @@ test("на планшете последний заказ можно прокр�
   expect(geometry!.rowBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry!.detailsTop);
 });
 
-test("отправленный заказ получает серый слот со статусом на всю линию, а количество больше одного видно слева", async ({ page }) => {
+test("отправленный заказ получает цветной слот со статусом на всю линию, а количество больше одного видно слева", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { shippedProductionOrder: true });
   await page.goto("/?section=production");
@@ -431,27 +432,80 @@ for (const viewport of [
   { name: "laptop", width: 1366, height: 768 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
-  test(`любой заказ с трек-номером получает зелёный слот: ${viewport.name}`, async ({ page }, testInfo) => {
+  test(`трек-номер означает отправку в производстве: ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await mockWorkspaceApi(page);
+    await mockWorkspaceApi(page,{trackedProductionOrder:true});
     await page.goto("/?section=production");
 
     const row = page.locator(".production-order-row").filter({ hasText: "YO-26-0103" });
     await expect(row.locator(".production-order-description em")).toHaveCount(0);
-    await expect(row.locator(".timeline-bar")).toHaveClass(/is-tracked/);
-    await expect(row.locator(".timeline-tracking-indicator")).toHaveText("трек ✓");
+    await expect(row.locator(".timeline-bar")).toHaveClass(/is-sent/);
+    await expect(row.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
+    await expect(row.locator(".timeline-tracking-indicator")).toHaveCount(0);
     await expect(row.locator(".timeline-bar")).toBeVisible();
-    expect(await row.locator(".timeline-tracking-indicator").evaluate((indicator) => {
-      const badge = indicator.getBoundingClientRect();
-      const bar = indicator.closest(".timeline-bar")!.getBoundingClientRect();
-      return badge.width > 0 && badge.height > 0 && badge.left >= bar.left && badge.right <= bar.right && badge.top >= bar.top && badge.bottom <= bar.bottom;
-    })).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`tracked-production-${viewport.width}x${viewport.height}.png`) });
   });
 }
 
-test("legacy статус отправки KeyCRM также показывает серый отправленный слот", async ({ page }) => {
+for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",width:1366,height:768},{name:"mobile",width:390,height:844}])test(`статусы производства учитывают статус заказа и трек без окраски ячеек: ${viewport.name}`,async({page},testInfo)=>{
+  await page.setViewportSize(viewport);
+  const {consoleErrors}=await mockWorkspaceApi(page);
+  const cases=[
+    {id:"active",number:"ACTIVE",hasTrackingNumber:false,salesStatus:"IN_PRODUCTION",productionStatus:"ON_HOLD",paidMinor:1000},
+    {id:"sales-shipped",number:"SALES-SHIPPED",hasTrackingNumber:false,salesStatus:"SHIPPED",shippingStatus:"NOT_READY"},
+    {id:"tracking",number:"TRACKING",hasTrackingNumber:true,salesStatus:"ORDER_CONFIRMED",shippingStatus:"LABEL_CREATED"},
+    {id:"transport",number:"TRANSPORT",hasTrackingNumber:false,shippingStatus:"SHIPPED"},
+    {id:"returned",number:"RETURNED",hasTrackingNumber:true,salesStatus:"SHIPPED",shippingStatus:"RETURNED"},
+    {id:"lost",number:"LOST",hasTrackingNumber:true,salesStatus:"DELIVERED",shippingStatus:"LOST"},
+    {id:"delivered",number:"DELIVERED",hasTrackingNumber:false,salesStatus:"DELIVERED",shippingStatus:"NOT_READY"},
+  ].map(candidate=>({...productionOrder,...candidate}));
+  await page.route("**/api/orders/production?*",route=>route.fulfill({json:cases}));
+  await page.goto("/?section=production");
+  await expect(page.locator(".production-order-row")).toHaveCount(cases.length);
+  const active=page.locator(".production-order-row").filter({hasText:"ACTIVE"});
+  await expect(active.locator(".timeline-production-segment")).toContainText("Приостановлено");
+  for(const number of ["SALES-SHIPPED","TRACKING","TRANSPORT"]){
+    const row=page.locator(".production-order-row").filter({hasText:number});
+    await expect(row.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
+    await expect(row.locator(".shipping-date-marker")).toHaveCount(0);
+  }
+  await expect(page.locator(".production-order-row").filter({hasText:"RETURNED"}).locator(".timeline-shipped-segment")).toHaveText("Возвращено");
+  await expect(page.locator(".production-order-row").filter({hasText:"LOST"}).locator(".timeline-shipped-segment")).toHaveText("Утеряно");
+  await expect(page.locator(".production-order-row").filter({hasText:"DELIVERED"}).locator(".timeline-shipped-segment")).toHaveText("Доставлено");
+  for (const number of ["RETURNED", "LOST", "DELIVERED"]) await expect(page.locator(".production-order-row").filter({hasText:number}).locator(".shipping-date-marker")).toHaveCount(0);
+  const geometry=await page.locator(".production-order-row").evaluateAll(rows=>rows.map(row=>({height:row.getBoundingClientRect().height,background:getComputedStyle(row).backgroundColor,grid:getComputedStyle(row).backgroundImage,summary:getComputedStyle(row.querySelector(".production-order-summary")).backgroundColor,barWidth:row.querySelector(".timeline-bar").getBoundingClientRect().width,statusColor:getComputedStyle(row.querySelector(".timeline-bar")).backgroundColor})));
+  expect(new Set(geometry.map(value=>value.height)).size).toBe(1);
+  expect(new Set(geometry.map(value=>value.background)).size).toBe(1);
+  expect(new Set(geometry.map(value=>value.grid)).size).toBe(1);
+  expect(new Set(geometry.map(value=>value.summary)).size).toBe(1);
+  expect(new Set(geometry.map(value=>value.barWidth)).size).toBe(1);
+  expect(geometry[0].statusColor).not.toBe(geometry[1].statusColor);
+  await page.screenshot({path:testInfo.outputPath(`production-statuses-${viewport.name}.png`)});
+  if (viewport.name === "mobile") {
+    await page.locator(".production-board-scroll").evaluate(scroll => {
+      const label = scroll.querySelector(".timeline-shipped-segment b")!.getBoundingClientRect();
+      const summary = scroll.querySelector(".production-order-summary")!.getBoundingClientRect();
+      scroll.scrollLeft += (label.left + label.right) / 2 - (summary.right + scroll.getBoundingClientRect().right) / 2;
+    });
+    await page.screenshot({path:testInfo.outputPath("production-statuses-mobile-timeline.png")});
+  }
+  await page.locator(".production-order-row").filter({hasText:"SALES-SHIPPED"}).locator(".production-order-summary").click();
+  await expect(page.locator(".production-lifecycle .is-shipped small")).toHaveText("Отправлено");
+  await expect(page.locator(".production-details-dates dl div").filter({hasText:"Фактическая отправка"}).locator("dd")).toHaveText("Не указан");
+  expect(consoleErrors).toEqual([]);
+});
+
+test("отправка видна в производстве даже когда слот вне видимого календаря", async ({ page }) => {
+  await mockWorkspaceApi(page);
+  await page.route("**/api/orders/production?*", route => route.fulfill({ json: [{ ...productionOrder, salesStatus: "SHIPPED", productionSlot: { ...productionOrder.productionSlot, startsAt: "2020-01-01", endsAt: "2020-01-07" } }] }));
+  await page.goto("/?section=production");
+  const row = page.locator(".production-order-row");
+  await expect(row.locator(".timeline-bar")).toHaveCount(0);
+  await expect(row.locator(".production-order-shipping .mantine-Badge-root")).toHaveText("Отправлено");
+});
+
+test("legacy статус отправки KeyCRM также показывает цветной отправленный слот", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { legacyShippedProductionOrder: true });
   await page.goto("/?section=production");
@@ -460,7 +514,7 @@ test("legacy статус отправки KeyCRM также показывае�
   await expect(page.locator(".timeline-shipped-segment")).toHaveText("Отправлено");
 });
 
-test("отправленный статус без накладной всё равно показывает серый слот и не показывает отсутствующую страну", async ({ page }) => {
+test("отправленный статус без накладной всё равно показывает цветной слот и не показывает отсутствующую страну", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await mockWorkspaceApi(page, { shippedWithoutTracking: true });
   await page.goto("/?section=production");

@@ -49,6 +49,7 @@ test("загрузка производства делает второй огр
   assert.deepEqual(plain(productionOrderSelect.shipment), { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } });
   assert.equal(productionOrderSelect.deliveryTrackingCode, true);
   assert.equal(productionOrderSelect.shippingStatus, true);
+  assert.equal(productionOrderSelect.salesStatus, true);
   assert.equal(productionOrderSelect.depositRequiredMinor, true);
   assert.equal(productionOrderSelect.paymentStatus, true);
   assert.deepEqual(plain(productionOrderSelect.payments.where), { voidedAt: null });

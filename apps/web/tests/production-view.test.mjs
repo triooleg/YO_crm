@@ -10,6 +10,7 @@ import {
   productionRange,
   productionSlotTimingPresentation,
   shippingPresentation,
+  orderProductionStatusPresentation,
   sortProductionOrdersByShippingProximity,
 } from "../lib/production-view.ts";
 
@@ -32,6 +33,27 @@ const order = (overrides = {}) => ({
   ...overrides,
 });
 
+test("returned/lost status-only does not fabricate an actual date", () => {
+  for (const [shippingStatus, code] of [["RETURNED", "returned"], ["LOST", "lost"]]) {
+    assert.deepEqual(shippingPresentation(order({ shippingStatus, hasTrackingNumber: true, salesStatus: "SHIPPED" })), { code, date: null });
+  }
+});
+
+test("Orders production badge uses the same dispatch evidence without changing stored status", () => {
+  const base = { productionStatus: "SCHEDULED", shippingStatus: "NOT_READY", salesStatus: "NEW_LEAD" };
+  assert.deepEqual(orderProductionStatusPresentation(base), { domain: "production", status: "SCHEDULED" });
+  for (const evidence of [{ salesStatus: "SHIPPED" }, { shippingStatus: "IN_TRANSIT" }, { deliveryTrackingCode: " TRACK " }, { shipment: { trackingNumber: "TRACK" } }, { shipment: { shippedAt: "2026-10-14" } }]) {
+    const candidate = { ...base, ...evidence };
+    assert.deepEqual(orderProductionStatusPresentation(candidate), { domain: "shipping", status: "SHIPPED" });
+    assert.equal(candidate.productionStatus, "SCHEDULED");
+  }
+  assert.deepEqual(orderProductionStatusPresentation({ ...base, deliveryTrackingCode: "   " }), { domain: "production", status: "SCHEDULED" });
+  for (const status of ["DELIVERED", "RETURNED", "LOST"]) {
+    assert.deepEqual(orderProductionStatusPresentation({ ...base, shippingStatus: status, salesStatus: "SHIPPED", deliveryTrackingCode: "TRACK" }), { domain: "shipping", status });
+  }
+  assert.deepEqual(orderProductionStatusPresentation({ ...base, shipment: { deliveredAt: "2026-10-14" } }), { domain: "shipping", status: "DELIVERED" });
+});
+
 test("масштабы календаря меняют реальный диапазон и ширину дня", () => {
   assert.deepEqual(productionRange("day"), { days: 14, dayWidth: 56, shiftDays: 7 });
   assert.deepEqual(productionRange("week"), { days: 28, dayWidth: 40, shiftDays: 14 });
@@ -51,19 +73,32 @@ test("оплата определяется по фактически приме
 
 test("отправка различает план, накладную и фактическую дату", () => {
   assert.deepEqual(shippingPresentation(order()), { code: "planned", date: "2026-10-21" });
-  assert.deepEqual(shippingPresentation(order({ hasTrackingNumber: true })), { code: "tracking", date: "2026-10-21" });
+  assert.deepEqual(shippingPresentation(order({ hasTrackingNumber: true })), { code: "shipped", date: null });
   assert.deepEqual(shippingPresentation(order({ shippedAt: "2026-10-20" })), { code: "shipped", date: "2026-10-20" });
   assert.deepEqual(shippingPresentation(order({ deliveredAt: "2026-10-23" })), { code: "delivered", date: "2026-10-23" });
   assert.deepEqual(shippingPresentation(order({ shippingStatus: "RETURNED", deliveredAt: "2026-10-23" })), { code: "returned", date: "2026-10-23" });
   assert.deepEqual(shippingPresentation(order({ shippingStatus: "LOST", shippedAt: "2026-10-20" })), { code: "lost", date: "2026-10-20" });
 });
 
+test("транспортный статус без фактической даты не подменяется плановой отправкой", () => {
+  for(const shippingStatus of ["SHIPPED","IN_TRANSIT"])
+    assert.deepEqual(shippingPresentation(order({shippingStatus,shippedAt:null})),{code:"shipped",date:null});
+  assert.deepEqual(shippingPresentation(order({shippingStatus:"DELIVERED",deliveredAt:null})),{code:"delivered",date:null});
+});
+
 test("отправленный производственный слот определяется фактом или статусом отправки", () => {
+  assert.equal(productionOrderIsShipped(order({salesStatus:"SHIPPED",shippingStatus:"NOT_READY",hasTrackingNumber:false})),true);
+  assert.deepEqual(shippingPresentation(order({salesStatus:"SHIPPED",shippingStatus:"NOT_READY",hasTrackingNumber:true})),{code:"shipped",date:null});
+  assert.deepEqual(shippingPresentation(order({salesStatus:"DELIVERED",shippingStatus:"NOT_READY",hasTrackingNumber:true})),{code:"delivered",date:null});
+  assert.equal(productionOrderIsShipped(order({salesStatus:"READY_TO_SHIP",shippingStatus:"LABEL_CREATED",hasTrackingNumber:false})),false);
   assert.equal(productionOrderIsShipped(order({ shippedAt: "2026-10-20" })), true);
   assert.equal(productionOrderIsShipped(order({ shippingStatus: "SHIPPED", shippedAt: null })), true);
   assert.equal(productionOrderIsShipped(order({ shippingStatus: "IN_TRANSIT", shippedAt: null })), true);
   assert.equal(productionOrderIsShipped(order({ shippingStatus: "DELIVERED", deliveredAt: "2026-10-22" })), true);
-  assert.equal(productionOrderIsShipped(order({ hasTrackingNumber: true, shippingStatus: "LABEL_CREATED" })), false);
+  assert.equal(productionOrderIsShipped(order({ hasTrackingNumber: true, shippingStatus: "LABEL_CREATED" })), true);
+  assert.equal(productionOrderIsShipped(order({hasTrackingNumber:false,shippingStatus:"LABEL_CREATED"})),false);
+  assert.equal(shippingPresentation(order({hasTrackingNumber:true,salesStatus:"SHIPPED",shippingStatus:"RETURNED"})).code,"returned");
+  assert.equal(shippingPresentation(order({hasTrackingNumber:true,salesStatus:"DELIVERED",shippingStatus:"LOST",deliveredAt:"2026-10-23"})).code,"lost");
 });
 
 test("KPI имеют явный знаменатель и считают загрузку слотами", () => {
