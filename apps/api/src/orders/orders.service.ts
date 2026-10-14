@@ -188,7 +188,7 @@ export class OrdersService {
     if (!order) throw new NotFoundException("Заказ не найден");
     const paymentHistory = await this.prisma.payment.findMany({
       where: { orderId },
-      select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true, voidedAt: true, voidReason: true, createdAt: true },
+      select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true, voidedAt: true, voidReason: true, createdAt: true, sourceSystem: true, sourceAccount: true, externalId: true },
       orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
     });
     const items = order.items.map(({ athlete, measurement, ...item }) => {
@@ -199,7 +199,8 @@ export class OrdersService {
     const legacyAthlete = order.athlete && !order.athlete.archivedAt && order.athlete.clientId === order.client.id ? order.athlete : null;
     const measurementHistory = legacyAthlete?.measurements ?? [];
     const athlete = legacyAthlete ? { id: legacyAthlete.id, firstName: legacyAthlete.firstName, lastName: legacyAthlete.lastName } : null;
-    return { ...order, athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory, measurementHistory };
+    const presentedPaymentHistory = paymentHistory.map(({ sourceSystem, sourceAccount, externalId, ...payment }) => ({ ...payment, isImported: Boolean(sourceSystem || sourceAccount || externalId), canVoid: !payment.voidedAt && !sourceSystem && !sourceAccount && !externalId }));
+    return { ...order, athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
   }
 
   async productionList(orderId?: string, from?: string, to?: string) {
@@ -571,6 +572,37 @@ export class OrdersService {
         if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
       }
       return payment;
+    });
+  }
+
+  async voidPayment(orderId: string, paymentId: string, dto: { reason: string; expectedOrderUpdatedAt: string }, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true, invoices: { where: { status: "PAID" } }, items: { include: { instances: { where: { archivedAt: null } } } } } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (order.updatedAt.toISOString() !== new Date(dto.expectedOrderUpdatedAt).toISOString()) throw new ConflictException("Заказ уже изменён. Обновите данные перед отменой оплаты");
+      const payment = await tx.payment.findFirst({ where: { id: paymentId, orderId } });
+      if (!payment) throw new NotFoundException("Оплата не найдена в этом заказе");
+      if (payment.sourceSystem || payment.sourceAccount || payment.externalId) throw new ConflictException("Импортированные оплаты нельзя отменять в YO CRM");
+      if (payment.voidedAt) throw new ConflictException("Оплата уже отменена");
+      const reason = dto.reason.trim();
+      if (reason.length < 2 || reason.length > 500) throw new BadRequestException("Укажите причину отмены оплаты (2–500 символов)");
+      const remaining = order.payments.filter(entry => entry.id !== paymentId);
+      const paidMinor = remaining.reduce((sum, entry) => sum + appliedPaymentMinor(entry, order.currency), 0);
+      for (const currency of new Set(order.invoices.map(invoice => invoice.currency))) {
+        const allocated = order.invoices.filter(invoice => invoice.currency === currency).reduce((sum, invoice) => sum + invoice.totalMinor, 0);
+        if (remaining.reduce((sum, entry) => sum + appliedPaymentMinor(entry, currency), 0) < allocated) throw new ConflictException("Отмена нарушит оплату закрытых инвойсов. Сначала согласуйте финансовую корректировку");
+      }
+      const committed = new Set<string>(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
+      const hasCommittedProduction = Boolean(order.productionSlot && !order.productionSlot.tentative) || committed.has(order.productionStatus) || order.items.some(item => committed.has(item.productionStatus) || item.instances.some(instance => committed.has(instance.productionStatus)));
+      if (requiresProduction(order.type) && paidMinor < order.depositRequiredMinor && hasCommittedProduction) throw new ConflictException("После отмены не хватит предоплаты для подтверждённого производства. Сначала согласуйте корректировку производства");
+      const updated = await tx.payment.update({ where: { id: paymentId }, data: { voidedAt: new Date(), voidReason: reason } });
+      const paymentStatus = paidMinor === 0 ? "UNPAID" : paidMinor >= order.priceMinor ? "PAID" : paidMinor >= order.depositRequiredMinor ? "DEPOSIT_PAID" : "PARTIALLY_PAID";
+      const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { paymentStatus } });
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, actorId: actor.id, type: "PAYMENT_VOIDED", summary: "Отменена ручная оплата YO CRM", metadata: { paymentId, reason, paidMinor, currency: order.currency } } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Payment", entityId: paymentId, before: payment, after: updated } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { paymentStatus: order.paymentStatus }, after: { paymentStatus } } });
+      return { payment: updated, paymentStatus, paidMinor, orderUpdatedAt: updatedOrder.updatedAt };
     });
   }
 

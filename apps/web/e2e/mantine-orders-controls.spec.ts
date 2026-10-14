@@ -480,6 +480,128 @@ test("общий редактор сохраняет автоматическо�
   expect(updates[1]).toMatchObject({ path: `/api/clients/${order.client.id}/athletes/athlete-new/measurements`, body: { standardHeight: 140, m1: 70, m2: 58, m3: 74, m8: 20.5, m15: 125 } });
 });
 
+for (const viewport of [{width:1920,height:1080},{width:1366,height:768},{width:390,height:844}]) {
+test(`финансы отменяют только ручную оплату и сохраняют историю без перезагрузки ${viewport.width}`, async ({page}, testInfo) => {
+  await page.setViewportSize(viewport);
+  const telemetry={listGets:0};
+  await mockOrdersApi(page,undefined,telemetry);
+  const detail=richOrderDetail(order);
+  const imported={...detail.payments[0],id:"imported-constant",canVoid:false,isImported:true,notes:"Импортированная константа"};
+  const manual={...detail.payments[0],id:"manual-void",amountMinor:2500,canVoid:true,isImported:false,notes:"Ручная оплата"};
+  let current={...detail,updatedAt:"2026-10-14T10:00:00.000Z",payments:[imported,manual],paymentHistory:[imported,manual]};
+  await page.route(`**/api/orders/${order.id}`,route=>route.fulfill({json:current}));
+  const writes:Record<string,unknown>[]=[];
+  await page.route(`**/api/orders/${order.id}/payments/manual-void/void`,async route=>{
+    const body=route.request().postDataJSON();writes.push(body);
+    const cancelled={...manual,voidedAt:"2026-10-14T11:00:00Z",voidReason:body.reason,canVoid:false};
+    current={...current,updatedAt:"2026-10-14T11:00:00Z",payments:[imported],paymentHistory:[imported,cancelled]};
+    await route.fulfill({json:{payment:cancelled,paymentStatus:"DEPOSIT_PAID",paidMinor:22500,orderUpdatedAt:current.updatedAt}});
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Финансы",exact:true}).click();
+  await expect(page.locator(".orders-payment-row")).toHaveCount(2);
+  await expect(page.getByRole("button",{name:/Действия оплаты:/})).toHaveCount(1);
+  await expect(page.locator(".orders-payment-row").first()).toContainText("Импортированная оплата");
+  await page.getByRole("button",{name:"Действия оплаты: manual-void",exact:true}).click();
+  await page.getByRole("menuitem",{name:"Отменить оплату",exact:true}).click();
+  const dialog=page.getByRole("dialog",{name:"Отмена ручной оплаты"});
+  await expect(dialog.getByRole("button",{name:"Отменить оплату",exact:true})).toBeDisabled();
+  await dialog.getByLabel("Причина отмены").fill("Ошибочная запись");
+  await page.screenshot({path:screenshotPath(testInfo,`payment-void-confirm-${viewport.width}.png`)});
+  await dialog.getByRole("button",{name:"Отменить оплату",exact:true}).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".orders-payment-row.is-voided")).toContainText("Ошибочная запись");
+  await expect(page.getByRole("button",{name:/Действия оплаты:/})).toHaveCount(0);
+  expect(writes).toEqual([{reason:"Ошибочная запись",expectedOrderUpdatedAt:"2026-10-14T10:00:00.000Z"}]);
+  expect(telemetry.listGets).toBe(1);
+  await expect(page.locator(".orders-finance-summary")).toContainText("225,00");
+  await page.locator(".orders-tab-finance-approved").screenshot({path:screenshotPath(testInfo,`finance-approved-${viewport.width}.png`)});
+  if(viewport.width===390)for(const target of [".orders-finance-summary",".orders-finance-side",".orders-finance-bottom",".orders-finance-summary-strip"]){await page.locator(target).scrollIntoViewIfNeeded();await page.screenshot({path:screenshotPath(testInfo,`finance-mobile-${target.slice(1)}.png`)});}
+});
+
+test(`экземпляры дизайна показывают четыре привязанные базовые мерки вместо даты и цены ${viewport.width}`, async ({page}, testInfo) => {
+  await page.setViewportSize(viewport);
+  await mockOrdersApi(page, undefined, undefined, {richDetail:true});
+  const detail=richOrderDetail(order);
+  detail.client.athletes[0].measurements=[{...detail.items[0].measurement,id:"profile-latest",values:{m1:99,m2:99,m3:99,m15:99}}];
+  detail.items[0].instances[0].measurement={...detail.items[0].measurement,values:{m1:70.5,m2:58,m3:74,m15:125}};
+  await page.route(`**/api/orders/${order.id}`, route=>route.fulfill({json:detail}));
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Дизайны (1)",exact:true}).click();
+  const row=page.locator(".orders-instance-row").first();
+  await expect(row.locator(".orders-instance-measurements strong")).toHaveText(["70,5 см","58 см","74 см","125 см"]);
+  await expect(row).not.toContainText("99 см");
+  await expect(row).not.toContainText("450,00");
+  await expect(row).not.toContainText("05 сент.");
+  const action=row.getByRole("button").last();
+  await action.scrollIntoViewIfNeeded();
+  const rowBox=await row.boundingBox(),actionBox=await action.boundingBox();
+  expect(actionBox!.x+actionBox!.width).toBeLessThanOrEqual(rowBox!.x+rowBox!.width+1);
+  await expect(action).toBeInViewport();
+  await row.screenshot({path:screenshotPath(testInfo,`instance-core-measurements-${viewport.width}.png`)});
+});
+}
+
+for(const failure of ["conflict","refresh"] as const)test(`отмена оплаты сохраняет корректное состояние при ошибке ${failure}`,async ({page})=>{
+  await mockOrdersApi(page);
+  const detail=richOrderDetail(order);
+  const manual={...detail.payments[0],id:"manual-safe",canVoid:true,isImported:false};
+  let submitted=0;
+  await page.route(`**/api/orders/${order.id}`,route=>submitted&&failure==="refresh"?route.fulfill({status:503,json:{message:"Детали недоступны"}}):route.fulfill({json:{...detail,updatedAt:"2026-10-14T10:00:00.000Z",payments:[manual],paymentHistory:[manual]}}));
+  await page.route(`**/api/orders/${order.id}/payments/manual-safe/void`,route=>{
+    submitted++;
+    return failure==="conflict"?route.fulfill({status:409,json:{message:"Заказ уже изменён"}}):route.fulfill({json:{payment:{...manual,canVoid:false,voidedAt:"2026-10-14T11:00:00Z",voidReason:"Ошибка"},paymentStatus:"UNPAID",paidMinor:0,orderUpdatedAt:"2026-10-14T11:00:00Z"}});
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Финансы",exact:true}).click();
+  await page.getByRole("button",{name:"Действия оплаты: manual-safe",exact:true}).click();
+  await page.getByRole("menuitem",{name:"Отменить оплату",exact:true}).click();
+  const dialog=page.getByRole("dialog",{name:"Отмена ручной оплаты"});
+  await dialog.getByLabel("Причина отмены").fill("Ошибка");
+  await dialog.getByRole("button",{name:"Отменить оплату",exact:true}).click();
+  if(failure==="conflict"){
+    await expect(dialog).toContainText("Заказ уже изменён");
+    await expect(page.locator(".orders-payment-row.is-voided")).toHaveCount(0);
+    await expect(page.locator(".orders-finance-summary")).toContainText("225,00");
+  }else{
+    await expect(dialog).toBeHidden();
+    await expect(page.locator(".orders-payment-row.is-voided")).toContainText("Ошибка");
+    await expect(page.getByRole("button",{name:/Действия оплаты:/})).toHaveCount(0);
+    await expect(page.locator(".orders-finance-summary")).toContainText("0,00");
+  }
+  expect(submitted).toBe(1);
+});
+
+test("финансовая заметка подхватывает поздние детали и обновляет существующую запись", async ({page})=>{
+  await mockOrdersApi(page);
+  const detail=richOrderDetail(order);
+  const note={...detail.notesStructured[0],id:"finance-note",category:"FINANCE",title:"Финансовые заметки",body:"Существующая заметка"};
+  detail.notesStructured=[note];
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  const writes:{method:string;path:string;body:Record<string,unknown>}[]=[];
+  await page.route(`**/api/orders/${order.id}`,async route=>{await gate;await route.fulfill({json:detail});});
+  await page.route(`**/api/order-tabs/${order.id}/notes**`,async route=>{
+    const body=route.request().postDataJSON();
+    writes.push({method:route.request().method(),path:new URL(route.request().url()).pathname,body});
+    await route.fulfill({json:{...note,...body,updatedAt:"2026-10-14T12:00:00.000Z"}});
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Финансы",exact:true}).click();
+  const editor=page.locator(".orders-finance-bottom textarea");
+  await expect(editor).toBeDisabled();
+  release();
+  await expect(editor).toHaveValue(note.body);
+  await editor.fill("Уточнённая заметка");
+  await page.locator(".orders-finance-bottom").getByRole("button",{name:"Сохранить",exact:true}).click();
+  await expect.poll(()=>writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({method:"PATCH",path:`/api/order-tabs/${order.id}/notes/finance-note`,body:{body:"Уточнённая заметка",expectedUpdatedAt:note.updatedAt}});
+});
+
 test("карточка заказа сохраняет утверждённую геометрию на рабочих разрешениях", async ({ page }, testInfo) => {
   await mockOrdersApi(page, undefined, undefined, { richDetail: true });
   for (const viewport of [

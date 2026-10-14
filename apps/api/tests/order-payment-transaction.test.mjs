@@ -41,6 +41,69 @@ const orderRequire = specifier => {
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
 const { OrdersService } = ordersModule.exports;
 
+test("ручная отмена оплаты сохраняет чек, пересчитывает остаток и записывает аудит", async () => {
+  const payment = { id: "manual-1", orderId: "order-void", amountMinor: 3500, currency: "EUR", method: "BANK_TRANSFER", receivedAt: new Date("2026-10-14T10:00:00Z"), sourceSystem: null, sourceAccount: null, externalId: null, voidedAt: null };
+  const order = { id: "order-void", clientId: "client-void", currency: "EUR", priceMinor: 39000, depositRequiredMinor: 19500, paymentStatus: "DEPOSIT_PAID", updatedAt: new Date("2026-10-14T11:00:00Z"), productionStatus: "NOT_SCHEDULED", productionSlot: null, invoices: [], items: [], payments: [payment] };
+  const writes = { payments: [], orders: [], activities: [], audits: [], locks: [] };
+  const tx = { $executeRawUnsafe: async (...args) => writes.locks.push(args), order: { findFirst: async () => order, update: async value => { writes.orders.push(value); return { ...order, ...value.data }; } }, payment: { findFirst: async () => payment, update: async value => { writes.payments.push(value); return { ...payment, ...value.data }; } }, activity: { create: async value => writes.activities.push(value) }, auditLog: { create: async value => writes.audits.push(value) } };
+  const service = new OrdersService({ $transaction: callback => callback(tx) }, {});
+  await service.voidPayment(order.id, payment.id, { reason: "Ошибочная ручная запись", expectedOrderUpdatedAt: order.updatedAt.toISOString() }, { id: "owner-void" });
+  assert.equal(writes.payments.length, 1);
+  assert.deepEqual(Object.keys(writes.payments[0].data).sort(), ["voidReason", "voidedAt"]);
+  assert.equal(writes.payments[0].data.voidReason, "Ошибочная ручная запись");
+  assert.equal(writes.orders[0].data.paymentStatus, "UNPAID");
+  assert.equal(writes.activities[0].data.type, "PAYMENT_VOIDED");
+  assert.equal(writes.activities[0].data.actorId, "owner-void");
+  assert.ok(writes.audits.some(entry => entry.data.entityType === "Payment"));
+  assert.equal(writes.locks[0][1], order.id);
+});
+
+function cancellationFixture({paymentPatch={},orderPatch={},remaining=[]}={}) {
+  const payment={id:"manual-cancel",orderId:"cancel-order",amountMinor:3500,currency:"EUR",sourceSystem:null,sourceAccount:null,externalId:null,voidedAt:null,...paymentPatch};
+  const order={id:"cancel-order",clientId:"cancel-client",type:"CUSTOM_ORDER",currency:"EUR",priceMinor:39000,depositRequiredMinor:19500,paymentStatus:"DEPOSIT_PAID",updatedAt:new Date("2026-10-14T10:00:00Z"),productionStatus:"NOT_SCHEDULED",productionSlot:null,invoices:[],items:[],payments:[payment,...remaining],...orderPatch};
+  const writes=[];
+  const tx={$executeRawUnsafe:async()=>{},order:{findFirst:async()=>order,update:async({data})=>{writes.push({entity:"Order",data});return {...order,...data,updatedAt:new Date("2026-10-14T11:00:00Z")};}},payment:{findFirst:async({where})=>where.orderId===payment.orderId?payment:null,update:async({data})=>{writes.push({entity:"Payment",data});return {...payment,...data};}},activity:{create:async value=>writes.push({entity:"Activity",...value})},auditLog:{create:async value=>writes.push({entity:"Audit",...value})}};
+  return {service:new OrdersService({$transaction:callback=>callback(tx)},{}),order,payment,writes,tx};
+}
+
+for(const paymentPatch of [{sourceSystem:"KEYCRM"},{sourceAccount:"external-account"},{externalId:"external-payment"},{voidedAt:new Date()},{orderId:"foreign-order"}]) {
+  test(`отмена оплаты отклоняет provider/foreign/voided состояние ${JSON.stringify(paymentPatch)}`,async()=>{
+    const {service,order,payment,writes}=cancellationFixture({paymentPatch});
+    await assert.rejects(service.voidPayment(order.id,payment.id,{reason:"Ошибка",expectedOrderUpdatedAt:order.updatedAt.toISOString()},{id:"owner"}));
+    assert.deepEqual(writes,[]);
+  });
+}
+
+test("отмена оплаты отклоняет устаревший заказ до финансовых изменений",async()=>{
+  const {service,order,payment,writes}=cancellationFixture();
+  await assert.rejects(service.voidPayment(order.id,payment.id,{reason:"Ошибка",expectedOrderUpdatedAt:"2026-10-13T10:00:00Z"},{id:"owner"}),/уже изменён/);
+  assert.deepEqual(writes,[]);
+});
+
+for(const orderPatch of [{productionSlot:{tentative:false}},{productionStatus:"SEWING"},{items:[{productionStatus:"NOT_SCHEDULED",instances:[{productionStatus:"READY"}]}]},{invoices:[{currency:"EUR",totalMinor:1}]}]) {
+  test(`отмена защищает подтверждённое производство или оплаченные инвойсы ${JSON.stringify(orderPatch)}`,async()=>{
+    const {service,order,payment,writes}=cancellationFixture({orderPatch});
+    await assert.rejects(service.voidPayment(order.id,payment.id,{reason:"Ошибка",expectedOrderUpdatedAt:order.updatedAt.toISOString()},{id:"owner"}));
+    assert.deepEqual(writes,[]);
+  });
+}
+
+test("отмена использует сохранённую валютную сумму и не запрашивает новый курс",async()=>{
+  const {service,order,payment,writes}=cancellationFixture({remaining:[{id:"fx",currency:"USD",amountMinor:10000,appliedCurrency:"EUR",appliedAmountMinor:9400}]});
+  const result=await service.voidPayment(order.id,payment.id,{reason:"Ошибка",expectedOrderUpdatedAt:order.updatedAt.toISOString()},{id:"owner"});
+  assert.equal(result.paidMinor,9400);assert.equal(result.paymentStatus,"PARTIALLY_PAID");
+  assert.equal(writes.filter(entry=>entry.entity==="Payment").length,1);
+  assert.equal(result.orderUpdatedAt.toISOString(),"2026-10-14T11:00:00.000Z");
+});
+
+test("ручная отмена ограничена RBAC и KeyCRM не перепривязывает отменённый ручной чек",()=>{
+  const controller=readFileSync(new URL("../src/orders/orders.controller.ts",import.meta.url),"utf8");
+  assert.match(controller,/@Post\(":id\/payments\/:paymentId\/void"\) @Roles\("OWNER", "ADMIN", "ACCOUNTANT"\)/);
+  assert.match(controller,/@UseGuards\(SessionGuard, RolesGuard\)/);
+  const keycrm=readFileSync(new URL("../src/keycrm/keycrm.service.ts",import.meta.url),"utf8");
+  assert.match(keycrm,/sourceSystem: null, externalId: null, voidedAt: null, amountMinor:/);
+});
+
 const effectiveDate = (() => {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
   const value = type => parts.find(part => part.type === type)?.value;

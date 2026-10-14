@@ -217,7 +217,12 @@
 @media(max-width:1300px){.orders-dashboard-table .orders-expanded-row .orders-approved-expanded{min-width:1080px}.orders-design-card{grid-template-columns:1fr}.orders-design-summary{border-right:0;border-bottom:1px solid #e5dfef}.orders-tab-measurements-approved{grid-template-columns:220px minmax(500px,1fr)}.orders-measurement-side{grid-column:1/-1;grid-template-columns:1fr 1fr}.orders-tab-client-approved,.orders-tab-delivery-approved{grid-template-columns:240px minmax(500px,1fr)}.orders-client-side,.orders-delivery-side{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}.orders-tab-notes-approved{grid-template-columns:210px minmax(520px,1fr)}.orders-note-editor-placeholder{grid-column:1/-1}}
 @media(max-width:900px){.orders-dashboard-table .orders-expanded-row .orders-approved-expanded{min-width:980px}.orders-tab-details-approved>.orders-approved-card,.orders-tab-details-approved>.orders-approved-card:first-child{grid-column:span 4}.orders-tab-span-8{grid-column:span 8}.orders-tab-span-4{grid-column:span 4}.orders-tab-measurements-approved{grid-template-columns:210px minmax(490px,1fr)}.orders-approved-measurement-grid{grid-template-columns:repeat(3,minmax(105px,1fr))}.orders-finance-calculation{grid-column:span 7}.orders-finance-summary{grid-column:span 5}.orders-finance-side{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}}
 .orders-approved-measurement-grid>div.is-sleeve{border-color:#a8d8ec;background:#f0faff}
-.orders-instance-row{grid-template-columns:36px repeat(3,minmax(80px,1fr)) auto 30px}
+.orders-instance-row{grid-template-columns:36px minmax(90px,.7fr) minmax(240px,2fr) auto 36px}
+.orders-instance-measurements{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;min-width:0}
+.orders-instance-measurements>span{display:grid;align-content:start;gap:3px;min-width:0}
+.orders-instance-measurements small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.orders-instance-measurements strong{white-space:nowrap}
+@media(max-width:900px){.orders-instance-row{grid-template-columns:32px minmax(80px,1fr) auto 30px}.orders-instance-measurements{grid-column:2/-1;grid-row:2;grid-template-columns:repeat(2,minmax(0,1fr))}}
 .orders-instance-assignment-form,.orders-client-preferences-form,.orders-shipment-form{display:grid;gap:12px}
 .orders-instance-assignment-form>p,.orders-client-preferences-form>p{margin:0;color:#6f6585;font-size:12px}
 .orders-instance-assignment-form>footer,.orders-client-preferences-form>footer,.orders-shipment-form>footer{display:flex;justify-content:flex-end;gap:8px}
@@ -285,6 +290,54 @@
 .orders-measurement-history-compact p strong{color:var(--text)}
 .orders-measurement-history-compact>li>small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);margin-top:5px}
 
+.orders-tab-finance-approved{grid-template-columns:minmax(0,1.4fr) minmax(210px,.52fr) minmax(0,1.05fr);gap:10px}
+.orders-tab-finance-approved>.orders-finance-calculation,.orders-tab-finance-approved>.orders-finance-summary,.orders-tab-finance-approved>.orders-finance-side{grid-column:auto;min-width:0}
+.orders-finance-calculation,.orders-finance-summary{align-self:stretch}
+.orders-finance-side{align-content:start}
+.orders-finance-scroll{min-width:0;overflow-x:auto}
+.orders-finance-table{min-width:460px}
+.orders-finance-table>header,.orders-finance-table>div{grid-template-columns:minmax(170px,1fr) 65px 85px 85px 28px;gap:8px;padding:10px 0}
+.orders-finance-table>header{background:#fbfaff}
+.orders-finance-table>div>span:first-child{min-width:0}
+.orders-finance-table>div>span:first-child>strong{overflow:hidden;text-overflow:ellipsis}
+.orders-finance-subheading{font-size:12px;margin:12px 0 3px;padding:7px 0;border-top:1px solid var(--line)}
+.orders-finance-empty-line,.orders-finance-footnote{color:var(--muted);font-size:11px}
+.orders-finance-calculation>.crm-button{margin-top:14px}
+.orders-finance-summary .orders-approved-money{padding:9px 0}
+.orders-finance-summary .orders-approved-money.is-strong{background:#f2edff;border-radius:7px;margin:10px 0 0;padding:9px;font-size:15px}
+.orders-finance-currency{display:grid;grid-template-columns:1fr auto;align-items:center;gap:6px;background:#f7f4ff;border-radius:7px;padding:10px;margin-top:20px}
+.orders-finance-currency>small{grid-column:1/-1;color:var(--muted)}
+.orders-finance-progress-label{color:var(--violet)}
+.orders-finance-payments{min-width:390px}
+.orders-finance-payments>header,.orders-finance-payments>.orders-payment-row{display:grid;grid-template-columns:80px 64px minmax(56px,.9fr) 64px minmax(58px,1fr) 24px;gap:5px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:11px}
+.orders-finance-payments>header{background:#fbfaff;color:var(--muted);border-top:0}
+.orders-finance-payments .orders-payment-row>span{display:block;min-width:0}
+.orders-payment-comment{overflow-wrap:anywhere;font-size:10px}
+.orders-payment-comment>small{display:block}
+.orders-finance-payments .orders-payment-row>.mantine-Badge-root{display:inline-flex;max-width:100%}
+.orders-payment-row.is-voided{color:var(--muted)}
+.orders-payment-row.is-voided>b{text-decoration:line-through}
+.orders-finance-expenses,.orders-finance-invoices{min-width:370px}
+.orders-finance-expenses>header,.orders-finance-expenses>div{display:grid;grid-template-columns:80px minmax(70px,1fr) 68px 40px minmax(60px,1fr);gap:5px;padding:8px 0;border-top:1px solid var(--line);font-size:11px;align-items:center}
+.orders-finance-invoices>header,.orders-finance-invoices>.orders-invoice-row{display:grid;grid-template-columns:minmax(84px,1fr) 80px 68px 70px 60px;gap:5px;padding:8px 0;border-top:1px solid var(--line);font-size:11px;align-items:center}
+.orders-finance-table>header,.orders-finance-payments>header,.orders-finance-expenses>header,.orders-finance-invoices>header{min-height:0;margin:0;line-height:1.25}
+.orders-finance-expenses>header,.orders-finance-invoices>header{background:#fbfaff;color:var(--muted);border-top:0}
+.orders-finance-invoices .orders-invoice-row>span{display:block}
+.orders-finance-invoices .orders-invoice-actions{display:flex;gap:4px}
+.orders-finance-invoices strong,.orders-finance-invoices span,.orders-finance-expenses span{min-width:0;overflow-wrap:anywhere}
+.orders-finance-bottom{grid-column:1/-1;display:grid;grid-template-columns:1.2fr 1.1fr .85fr;gap:10px}
+.orders-finance-bottom>.orders-approved-card{min-width:0}
+.orders-finance-bottom>.orders-approved-card:nth-child(2){background:#faf7ff}
+.orders-finance-bottom>.orders-approved-card:nth-child(3){background:#f7fbff}
+.orders-finance-notes-form{display:grid;gap:8px}
+.orders-finance-notes-form>.crm-button{justify-self:end}
+.orders-finance-summary-strip{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.orders-payment-void-form{display:grid;gap:14px}
+.orders-payment-void-form>p{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
+.orders-payment-void-form>footer{display:flex;justify-content:flex-end;gap:8px}
+@media(max-width:1100px){.orders-tab-finance-approved{grid-template-columns:minmax(0,1.4fr) minmax(210px,.6fr)}.orders-tab-finance-approved>.orders-finance-side{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr))}.orders-finance-side>.orders-approved-card:first-child{grid-column:1/-1}.orders-finance-bottom{grid-template-columns:1fr 1fr}.orders-finance-summary-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){.orders-tab-finance-approved,.orders-tab-finance-approved>.orders-finance-side,.orders-finance-bottom{grid-template-columns:minmax(0,1fr)}.orders-tab-finance-approved>.orders-finance-summary{grid-column:1}.orders-finance-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 @media(max-width:900px){
   .orders-dashboard-table .orders-expanded-row>td{width:calc(100vw - 24px)!important;max-width:calc(100vw - 24px)!important}
   .orders-dashboard-table .orders-expanded-row .orders-approved-expanded{width:calc(100vw - 34px);min-width:0}
@@ -302,4 +355,12 @@
   .orders-history-filters{grid-template-columns:1fr}
   .orders-history-filters>*:last-child{grid-column:auto}
   .orders-tab-details-approved>.orders-approved-card,.orders-tab-details-approved>.orders-approved-card.orders-tab-span-4{grid-column:1/-1}
+  .orders-tab-designs-approved,.orders-design-card-list{grid-template-columns:minmax(0,1fr);min-width:0}
+  .orders-design-card{grid-template-columns:minmax(0,1fr)}
+  .orders-design-summary,.orders-design-instances,.orders-design-name{min-width:0}
+  .orders-design-name small,.orders-design-name h4{white-space:normal;overflow-wrap:anywhere}
+  .orders-instance-row{grid-template-columns:32px minmax(0,1fr) auto 36px;min-width:0}
+  .orders-instance-row>span{min-width:0}
+  .orders-instance-measurements{grid-column:2/-1;grid-row:2}
+  .orders-quick-action-grid .mantine-Button-label{white-space:normal;line-height:1.2;text-align:center}
 }

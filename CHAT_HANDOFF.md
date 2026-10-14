@@ -1,5 +1,20 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-14 — подготовка релиза CRM 0.1.52
+
+- Пользователь разрешил deployment, затем отдельно commit и публикацию. Release metadata 0.1.52 в package/Compose/i18n/CHANGELOG; проверенный runtime diff прежний. Обновляются API/web, схема и миграции не менялись. Для этого релиза API стартует через deployment-only Compose override без `db:deploy`/seed после сравнения схемы/миграций с live.
+- Live baseline `531187dc33877643c9a648b9f77e593c2e42ac29`/0.1.51 подтверждён; все сервисы healthy/restart 0. До обновления Client/Conversation/Message/Order/OrderItem/Payment/Shipment/Athlete/Measurement/OrderItemInstance: `596/267/3005/504/579/826/407/4/13/780`.
+- Verified FULL backup `20261014T122341Z-531187d-pre-v052` COMPLETED, 331661570 байт. SHA256SUMS `9b6c78ec32dd9723967ee426c9d0499e4f97dd171ed4925d22c7de22e424b5b8`, dump `455f58ad1dd73ce5f44bea60dcb8ca3f9873f506914dccfeb9eddf012d692056`, uploads `bd03da1f64baf2c8bd39540e9b4eae7aa4ab15da5de4349a0c2c955abc7b15be`, manifest `7b9c1f4c133545993e1ef563239b81df2e7f6791ffc6e9fc2b76d89d226031f7`; контрольные суммы, pg_restore listing, tar listing и manifest проверены.
+- Повтор release-quality после обновления версии сначала выявил hardcoded version expectation 0.1.51 в crm-version.test; ожидание обновлено на 0.1.52, полный повтор PASS (API 808/web 437/DB 17, typecheck/build, exit 0). Браузерные 45 сценариев и четыре независимые review-роли ранее PASS. Production ещё не переключён.
+
+# 2026-10-14 — локальная доработка дизайнов и финансов заказа
+
+- В экземплярах дизайна рядом со спортсменкой показаны только четыре основные мерки №1/2/3/15 из снимка, привязанного именно к экземпляру. Дата снимка и цена экземпляра убраны из этой строки; коммерческие суммы остаются в сводке дизайна. Проверена адаптивность на 1920/1366/390 px.
+- Финансы переработаны по `05_Finance.png`: выровнены таблицы и три основные колонки, добавлены сводка, финансовые заметки, быстрые действия и нижние показатели. Значения только из текущих данных; отсутствующие услуги/напоминания обозначены честными пустыми состояниями. Добавление расхода использует существующий финансовый workflow, инвойса — существующий InvoiceEditor. Заметка загружается перед редактированием, обновляется с version token и не дублируется при сбое refresh.
+- Пользователь подтвердил: отмена только ручных оплат YO CRM; импортированные оплаты — константа для этой функции. Новый OWNER/ADMIN/ACCOUNTANT endpoint `POST /orders/:id/payments/:paymentId/void` проверяет provenance, version token, депозит/производство и allocation оплаченных инвойсов под общей блокировкой заказа в транзакции. Soft void сохраняет платёж, причину, Activity и AuditLog; итог использует сохранённые FX snapshots. KeyCRM не связывает voided ручные платежи, provider-owned sync не заменён.
+- Browser Orders 43/43 PASS, дополнительные conflict/refresh-failure сценарии отмены 2/2 PASS. Совместимость/Standards, Regression/Spec, business/security и визуальная проверка PASS. Финальный `pnpm quality:check` завершён с exit 0 (API 808/web 437/DB 17, typecheck/build). Итоговый локальный release gate 1–6 и 9 PASS, блокеров нет; live gates 7–8 UNVERIFIED. Generated `next-env.d.ts` восстановлен в baseline, `git diff --check` PASS.
+- Скриншоты и логи: `.local/order-finance-fix/`. Схема и миграции не менялись. Изменения не коммитились и не развёртывались; production остаётся 0.1.51. Основной dirty-checkout и посторонний `artifacts/` сохранены. Live smoke этой доработки не выполнялся.
+
 # 2026-10-14 — production deployment CRM 0.1.51: единый редактор мерок
 
 - Runtime commit `531187dc33877643c9a648b9f77e593c2e42ac29` fast-forward опубликован в `origin/main`, развёрнут exact-SHA и закреплён тегом `crm-v0.1.51`. GitHub Actions `Quality gates` run `38480333810` и `CRM release` run `38480634624` завершены success; GitHub Release: https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.51.

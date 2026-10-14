@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
 
@@ -173,6 +173,11 @@ export class UpdateOrderDeliveryAddressDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 120) country?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 800) addressText?: string;
 }
+export class VoidOrderPaymentDto {
+  @ApiProperty() @Transform(({ value }) => typeof value === "string" ? value.trim() : value) @IsString() @Length(2, 500) reason!: string;
+  @ApiProperty() @IsDateString() expectedOrderUpdatedAt!: string;
+}
+
 export class OrderMeasurementDto extends CreateMeasurementDto {
   @ApiPropertyOptional() @IsOptional() @IsString() expectedMeasurementId?: string;
 }

@@ -46,7 +46,7 @@ test("панели используют расширенную detail-проек
   assert.match(tabs, /shipment\.customerChargeMinor/);
   assert.match(tabs, /shipment\.atelierCostMinor/);
   assert.match(tabs, /preferenceEntries\(order\.client\.preferences\)/);
-  assert.match(tabs, /order\.expenses\.map/);
+  assert.match(tabs, /order\.expenses\?\.map/);
   assert.match(tabs, /activity\.actor\?\.displayName \|\| ui\.systemUser/);
   assert.doesNotMatch(tabs, /ui\.multipleShipmentsUnavailable/);
   assert.doesNotMatch(tabs, /ui\.shipmentAssignmentUnavailable/);

@@ -523,7 +523,7 @@ export class KeycrmService {
         if (!previous && matchedExistingOrder && payment.isPaid && payment.receivedAt) {
           const dayStart = new Date(payment.receivedAt); dayStart.setUTCHours(0, 0, 0, 0);
           const dayEnd = new Date(dayStart); dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-          const candidates = await tx.payment.findMany({ where: { orderId: persisted.id, sourceSystem: null, externalId: null, amountMinor: payment.amountMinor, currency: payment.currency, receivedAt: { gte: dayStart, lt: dayEnd } }, orderBy: { createdAt: "asc" }, take: 2 });
+          const candidates = await tx.payment.findMany({ where: { orderId: persisted.id, sourceSystem: null, externalId: null, voidedAt: null, amountMinor: payment.amountMinor, currency: payment.currency, receivedAt: { gte: dayStart, lt: dayEnd } }, orderBy: { createdAt: "asc" }, take: 2 });
           if (candidates.length > 1) {
             await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "AMBIGUOUS_EXISTING_PAYMENT", message: `В заказе ${persisted.number} найдено несколько одинаковых оплат. Оплата KeyCRM #${payment.externalId} не добавлена повторно и требует проверки.` } });
             continue;

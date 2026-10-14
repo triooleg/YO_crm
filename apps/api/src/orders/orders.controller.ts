@@ -6,7 +6,7 @@ import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
-import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderBuyerCommentDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
+import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderBuyerCommentDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto, VoidOrderPaymentDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
 import { isOrderImageName } from "./order-image-name";
@@ -41,6 +41,7 @@ export class OrdersController {
   @Patch(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") updateProductionSlot(@Param("id") id: string, @Body() dto: UpdateProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.updateProductionSlot(id, dto, req.user); }
   @Delete(":id/production-slot") @Roles("OWNER", "ADMIN", "MANAGER") deleteProductionSlot(@Param("id") id: string, @Body() dto: DeleteProductionSlotDto, @Req() req: Request & { user: User }) { return this.orders.deleteProductionSlot(id, dto, req.user); }
   @Post(":id/payments") @Roles("OWNER", "ADMIN", "MANAGER") addPayment(@Param("id") id: string, @Body() dto: AddOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.addPayment(id, dto, req.user); }
+  @Post(":id/payments/:paymentId/void") @Roles("OWNER", "ADMIN", "ACCOUNTANT") voidPayment(@Param("id") id: string, @Param("paymentId") paymentId: string, @Body() dto: VoidOrderPaymentDto, @Req() req: Request & { user: User }) { return this.orders.voidPayment(id, paymentId, dto, req.user); }
   @Post(":id/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addMeasurement(@Param("id") id: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addMeasurement(id, dto, req.user); }
   @Post(":orderId/items/:itemId/measurement") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) addItemMeasurement(@Param("orderId") orderId: string, @Param("itemId") itemId: string, @Body() dto: OrderMeasurementDto, @Req() req: Request & { user: User }) { return this.orders.addItemMeasurement(orderId, itemId, dto, req.user); }
   @Get("images/:name") image(@Param("name") name: string, @Res() res: Response) {
