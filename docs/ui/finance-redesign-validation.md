@@ -79,3 +79,11 @@ Git-ignored каталог: `apps/web/.local/finance/acceptance-final/`.
 - Тесты, lockfile, утверждённые исходники, этот отчёт и `CHAT_HANDOFF.md`.
 
 Uncommitted Inbox follow-up и старые изменения primary checkout не включены в Finance diff.
+
+## Production deployment 0.1.58 — 15.10.2026
+
+После отдельного разрешения пользователя exact runtime `4707c4c7786fded4f8cfc210e626dc14aef7afbf` развёрнут на https://crm.yoleotard.com/?section=finance. [GitHub Release](https://github.com/triooleg/YO_crm/releases/tag/crm-v0.1.58). Локальные quality и GitHub CI PASS. Перед переключением проверен FULL backup; API/web healthy, PostgreSQL/Redis не пересоздавались, миграций нет. Public root и health200.
+
+Финальный live smoke использует реальные API без подмен:1920/1366/390, EUR/USD/UAH, все6KPI, графики,3вкладки, CSV по той же версии оценки, обе стрелки и фактический ручной выбор/восстановление месяца PASS. Ошибок runtime/console/network0, экономических записей0. Дополнительный live Orders/Production smoke3viewport PASS. Первые отладочные прогоны harness не считаются приёмкой; финальные логи `live-finance-final.log` и `live-neighbors.log` завершились exit0.
+
+Live-скриншоты находятся в ignored `.local/finance-release/visuals/` рабочего Finance checkout: `live-finance-0.1.58-1920-EUR.png`, `live-finance-0.1.58-1366-EUR.png`, `live-finance-0.1.58-390-EUR.png` и USD/UAH варианты. Они содержат реальные данные клиентов, поэтому в Git не включены.
