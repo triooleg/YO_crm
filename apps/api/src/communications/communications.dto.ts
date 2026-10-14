@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsDateString,
   IsOptional,
   IsString,
   IsUrl,
@@ -31,6 +32,7 @@ export class ConversationQueryDto {
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
 }
 export class CommunicationsListQueryDto {
+  @IsOptional() @IsIn(["SPAM"] as const) spamScope?: "SPAM";
   @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset = 0;
   @IsOptional() @IsInt() @Min(1) @Max(60) @Type(() => Number) limit = 15;
   @IsOptional() @IsString() @Length(1, 80) clientId?: string;
@@ -44,6 +46,10 @@ export class CommunicationsListQueryDto {
 export class ReadConversationDto {
   @IsString() @Length(1, 80) id!: string;
   @IsInt() @Min(0) unreadVersion!: number;
+}
+export class InboxSpamDto {
+  @IsBoolean() spam!: boolean;
+  @ValidateIf((_object,value)=>value!==null) @IsDateString() expectedSpamAt!: string|null;
 }
 export class MarkConversationsReadDto {
   @ArrayMinSize(1) @ArrayMaxSize(20) @ValidateNested({ each: true })

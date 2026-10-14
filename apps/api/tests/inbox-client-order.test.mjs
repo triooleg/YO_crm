@@ -5,7 +5,7 @@ const { orderInboxClientRows } = await import("../src/communications/inbox-clien
 
 const at = (value) => new Date(value);
 
-test("ожидающие ответа всегда идут первыми и сортируются по времени входящего", () => {
+test("все переписки сортируются по последнему реальному сообщению независимо от ожидания", () => {
   const rows = [
     { id: "answered-new", displayName: "Answered new", lastContactAt: at("2026-10-13T12:00:00Z") },
     { id: "waiting-old", displayName: "Waiting old", lastContactAt: at("2026-10-13T09:00:00Z") },
@@ -21,11 +21,11 @@ test("ожидающие ответа всегда идут первыми и с
 
   assert.deepEqual(
     orderInboxClientRows(rows, replyStates).map((row) => row.id),
-    ["waiting-new", "waiting-old", "answered-new", "answered-old"],
+    ["answered-new", "waiting-new", "waiting-old", "answered-old"],
   );
 });
 
-test("несколько каналов используют самое свежее неотвеченное входящее", () => {
+test("несколько каналов используют самое свежее реальное сообщение", () => {
   const rows = [
     { id: "multi", displayName: "Multi", lastContactAt: at("2026-10-13T12:00:00Z") },
     { id: "single", displayName: "Single", lastContactAt: at("2026-10-13T11:00:00Z") },
@@ -36,7 +36,7 @@ test("несколько каналов используют самое свеж
     { clientId: "single", direction: "INBOUND", createdAt: at("2026-10-13T10:00:00Z") },
   ];
 
-  assert.deepEqual(orderInboxClientRows(rows, replyStates).map((row) => row.id), ["single", "multi"]);
+  assert.deepEqual(orderInboxClientRows(rows, replyStates).map((row) => row.id), ["multi", "single"]);
 });
 
 test("клиенты без сообщений сохраняют стабильный fallback по контакту имени и id", () => {

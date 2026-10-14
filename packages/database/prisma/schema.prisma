@@ -332,6 +332,7 @@ model Client {
   responsibleManagerId    String?
   nextActionAt            DateTime?
   lastContactAt           DateTime?
+  inboxSpamAt             DateTime?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   archivedAt              DateTime?

@@ -70,6 +70,8 @@ import { AI_CONCURRENCY_LIMIT, AI_RATE_LIMIT_PER_HOUR, inspectAiGenerationAdmiss
 import { channelAccountName, conversationOwnerSourceId, hasValidMovedEntityIds, legacyConversationOwnerSourceId, legacyMergeTargetClientId, legacySourceChannels } from "../clients/client-merge-provenance";
 import { withPreferredItem } from "./preferred-page";
 import { orderInboxClientRows } from "./inbox-client-order";
+import { setInboxSpam } from "./inbox-spam";
+import { latestInboxMessageIds } from "./inbox-message-window";
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -141,32 +143,38 @@ export class CommunicationsService {
   private readonly logger = new Logger(CommunicationsService.name);
   private readonly instagramOauthFailures = new WeakMap<object, { correlationId: string; stage: string }>();
   constructor(private p: PrismaService,private readonly emailTransport:EmailTransportService) {}
+  setSpam(clientId:string,input:{spam:boolean;expectedSpamAt:string|null},actor:User){
+    return this.p.$transaction(tx=>setInboxSpam(tx,clientId,input,actor.id));
+  }
   async unreadCount() {
     const result = await this.p.conversation.aggregate({
-      where: { archivedAt: null, client: { archivedAt: null }, unreadCount: { gt: 0 } },
+      where: { archivedAt: null, client: { archivedAt: null, inboxSpamAt: null }, unreadCount: { gt: 0 } },
       _sum: { unreadCount: true },
     });
     return { unreadCount: result._sum.unreadCount ?? 0 };
   }
   private async latestReplyStateRows(where: Prisma.ClientWhereInput) {
     const clientIds = (await this.p.client.findMany({ where, select: { id: true } })).map(client => client.id);
-    if (!clientIds.length) return [] as { clientId: string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[];
-    return this.p.$queryRaw<{ clientId: string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[]>(Prisma.sql`
+    if (!clientIds.length) return [] as { clientId: string; conversationId:string; messageId:string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[];
+    return this.p.$queryRaw<{ clientId: string; conversationId:string; messageId:string; channel: ContactChannel; direction: MessageDirection; createdAt: Date }[]>(Prisma.sql`
       SELECT DISTINCT ON (m."conversationId")
         c."clientId" AS "clientId",
+        c."id" AS "conversationId",
+        m."id" AS "messageId",
         c."channel" AS "channel",
         m."direction" AS "direction",
-        m."createdAt" AS "createdAt"
+        CASE WHEN m."direction"='OUTBOUND' THEN COALESCE(m."sentAt",m."createdAt") ELSE COALESCE(m."receivedAt",m."createdAt") END AS "createdAt"
       FROM "Message" m
       INNER JOIN "Conversation" c ON c."id" = m."conversationId"
       WHERE c."clientId" IN (${Prisma.join(clientIds)})
         AND c."archivedAt" IS NULL
         AND m."direction" IN ('INBOUND','OUTBOUND')
         AND m."status" IN ('RECEIVED','SENT')
+        AND ((m."direction"='INBOUND' AND m."status"='RECEIVED') OR (m."direction"='OUTBOUND' AND m."status"='SENT'))
         AND m."messageType" <> 'reaction'
         AND m."metadata" #>> '{deletion,deletedAt}' IS NULL
         AND m."metadata" ->> 'deduplicatedIntoMessageId' IS NULL
-      ORDER BY m."conversationId", m."createdAt" DESC, m."id" DESC
+      ORDER BY m."conversationId", CASE WHEN m."direction"='OUTBOUND' THEN COALESCE(m."sentAt",m."createdAt") ELSE COALESCE(m."receivedAt",m."createdAt") END DESC, m."id" DESC
     `);
   }
   async list(query: CommunicationsListQueryDto = new CommunicationsListQueryDto()) {
@@ -191,6 +199,7 @@ export class CommunicationsService {
     `)).map(row=>row.clientId) : [];
     const baseWhere: Prisma.ClientWhereInput = {
       archivedAt: null,
+      inboxSpamAt: query.spamScope === "SPAM" ? {not:null} : null,
       ...(query.conversationScope === "CLIENTS" ? { status: { not: "LEAD" } } : {}),
       ...(query.orderScope === "WITH_ORDERS" ? { orders: { some: { archivedAt: null } } } : {}),
       ...(query.orderScope === "ACTIVE_ORDERS" ? { orders: { some: { archivedAt: null, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } } } } : {}),
@@ -230,7 +239,6 @@ export class CommunicationsService {
       conversations: {
         where: { archivedAt: null, ...(selectedChannels ? { channel: { in: selectedChannels } } : {}) },
         orderBy: { lastMessageAt: "desc" },
-        include: { messages: { where: { messageType: { not: "reaction" } }, orderBy: { createdAt: "desc" }, take: 1 } },
       },
     });
     const orderedClientRows = orderInboxClientRows(await this.p.client.findMany({
@@ -241,7 +249,7 @@ export class CommunicationsService {
       .slice(query.offset ?? 0, (query.offset ?? 0) + limit)
       .map(client => client.id);
     const pagePosition = new Map(pageClientIds.map((id, index) => [id, index]));
-    const [unorderedPageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal] = await Promise.all([pageClientIds.length ? this.p.client.findMany({
+    const [unorderedPageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal, spamTotal] = await Promise.all([pageClientIds.length ? this.p.client.findMany({
       where: { AND: [where, { id: { in: pageClientIds } }] },
       include: clientListInclude,
     }) : Promise.resolve([]), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>query.conversationScope === "WAITING"
@@ -249,21 +257,19 @@ export class CommunicationsService {
       : this.p.client.count({where:{...baseWhere,conversations:{some:{channel,archivedAt:null,...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {})}}}}))),
       this.p.client.count({where:scopeBaseWhere}),
       this.p.client.count({where:{...baseWhere,conversations:{some:{archivedAt:null,...(selectedChannels?{channel:{in:selectedChannels}}:{}),unreadCount:{gt:0}}}}}),
+      this.p.client.count({where:{...scopeBaseWhere,inboxSpamAt:{not:null}}}),
     ]);
     const pageClients = unorderedPageClients.sort((left, right) => pagePosition.get(left.id)! - pagePosition.get(right.id)!);
     const requestedClient = (query.offset ?? 0) === 0 && query.clientId && !pageClients.some(client => client.id === query.clientId)
-      ? await this.p.client.findFirst({ where: { id: query.clientId, archivedAt: null }, include: clientListInclude })
+      ? await this.p.client.findFirst({ where: { id: query.clientId, archivedAt: null, inboxSpamAt: query.spamScope === "SPAM" ? {not:null} : null }, include: clientListInclude })
       : null;
     const preferredPage = withPreferredItem(pageClients, requestedClient);
     const clients = preferredPage.aggregateItems;
-    const hiddenPreviewConversations = clients.flatMap(client => client.conversations.filter(conversation => {
-      const preview = conversation.messages[0];
-      return Boolean(preview && (isSoftDeletedMessage(preview.metadata) || isDeduplicatedDraft(preview.metadata)));
-    }));
-    const fallbackPreviewByConversation = new Map(await Promise.all(hiddenPreviewConversations.map(async conversation => {
-      const visible = await this.latestVisibleMessages({ conversationId: conversation.id });
-      return [conversation.id, visible.at(-1)] as const;
-    })));
+    const preferredReplyRows=requestedClient&&!replyStateRows.some(row=>row.clientId===requestedClient.id)
+      ? await this.latestReplyStateRows({id:requestedClient.id,archivedAt:null,inboxSpamAt:query.spamScope === "SPAM" ? {not:null} : null}) : [];
+    const previewRows=[...replyStateRows,...preferredReplyRows].filter(row=>clients.some(client=>client.id===row.clientId));
+    const realPreviewMessages=(previewRows.length?await this.p.message.findMany({where:{id:{in:previewRows.map(row=>row.messageId)}}}):[]).filter(message=>!isSoftDeletedMessage(message.metadata)&&!isDeduplicatedDraft(message.metadata)&&message.messageType!=="reaction"&&((message.direction===MessageDirection.INBOUND&&message.status===MessageStatus.RECEIVED)||(message.direction===MessageDirection.OUTBOUND&&message.status===MessageStatus.SENT)));
+    const previewById=new Map(realPreviewMessages.map(message=>[message.id,message]));
     const clientIds = clients.map(client => client.id);
     const chatwootConversationIds = clients.flatMap(client => client.conversations.filter(conversation => conversation.channel === ContactChannel.CHATWOOT).map(conversation => conversation.id));
     const [orderCounts, activeOrders, payments, chatwootIdentityMessages, linkedChannelRows, mergeRedirects, mergeActivities] = clientIds.length ? await Promise.all([
@@ -322,10 +328,11 @@ export class CommunicationsService {
       linkedChannels:[...new Set(linkedChannelRows.filter(row=>row.clientId===client.id).map(row=>row.channel))],
       linkedAccounts,
       mergedClients,
-      waitingForReply: waitingClientIds.has(client.id),
+      waitingForReply: waitingClientIds.has(client.id)||preferredReplyRows.some(row=>row.clientId===client.id&&row.direction===MessageDirection.INBOUND&&(!selectedChannels?.length||selectedChannels.includes(row.channel))),
       conversations: client.conversations.map(conversation => ({
         ...conversation,
-        messages: conversation.messages.filter(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)).slice(0, 1).concat(conversation.messages.some(message => !isSoftDeletedMessage(message.metadata) && !isDeduplicatedDraft(message.metadata)) ? [] : fallbackPreviewByConversation.get(conversation.id) ? [fallbackPreviewByConversation.get(conversation.id)!] : []),
+        lastMessageAt: previewRows.find(row=>row.conversationId===conversation.id)?.createdAt??null,
+        messages: previewRows.filter(row=>row.conversationId===conversation.id).flatMap(row=>{const message=previewById.get(row.messageId);return message?[message]:[]}),
         connectedAccountLabel: metaConnectedAccountLabel(conversation.channel, metaSettings),
         connectedAccountUrl: metaConversationInboxUrl(conversation.channel, conversation.externalId, {
           ...metaSettings,
@@ -335,7 +342,7 @@ export class CommunicationsService {
     });});
     const preferredItem = preferredPage.preferredId ? aggregateItems.find(item => item.id === preferredPage.preferredId) : undefined;
     const items = preferredPage.preferredId ? aggregateItems.filter(item => item.id !== preferredPage.preferredId) : aggregateItems;
-    return { items, ...(preferredItem ? { preferredItem } : {}), total, scopeCounts:{all:allScopeTotal,unread:unreadScopeTotal,waiting:waitingClientIds.size}, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + pageClients.length < total };
+    return { items, ...(preferredItem ? { preferredItem } : {}), total, scopeCounts:{all:allScopeTotal,unread:unreadScopeTotal,waiting:waitingClientIds.size,spam:spamTotal}, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + pageClients.length < total };
   }
   templates() {
     return this.p.messageTemplate.findMany({
@@ -1917,23 +1924,13 @@ export class CommunicationsService {
       return { marked };
     });
   }
-  private async latestVisibleMessages(where: Prisma.MessageWhereInput) {
-    const visible: MessageWithChannel[] = [];
-    let cursor: string | undefined;
-    while (visible.length < 300) {
-      const batch = await this.p.message.findMany({
-        where: { AND: [where, { messageType: { not: "reaction" } }] },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: 300,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        include: { conversation: { select: { channel: true } }, replyToMessage: { select: { id: true, content: true, metadata: true } } },
-      });
-      visible.push(...batch.filter(message => !isDeduplicatedDraft(message.metadata) && !isSoftDeletedMessage(message.metadata)));
-      if (batch.length < 300) break;
-      cursor = batch.at(-1)?.id;
-      if (!cursor) break;
-    }
-    return visible.slice(0,300).reverse().map(({conversation,...message})=>{
+  private async latestVisibleMessages(where: {conversationId?:string;conversation?:{clientId:string;archivedAt:null}}) {
+    const rows=await latestInboxMessageIds(this.p,{conversationId:where.conversationId,clientId:where.conversation?.clientId});
+    if(!rows.length)return [];
+    const position=new Map(rows.map((row,index)=>[row.id,index]));
+    const batch=await this.p.message.findMany({where:{id:{in:rows.map(row=>row.id)}},include:{conversation:{select:{channel:true}},replyToMessage:{select:{id:true,content:true,metadata:true}}}});
+    const visible=batch.filter(message=>!isDeduplicatedDraft(message.metadata)&&!isSoftDeletedMessage(message.metadata));
+    return visible.sort((left,right)=>position.get(right.id)!-position.get(left.id)!).map(({conversation,...message})=>{
       const replyToMessage=message.replyToMessage&&!isSoftDeletedMessage(message.replyToMessage.metadata)
         ?{...message.replyToMessage,metadata:messageMetadataForClient(message.replyToMessage.id,message.replyToMessage.metadata)}
         :null;
@@ -2194,7 +2191,6 @@ export class CommunicationsService {
         {aiRunId:_previousAiRunId,...preservedMetadata}=storedMetadata,
         metadata={...preservedMetadata,composerDraftKey:draftKey,...(d.aiRunId?{aiRunId:d.aiRunId}:{})};
       const message=existing?await tx.message.update({where:{id:existing.id},data:{content,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT,content,authorId:u.id,metadata}});
-      await tx.conversation.update({where:{id:conversation.id},data:{lastMessageAt:message.createdAt}});
       if(!existing)await tx.activity.create({data:{clientId,type:"MESSAGE_DRAFTED",summary:"Автоматически сохранён исходящий черновик",metadata:{messageId:message.id,channel:conversation.channel}}});
       await tx.auditLog.create({data:{actorId:u.id,action:existing?"UPDATE":"CREATE",entityType:"Message",entityId:message.id,after:{status:"DRAFT",channel:conversation.channel,autosaved:true}}});
       return{...message,channel:conversation.channel};
@@ -2604,10 +2600,6 @@ export class CommunicationsService {
         const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, claimedAt: null, clientRequestId: null }, data: { messageId: m.id, claimedAt: new Date() } });
         if (claimed.count !== 1) throw new ConflictException("Вложение уже использовано в другом сообщении");
       }
-      await tx.conversation.update({
-        where: { id: c.id },
-        data: { lastMessageAt: m.createdAt },
-      });
       await tx.activity.create({
         data: {
           clientId,

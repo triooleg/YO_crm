@@ -1,6 +1,6 @@
 {
     "name":  "yoleotard-crm",
-    "version":  "0.1.52",
+    "version":  "0.1.53",
     "private":  true,
     "packageManager":  "pnpm@11.16.0",
     "engines":  {

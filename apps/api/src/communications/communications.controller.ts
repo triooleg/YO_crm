@@ -11,6 +11,7 @@ import{issueMetaSetupToken,metaSetupBinding}from"./meta-setup-session";
 import{join}from"node:path";
 import{uploadsRoot}from"../uploads";
 import{EmailSyncService}from"./email-sync.service";
+import{InboxSpamDto}from"./communications.dto";
 import{isCommunicationFileName}from"./communication-file";
 
 @Controller("communications")@UseGuards(SessionGuard,RolesGuard)
@@ -56,6 +57,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Post("messages/:messageId/reaction")@Roles("OWNER","ADMIN","MANAGER")react(@Param("messageId")messageId:string,@Body()d:MessageReactionDto,@Req()r:Request&{user:User}){return this.c.reactToMessage(messageId,d,r.user)}
 @Post("messages/:messageId/delete")@Roles("OWNER","ADMIN","MANAGER")deleteMessage(@Param("messageId")messageId:string,@Body()d:DeleteMessageDto,@Req()r:Request&{user:User}){return this.c.deleteMessage(messageId,d,r.user)}
 @Patch(":clientId/read")@Roles("OWNER","ADMIN","MANAGER")markRead(@Param("clientId")id:string,@Body()d:MarkConversationsReadDto,@Req()r:Request&{user:User}){return this.c.markRead(id,d,r.user)}
+@Patch(":clientId/spam")@Roles("OWNER","ADMIN","MANAGER")spam(@Param("clientId")id:string,@Body()d:InboxSpamDto,@Req()r:Request&{user:User}){return this.c.setSpam(id,d,r.user)}
 @Put(":clientId/drafts/:draftKey")@Roles("OWNER","ADMIN","MANAGER")updateDraft(@Param("clientId")clientId:string,@Param("draftKey")draftKey:string,@Body()d:UpdateMessageDraftDto,@Req()r:Request&{user:User}){return this.c.updateDraft(clientId,draftKey,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
 @Post(":clientId/messages")@Roles("OWNER","ADMIN","MANAGER")send(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}}

@@ -32,18 +32,13 @@ export function orderInboxClientRows<T extends InboxClientOrderRow>(
   const waitingAt = latestTimestampByDirection(replyStateRows, "INBOUND");
   const answeredAt = latestTimestampByDirection(replyStateRows, "OUTBOUND");
   const contactAt = (row: T) => row.lastContactAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const activity = (row:T) => waitingAt.has(row.id) || answeredAt.has(row.id)
+    ? Math.max(waitingAt.get(row.id) ?? Number.NEGATIVE_INFINITY, answeredAt.get(row.id) ?? Number.NEGATIVE_INFINITY)
+    : contactAt(row);
 
   return [...rows].sort((left, right) => {
-    const leftWaiting = waitingAt.has(left.id);
-    const rightWaiting = waitingAt.has(right.id);
-    if (leftWaiting !== rightWaiting) return leftWaiting ? -1 : 1;
-
-    const leftActivity = leftWaiting
-      ? waitingAt.get(left.id)!
-      : answeredAt.get(left.id) ?? contactAt(left);
-    const rightActivity = rightWaiting
-      ? waitingAt.get(right.id)!
-      : answeredAt.get(right.id) ?? contactAt(right);
+    const leftActivity = activity(left);
+    const rightActivity = activity(right);
     if (leftActivity !== rightActivity) return rightActivity - leftActivity;
 
     const contactDifference = contactAt(right) - contactAt(left);

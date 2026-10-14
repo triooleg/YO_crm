@@ -17,7 +17,7 @@ import { OrderPanel } from "./order-panel";
 import { TaskDialog } from "./tasks-workspace";
 import { latestSuccessfulMessage, prepareAttachmentAttempt, settleAttachmentAttempt, shouldResetAttachmentForClient, type PendingAttachmentSend } from "../lib/attachment-send-state";
 import { shouldOfferInboundTranslation } from "../lib/message-language";
-import { inboxDraftNeedsSave, prepareInboxMessages, restoreInboxDraft } from "../lib/inbox-message-visibility";
+import { inboxDraftNeedsSave, inboxMessageTimestamp, prepareInboxMessages, restoreInboxDraft } from "../lib/inbox-message-visibility";
 import { CrmSearchField } from "./crm/search-field";
 import { CrmActionIcon, CrmButton, CrmNativeSelect } from "./crm/settings-controls";
 import { CrmMenu } from "./crm/menu";
@@ -45,12 +45,13 @@ type ConversationPreview = {
   unreadVersion?: number;
   channel?: string;
   lastMessageAt?: string;
-  messages?: { content: string; createdAt: string }[];
+  messages?: { content: string; createdAt: string; sentAt?:string|null;receivedAt?:string|null;status?:string;direction?:string }[];
   connectedAccountLabel?: string;
   connectedAccountUrl?: string;
 };
 type Client = {
   id: string;
+  inboxSpamAt?:string|null;
   waitingForReply?:boolean;
   hasSummary?:boolean;
   linkedChannels?:string[];
@@ -99,7 +100,7 @@ type TaskBoard = {
 };
 type ContextTarget = "clients" | "orders" | "production" | "tasks" | "finance";
 type CommunicationsWorkspaceProps = { searchQuery?:string; onSearchChange?:(value:string)=>void; unreadRequest?:number; businessLogoUrl?:string|null; onUnreadDelta?:(delta:number)=>void; onUnreadRefresh?:()=>void; onNavigate?: (section: ContextTarget, context?: Record<string,string>) => void; onRegisterBeforeLeave?:(handler:(()=>Promise<boolean>)|null)=>void };
-type ScopeCounts = { all:number; unread:number; waiting:number };
+type ScopeCounts = { all:number; unread:number; waiting:number; spam?:number };
 type ClientPage = { items: Client[]; preferredItem?: Client; total: number; hasMore: boolean; scopeCounts:ScopeCounts; channelCounts:Partial<Record<SocialChannel,number>> };
 type Message = {
   id: string;
@@ -107,6 +108,8 @@ type Message = {
   direction: string;
   content: string;
   createdAt: string;
+  sentAt?:string|null;
+  receivedAt?:string|null;
   channel: string;
   status?: string;
   language?: string;
@@ -283,6 +286,9 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
     [conversationScope,setConversationScope]=useState<ConversationScope>("ALL"),
+    [spamScope,setSpamScope]=useState(false),
+    [spamTarget,setSpamTarget]=useState<{id:string;name:string;spam:boolean;expectedSpamAt:string|null}>(),
+    [spamBusy,setSpamBusy]=useState(false),
     [clientTotal,setClientTotal]=useState(0),
     [scopeCounts,setScopeCounts]=useState<ScopeCounts>({all:0,unread:0,waiting:0}),
     [channelTotals,setChannelTotals]=useState<Partial<Record<SocialChannel,number>>>({}),
@@ -383,7 +389,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     splitTriggerRef=useRef<HTMLButtonElement|null>(null),
     clientIdentityRef=useRef<HTMLSpanElement|null>(null),
     currentActiveChannel=useRef(activeChannel),
-    currentComposerText=useRef(text);
+    currentComposerText=useRef(text),
+    currentSpamScope=useRef(spamScope),
+    spamPending=useRef(false);
+  currentSpamScope.current=spamScope;
   currentSearch.current=search;
   currentSocialFilters.current=socialFilters;
   currentOrderScope.current=orderScope;
@@ -574,7 +583,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       const orderScopeParam=selectedOrderScope?`&orderScope=${encodeURIComponent(selectedOrderScope)}`:"";
       const conversationScopeParam=selectedConversationScope!=="ALL"?`&conversationScope=${encodeURIComponent(selectedConversationScope)}`:"";
       const clientParam=offset===0&&preferredClientId?`&clientId=${encodeURIComponent(preferredClientId)}`:"";
-      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}${clientParam}`) as ClientPage;
+      const page = await api(`/communications?offset=${offset}&limit=${limit}&search=${encodeURIComponent(query.trim())}${channelParam}${orderScopeParam}${conversationScopeParam}${clientParam}${currentSpamScope.current?"&spamScope=SPAM":""}`) as ClientPage;
       total=page.total;channelCounts=page.channelCounts||{};scopeCounts=page.scopeCounts||scopeCounts;
       if(page.preferredItem&&!seenIds.has(page.preferredItem.id)){seenIds.add(page.preferredItem.id);items.push(page.preferredItem)}
       for(const item of page.items)if(!seenIds.has(item.id)){seenIds.add(item.id);items.push(item)}
@@ -647,7 +656,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       ),
     );
     setClient(readClient);
-    onUnreadDelta?.(-markedUnreadCount);
+    if(!c.inboxSpamAt)onUnreadDelta?.(-markedUnreadCount);
     try {
       await api("/communications/" + c.id + "/read", {
         method: "PATCH",
@@ -655,7 +664,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       });
       onUnreadRefresh?.();
     } catch {
-      onUnreadDelta?.(markedUnreadCount);
+      if(!c.inboxSpamAt)onUnreadDelta?.(markedUnreadCount);
       if (readOperations.current.get(c.id) === operation) {
         setClients((current) =>
           current.map((candidate) =>
@@ -998,7 +1007,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       await loadClients(undefined,15,search,socialFilters,orderScope,conversationScope);
     })()},250);
     return()=>clearTimeout(timer);
-  },[search,socialFilters,orderScope,conversationScope]);
+  },[search,socialFilters,orderScope,conversationScope,spamScope]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,
@@ -1028,10 +1037,30 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       const conversations=item.conversations.map(conversation=>{
         if(conversation.channel!==message.channel)return conversation;
         updated=true;
-        return {...conversation,lastMessageAt:message.createdAt,messages:[{content:message.content,createdAt:message.createdAt}]};
+        return {...conversation,lastMessageAt:inboxMessageTimestamp(message),messages:[message]};
       });
       return updated?{...item,conversations}:item;
-    }));
+    }).sort((left,right)=>new Date(latestConversation(right)?.lastMessageAt||0).getTime()-new Date(latestConversation(left)?.lastMessageAt||0).getTime()));
+  }
+  async function changeSpamScope(next:boolean){
+    if(next===spamScope)return;
+    if(!await flushComposerDraftBeforeNavigation()){setError(ui.draftAutosaveFailed);return;}
+    refreshRequestSequence.current++;listRequestSequence.current++;detailVersion.current++;
+    selectedClientId.current=undefined;setClient(undefined);setMessages([]);setSpamScope(next);
+  }
+  async function confirmSpam(){
+    if(!spamTarget||spamPending.current)return;
+    spamPending.current=true;setSpamBusy(true);setError("");
+    try{
+      if(!await flushComposerDraftBeforeNavigation())throw new Error(ui.draftAutosaveFailed);
+      await api(`/communications/${spamTarget.id}/spam`,{method:"PATCH",body:JSON.stringify({spam:spamTarget.spam,expectedSpamAt:spamTarget.expectedSpamAt})});
+      refreshRequestSequence.current++;listRequestSequence.current++;detailVersion.current++;
+      setClients(current=>current.filter(item=>item.id!==spamTarget.id));
+      if(selectedClientId.current===spamTarget.id){selectedClientId.current=undefined;setClient(undefined);setMessages([]);}
+      setSpamTarget(undefined);onUnreadRefresh?.();
+      await loadClients();
+    }catch(problem){setError(problem instanceof Error?problem.message:ui.spamMutationFailed);}
+    finally{spamPending.current=false;setSpamBusy(false);}
   }
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
@@ -1336,9 +1365,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             {socialChannels.map(item=>{const label=item==="EMAIL"?ui.gmail:ui.sources[item];return <button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={`${label}: ${channelCounts[item]}`} title={label} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}><span aria-hidden="true">{icons[item]}</span><strong aria-hidden="true">{channelCounts[item]}</strong></button>})}
           </div>
           <div className="communications-order-filters communications-secondary-filters" role="group" aria-label={ui.orderFilter}>
-            <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope} onClick={()=>{setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels} <b>{scopeCounts.all}</b></button>
+            <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope&&!spamScope} onClick={()=>{void changeSpamScope(false);setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels} <b>{scopeCounts.all}</b></button>
             <button type="button" aria-pressed={conversationScope==="UNREAD"} onClick={()=>setConversationScope(current=>current==="UNREAD"?"ALL":"UNREAD")}>{ui.unreadChats} <b>{scopeCounts.unread}</b></button>
             <button type="button" aria-pressed={conversationScope==="WAITING"} onClick={()=>setConversationScope(current=>current==="WAITING"?"ALL":"WAITING")}>{ui.waitingReply} <b>{scopeCounts.waiting}</b></button>
+            <button type="button" aria-pressed={spamScope} onClick={()=>void changeSpamScope(!spamScope)}>{ui.spam} <b>{scopeCounts.spam||0}</b></button>
             <CrmNativeSelect className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)} data={[{value:"",label:ui.orderScopeMenu},{value:"WITH_ORDERS",label:ui.clientsWithOrders},{value:"ACTIVE_ORDERS",label:ui.clientsWithActiveOrders}]}/>
           </div>
           <div className="communications-client-list">
@@ -1382,15 +1412,15 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                     {last && (
                       <time
                         className="communications-client-time"
-                        dateTime={last.createdAt}
+                        dateTime={inboxMessageTimestamp(last)}
                       >
-                        {new Date(last.createdAt).toLocaleTimeString("ru", {
+                        {new Date(inboxMessageTimestamp(last)).toLocaleTimeString("ru", {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
                       </time>
                     )}
-                    {last&&<time className="communications-client-date" dateTime={last.createdAt}>{new Date(last.createdAt).toLocaleDateString("ru")}</time>}
+                    {last&&<time className="communications-client-date" dateTime={inboxMessageTimestamp(last)}>{new Date(inboxMessageTimestamp(last)).toLocaleDateString("ru")}</time>}
                     {unread > 0 && <em>{unread}</em>}
                   </span>
                 </button>
@@ -1410,6 +1440,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           onKey={resizeByKeyboard}
         />
         <main className="communications-chat">
+          <Modal opened={Boolean(spamTarget)} onClose={()=>!spamBusy&&setSpamTarget(undefined)} title={spamTarget?.spam?ui.markSpam:ui.restoreSpam} centered closeOnEscape={!spamBusy} closeOnClickOutside={!spamBusy} closeButtonProps={{"aria-label":ui.close,disabled:spamBusy}}><p>{spamTarget?.name}</p><p>{spamTarget?.spam?ui.spamConfirmHint:ui.spamRestoreHint}</p>{error&&<Alert color="red" role="alert">{error}</Alert>}<CrmButton tone="secondary" disabled={spamBusy} onClick={()=>setSpamTarget(undefined)}>{ui.cancel}</CrmButton><CrmButton loading={spamBusy} disabled={spamBusy} onClick={()=>void confirmSpam()}>{spamTarget?.spam?ui.markSpam:ui.restoreSpam}</CrmButton></Modal>
           <header className="communications-chat-header">
             <button type="button" className="communications-mobile-list-toggle" aria-expanded={mobileClientListOpen} onClick={()=>setMobileClientListOpen(true)}>{ui.openClientList}</button>
             <span className="communications-chat-client" ref={clientIdentityRef} tabIndex={-1}>
@@ -1420,6 +1451,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
+            {client&&<CrmMenu label={ui.conversationActions} children="•••" items={[{label:client.inboxSpamAt?ui.restoreSpam:ui.markSpam,onClick:()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}]}/>}
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={openSplitDialog}>⇄</CrmActionIcon>:null}
             {client && (availableChannels.length > 1 ? (
               <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
@@ -1446,9 +1478,9 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 const canSocialReply=message.direction==="INBOUND"&&Boolean(message.externalId)&&(["INSTAGRAM","WHATSAPP"].includes(message.channel)||(message.channel==="FACEBOOK"&&Boolean(engagement)));
                 const replyMedia=message.replyToMessage?.metadata?.attachments?.find(item=>item.url&&["image","sticker","video"].includes(item.type));
                 const storyUrl=safeAttachmentUrl(replyContext?.storyUrl),replyMediaUrl=safeAttachmentUrl(replyMedia?.url),engagementMediaUrl=safeAttachmentUrl(engagement?.mediaUrl),engagementPermalink=safeAttachmentUrl(engagement?.permalinkUrl);
-                const previousCreatedAt=displayMessages[messageIndex-1]?.createdAt,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(message.createdAt);
+                const previousMessage=displayMessages[messageIndex-1],previousCreatedAt=previousMessage?inboxMessageTimestamp(previousMessage):undefined,showDay=!previousCreatedAt||messageDayKey(previousCreatedAt)!==messageDayKey(inboxMessageTimestamp(message));
                 return (<Fragment key={message.id}>
-                  {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(message.createdAt)}</span></div>}
+                  {showDay&&<div className="communications-date-separator"><span>{formatMessageDay(inboxMessageTimestamp(message))}</span></div>}
                   <article
                     className={`${message.direction === "OUTBOUND" ? "out" : "in"}${canSelectForReply ? " selectable" : ""}${hasVisualAttachment&&!message.content?" media-only":""}`}
                   >
@@ -1518,7 +1550,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                     </span>}
                     <small className="communications-message-meta">
                       {message.status === "FAILED" ? ui.failed : ""}{message.status === "FAILED" ? " · " : ""}
-                      {formatMessageDateTime(message.createdAt)}
+                      {formatMessageDateTime(inboxMessageTimestamp(message))}
                       {message.direction === "OUTBOUND" && message.metadata?.metaReadAt && <span className="communications-message-read" title={ui.messageRead} aria-label={ui.messageRead} role="img"></span>}
                     </small>
                     {message.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation(message.language) && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?(shownTranslations.has(message.id)?ui.hideTranslation:ui.showTranslation):ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?(shownTranslations.has(message.id)?ui.hideTranslation:ui.showTranslation):ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}

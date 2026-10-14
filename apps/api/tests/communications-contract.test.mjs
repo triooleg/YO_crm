@@ -66,7 +66,7 @@ test("inbox list uses server pagination, full search and complete buyer aggregat
 test("входящие догружают точного клиента за пределами первой страницы", () => {
   assert.match(dto, /@IsOptional\(\)@IsString\(\)@Length\(1,80\)clientId\?:string/);
   assert.match(service, /query\.clientId&&!pageClients\.some\(client=>client\.id===query\.clientId\)/);
-  assert.match(service, /where:\{id:query\.clientId,archivedAt:null\}/);
+  assert.match(service, /where:\{id:query\.clientId,archivedAt:null,inboxSpamAt:query\.spamScope/);
   assert.match(service, /withPreferredItem\(pageClients,requestedClient\)/);
   assert.match(service, /preferredItem/);
   assert.match(service, /hasMore:\(query\.offset\?\?0\)\+pageClients\.length<total/);
@@ -213,21 +213,20 @@ test("the application shell can request one exact unread message total", () => {
 test("conversation detail returns the latest messages in chronological order", () => {
   const x = service.slice(service.indexOf("asyncdetail"), service.indexOf("asyncuploadAttachment"));
   const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));
-  assert.match(window, /orderBy:\[\{createdAt:"desc"\},\{id:"desc"\}\]/);
-  assert.match(window, /while\(visible\.length<300\)/);
-  assert.match(window, /cursor:\{id:cursor\},skip:1/);
+  assert.match(window, /latestInboxMessageIds\(this\.p/);
+  assert.match(window, /position=newMap/);
   assert.match(window, /batch\.filter\(message=>!isDeduplicatedDraft\(message\.metadata\)&&!isSoftDeletedMessage\(message\.metadata\)\)/);
-  assert.match(window, /visible\.slice\(0,300\)\.reverse\(\)/);
+  assert.match(window, /visible\.sort/);
   assert.match(x, /this\.latestVisibleMessages\(\{conversation:/);
   assert.match(x, /this\.latestVisibleMessages\(\{conversationId:c\.id\}\)/);
 });
 test("legacy Meta reaction control records stay out of conversation previews and message history", () => {
   const list = service.slice(service.indexOf("asynclist"), service.indexOf("templates()"));
   const window = service.slice(service.indexOf("privateasynclatestVisibleMessages"), service.indexOf("asyncdetail"));
-  assert.match(list, /messages:\{where:\{messageType:\{not:"reaction"\}\},orderBy:\{createdAt:"desc"\},take:1\}/);
-  assert.match(list, /hiddenPreviewConversations/);
-  assert.match(list, /fallbackPreviewByConversation/);
-  assert.match(window, /where:\{AND:\[where,\{messageType:\{not:"reaction"\}\}\]\}/);
+  assert.match(service, /m\."messageType"<>'reaction'/);
+  assert.match(list, /realPreviewMessages/);
+  assert.match(list, /previewById/);
+  assert.match(window, /latestInboxMessageIds\(this\.p/);
 });
 test("AI requires opt in and separate context consent", () => {
   assert.match(service, /enabled:v\.enabled===true/);
@@ -356,7 +355,7 @@ test("inbox secondary filters and channel counters are server complete", () => {
 
 test("waiting for reply is based on the latest visible delivered message, not unread state",()=>{
   assert.match(service,/latestReplyStateRows/);
-  assert.match(service,/m\."createdAt"AS"createdAt"/);
+  assert.match(service,/COALESCE\(m\."sentAt",m\."createdAt"\)/);
   assert.match(service,/DISTINCTON\(m\."conversationId"\)/);
   assert.match(service,/m\."direction"IN\('INBOUND','OUTBOUND'\)/);
   assert.match(service,/m\."status"IN\('RECEIVED','SENT'\)/);

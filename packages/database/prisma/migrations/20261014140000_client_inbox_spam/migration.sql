@@ -1,0 +1,1 @@
+ALTER TABLE "Client" ADD COLUMN "inboxSpamAt" TIMESTAMP(3);

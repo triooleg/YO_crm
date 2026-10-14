@@ -10,6 +10,14 @@ const module = { exports: {} };
 vm.runInNewContext(javascript, { module, exports: module.exports });
 const { inboxDraftNeedsSave, prepareInboxMessages, restoreInboxDraft } = module.exports;
 
+test("отправленный черновик занимает место по фактическому времени отправки",()=>{
+  const prepared=prepareInboxMessages([
+    {id:"reply",status:"SENT",direction:"OUTBOUND",channel:"CHATWOOT",createdAt:"2026-10-14T12:00:00Z",sentAt:"2026-10-14T12:58:00Z",content:"Ответ"},
+    {id:"incoming",status:"RECEIVED",direction:"INBOUND",channel:"CHATWOOT",createdAt:"2026-10-14T12:47:00Z",content:"Вопрос"},
+  ],"CHATWOOT");
+  assert.deepEqual(prepared.visible.map(message=>message.id),["incoming","reply"]);
+});
+
 test("does not expose drafts as chat messages and restores the newest channel draft", () => {
   const messages = [
     { id: "sent", status: "SENT", channel: "INSTAGRAM", createdAt: "2026-09-14T10:00:00Z", content: "Отправлено" },

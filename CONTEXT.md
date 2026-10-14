@@ -237,7 +237,16 @@ are not rewritten.
 
 One client dialogue in one `ContactChannel`. Stored as `Conversation`, unique by
 `clientId + channel`; provider mappings may also use `externalId + channel`.
-`lastMessageAt` and unread counters drive inbox ordering and badges.
+Inbox chronology follows the last real received or sent message, not draft
+creation or whether a reply is still awaited. Unread and waiting are separate
+attention indicators.
+
+### Inbox spam
+
+A reversible client-level classification that hides a client from the normal
+Inbox without deleting the client, conversations or orders. The Spam view
+retains the conversation and allows returning the client to the normal Inbox;
+this is not a provider-side block or a change to AI mode.
 
 ### Message
 
