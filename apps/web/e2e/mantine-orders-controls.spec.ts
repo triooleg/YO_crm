@@ -858,6 +858,184 @@ test("фильтры и сортировка заказов сохраняют �
   await expect(orderNumbers).toHaveText([secondOrder.number, order.number]);
 });
 
+test("Без предоплаты исключает частичные оплаты, а KPI сохраняет недостающую предоплату", async ({page})=>{
+  await mockOrdersApi(page);
+  const makeOrder=(id:string,amountMinor:number)=>({...order,id,number:id,payments:amountMinor?[{id:`payment-${id}`,amountMinor,currency:"EUR",method:"BANK_TRANSFER",receivedAt:"2026-10-10T12:00:00.000Z"}]:[]});
+  await page.route("**/api/orders",route=>route.fulfill({json:[makeOrder("ZERO",0),makeOrder("PARTIAL",1000),makeOrder("PAID",45000)]}));
+  await page.goto("/?section=orders");
+  await expect(page.locator(".orders-summary-row")).toHaveCount(3);
+  await page.getByRole("button",{name:/^Без предоплаты/}).click();
+  await expect(page.locator(".orders-summary-row")).toHaveCount(1);
+  await expect(page.locator(".orders-order-number")).toHaveText(["ZERO"]);
+  await page.getByRole("button",{name:/Нужна предоплата/}).click();
+  await expect(page.locator(".orders-summary-row")).toHaveCount(2);
+});
+
+test("выбор страны клиента показывает флаги, ищет по первым буквам и сохраняет выбранную страну",async({page})=>{
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true});
+  const clientWrites:Record<string,unknown>[]=[];
+  await page.route(`**/api/clients/${order.client.id}`,route=>{
+    clientWrites.push(route.request().postDataJSON());return route.fulfill({json:{}});
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Клиент",exact:true}).click();
+  await page.locator(".orders-client-identity.is-large").locator("svg").waitFor();
+  await page.locator(".orders-tab-client-approved").getByRole("button",{name:"Изменить",exact:true}).first().click();
+  const dialog=page.getByRole("dialog",{name:"Редактирование клиента"});
+  const country=dialog.getByLabel("Страна",{exact:true});
+  await country.fill("фра");
+  await expect(page.getByRole("option",{name:"Франция",exact:true})).toBeVisible();
+  await expect(page.getByRole("option",{name:"Франция",exact:true}).locator(".fi-fr")).toHaveCount(1);
+  await page.getByRole("option",{name:"Франция",exact:true}).click();
+  await dialog.getByRole("button",{name:"Сохранить клиента"}).click();
+  await expect.poll(()=>clientWrites[0]?.country).toBe("France");
+});
+
+test("предыдущий заказ вне списка открывается на своей странице без перезагрузки",async({page})=>{
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true,additionalOrders:25});
+  const previous={...richOrderDetail(order),id:"order-previous-1",number:"YO-26-0094",createdAt:"2010-06-12T12:00:00.000Z"};
+  await page.route("**/api/orders/order-previous-1",route=>route.fulfill({json:previous}));
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Клиент",exact:true}).click();
+  await page.getByRole("button",{name:"Данные заказа YO-26-0094",exact:true}).click();
+  await expect(page.getByRole("region",{name:"Данные заказа YO-26-0094"})).toBeVisible();
+  await expect(page).toHaveURL(/orderId=order-previous-1/);
+  await page.getByRole("button",{name:"Свернуть заказ",exact:true}).first().click();
+  await expect(page.getByRole("region",{name:"Данные заказа YO-26-0094"})).toHaveCount(0);
+});
+
+test("предыдущий заказ после поиска ждёт полный список и открывает верную страницу",async({page})=>{
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true});
+  const previous={...richOrderDetail(order),id:"order-previous-1",number:"YO-26-0094",createdAt:"2010-06-12T12:00:00.000Z"};
+  const listed=[order,...Array.from({length:25},(_,index)=>({...order,id:`other-${index}`,number:`OTHER-${index}`}))];
+  let blockFull=false,started=false,release!:()=>void;
+  const barrier=new Promise<void>(resolve=>{release=resolve;});
+  await page.route("**/api/orders?search=*",route=>route.fulfill({json:[order]}));
+  await page.route("**/api/orders",async route=>{if(blockFull){started=true;await barrier;}return route.fulfill({json:listed});});
+  await page.route("**/api/orders/order-previous-1",route=>route.fulfill({json:previous}));
+  await page.goto("/?section=orders");
+  await page.locator(".orders-search input").fill("Mantine");
+  await expect(page.locator(".orders-summary-row")).toHaveCount(1);
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Клиент",exact:true}).click();
+  blockFull=true;
+  await page.getByRole("button",{name:"Данные заказа YO-26-0094",exact:true}).click();
+  await expect.poll(()=>started).toBe(true);release();
+  await expect(page.getByRole("region",{name:"Данные заказа YO-26-0094"})).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(page.getByRole("region",{name:"Данные заказа YO-26-0094"})).toBeVisible();
+  await expect(page.locator(".orders-summary-row")).toHaveCount(7);
+});
+
+for(const intent of ["search","filter","expand","page","pageSize"] as const)test(`задержанный предыдущий заказ не перебивает новый выбор: ${intent}`,async({page})=>{
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true,additionalOrders:intent==="page"||intent==="pageSize"?25:1});
+  let started=false,release!:()=>void;
+  const barrier=new Promise<void>(resolve=>{release=resolve;});
+  await page.route("**/api/orders/order-previous-1",async route=>{started=true;await barrier;return route.fulfill({json:{...richOrderDetail(order),id:"order-previous-1",number:"YO-26-0094"}});});
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Клиент",exact:true}).click();
+  await page.getByRole("button",{name:"Данные заказа YO-26-0094",exact:true}).click();
+  await expect.poll(()=>started).toBe(true);
+  if(intent==="search")await page.locator(".orders-search input").fill("Новый поиск");
+  else if(intent==="filter")await page.getByRole("button",{name:/^Без предоплаты/}).click();
+  else if(intent==="page")await page.locator(".orders-pagination nav").getByRole("button",{name:"2",exact:true}).click();
+  else if(intent==="pageSize")await page.locator(".orders-page-size select").selectOption("50");
+  else await page.getByRole("button",{name:"YO-26-0102",exact:true}).click();
+  release();await page.waitForTimeout(350);
+  await expect(page.getByRole("region",{name:"Данные заказа YO-26-0094"})).toHaveCount(0);
+  if(intent==="search")await expect(page.locator(".orders-search input")).toHaveValue("Новый поиск");
+  else if(intent==="filter")await expect(page.locator(".orders-quick-filters").getByRole("button",{name:/^Без предоплаты/})).toHaveClass(/active/);
+  else if(intent==="page")await expect(page.locator('.orders-pagination nav button[aria-current="page"]')).toHaveText("2");
+  else if(intent==="pageSize")await expect(page.locator(".orders-page-size select")).toHaveValue("50");
+});
+
+test("расход заказа сохраняет тип и независимую валюту, не меняя стоимость для клиента",async({page})=>{
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true});
+  const writes:Record<string,unknown>[]=[];
+  await page.route("**/api/finance",route=>route.fulfill({json:{categories:[{id:"material",name:"Материалы",active:true},{id:"old",name:"Старая статья",active:false}]}}));
+  await page.route("**/api/finance/expenses",route=>{writes.push(route.request().postDataJSON());return route.fulfill({json:{id:"new-expense"}});});
+  await page.goto("/?section=orders");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Финансы",exact:true}).click();
+  await page.getByRole("button",{name:"＋ Добавить расход",exact:true}).click();
+  const dialog=page.getByRole("dialog",{name:`Добавить расход: ${order.number}`});
+  await expect(dialog.getByLabel("Тип расхода")).toHaveValue("material");
+  await expect(dialog.getByLabel("Тип расхода").locator("option")).toHaveCount(1);
+  await dialog.getByLabel(/^Сумма/).fill("34,50");
+  await dialog.getByLabel("Валюта",{exact:true}).selectOption("USD");
+  await dialog.getByRole("button",{name:"Сохранить расход"}).click();
+  await expect.poll(()=>writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({categoryId:"material",orderId:order.id,amountMinor:3450,currency:"USD"});
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".orders-finance-summary")).toContainText("450,00");
+});
+
+for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",width:1366,height:768},{name:"mobile",width:390,height:844}])test(`иконки этапов и линии сохраняют высоту при переносе текста: ${viewport.name}`, async ({ page },testInfo) => {
+  await page.setViewportSize(viewport);
+  const runtimeErrors:string[]=[];page.on("pageerror",error=>runtimeErrors.push(error.message));
+  await mockOrdersApi(page, undefined, undefined, { richDetail: true });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: order.number, exact: true }).click();
+  const flow = page.locator(".orders-order-flow");
+  await expect(flow.locator("article")).toHaveCount(3);
+  await flow.scrollIntoViewIfNeeded();
+  const geometry = () => flow.evaluate(element => Array.from(element.querySelectorAll("article")).map(article => {
+    const icon = article.querySelector("i")!;
+    const badge = article.querySelector(".crm-status-badge")!;
+    return { y: icon.getBoundingClientRect().y, background: getComputedStyle(icon).backgroundColor, badge: getComputedStyle(badge).backgroundColor, lineY: article.getBoundingClientRect().y + parseFloat(getComputedStyle(article,"::after").top) };
+  }));
+  const before = await geometry();
+  expect(Math.max(...before.map(value=>value.y))-Math.min(...before.map(value=>value.y))).toBeLessThan(1);
+  for (const value of before) expect(value.badge).toBe(value.background);
+  await flow.screenshot({path:screenshotPath(testInfo,`orders-followups-flow-${viewport.name}.png`)});
+  await page.screenshot({path:screenshotPath(testInfo,`orders-followups-details-${viewport.name}.png`)});
+  const originalText=await flow.locator("article").first().locator("small").textContent();
+  await flow.locator("article").first().locator("small").evaluate(element => { element.textContent = "Очень длинная подпись с переносами ".repeat(5); });
+  const after = await geometry();
+  expect(after.map(value=>value.y)).toEqual(before.map(value=>value.y));
+  expect(after.slice(0,2).map(value=>value.lineY)).toEqual(before.slice(0,2).map(value=>value.lineY));
+  await expect.poll(()=>flow.evaluate(element=>Math.max(...Array.from(element.querySelectorAll(".orders-flow-caption")).map(caption=>caption.getBoundingClientRect().bottom))-element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+  await flow.locator("article").first().locator("small").evaluate((element,text)=>{element.textContent=text;},originalText);
+  await page.getByRole("tab",{name:"Клиент",exact:true}).click();
+  await page.locator(".orders-tab-client-approved").scrollIntoViewIfNeeded();
+  await page.screenshot({path:screenshotPath(testInfo,`orders-followups-client-${viewport.name}.png`)});
+  await page.locator(".orders-tab-client-approved").getByRole("button",{name:"Изменить",exact:true}).first().click();
+  const dialog=page.getByRole("dialog",{name:"Редактирование клиента"});
+  await dialog.getByLabel("Страна",{exact:true}).fill("united");
+  await expect(page.getByRole("option",{name:/США/})).toBeVisible();
+  await page.screenshot({path:screenshotPath(testInfo,`orders-followups-country-${viewport.name}.png`)});
+  const bounds=await dialog.boundingBox();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(viewport.width+1);
+  expect(runtimeErrors).toEqual([]);
+});
+
+for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",width:1366,height:768},{name:"mobile",width:390,height:844}])test(`цветной выбор статуса и расхода помещается на экране: ${viewport.name}`,async({page},testInfo)=>{
+  await page.setViewportSize(viewport);
+  await mockOrdersApi(page,undefined,undefined,{richDetail:true});
+  await page.route("**/api/finance",route=>route.fulfill({json:{categories:[{id:"material",name:"Материалы"},{id:"shipping",name:"Доставка"}]}}));
+  await page.goto("/?section=orders");
+  await page.getByRole("combobox",{name:"Изменить статус"}).click();
+  await expect(page.getByRole("option",{name:"Оплачено",exact:true})).toBeVisible();
+  const labelFits=await page.getByRole("option").locator(".mantine-Badge-label").evaluateAll(labels=>labels.every(label=>label.scrollWidth<=label.clientWidth));
+  expect(labelFits).toBe(true);
+  const dropdownBounds=await page.getByRole("listbox").boundingBox();expect(dropdownBounds!.x).toBeGreaterThanOrEqual(0);expect(dropdownBounds!.x+dropdownBounds!.width).toBeLessThanOrEqual(viewport.width+1);
+  await page.screenshot({path:screenshotPath(testInfo,`orders-followups-status-${viewport.name}.png`)});
+  await page.keyboard.press("Escape");
+  await page.getByRole("button",{name:order.number,exact:true}).click();
+  await page.getByRole("tab",{name:"Финансы",exact:true}).click();
+  await page.getByRole("button",{name:"＋ Добавить расход",exact:true}).click();
+  const dialog=page.getByRole("dialog",{name:`Добавить расход: ${order.number}`});
+  await expect(dialog.getByLabel("Тип расхода")).toHaveValue("material");
+  await dialog.getByLabel("Валюта",{exact:true}).selectOption("USD");
+  await page.screenshot({path:screenshotPath(testInfo,`orders-followups-expense-${viewport.name}.png`)});
+  const bounds=await dialog.boundingBox();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(viewport.width+1);
+  await dialog.getByLabel(/^Сумма/).fill("wrong");await dialog.getByRole("button",{name:"Сохранить расход"}).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByRole("button",{name:"Повторить загрузку типов расходов"})).toHaveCount(0);
+});
+
 test("смена статуса сохраняется без перезагрузки списка и не закрывает выбранный заказ", async ({ page }) => {
   const telemetry = { listGets: 0 };
   const updates = await mockOrdersApi(page, undefined, telemetry);
@@ -866,10 +1044,17 @@ test("смена статуса сохраняется без перезагру
   await page.getByRole("button", { name: order.number, exact: true }).click();
   const details = page.getByRole("region", { name: `Данные заказа ${order.number}` });
   await expect(details).toBeVisible();
-  await page.getByRole("combobox", { name: "Изменить статус" }).selectOption("PAID");
+  await page.getByRole("combobox", { name: "Изменить статус" }).click();
+  await page.getByRole("option", { name: "Оплачено", exact: true }).click();
   await expect.poll(() => updates.some((update) => update.path.endsWith("/statuses") && update.body.salesStatus === "PAID")).toBe(true);
   await expect(details).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Изменить статус" })).toHaveValue("PAID");
+  await expect(page.getByRole("combobox", { name: "Изменить статус" })).toHaveValue("Оплачено");
+  const tint=await page.locator('.orders-summary-row[data-sales-status="PAID"]').evaluate(row=>{
+    const style=getComputedStyle(row),sample=document.createElement("div");sample.style.backgroundColor=`color-mix(in srgb, ${style.getPropertyValue("--order-status-color")} 10%, transparent)`;document.body.append(sample);
+    const expected=getComputedStyle(sample).backgroundColor;sample.remove();
+    return {expected,actual:Array.from(row.querySelectorAll("td")).map(cell=>getComputedStyle(cell).backgroundColor),opacity:style.opacity};
+  });
+  expect(tint.actual.every(color=>color===tint.expected)).toBe(true);expect(tint.opacity).toBe("1");
   expect(telemetry.listGets).toBe(1);
 });
 
@@ -879,8 +1064,10 @@ test("ошибка PATCH статуса полностью откатывает 
   await page.goto("/?section=orders");
   await page.getByRole("button", { name: order.number, exact: true }).click();
   const status = page.getByRole("combobox", { name: "Изменить статус" });
-  await status.selectOption("PAID");
-  await expect(status).toHaveValue("ORDER_CONFIRMED");
+  await status.click();
+  await page.getByRole("option", { name: "Оплачено", exact: true }).click();
+  await expect(status).toHaveValue("Заказ подтверждён");
+  await expect(page.locator(".orders-summary-row")).toHaveAttribute("data-sales-status","ORDER_CONFIRMED");
   await expect(page.getByText("Статус уже изменён")).toBeVisible();
   expect(telemetry.listGets).toBe(1);
 });
@@ -891,8 +1078,9 @@ test("успешный PATCH статуса не откатывается при
   await page.goto("/?section=orders");
   await page.getByRole("button", { name: order.number, exact: true }).click();
   const status = page.getByRole("combobox", { name: "Изменить статус" });
-  await status.selectOption("PAID");
-  await expect(status).toHaveValue("PAID");
+  await status.click();
+  await page.getByRole("option", { name: "Оплачено", exact: true }).click();
+  await expect(status).toHaveValue("Оплачено");
   await expect(page.getByText("Детали временно недоступны")).toBeVisible();
   expect(telemetry.listGets).toBe(1);
 });

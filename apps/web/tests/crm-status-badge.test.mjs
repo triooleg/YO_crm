@@ -7,6 +7,7 @@ const [statusBadge, ordersDashboard, orderTabs] = await Promise.all([
   readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8"),
   readFile(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8"),
 ]);
+const statusSelect=await readFile(new URL("../components/crm/sales-status-select.tsx",import.meta.url),"utf8");
 
 test("статусы заказов отображаются единым CRM-компонентом на Mantine Badge", () => {
   assert.match(statusBadge, /import \{ Badge \} from "@mantine\/core"/);
@@ -24,7 +25,9 @@ test("статусы заказов отображаются единым CRM-к
   assert.match(ordersUi, /<CrmStatusBadge domain="payment" status=\{order\.paymentStatus\}/);
   assert.match(ordersUi, /<CrmStatusBadge domain="shipping" status=\{order\.shippingStatus\}/);
   assert.match(ordersUi, /<CrmStatusBadge domain="production" status=\{(?:item|instance)\.productionStatus\}/);
-  assert.match(ordersDashboard, /crmStatusPresentation\("sales",\s*order\.salesStatus\)\.tone/);
+  assert.match(ordersDashboard, /crmStatusPresentation\("sales",\s*order\.salesStatus\)\.color/);
+  assert.match(statusSelect, /crmStatusPresentation\("sales",value\)/);
+  assert.match(statusSelect, /renderOption.*CrmStatusBadge/);
   assert.doesNotMatch(ordersDashboard, /function statusTone/);
   assert.doesNotMatch(ordersDashboard, /<span className=\{`orders-status orders-status--\$\{statusTone\(/);
 });

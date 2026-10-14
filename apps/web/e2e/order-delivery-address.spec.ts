@@ -54,7 +54,8 @@ for (const viewport of [{ name: "desktop", width: 1920, height: 1080 }, { name: 
     await dialog.getByLabel("Город").fill("Paris");
     await dialog.getByLabel("Область / штат").fill("Île-de-France");
     await dialog.getByLabel("Почтовый индекс").fill("75001");
-    await dialog.getByLabel("Страна").fill("France");
+    await dialog.getByLabel("Страна").fill("фра");
+    await page.getByRole("option", { name: "Франция", exact: true }).click();
     await expect(dialog.getByLabel("Полный адрес")).toHaveValue("");
     await page.screenshot({ path: testInfo.outputPath(`order-delivery-${viewport.width}x${viewport.height}.png`), fullPage: false });
     await dialog.getByRole("button", { name: "Сохранить адрес" }).click();
