@@ -263,7 +263,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     try { return await refreshOrder(orderId, true); }
     catch {
       setOrderDetails((current) => { const next = { ...current }; delete next[orderId]; return next; });
-      await load();
+      await load({ background: true });
       return undefined;
     }
   }
@@ -616,7 +616,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       setArchiveOpen(false);
       setSelectedIds(new Set());
       setExpandedId((current) => current && selectedIds.has(current) ? undefined : current);
-      await load();
+      await load({ background: true });
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -701,7 +701,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     </Modal>
     {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
-    {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load(); }} />}
+    {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load({ background: true }); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await refreshAfterMutation(paymentOrder.id); }} />}
     {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await refreshAfterMutation(deliveryOrder.id); }} />}
     {deliveryContactOrder && <DeliveryContactModal order={deliveryContactOrder} request={request} onClose={() => setDeliveryContactOrderId(undefined)} onSaved={async () => { const orderId = deliveryContactOrder.id; setDeliveryContactOrderId(undefined); await refreshAfterMutation(orderId); }} />}

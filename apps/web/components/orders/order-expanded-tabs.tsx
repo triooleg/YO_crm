@@ -5,6 +5,8 @@ import { sourceLabel } from "../../lib/order-source";
 import "../../app/designs-instances.css";
 import { HistoricalInstance } from "./historical-instance";
 import { DesignsInstancesTab, CompositionEditor } from "./designs-instances";
+import { OrderDiscountEditor } from "./order-discount-editor";
+import { orderDiscountUi } from "../../lib/i18n";
 import { InstanceMeasurementDrawer } from "./instance-measurement-drawer";
 import { MeasurementUsage, MeasurementArchiveAction, type MeasurementUsageRow } from "./measurement-usage";
 import { designsInstancesUi as designsUi } from "../../lib/i18n";
@@ -433,13 +435,14 @@ function ClientPreferencesForm({ preferences, onCancel, onSubmit }: { preference
   return <form className="orders-client-preferences-form" onSubmit={submit}><p>{ui.clientPreferencesHint}</p><CrmTextarea data-autofocus highlighted value={value} onChange={(event) => setValue(event.currentTarget.value)} autosize minRows={8} maxRows={18} spellCheck={false} aria-label={ui.clientPreferences} />{error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onCancel}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer></form>;
 }
 
-function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, onVoidPayment }: Props & { items: ExpandedOrderItem[] }) {
+function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, compositionActions, onVoidPayment }: Props & { items: ExpandedOrderItem[] }) {
   const paidMinor = paid(order), percentage = paidMinor === null ? null : order.priceMinor ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
   const paymentHistory = order.paymentHistory ?? order.payments;
   const productsMinor = items.reduce((sum, item) => sum + item.priceMinor * item.quantity, 0);
   const latestPayment = [...paymentHistory].filter(payment => !("voidedAt" in payment && payment.voidedAt)).sort((a,b) => Date.parse(b.receivedAt)-Date.parse(a.receivedAt))[0];
   const [voidTarget, setVoidTarget] = useState<{payment: NonNullable<ExpandedOrderView["paymentHistory"]>[number]; orderUpdatedAt: string}>();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [discountOpen, setDiscountOpen] = useState(false);
   const [expenseOpen,setExpenseOpen]=useState(false);
   const [error, setError] = useState("");
   const paymentsRef = useRef<HTMLDivElement>(null);
@@ -454,14 +457,14 @@ function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, o
       {!order.taxMinor && !order.giftWrapMinor && <p className="orders-finance-empty-line">{ui.financeNoAdditionalServices}</p>}
       <h4 className="orders-finance-subheading">{ui.shippingPaidByClient}</h4>
       <MoneyRow label={ui.shippingPaidByClient} value={order.deliveryMinor || 0} currency={order.currency} />
-      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" />
+      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />
       <CrmButton tone="secondary" size="compact-sm" onClick={onAddDesign}>＋ {ui.financeAddPosition}</CrmButton>
     </TabCard>
     <TabCard className="orders-finance-summary" title={ui.orderTotal}>
       <MoneyRow label={`${ui.products} (${itemQuantity(order)} ${ui.pieces})`} value={productsMinor} currency={order.currency} />
       <MoneyRow label={ui.financeAdditionalServices} value={(order.taxMinor || 0)+(order.giftWrapMinor || 0)} currency={order.currency} />
       <MoneyRow label={ui.shippingPaidByClient} value={order.deliveryMinor || 0} currency={order.currency} />
-      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" />
+      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />
       <MoneyRow label={ui.total} value={order.priceMinor} currency={order.currency} strong />
       <MoneyRow label={ui.paid} value={paidMinor} currency={order.currency} tone="success" />
       <MoneyRow label={ui.balance} value={balance(order)} currency={order.currency} tone={balance(order) ? "danger" : "success"} />
@@ -490,6 +493,7 @@ function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, o
     <div className="orders-finance-summary-strip"><SummaryMetric label={ui.financeTotalPositions} value={String(items.length)}/><SummaryMetric label={ui.orderTotal} value={money(order.priceMinor,order.currency)}/><SummaryMetric label={ui.paid} value={money(paidMinor,order.currency)}/><SummaryMetric label={ui.balance} value={money(balance(order),order.currency)}/><SummaryMetric label={ui.financeLastPayment} value={latestPayment ? formatDate(latestPayment.receivedAt) : ui.notSpecified}/></div>
     {error && <CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}
     {voidTarget && onVoidPayment && <PaymentVoidDialog payment={voidTarget.payment} expectedOrderUpdatedAt={voidTarget.orderUpdatedAt} onVoid={onVoidPayment} onClose={()=>setVoidTarget(undefined)}/>}
+    {discountOpen && compositionActions && <OrderDiscountEditor orderId={order.id} discountMinor={order.discountMinor || 0} currency={order.currency} bridge={compositionActions} onClose={() => setDiscountOpen(false)} />}
     {invoiceOpen && financeActions && <InvoiceEditor order={order} request={financeActions.request} close={()=>setInvoiceOpen(false)} done={()=>{setInvoiceOpen(false);void financeActions.onSaved().catch(reason=>setError(reason instanceof Error ? reason.message : ui.financeMutationFailed));}}/>}
   </div>;
 }
@@ -736,7 +740,7 @@ function EditableField({ label, value, onClick }: { label: string; value: ReactN
 function EmptyState({ text, compact, action }: { text: string; compact?: boolean; action?: ReactNode }) { return <div className={`orders-approved-empty${compact ? " is-compact" : ""}`}><span>—</span><p>{text}</p>{action}</div>; }
 function SummaryMetric({ label, value }: { label: string; value: string }) { return <div className="orders-summary-metric"><small>{label}</small><strong>{value}</strong></div>; }
 function Stage({ icon, label, value }: { icon: string; label: string; value: string }) { return <div><TabIcon name={icon} /><span><strong>{label}</strong><small>{value}</small></span></div>; }
-function MoneyRow({ label, value, currency, strong, tone }: { label: string; value: number | null; currency: string; strong?: boolean; tone?: "success" | "danger" }) { return <div className={`orders-approved-money${strong ? " is-strong" : ""}${tone ? ` is-${tone}` : ""}`}><span>{label}</span><b>{money(value, currency)}</b></div>; }
+function MoneyRow({ label, value, currency, strong, tone, onEdit }: { label: string; value: number | null; currency: string; strong?: boolean; tone?: "success" | "danger"; onEdit?: () => void }) { return <div className={`orders-approved-money${strong ? " is-strong" : ""}${tone ? ` is-${tone}` : ""}`}><span>{label}</span>{onEdit ? <UnstyledButton onClick={onEdit} aria-label={orderDiscountUi.title}><b><u>{money(value, currency)}</u> ✎</b></UnstyledButton> : <b>{money(value, currency)}</b>}</div>; }
 function ClientIdentity({ order, large }: { order: ExpandedOrderView; large?: boolean }) { return <div className={`orders-client-identity${large ? " is-large" : ""}`}><span className="orders-client-portrait"><TabIcon name="client" /><small>{initials(order.client.displayName)}</small></span><div><strong>{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.notSpecifiedFeminine}</small></div></div>; }
 function ItemThumb({ item }: { item: ExpandedOrderItem }) { const image = itemImage(item); return image ? <img className="orders-item-thumb" src={image} alt={item.name} /> : <span className="orders-item-thumb is-empty"><TabIcon name="designs" /></span>; }
 

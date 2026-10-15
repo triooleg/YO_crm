@@ -88,6 +88,15 @@ Money is integer minor units plus an ISO currency. `priceMinor`,
 custom-order deposit is supplied by the configured percentage, defaulting to 50
 percent, with an authorized explicit override.
 
+An order discount is the stored integer `discountMinor`, not a persistent percent
+mode. A manual percentage command resolves once against `priceMinor + discountMinor`
+(the authoritative amount before the existing discount, including delivery and
+services), in integer basis points with half-up rounding. Replacing the discount
+preserves other adjustments: new total = old total + old discount - new discount.
+Later composition changes preserve the stored amount; currency changes convert it
+through the established order-money conversion. Manual discount intent is audited
+and protected from provider overwrite, without rewriting receipts or invoice snapshots.
+
 An order owns a frozen delivery-address snapshot that is independent from the
 client profile. Saving the snapshot requires either a usable street/address
 line or an explicitly entered full address; city or country alone is not a

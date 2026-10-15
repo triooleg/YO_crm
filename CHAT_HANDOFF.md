@@ -1,5 +1,40 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — 0.4.0 discount/async candidate verified locally; 0.3.1 held
+
+User steering before the live switch adds: all order mutation completions must
+refresh asynchronously; Order Finance discount amount opens a compact fixed/percent
+editor. 0.3.1/94cc98f is immutable and published with successful CI and isolated
+WEB build, but was NOT deployed. Production remains 0.3.0/81a6b62. Do not switch
+that superseded candidate or replay the 319 completed profile confirmations.
+
+New candidate 0.4.0: additive discount preview/apply endpoints under composition,
+existing discountMinor and operation ledger, no migration. Percentage is a one-time
+command in integer basis points, half-up rounding, based on authoritative total
+before the current discount (priceMinor + discountMinor, including delivery and
+services). Replaces existing discount, zero clears. Persisted amount subsequently
+follows normal composition-delta and currency conversion rules; no hidden dynamic
+percentage. Preserve payments, invoice snapshots, production/deposit constraints,
+CAS/idempotent retries/audit and manual-discount import protection. Strict editor
+refresh retries reads after acknowledged save; no repeated financial mutation.
+
+Integration checkout codex/website-sales; backend/browser work in isolated
+codex/order-discount and codex/discount-browser-tests worktrees. New scope requires
+full quality, independent reviews and an API+WEB candidate deployment; previous
+0.3.1 WEB-only helper is unsuitable. PG/Redis/migrations/data stay protected.
+
+Post-fix quality EXIT0:1594=1082API+488web+24DB, types/API+Nextbuild PASS;
+tracked Next ambient references restored, final web typecheck PASS. New browser13
+PASS at localhost, six1366/390 frames and independent visual PASS. Same-value
+manual discount now monotonically advances only Order.updatedAt so prior import
+rollback cannot overwrite confirmed intent; retry changes neither version/history.
+Independent actual-service focused5PASS and worker126PASS close compatibility
+blocker. No real-PG concurrency proof claimed. Fresh FULL20261015T185837Z-81a6b62-pre-v040
+verified. Read-only production baseline source800/schema36/private config pins and
+all4healthy PASS. Runtime is still0.3.0; upcoming API+WEB build/switch requires
+immutable candidate/CI2success and final release-gate receipts. No business data
+has been changed for discount verification.
+
 ## 2026-10-15 — User authorized 0.3.1 deployment; candidate verification
 
 Current explicit deploy request covers the accepted photo/async fix and subsequent
