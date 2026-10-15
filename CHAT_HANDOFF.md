@@ -1,5 +1,34 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — 0.2.0 deployed; acceptance complete
+
+Runtime/tag crm-v0.2.0 = 619f9446cfcc2e1841141b76e6e5d4e32e200c4a.
+Quality38749068660 and Release38749630750 SUCCESS. Source302/archive
+27b64aaf78378caf7fb6ad1c4d16ae3e1f41de21fe46bd39e57dc4df3c025c3f verified.
+FULL backup20261015T140235Z-745dd88-pre-v020 sums
+eda795f20ad9310b62e3db0695f8b3068ab5434d845a00d8005ebc4ce1d3c08b.
+App-only switch exit0; start-only API, no migration/seed/import/customer sends.
+APIimage9ab84e8044d7472bf94649c05516c6cde10eefc340418683b05df2270288f485,
+webimagea69ef957c9df52e01954603c8e63aa3c66b60e7f04119b2639c21eabae6ee901.
+PG/Redis unchanged, all4healthy/restarts0. Rollback source67 retained at
+/home/trio/yoleotard-crm-previous-v067-20261015T141032Z with both images.
+Initial and final post exit0: strict13counts/eightprotectedhashes equal fresh020
+baseline; source/history identities PASS, API/web errors0 through14:32:57UTC.
+Public root/health200 at14:33:24UTC. Read-only actual browser composite52checks/
+81PNGs plus strict continuation24checks/35PNGs PASS accepted; preserve twofailed
+runs caused by private harness expectations/selectors, no product patch after tag.
+Auth login/logout only; blocked writes/GET/runtime/console/network errors0,
+externalimages0. Actual independent visual PASS; mandatory local roles PASS.
+Actual debt API2145286minor EUR matches independent SQL exactly (sequential
+snapshots14:09 and14:32, not atomic). Ready2 Orders/Overview parity confirmed.
+No claim of provider/bank completeness or unchanged data since67: bounded
+two-backup attribution identified pre020backup business changes, actor unknown;
+fresh020baseline preserved. No repair/reset/restore performed.
+IG profile+Write fallback localPASS only; external session availability unproven.
+See docs/ui/crm-0.2.0-validation.md and private live-v020-visual-review.md,
+deploy-helper-review.md, post-v020-final.log, live-v020-debt-receipt.log.
+Documentation closure after runtime commit does not retag or redeploy0.2.0.
+
 ## 2026-10-15 — 0.2.0 candidate, final feature gates
 
 User explicitly requested SemVer policy; unpublished0.1.68 superseded by0.2.0.
