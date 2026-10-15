@@ -5,7 +5,7 @@ import { orderSettlement } from "../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../lib/i18n";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, NativeSelect } from "@mantine/core";
+import { Alert, Box, Button, Group, Modal, NativeSelect, Switch, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { communicationsUi as ui, labels, overviewTargetUi } from "../lib/i18n";
 import {
@@ -1069,12 +1069,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   },[deleteTarget?.id,deleteBusy]);
   useEffect(()=>{if(messagesLoading||!client)return;scrollMessagesToLatest()},[messagesLoading,client?.id,messages.length]);
   useEffect(()=>{if(!error)return;showInboxErrorNotification(error);setError("")},[error]);
-  useEffect(()=>{
-    if(messagesLoading||!client||currentComposerText.current||composerDraftId.current!==undefined)return;
-    const prepared=prepareInboxMessages(messages,activeChannel);
-    if(!prepared.draft)return;
-    setText(prepared.draft.content);setComposerAiRunId(prepared.draftAiRunId);composerDraftId.current=prepared.draft.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft.content;lastAutosavedAiRunId.current=prepared.draftAiRunId;setDraftStatus("SAVED");
-  },[messagesLoading,client?.id,messages,activeChannel]);
+  // Restore saved drafts only when explicitly opening a client or changing channel.
+  // Polling may discover an older draft after a send; it must never replace the composer.
   useEffect(()=>{
     const content=text.trim();
     if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
@@ -1672,9 +1668,15 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           </div>
           <footer>
             <section className={`communications-ai-panel ${aiPanelOpen?"expanded":"collapsed"}`}>
-              <button type="button" className="communications-ai-panel-toggle" aria-expanded={aiPanelOpen} aria-controls="communications-ai-panel-body" onClick={()=>{if(aiPanelOpen)closeAiPanel();else setAiPanelOpen(true)}}>
-                <span aria-hidden>✦</span><b>{ui.aiSuggestionTitle}</b><small>{aiPanelOpen?ui.collapseAiSuggestion:ui.expandAiSuggestion}</small><span className="communications-ai-panel-chevron" aria-hidden>{aiPanelOpen?"⌃":"⌄"}</span>
-              </button>
+              <Group gap="xs" wrap="nowrap" px="sm">
+                <Box flex={1} miw={0}>
+                  <button type="button" className="communications-ai-panel-toggle" aria-expanded={aiPanelOpen} aria-controls="communications-ai-panel-body" onClick={()=>{if(aiPanelOpen)closeAiPanel();else setAiPanelOpen(true)}}>
+                    <span aria-hidden>✦</span><b>{ui.aiSuggestionTitle}</b><small>{aiPanelOpen?ui.collapseAiSuggestion:ui.expandAiSuggestion}</small><span className="communications-ai-panel-chevron" aria-hidden>{aiPanelOpen?"⌃":"⌄"}</span>
+                  </button>
+                </Box>
+                <Switch size="sm" flex="0 0 auto" aria-label={ui.aiReplyToggle} label={aiPanelOpen?ui.aiReplyOn:ui.aiReplyOff} checked={aiPanelOpen} disabled={!client} onChange={event=>{if(event.currentTarget.checked)setAiPanelOpen(true);else closeAiPanel()}} />
+              </Group>
+              <Text size="xs" c="dimmed" px="sm" pb="xs">{ui.aiManualGenerationHint}</Text>
               {aiPanelOpen&&<div id="communications-ai-panel-body" className="communications-ai-panel-body">
                 <div className="communications-ai-language-row">
                   <CrmNativeSelect label={ui.aiReplyLanguage} value={aiTargetLanguage} disabled={aiPreparing||Boolean(aiReply?.phase==="TRANSLATED")} onChange={event=>{invalidateAiOperation();setAiTargetLanguage(event.target.value);setAiReply(current=>current?.phase==="TRANSLATED"?null:current)}} data={[

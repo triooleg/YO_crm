@@ -161,7 +161,6 @@ test("быстрое переключение канала не теряет т�
   assert.match(component,/restoreInboxDraft\(messages,nextChannel,volatileDrafts\.current\.get\(nextChannel\)\)/);
   assert.match(component,/displayMessages\[messageIndex-1\]/);
   assert.doesNotMatch(component,/messages\[messageIndex-1\]/);
-  assert.match(component,/if\(messagesLoading\|\|!client\|\|currentComposerText\.current\|\|composerDraftId\.current!==undefined\)return/);
 });
 
 test("ошибки входящих показываются компактным уведомлением Mantine, а не полосой",()=>{

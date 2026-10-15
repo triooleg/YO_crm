@@ -1,5 +1,42 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — Inbox 0.4.1 release authorized, preparation
+
+User explicitly requested deployment after local acceptance. Release candidate
+0.4.1 contains the reviewed Inbox fix plus version/changelog metadata only.
+Target remains trio@192.168.31.219 /home/trio/yoleotard-crm; WEB-only switch,
+retain running0.4.0 API and PostgreSQL/Redis identities. No migration/seed/backfill
+or real model/customer message. Fresh FULL backup
+20261015T202841Z-c187304-pre-v041 verified checksums, dump catalog and upload tar.
+Previous LOCAL ONLY section below records pre-authorization acceptance.
+Final immutable source/archive/helper review and live smoke required before
+calling deployed. Private evidence .local/inbox-ai-deploy.
+
+## 2026-10-15 — Inbox explicit AI reply control, LOCAL ONLY
+
+User reports reply text appearing after new client messages. Actual synthetic
+browser RED reproduced saved server DRAFT restoration into an empty composer
+during polling while the AI panel was off, with zero generation POSTs/mutations.
+Do not claim confirmed autonomous provider generation. Removed only the polling
+hydration effect; initial client/channel restoration retains draft ID/key and
+aiRun provenance. New Mantine conversation reply switch shares the existing
+panel state, defaults off; ON only opens tools, OFF invalidates pending results
+without changing the main composer or stored drafts. Explicit generate/send
+remain separate. Global AI policy, analysis, translation/summary and backend
+contracts unchanged.
+
+Local quality: 1594 tests, typechecks and API/Next builds PASS; restored original
+Next ambient declaration, web tsc PASS again. Synthetic browser 9 PASS, including
+inbound/poll, initial/channel drafts/provenance/manual send, OFF/ON1366/390,
+explicit one-request generation and OFF/late result. Independent compatibility
+and business source PASS, actual resting1366/390 visual PASS. Final local review
+receipts in .local/inbox-ai-opt-in; docs/ui/inbox-ai-opt-in-validation.md.
+Regression and final fifth-role local gate PASS; source manifest114/114 matches,
+final web tsc including the new test PASS.
+No real model/send or production mutation for tests. Changes remain uncommitted;
+no new commit/push/deploy authorization. Runtime remains 0.4.0/c187304. Do not
+replay any earlier deployment or the completed319 profile confirmations.
+
 ## 2026-10-15 — CRM 0.4.0 deployed; live verification
 
 Runtime/tag c187304d4df8c6e43cf303e465b53afe93baaa67 / crm-v0.4.0.

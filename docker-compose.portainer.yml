@@ -68,7 +68,7 @@ services:
       dockerfile: docker/web.Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL}"
-        CRM_VERSION: "${CRM_VERSION:-0.4.0}"
+        CRM_VERSION: "${CRM_VERSION:-0.4.1}"
         CRM_COMMIT: "${CRM_COMMIT:-development}"
     restart: unless-stopped
     depends_on:
