@@ -100,3 +100,21 @@ test('Source trend keeps physical 12px labels and exact accessible amounts at 12
  const center=page.locator('.order-source-center strong');await center.scrollIntoViewIfNeeded();const fit=await center.evaluate(node=>({text:node.getBoundingClientRect().width,hole:Math.min(node.closest('.order-source-donut')!.getBoundingClientRect().width,225)*.56}));expect(fit.text).toBeLessThanOrEqual(fit.hole);
  await expect(chart.locator('rect[role=button]').first()).toHaveAttribute('aria-label',/₴/);await page.screenshot({path:info.outputPath('uah-12-months-visible.png')});
 });
+
+test('Seven finance KPI cards retain the full million-UAH debt at laptop widths',async({page})=>{
+ await fixture(page);
+ await page.route('**/api/finance/report?*',async route=>{
+  const report=buildFinanceReport(ledger,Object.fromEntries(new URL(route.request().url()).searchParams),valuation,now);
+  report.debtMinor=110906006;
+  await route.fulfill({json:report});
+ });
+ for(const width of [1536,1366,1920,390]){
+  await page.setViewportSize({width,height:1080});
+  await page.goto('/?section=finance&period=2026-10&currency=UAH');
+  await expect(page.locator('.finance-report-kpi')).toHaveCount(7);
+  const amount=page.locator('.finance-report-kpi').filter({has:page.getByRole('heading',{name:'Долги клиентов',exact:true})}).locator('strong');
+  await expect(amount).toHaveText(/^1\s109\s060,06\s₴$/);
+  const fit=await amount.evaluate(node=>{const r=document.createRange();r.selectNodeContents(node);const text=r.getBoundingClientRect(),card=node.closest('.finance-report-kpi')!.getBoundingClientRect();return text.left>=card.left&&text.right<=card.right-8;});
+  expect(fit,`full debt and currency fit the card at ${width}px`).toBe(true);
+ }
+});

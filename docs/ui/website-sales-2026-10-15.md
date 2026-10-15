@@ -1,6 +1,25 @@
 # Продажи с сайта — отчёт реализации,15 октября2026
 
-Реализовано локально в integration worktree, ветка `codex/website-sales`, база `239d7bd`. Production остаётся CRM0.1.63. Коммит, push, деплой, миграции, импорт/изменение данных и сообщения клиентам не выполнялись.
+Развёрнуто на https://crm.yoleotard.com/ как **CRM0.1.64**, commit `76b8a9d495ef7a5e8d0935e6a81adc72cc38d34c`, tag `crm-v0.1.64`. Пользователь отдельно разрешил деплой. Предыдущие локальные снимки ниже сохранены с датой; они не подменяют свежие рабочие данные.
+
+## Проверка рабочего выпуска
+
+- GitHub Quality и Release SUCCESS; 1374 теста, typecheck и сборка PASS. Проверенная полная резервная копия до обновления, сохранены предыдущие исходники и образы для отката.
+- Обновлены только API/web, без миграций, seed, импорта, коррекции данных и сообщений клиентам. Все четыре контейнера healthy, restart0; PostgreSQL/Redis не пересозданы.
+- Все13счётчиков и8полных хешей финансовых/заказных записей совпали до/после. На момент выпуска504заказа,828платежей,3046сообщений; исторические даты сохранены.
+- Реальная проверка через вход в CRM: **25 проверок,43скриншота**,1536px/390px, без mocks. Проверены500активных заказов/21ссайта, страницы, открытие конкретного заказа, фильтры/переходы из «Обзора», EUR/USD/UAH, суммы источников, CSV, прежние диаграммы и12месяцевUAH. Ошибок страницы, console, сети и изображений0; бизнес-записей и отметок прочтения нет, logoutPASS.
+- Первый неуспешный запуск сохранён: неверная граница слова в проверочном regex версии; исправлен только приватный скрипт. Приложение не менялось после commit.
+- Финальная серверная проверка11:04:18UTC: source301PASS, платежи/заказы/история без изменений, полные логи с11:00:01UTC без новых API/web errors. Сайт и /api/health отвечают200. Финальный независимый визуальный/релизный вердикт записывается после просмотра этих кадров.
+
+Рабочие скриншоты:
+
+- [Заказы](../../.local/website-sales/live-v064-2026-10-15T11-03-10-744Z/orders-all-1536.png)
+- [Обзор](../../.local/website-sales/live-v064-2026-10-15T11-03-10-744Z/overview-1536.png)
+- [Финансы EUR](../../.local/website-sales/live-v064-2026-10-15T11-03-10-744Z/finance-all-1536-EUR.png)
+- [Мобильный график UAH за12месяцев](../../.local/website-sales/live-v064-2026-10-15T11-03-10-744Z/finance-UAH-12months-source-trend-390.png)
+
+Эти файлы приватные локальные артефакты, не публикуются вместе с исходниками. Проверка показывает согласованность текущих CRM/API/UI, а не полноту внешнего банка или KeyCRM.
+
 
 ## Изменения интерфейса
 
@@ -83,7 +102,7 @@ Private evidence: `.local/website-sales/quality-accepted.log`, `browser-final.lo
 
 Классификация консервативна при истории более100 provenance-событий: UNKNOWN вместо догадки. Серверная пагинация использует narrow линейный aggregate pass; rich relations ограничены страницей. Это не новая индексированная SQL materialized view. Политика и условия будущего улучшения описаны в source policy.
 
-Независимые проверки: Compatibility/Business/RBAC и backend Standards — Erdos PASS; Backend Regression/Spec — Halley PASS; Frontend Standards/Spec/interaction — Leibniz PASS; Visual — Chandrasekhar FINAL PASS по32свежим кадрам, включая центр UAH donut. Открытых findings в этих областях нет. Финальный локальный release gate — Faraday PASS: gates1–6/9 пройдены,45/45хешей совпали; deployed gates7–8 остаются UNVERIFIED, поскольку деплой не выполнялся. Доказательство `.local/website-sales/release-gate.md`. Этот отчёт не является разрешением на деплой.
+На локальном этапе независимые проверки: Compatibility/Business/RBAC и backend Standards — Erdos PASS; Backend Regression/Spec — Halley PASS; Frontend Standards/Spec/interaction — Leibniz PASS; Visual — Chandrasekhar FINAL PASS по32кадрам, включая центр UAH donut. Локальный release gate — Faraday PASS: gates1–6/9,45/45хешей; deployed gates7–8 тогда оставались UNVERIFIED. Историческое доказательство `.local/website-sales/release-gate.md`; актуальная проверка рабочего выпуска приведена в начале отчёта.
 
 ## Изменённые файлы
 

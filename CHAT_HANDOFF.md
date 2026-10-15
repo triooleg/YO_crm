@@ -1,5 +1,22 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-15 — CRM0.1.65 scoped visual correction in preparation
+
+- Final actual v064 visual reviewer inspected43/43PNGs and found one blockingP2: Finance1536UAH debt1,109,060.06 clips beyond its card. Functional/data/server acceptance remains PASS; do not label v064 final visual PASS.
+- Added failing browser test measuring real text Range bounds against all seven KPI cards at1536/1366/1920/390 (RED1536). Minimal CSS switches only seven-card Finance layout to four columns at701–1700px, retaining fonts, mobile2columns and1920seven. No financial/API/data changes.
+- Metadata0.1.65 prepared; fresh FULL backup, exact candidate build/reviews and post/live closure required. Existing user deploy/commit/publication authorization applies to this release correction. Runtime currently76b8a9d/0.1.64 until guarded switch.
+
+# 2026-10-15 — DEPLOYED CRM0.1.64: Website Sales
+
+- User explicitly authorized deployment; previous commit/publication consent reused. Exact runtime `76b8a9d495ef7a5e8d0935e6a81adc72cc38d34c`, tag `crm-v0.1.64`, origin/main published. GitHub Quality38723572094 and Release38723571922 SUCCESS. Integration branch codex/website-sales, explicit50task paths; primary unrelated dirty checkout and3532 untouched.
+- Immutable final quality-release-v064-accepted exit0:894API+463web+17DB=1374tests, typecheck and Nest/Next build PASS. Version-only delta separately reviewed; original43feature paths unchanged and i18n matches accepted content after stripping only new release entry. Full feature reviews/local115composite+10focused and32actual-snapshot visual evidence retained below.
+- Verified FULL backup `20261015T105247Z-7bce37d-pre-v064`, SHA256SUMS396da707c93222786e2899d2f02e169065af5c34deded3c026a59090cdee6424. Exact301-source archive identity checked before/after Linux build, before switch and final post. ArchiveSHA256fe07aa20f5ca0fd0968436d0466f7a3f773f8474c351b8983142599927fa14ef. Source rollback `/home/trio/yoleotard-crm-previous-v063-20261015T105407Z`; retained source archive and both old images. Private helpers independently reviewed; backup/baseline/stamp/source/history guards strengthened before switch, no runtime workaround.
+- App-only no-deps/no-build/pull-never recreation; exact start-only API. No migrations/seed/import/data repair/provider sends. APIimage5ab08be0e4ad4a454ad9621d3fa865e33939e209b1a4c20e698d50eef0b6a677; webf56c0c21d496d09fd61d0a3e102663943e2cec07d5ca231c96b81d3ff0180255. All4healthy/restarts0, PG/Redis IDs/images unchanged;35existing migrations current.
+- Pre/post13businesscounts and8full-rowfinancial/order/shipment hashes unchanged:504orders,828payments,3046messages. Earlier local capture had827payments; fresh release baseline preserves legitimate intervening data instead of restoring old values. Historical pre2000Message timestamp count12/fingerprintcd4c7c5abca39386bb12e78169697145 unchanged. No historical timestamps rewritten.
+- Actual authenticated production smoke11:03:10–11:03:57UTC PASS:25checks/43PNGs at1536 and390. Full500active orders/21WEBSITE, paging, deep focus to page2, source filter and Overview links, EUR/USD/UAH cash/source sums/table/CSV with exact valuation snapshots, original/source diagrams and UAH12months/center/mobileDetails. All page/console/network/external-image errors0; blocked writes/GETs0, no customer mutation or readmark, logoutPASS. Fresh API/UI reconciliation is not bank/KeyCRM completeness proof. Firstfailedbrowserrun preserved: private harness word-boundary expected0.1.64 failed actual 'CRM v0.1.64'; corrected to exact CRM v0.1.64, product unchanged.
+- Strict post-v064-final exit0: fixed whole interval11:00:01Z–11:04:18.728875Z, API/web error scans0 with successful retrieval, source301/history/business/commands/images/containers PASS. Public root/health200. Independent final actual visual and deployed release-gate closure pending at this documentation checkpoint; private evidence `.local/website-sales` and `.local/finance-release/*v064*`.
+
+
 # 2026-10-15 — website-sales: CRM0.1.64 deployment authorized, release preparation
 
 - Current user now explicitly authorized deployment; prior commit/publication consent reused as for0.1.63. Release version0.1.64, fresh FULL backup and independent helper review required; no production business-data changes authorized.
