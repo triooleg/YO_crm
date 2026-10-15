@@ -21,11 +21,12 @@ export async function updateProductionStatusGraph(
   options: { preserveProgress?: boolean } = {},
 ) {
   const updated = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } });
-  await tx.orderItem.updateMany({ where: { orderId }, data: { productionStatus } });
+  const planningOnly = options.preserveProgress && PLANNING_STATUSES.includes(productionStatus);
+  await tx.orderItem.updateMany({ where: { orderId, archivedAt: null, ...(planningOnly ? { productionStatus: { in: PLANNING_STATUSES } } : {}) }, data: { productionStatus } });
   await tx.orderItemInstance.updateMany({
-    where: options.preserveProgress && PLANNING_STATUSES.includes(productionStatus)
-      ? { orderItem: { orderId }, archivedAt: null, productionStatus: { in: PLANNING_STATUSES } }
-      : { orderItem: { orderId }, archivedAt: null },
+    where: planningOnly
+      ? { orderItem: { orderId, archivedAt: null }, archivedAt: null, productionStatus: { in: PLANNING_STATUSES } }
+      : { orderItem: { orderId, archivedAt: null }, archivedAt: null },
     data: { productionStatus },
   });
   return updated;

@@ -5,6 +5,7 @@ import test from "node:test";
 import vm from "node:vm";
 import { OrderType } from "@prisma/client";
 import ts from "typescript";
+import { loadTargetModule } from "./overview-target-loader.mjs";
 import { KeycrmClient } from "../src/keycrm/keycrm-client.ts";
 import {
   hasUsableDeliveryAddress,
@@ -38,13 +39,13 @@ function loadKeycrmService(imageHooks = {}) {
       await tx.orderItemInstance?.updateMany?.({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus: nextStatus } });
       return order;
     } };
-    if (specifier === "../orders/order-item-details") return { reconcileOrderItemInstances: async (tx, item, quantity) => {
+    if (specifier === "../orders/order-item-details") return { reconcileOrderItemInstances: imageHooks.reconcileOrderItemInstances ?? (async (tx, item, quantity) => {
       if (!tx.orderItemInstance) return;
       const existing = await tx.orderItemInstance.findMany({ where: { orderItemId: item.id } });
       for (let ordinal = 1; ordinal <= quantity; ordinal += 1) if (!existing.some(instance => instance.ordinal === ordinal && !instance.archivedAt)) {
         await tx.orderItemInstance.create({ data: { orderItemId: item.id, ordinal, athleteId: item.athleteId ?? null, measurementId: item.measurementId ?? null, productionStatus: item.productionStatus } });
       }
-    } };
+    }) };
     if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency ? payment.appliedAmountMinor ?? 0 : 0 };
     if (specifier === "./keycrm.dto") return {};
     return nativeRequire(specifier);
@@ -1256,4 +1257,181 @@ test("общий импортированный файл не удаляется
     await new KeycrmService({ $transaction: callback => callback(tx) }).cleanupImportedImage(imageName);
     assert.deepEqual(removed, [], `orders=${orders}, items=${items}`);
   }
+});
+
+test('reimport preserves provider item tombstone and never reconciles or rewrites archived pieces',async()=>{
+ const KeycrmService=loadKeycrmService();
+ const historical={id:'provider-item',orderId:'order-1',sourceSystem:'KEYCRM',sourceAccount:'connection-1',externalId:'product-1',quantity:2,priceMinor:10000,archivedAt:new Date('2026-10-10')};
+ const existing={id:'order-1',number:'K-1',clientId:'client-1',sourceLinkMode:'IMPORTED',currency:'EUR',externalUpdatedAt:new Date('2026-10-01'),depositRequiredMinor:5000,priceMinor:10000,type:OrderType.CUSTOM_ORDER,paymentStatus:'UNPAID',productionStatus:'NOT_SCHEDULED'};
+ let itemWrites=0,instanceWrites=0;const issues=[];
+ const tx={$executeRaw:async()=>undefined,$executeRawUnsafe:async()=>undefined,$queryRaw:async()=>[],
+  order:{findUnique:async()=>existing,update:async({data})=>({...existing,...data})},
+  clientMergeRedirect:{findUnique:async()=>null},client:{findUniqueOrThrow:async()=>({id:'client-1',email:null,phone:null,country:null,city:null,address:null,postalCode:null})},
+  orderItem:{count:async()=>0,findUnique:async()=>historical,upsert:async()=>{itemWrites++;return historical}},
+  orderItemInstance:{findMany:async()=>[],create:async()=>{instanceWrites++}},
+  payment:{findMany:async()=>[],findUnique:async()=>null},productionSlot:{findUnique:async()=>null},shipment:{findUnique:async()=>null},
+  activity:{findFirst:async()=>null,create:async()=>undefined},auditLog:{create:async()=>undefined},keycrmSyncIssue:{findFirst:async()=>null,create:async({data})=>issues.push(data)}};
+ const service=new KeycrmService({$transaction:callback=>callback(tx)});
+ const incoming=normalizedOrder({items:[{externalId:'product-1',name:'Provider',quantity:3,priceMinor:10000,notes:null,sku:null,externalImageUrl:null,properties:[]}]});
+ for(let n=0;n<2;n++)assert.equal(await service.importOrder(incoming,'owner-1','run-1'),'UPDATED');
+ assert.equal(itemWrites,0);assert.equal(instanceWrites,0);assert.ok(historical.archivedAt);assert.equal(historical.quantity,2);
+ assert.ok(issues.some(row=>row.code==='ARCHIVED_ORDER_ITEM_PRESERVED'));
+});
+
+for(const archived of [false,true])test('legacy rollback snapshot handles additive null fields but protects new archive '+archived,async()=>{
+ const KeycrmService=loadKeycrmService();const item={id:'item-1'};
+ const old={id:'o',clientId:'c',items:[item],payments:[],productionSlot:null,shipment:null,invoices:[],expenses:[],agreements:[]};
+ const current={...old,items:[{...item,archivedAt:archived?'2026-10-15T10:00:00.000Z':null,discipline:null}]};
+ const scope={orderId:'o',clientIds:[],connectionKey:'connection-1',keycrmBuyerId:null};
+ const after={version:2,scope,order:old,orderItemInstances:[],orderShipments:[],clients:[],keycrmLinks:[]};
+ const mutation={id:'m',externalOrderId:'1',orderId:'o',kind:'IMPORTED_ORDER',beforeSnapshot:{...after,scope:{...scope,orderId:null},order:null},afterSnapshot:after,rollbackEligible:true,rolledBackAt:null};
+ const run={id:'r',mode:'APPLY',status:'FAILED',rollbackEligible:true,mutations:[mutation]};let writes=0;
+ const tx={$executeRaw:async()=>undefined,$executeRawUnsafe:async()=>undefined,
+  keycrmSyncRun:{findUnique:async()=>run,update:async({data})=>Object.assign(run,data)},
+  order:{findUnique:async()=>current,update:async()=>{writes++},count:async()=>0},
+  orderItem:{updateMany:async()=>undefined,count:async()=>0},orderItemInstance:{findMany:async()=>[],updateMany:async()=>undefined},
+  client:{findMany:async()=>[]},keycrmClientLink:{findMany:async()=>[]},payment:{updateMany:async()=>undefined},
+  activity:{create:async()=>undefined},auditLog:{create:async()=>undefined},keycrmSyncMutation:{update:async()=>undefined}};
+ const service=new KeycrmService({$transaction:fn=>fn(tx),keycrmSyncRun:{findUnique:async()=>({...run,_count:{issues:0}})}});
+ if(archived){await assert.rejects(()=>service.rollback('r',{id:'owner'}),/изменён после импорта/);assert.equal(writes,0)}
+ else {await service.rollback('r',{id:'owner'});assert.equal(writes,1)}
+ assert.equal(JSON.stringify(item),'\u007b"id":"item-1"}');
+});
+
+test('local add or duplicate on imported order preserves its commercial total on repeated import',async()=>{
+ const KeycrmService=loadKeycrmService();const updates=[];
+ const existing={id:'order-1',number:'K-1',clientId:'client-1',sourceLinkMode:'IMPORTED',currency:'EUR',externalUpdatedAt:new Date('2026-10-01'),depositRequiredMinor:12500,priceMinor:25000,type:OrderType.CUSTOM_ORDER,paymentStatus:'UNPAID',productionStatus:'NOT_SCHEDULED'};
+ const tx={$executeRaw:async()=>undefined,$executeRawUnsafe:async()=>undefined,$queryRaw:async()=>[],order:{findUnique:async()=>existing,update:async({data})=>{updates.push(data);return {...existing,...data}}},clientMergeRedirect:{findUnique:async()=>null},client:{findUniqueOrThrow:async()=>({id:'client-1',email:null,phone:null,country:null,city:null,address:null,postalCode:null})},orderItem:{count:async()=>1},orderItemInstance:{findMany:async()=>[]},payment:{findMany:async()=>[],findUnique:async()=>null},productionSlot:{findUnique:async()=>null},shipment:{findUnique:async()=>null},activity:{findFirst:async()=>null,create:async()=>undefined},auditLog:{create:async()=>undefined},keycrmSyncIssue:{findFirst:async()=>null,create:async()=>undefined}};
+ const service=new KeycrmService({$transaction:fn=>fn(tx)});let slotSyncs=0;service.syncProductionSlot=async()=>{slotSyncs++};
+ for(let n=0;n<2;n++)await service.importOrder(normalizedOrder(),'owner-1','r');
+ assert.equal(slotSyncs,0);assert.ok(updates.length);assert.equal(updates[0].priceMinor,25000);assert.equal(updates[0].depositRequiredMinor,12500);
+});
+
+function localCompositionImportFixture({ manualItemOverride = false, compositionEvent = false } = {}) {
+  const state = {
+    order: { id: 'order-1', number: 'K-1', clientId: 'client-1', sourceLinkMode: 'IMPORTED', sourceSystem: 'KEYCRM', sourceAccount: 'connection-1', externalId: 'order-1', currency: 'EUR', externalUpdatedAt: new Date('2026-10-01'), depositRequiredMinor: 12500, priceMinor: 25000, type: OrderType.CUSTOM_ORDER, paymentStatus: 'PARTIALLY_PAID', productionStatus: 'NOT_SCHEDULED' },
+    items: [
+      { id: 'provider-item', orderId: 'order-1', sourceSystem: 'KEYCRM', sourceAccount: 'connection-1', externalId: 'product-1', name: 'Provider', quantity: 1, priceMinor: 10000, archivedAt: null, productionStatus: 'NOT_SCHEDULED' },
+      { id: 'local-item', orderId: 'order-1', sourceSystem: null, name: 'Manual addition', quantity: 1, priceMinor: 15000, archivedAt: null, productionStatus: 'NOT_SCHEDULED' },
+    ],
+    instances: [{ id: 'provider-piece', orderItemId: 'provider-item', ordinal: 1, archivedAt: null, productionStatus: 'NOT_SCHEDULED', athleteId: 'a1', measurementId: 'm1' }],
+    payments: [{ id: 'receipt', amountMinor: 5000, currency: 'EUR', reference: 'Immutable receipt' }],
+    invoices: [{ id: 'invoice', totalMinor: 25000, status: 'ISSUED' }],
+    audits: [], activities: [],
+  };
+  if (compositionEvent) {
+    state.items.splice(1);
+    state.order.priceMinor = 10000; state.order.depositRequiredMinor = 5000;
+  }
+  const issues = [];
+  let businessWrites = 0;
+  const tx = {
+    $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined, $queryRaw: async () => [],
+    order: { findUnique: async () => structuredClone(state.order), update: async ({ data }) => { businessWrites++; Object.assign(state.order, data); return structuredClone(state.order); } },
+    clientMergeRedirect: { findUnique: async () => null },
+    client: { findUniqueOrThrow: async () => ({ id: 'client-1', email: null, phone: null, country: null, city: null, address: null, postalCode: null }) },
+    orderItem: {
+      count: async () => state.items.filter(item => item.sourceSystem !== 'KEYCRM').length,
+      findUnique: async ({ where }) => structuredClone(state.items.find(item => item.externalId === where.sourceSystem_sourceAccount_externalId.externalId) ?? null),
+      upsert: async ({ where, create, update }) => {
+        businessWrites++;
+        let item = state.items.find(item => item.externalId === where.sourceSystem_sourceAccount_externalId.externalId);
+        if (item) Object.assign(item, update); else { item = { id: 'new-provider-item', ...create }; state.items.push(item); }
+        return structuredClone(item);
+      },
+    },
+    orderItemInstance: {
+      findMany: async ({ where }) => structuredClone(state.instances.filter(instance => instance.orderItemId === where.orderItemId)),
+      create: async ({ data }) => { businessWrites++; const instance = { id: 'new-piece', archivedAt: null, ...data }; state.instances.push(instance); return structuredClone(instance); },
+    },
+    payment: { findMany: async () => structuredClone(state.payments), findUnique: async () => null },
+    productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
+    activity: { findFirst: async ({ where }) => where.AND ? manualItemOverride ? { id: 'item-override' } : null : compositionEvent && where.metadata?.path?.[0] === 'composition' ? { id: 'composition-event' } : null, create: async ({ data }) => { businessWrites++; state.activities.push(data); } },
+    auditLog: { create: async ({ data }) => { businessWrites++; state.audits.push(data); } },
+    keycrmSyncIssue: { findFirst: async () => null, create: async ({ data }) => { issues.push(data); return data; } },
+  };
+  const KeycrmService = loadKeycrmService({ reconcileOrderItemInstances: loadTargetModule('orders/order-item-details.ts').reconcileOrderItemInstances });
+  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  return { state, issues, service, get businessWrites() { return businessWrites; } };
+}
+
+test('local composition conflict skips provider quantity growth before any business mutation, including retry', async () => {
+  const f = localCompositionImportFixture(), before = structuredClone(f.state);
+  const incoming = normalizedOrder({ priceMinor: 20000, items: [{ externalId: 'product-1', name: 'Provider', quantity: 2, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }] });
+  for (let attempt = 0; attempt < 2; attempt++) assert.equal(await f.service.importOrder(incoming, 'owner', 'run-1'), 'SKIPPED');
+  assert.equal(f.businessWrites, 0);
+  assert.deepEqual(f.state, before);
+  assert.ok(f.issues.some(issue => issue.code === 'LOCAL_COMPOSITION_IMPORT_CONFLICT' && /состав|количеств/i.test(issue.message)));
+});
+
+for (const [reason, line] of [
+  ['quantity decrease', { externalId: 'product-1', quantity: 1, priceMinor: 10000 }],
+  ['price change', { externalId: 'product-1', quantity: 1, priceMinor: 12000 }],
+  ['new provider line', { externalId: 'product-2', quantity: 1, priceMinor: 5000 }],
+]) test(`local composition conflict skips ${reason} before business writes`, async () => {
+  const f = localCompositionImportFixture();
+  if (reason === 'quantity decrease') {
+    f.state.items[0].quantity = 2;
+    f.state.order.priceMinor = 35000; f.state.order.depositRequiredMinor = 17500;
+    f.state.instances.push({ ...f.state.instances[0], id: 'provider-piece-2', ordinal: 2 });
+  }
+  const before = structuredClone(f.state);
+  const incoming = normalizedOrder({ items: [{ name: 'Provider', notes: null, sku: null, externalImageUrl: null, properties: [], ...line }] });
+  assert.equal(await f.service.importOrder(incoming, 'owner', 'run-1'), 'SKIPPED');
+  assert.equal(f.businessWrites, 0); assert.deepEqual(f.state, before);
+  assert.equal(f.issues[0].code, 'LOCAL_COMPOSITION_IMPORT_CONFLICT');
+});
+
+test('local composition conflict also protects composition intent recorded without a local-only item', async () => {
+  const f = localCompositionImportFixture({ compositionEvent: true }), before = structuredClone(f.state);
+  assert.equal(await f.service.importOrder(normalizedOrder({ items: [{ externalId: 'product-1', name: 'Provider', quantity: 2, priceMinor: 10000 }] }), 'owner', 'run-1'), 'SKIPPED');
+  assert.equal(f.businessWrites, 0); assert.deepEqual(f.state, before);
+  assert.equal(f.issues[0].code, 'LOCAL_COMPOSITION_IMPORT_CONFLICT');
+});
+
+test('local composition conflict preflights every provider line before updating an earlier compatible line', async () => {
+  const f = localCompositionImportFixture(), before = structuredClone(f.state);
+  const incoming = normalizedOrder({ items: [
+    { externalId: 'product-1', name: 'Compatible metadata update', quantity: 1, priceMinor: 10000 },
+    { externalId: 'product-2', name: 'New provider line', quantity: 1, priceMinor: 5000 },
+  ] });
+  assert.equal(await f.service.importOrder(incoming, 'owner', 'run-1'), 'SKIPPED');
+  assert.equal(f.businessWrites, 0); assert.deepEqual(f.state, before);
+  assert.equal(f.issues[0].details.externalItemId, 'product-2');
+});
+
+test('local composition keeps compatible unchanged provider imports and repeat imports working', async () => {
+  const f = localCompositionImportFixture(), pieces = structuredClone(f.state.instances), receipts = structuredClone(f.state.payments), invoices = structuredClone(f.state.invoices);
+  const incoming = normalizedOrder({ items: [{ externalId: 'product-1', name: 'Provider', quantity: 1, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }] });
+  assert.equal(await f.service.importOrder(incoming, 'owner', 'run-1'), 'UPDATED');
+  assert.equal(await f.service.importOrder(incoming, 'owner', 'run-1'), 'SKIPPED');
+  assert.equal(f.issues.length, 0); assert.equal(f.state.order.priceMinor, 25000); assert.equal(f.state.order.depositRequiredMinor, 12500);
+  assert.equal(f.state.items[1].priceMinor, 15000); assert.deepEqual(f.state.instances, pieces);
+  assert.deepEqual(f.state.payments, receipts); assert.deepEqual(f.state.invoices, invoices);
+});
+
+test('local composition retains explicitly overridden lines and tombstones instead of conflicting on their suppressed provider writes', async () => {
+  for (const archived of [false, true]) {
+    const f = localCompositionImportFixture({ manualItemOverride: !archived });
+    if (archived) f.state.items[0].archivedAt = new Date('2026-10-10');
+    const items = structuredClone(f.state.items), pieces = structuredClone(f.state.instances);
+    assert.equal(await f.service.importOrder(normalizedOrder({ items: [{ externalId: 'product-1', name: 'Provider', quantity: 2, priceMinor: 10000 }] }), 'owner', 'run-1'), 'UPDATED');
+    assert.deepEqual(f.state.items, items); assert.deepEqual(f.state.instances, pieces);
+    assert.equal(f.state.order.priceMinor, 25000);
+    assert.equal(f.issues.some(issue => issue.code === 'LOCAL_COMPOSITION_IMPORT_CONFLICT'), false);
+  }
+});
+
+test('local composition keeps matched-existing manual items on their original preserve-items import path', async () => {
+  const f = localCompositionImportFixture({ compositionEvent: true });
+  f.state.order.sourceLinkMode = 'MATCHED_EXISTING';
+  const pieces = structuredClone(f.state.instances);
+  // This linked order already preserves all CRM items rather than applying provider lines.
+  // Give that existing ownership branch its actual non-provider item count.
+  f.state.items[0].sourceSystem = null;
+  const expectedItems = structuredClone(f.state.items);
+  assert.equal(await f.service.importOrder(normalizedOrder({ items: [{ externalId: 'new-provider-line', name: 'Provider', quantity: 2, priceMinor: 10000 }] }), 'owner', 'run-1'), 'UPDATED');
+  assert.deepEqual(f.state.items, expectedItems); assert.deepEqual(f.state.instances, pieces);
+  assert.equal(f.issues.some(issue => issue.code === 'LOCAL_COMPOSITION_IMPORT_CONFLICT'), false);
+  assert.ok(f.issues.some(issue => issue.code === 'MATCHED_ORDER_ITEMS_PRESERVED'));
 });

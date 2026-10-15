@@ -46,7 +46,7 @@ export class OverviewService {
         FROM "Client" WHERE "archivedAt" IS NULL AND "createdAt">=${trendStart} AND "createdAt"<${end}
         GROUP BY 1 ORDER BY 1
       `);
-      const recent=await tx.order.findMany({where:{archivedAt:null},take:5,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,number:true,priceMinor:true,currency:true,salesStatus:true,createdAt:true,modelImagePath:true,client:{select:{displayName:true}},items:{where:{modelImagePath:{not:null}},take:1,orderBy:{id:'asc'},select:{modelImagePath:true}}}});
+      const recent=await tx.order.findMany({where:{archivedAt:null},take:5,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,number:true,priceMinor:true,currency:true,salesStatus:true,createdAt:true,modelImagePath:true,client:{select:{displayName:true}},items:{where:{archivedAt:null,modelImagePath:{not:null}},take:1,orderBy:{id:'asc'},select:{modelImagePath:true}}}});
       const settings=await tx.appSetting.findMany({where:{section:'finance',key:{in:['exchangeRateProvider','exchangeRateCache']}},select:{key:true,value:true}});
       const provider=settings.find(setting=>setting.key==='exchangeRateProvider')?.value==='ECB'?'ECB':'NBU';
       let cache:ExchangeRateCache|null=null;

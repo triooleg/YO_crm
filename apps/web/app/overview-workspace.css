@@ -32,3 +32,11 @@
 .overview-chart-footer .order-source-scope{margin-bottom:0!important}
 .overview-page{padding-top:15px}.overview-header{margin-bottom:16px}.overview-message-copy{gap:2px;line-height:1.15}.overview-shipment-open>span:last-child{gap:2px;line-height:1.15}.overview-kpi .overview-verification{line-height:1.15}@media(min-width:1700px){.overview-page{padding-top:18px}}
 .overview-kpi strong.overview-long-money{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.overview-status-card .order-source-breakdown{container-type:inline-size;grid-template-columns:minmax(0,1fr);align-content:start;gap:10px}
+.overview-status-card .order-source-donut{width:100%;max-width:205px;margin-inline:auto}
+.overview-status-card .order-source-legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:14px;align-content:start}
+.overview-status-card .order-source-legend button{grid-template-columns:8px minmax(0,1fr) auto 25px;gap:5px;min-height:36px;padding-block:6px;text-align:left}
+.overview-status-card .order-source-legend button>span{overflow-wrap:anywhere}
+.overview-status-card .order-source-legend>p{grid-column:1/-1}
+@container(max-width:440px){.overview-status-card .order-source-legend{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container(max-width:270px){.overview-status-card .order-source-legend{grid-template-columns:minmax(0,1fr)}}

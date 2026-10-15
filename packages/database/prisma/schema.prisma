@@ -274,6 +274,7 @@ model User {
   sessions                 Session[]
   clients                  Client[]                  @relation("ClientManager")
   orders                   Order[]                   @relation("OrderManager")
+  compositionOperations    OrderCompositionOperation[]
   auditLogs                AuditLog[]                @relation("AuditActor")
   authoredMessages         Message[]                 @relation("MessageAuthor")
   communicationAttachments CommunicationAttachment[]
@@ -433,12 +434,14 @@ model Measurement {
   notes      String?
   source     String?
   createdAt  DateTime    @default(now())
+  archivedAt DateTime?
   athlete    Athlete     @relation(fields: [athleteId], references: [id])
   orders     Order[]
   orderItems OrderItem[]
   orderItemInstances OrderItemInstance[]
 
   @@index([athleteId, measuredAt])
+  @@index([athleteId, archivedAt, measuredAt])
 }
 
 model Order {
@@ -502,6 +505,7 @@ model Order {
   measurement          Measurement?     @relation(fields: [measurementId], references: [id])
   responsibleManager   User?            @relation("OrderManager", fields: [responsibleManagerId], references: [id])
   items                OrderItem[]
+  compositionOperations OrderCompositionOperation[]
   payments             Payment[]
   productionSlot       ProductionSlot?
   activities           Activity[]
@@ -621,6 +625,8 @@ model OrderItem {
   externalImageUrl String?
   sku              String?
   designNumber     Int?
+  discipline       Discipline?
+  archivedAt       DateTime?
   properties       Json?
   sourceSystem     String?
   sourceAccount    String?
@@ -638,6 +644,7 @@ model OrderItem {
 
   @@unique([sourceSystem, sourceAccount, externalId])
   @@index([orderId, productionStatus])
+  @@index([orderId, archivedAt])
   @@index([athleteId])
 }
 
@@ -645,6 +652,7 @@ model OrderItemInstance {
   id               String           @id @default(cuid())
   orderItemId      String
   ordinal          Int
+  standardHeight   Int?
   athleteId        String?
   measurementId    String?
   orderShipmentId  String?
@@ -667,6 +675,20 @@ model OrderItemInstance {
   @@index([measurementId])
   @@index([orderShipmentId])
   @@index([productionStatus, archivedAt])
+}
+
+model OrderCompositionOperation {
+  id           String   @id @default(cuid())
+  orderId      String
+  actorId      String
+  operationKey String
+  requestHash  String
+  result       Json
+  createdAt    DateTime @default(now())
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  actor        User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, operationKey])
 }
 
 model OrderTag {

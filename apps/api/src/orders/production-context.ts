@@ -1,10 +1,11 @@
 import type { OrderType, Prisma } from "@prisma/client";
 import { appliedPaymentMinor } from "../finance/exchange-rates";
-import { shippingEvidence } from './order-shipping-evidence';
+import { shippingEvidence, hasManagedEmptyItems } from './order-shipping-evidence';
 
 const NON_PRODUCTION_ORDER_TYPES: OrderType[] = ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"];
 
 export const productionOrderSelect = {
+  compositionOperations:{take:1,select:{id:true}},_count:{select:{items:{where:{archivedAt:{not:null}}}}},
   id: true,
   number: true,
   notes: true,
@@ -28,7 +29,7 @@ export const productionOrderSelect = {
   shipment: { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } },
   orderShipments: { where:{archivedAt:null}, orderBy:[{isPrimary:"desc" as const},{createdAt:"asc" as const}], select:{status:true,trackingNumber:true,shippedAt:true,deliveredAt:true,instances:{select:{id:true}}} },
   client: { select: { displayName: true, country: true } },
-  items: { select: { name: true, quantity: true, modelImagePath: true, externalImageUrl: true, instances:{where:{archivedAt:null},select:{id:true,productionStatus:true}}, athlete: { select: { firstName: true, lastName: true } } } },
+  items: { where: { archivedAt: null }, select: { name: true, quantity: true, modelImagePath: true, externalImageUrl: true, instances:{where:{archivedAt:null},select:{id:true,productionStatus:true}}, athlete: { select: { firstName: true, lastName: true } } } },
 } satisfies Prisma.OrderSelect;
 
 export function includeRequestedProductionOrder<T extends { id: string }>(orders: readonly T[], requested?: T | null) {
@@ -37,7 +38,7 @@ export function includeRequestedProductionOrder<T extends { id: string }>(orders
 }
 
 type ProductionOrder = Prisma.OrderGetPayload<{ select: typeof productionOrderSelect }>;
-type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment" | "orderShipments"> & {
+type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment" | "orderShipments" | "compositionOperations" | "_count"> & {
   hasTrackingNumber: boolean;
   dispatchComplete: boolean;
   deliveryComplete: boolean;
@@ -54,7 +55,7 @@ export type ProductionOrderRepository = {
 };
 
 function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
-  const { deliveryTrackingCode, payments, shipment, ...safeOrder } = order;
+  const { deliveryTrackingCode, payments, shipment, compositionOperations: _operations, _count: _counts, ...safeOrder } = order;
   const { orderShipments = [], ...safeOrderWithoutShipments } = safeOrder;
   const dispatch=shippingEvidence(order);
   const activePayments = payments ?? [];
@@ -86,6 +87,10 @@ function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
 }
 
 const PRODUCTION_RESULT_LIMIT = 1000;
+const hasActiveProductionComposition = { OR: [
+  { items: { some: { archivedAt: null } } },
+  { AND: [{ compositionOperations: { none: {} } }, { items: { none: { archivedAt: { not: null } } } }] },
+] } satisfies Prisma.OrderWhereInput;
 const MAX_PRODUCTION_RANGE_DAYS = 366;
 
 function productionDate(value: string | undefined, fallback: Date, endOfDay = false) {
@@ -103,7 +108,7 @@ export async function loadProductionOrders(repository: ProductionOrderRepository
   const endsAt = productionDate(to, defaultTo, true);
   if (endsAt < startsAt || endsAt.getTime() - startsAt.getTime() > MAX_PRODUCTION_RANGE_DAYS * 24 * 60 * 60 * 1000) throw new Error("INVALID_PRODUCTION_RANGE");
   const orders = await repository.findMany({
-    where: { archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, ...(overview ? { id: { in: overview.orderIds } } : { OR: [
+    where: { AND: [hasActiveProductionComposition], archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, ...(overview ? { id: { in: overview.orderIds } } : { OR: [
       { productionSlot: { is: { startsAt: { lte: endsAt }, endsAt: { gte: startsAt } } } },
       { requiredDeliveryAt: { gte: startsAt, lte: endsAt } },
       { productionSlot: { is: null }, requiredDeliveryAt: null },
@@ -113,7 +118,8 @@ export async function loadProductionOrders(repository: ProductionOrderRepository
     select: productionOrderSelect,
   });
   if (orders.length > PRODUCTION_RESULT_LIMIT) throw new Error("PRODUCTION_RESULT_LIMIT_EXCEEDED");
-  if (overview || !orderId || orders.some((order) => order.id === orderId)) return orders.map(presentProductionOrder);
-  const requested = await repository.findFirst({ where: { id: orderId, archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
-  return includeRequestedProductionOrder(orders, requested).map(presentProductionOrder);
+  const visible=orders.filter(order=>!hasManagedEmptyItems(order));
+  if (overview || !orderId || orders.some((order) => order.id === orderId)) return visible.map(presentProductionOrder);
+  const requested = await repository.findFirst({ where: { AND: [hasActiveProductionComposition], id: orderId, archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
+  return includeRequestedProductionOrder(visible, requested && !hasManagedEmptyItems(requested)?requested:null).map(presentProductionOrder);
 }

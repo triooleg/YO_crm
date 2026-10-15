@@ -60,7 +60,7 @@ test("production reads use a dedicated least-privilege projection", () => {
   assert.match(projection, /payments: \{[\s\S]*where: \{ voidedAt: null \}/);
   assert.match(projection, /client: \{ select: \{ displayName: true, country: true \} \}/);
   assert.doesNotMatch(projection, /invoices|address|postalCode|language|source|measurement|activities|carrier|costMinor/);
-  assert.match(productionContext, /const \{ deliveryTrackingCode, payments, shipment, \.\.\.safeOrder \} = order/);
+  assert.match(productionContext, /const \{ deliveryTrackingCode, payments, shipment, compositionOperations: _operations, _count: _counts, \.\.\.safeOrder \} = order/);
   assert.match(productionContext, /latestPaymentAt/);
   assert.match(productionContext, /hasTrackingNumber: Boolean\(shipment\?\.trackingNumber\?\.trim\(\) \|\| deliveryTrackingCode\?\.trim\(\)\)/);
   assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to, new Date\(\), overview\)/);

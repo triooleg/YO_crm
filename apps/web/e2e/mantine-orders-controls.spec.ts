@@ -260,8 +260,22 @@ test(`измерения показывают снимок привязанны�
   const detail = richOrderDetail(order);
   const bound = detail.items[0].measurement;
   const second = { ...bound, id: "measurement-2", measuredAt: "2026-09-06T12:00:00.000Z", values: { ...bound.values, m1: 74.5 } };
-  detail.client.athletes[0].measurements = [{ ...bound, id: "profile-new", measuredAt: "2026-10-13T12:00:00.000Z", values: { ...bound.values, m1: 99 } }];
-  const item = { ...detail.items[0], athlete: null, measurement: null, quantity: 2, instances: [{ ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z" }, { ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z", id: "instance-2", ordinal: 2, measurement: second }] };
+  detail.client.athletes[0].measurements = [{ ...bound, id: "profile-new", measuredAt: "2026-10-13T12:00:00.000Z", values: { ...bound.values, m1: 99 } }, bound, second];
+  const item = { ...detail.items[0], athlete: null, measurement: null, quantity: 2, productionStatus: "SEWING", instances: [{ ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z" }, { ...detail.items[0].instances[0], updatedAt: "2026-10-13T12:00:00.000Z", id: "instance-2", ordinal: 2, productionStatus: "SCHEDULED", measurement: second }] };
+  const usageQueries: string[] = [];
+  await page.route(`**/api/order-tabs/${order.id}/measurements/usage?*`, route => {
+    const url = new URL(route.request().url());
+    expect(route.request().method()).toBe("GET");
+    expect(url.searchParams.get("athleteId")).toBe("athlete-1");
+    expect(url.searchParams.get("page")).toBe("1");
+    expect(url.searchParams.get("pageSize")).toBe("20");
+    usageQueries.push(url.pathname);
+    return route.fulfill({ json: { rows: item.instances.map(instance => ({
+      orderId: order.id, orderNumber: order.number, orderItemId: item.id, designName: item.name,
+      instanceId: instance.id, ordinal: instance.ordinal, measurementId: instance.measurement.id,
+      measuredAt: instance.measurement.measuredAt, productionStatus: instance.productionStatus, archived: false,
+    })), total: 2, page: 1, pageSize: 20 } });
+  });
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   await page.route("**/api/clients/*/athletes/athlete-1", async route => {
     const body = route.request().postDataJSON();
@@ -274,9 +288,10 @@ test(`измерения показывают снимок привязанны�
     const body = route.request().postDataJSON();
     writes.push({ path: new URL(route.request().url()).pathname, body });
     item.instances[1].measurement = { ...second, id: "edited-snapshot", measuredAt: body.measuredAt, values: { ...second.values, m1: body.m1 } };
-    await route.fulfill({ json: item.instances[1].measurement });
+    detail.client.athletes[0].measurements.push(item.instances[1].measurement);
+    await route.fulfill({ json: { ...item.instances[1], measurementId: item.instances[1].measurement.id } });
   });
-  await page.route(`**/api/orders/${order.id}`, route => route.fulfill({ json: { ...detail, items: [item] } }));
+  await page.route(`**/api/orders/${order.id}`, route => route.fulfill({ json: { ...detail, productionStatus: "SEWING", items: [item] } }));
   await page.goto("/?section=orders");
   await page.getByRole("button", { name: order.number, exact: true }).click();
   await page.getByRole("tab", { name: "Измерения", exact: true }).click();
@@ -284,14 +299,22 @@ test(`измерения показывают снимок привязанны�
   await expect(grid).toBeVisible();
   await expect(grid.locator("strong").first()).toHaveText("50 см");
   await expect(grid.locator("strong")).toHaveCount(4);
-  await expect(grid).toContainText("№15 · Обхват через пах и плечо");
+  await expect(grid).toContainText("№15 · Длина торса через плечо и промежность");
   await expect(grid).not.toContainText("№4 ·");
   await page.getByRole("tab", { name: "Дополнительные", exact: true }).click();
   await expect(grid.locator("strong")).toHaveCount(13);
   await expect(grid).toContainText("№4 · От талии до основания шеи спереди");
   await expect(grid).toContainText("№17 · От талии до верхней линии плавок");
   await page.getByRole("tab", { name: "Основные мерки", exact: true }).click();
-  await expect(page.locator(".orders-used-product")).toHaveCount(2);
+  const usage = page.locator(".design-usage-row");
+  await expect(usage).toHaveCount(2);
+  await expect(usage.nth(0)).toContainText(order.number);
+  await expect(usage.nth(0)).toContainText(item.name);
+  await expect(usage.nth(0)).toContainText("measurement-1");
+  await expect(usage.nth(1)).toContainText(order.number);
+  await expect(usage.nth(1)).toContainText(item.name);
+  await expect(usage.nth(1)).toContainText("measurement-2");
+  expect(usageQueries).toContain(`/api/order-tabs/${order.id}/measurements/usage`);
   await page.getByLabel("Изделие для просмотра мерок").selectOption("instance-2");
   await expect(grid.locator("strong").first()).toHaveText("74,5 см");
   await expect(page.locator(".orders-measurement-workspace")).not.toContainText("99 см");
@@ -316,10 +339,11 @@ test(`измерения показывают снимок привязанны�
   await expect(grid.locator("strong").first()).toHaveText("75,5 см");
   expect(writes[1]).toMatchObject({ path: `/api/order-tabs/${order.id}/instances/instance-2/measurement`, body: { expectedMeasurementId: "measurement-2", expectedUpdatedAt: "2026-10-13T12:00:00.000Z", m1: 75.5 } });
   expect(item.instances[0].measurement.id).toBe("measurement-1");
+  expect(detail.client.athletes[0].measurements.find(snapshot => snapshot.id === "measurement-2")?.values.m1).toBe(74.5);
   await page.getByLabel("Изделие для просмотра мерок").selectOption("instance-1");
   await expect(grid.locator("strong").first()).toHaveText("50 см");
   await page.getByRole("tab", { name: "История замеров", exact: true }).click();
-  await expect(page.locator(".orders-measurement-history-compact li")).toHaveCount(3);
+  await expect(page.locator(".orders-measurement-history-compact li")).toHaveCount(4);
   await expect(page.locator(".orders-measurement-workspace .orders-approved-measurement-grid")).toHaveCount(0);
   await expect(page.locator(".orders-measurement-history-compact")).toContainText("99 см");
   await page.locator(".orders-measurement-workspace").screenshot({ path: screenshotPath(testInfo, `compact-measurement-history-${viewport.width}.png`) });

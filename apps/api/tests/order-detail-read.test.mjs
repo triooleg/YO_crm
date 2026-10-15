@@ -32,7 +32,7 @@ const orderRequire = specifier => {
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
-  if (specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
@@ -89,4 +89,16 @@ test("lazy detail rejects missing or archived orders", async () => {
   const service = new OrdersService({ order: { findFirst: async () => null }, payment: { findMany: async () => { historyReads++; return []; } } }, {});
   await assert.rejects(() => service.detail("missing"), HttpError);
   assert.equal(historyReads, 0);
+});
+
+for(const [operations,archivedCount,expected] of [[[],0,false],[[{id:'private-operation'}],0,true],[[],2,true]])test(`detail compositionManaged is ${expected} for operations ${operations.length} archived ${archivedCount}`,async()=>{
+ let query;const historical={id:'snapshot',archivedAt:new Date(),athleteId:'a',values:{m1:80}};
+ const row={id:'o',client:{id:'c',athletes:[]},items:[],athlete:null,compositionOperations:operations,_count:{items:archivedCount},measurementHistory:[historical]};
+ const service=new OrdersService({order:{findFirst:async q=>{query=q;return row},findMany:async()=>[{id:'o',activities:[]}]},payment:{findMany:async()=>[]}},{});
+ const result=await service.detail('o');assert.equal(result.compositionManaged,expected);assert.equal(result.items.length,0);
+ assert.equal('compositionOperations' in result,false);assert.equal('_count' in result,false);
+ assert.equal(query.select.compositionOperations.take,1);assert.equal(query.select.items.where.archivedAt,null);
+ assert.equal(query.select.items.select.notes,true);assert.equal(query.select.items.select.discipline,true);assert.equal(query.select.items.select.archivedAt,true);
+ assert.equal(query.select.items.select.instances.select.standardHeight,true);
+ assert.equal(query.select.items.select.measurement.select.archivedAt,true);assert.equal(query.select.client.select.athletes.select.measurements.select.archivedAt,true);
 });

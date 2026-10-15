@@ -1,3 +1,4 @@
+import {loadTargetModule} from './overview-target-loader.mjs';
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -14,6 +15,7 @@ function loadOrderTabsService() {
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
   const localRequire = specifier => {
+    if (specifier === "./order-assignment-eligibility") return loadTargetModule("orders/order-assignment-eligibility.ts");
     if (specifier === "../clients/measurement-data") return measurementModule.exports;
     if (specifier === "../prisma.service") return { PrismaService: class PrismaService {} };
     if (specifier === "../uploads") return { uploadsRoot: () => ".local" };

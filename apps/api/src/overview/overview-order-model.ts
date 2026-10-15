@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { financeBusinessDay, financePeriod } from '../finance/finance-report-model';
 import { requiresProduction } from '../orders/production-rules';
-import { shippingEvidence } from '../orders/order-shipping-evidence';
+import { shippingEvidence, hasManagedEmptyItems } from '../orders/order-shipping-evidence';
 
 export const OVERVIEW_BUCKETS = ['new', 'work', 'ready', 'awaiting', 'completed'] as const;
 export type OverviewBucket = typeof OVERVIEW_BUCKETS[number];
@@ -10,6 +10,7 @@ export type OverviewOrderFilter = OverviewBucket | 'period' | 'overdue' | 'unpai
 type Payment = {amountMinor:number;currency:string;appliedAmountMinor:number|null;appliedCurrency:string|null};
 type Parcel = {id:string;status:string;carrier:string;trackingNumber:string|null;shippedAt:Date|null;deliveredAt:Date|null;instances?:{id:string}[]};
 export type OverviewOrderSource = {
+  compositionManaged?:boolean;compositionOperations?:{id:string}[];_count?:{items:number};
   id:string;type:Parameters<typeof requiresProduction>[0];createdAt:Date;sourceSystem:string|null;
   salesStatus:string;productionStatus:string;paymentStatus:string;shippingStatus:string;
   requiredDeliveryAt:Date|null;deliveryTrackingCode:string|null;priceMinor:number;depositRequiredMinor:number;currency:string;
@@ -20,9 +21,10 @@ export type OverviewOrderSource = {
 
 /** Narrow private operational projection, never an order detail or provider payload. */
 export const overviewOrderSourceSelect = {
+  compositionOperations:{take:1,select:{id:true}},_count:{select:{items:{where:{archivedAt:{not:null}}}}},
   id:true,type:true,createdAt:true,sourceSystem:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,
   requiredDeliveryAt:true,deliveryTrackingCode:true,priceMinor:true,depositRequiredMinor:true,currency:true,
-  items:{select:{quantity:true,productionStatus:true,instances:{where:{archivedAt:null},select:{id:true,productionStatus:true}}}},
+  items:{where:{archivedAt:null},select:{quantity:true,productionStatus:true,instances:{where:{archivedAt:null},select:{id:true,productionStatus:true}}}},
   payments:{where:{voidedAt:null},select:{amountMinor:true,currency:true,appliedAmountMinor:true,appliedCurrency:true}},
   orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:'desc' as const},{id:'asc' as const}],select:{id:true,status:true,carrier:true,trackingNumber:true,shippedAt:true,deliveredAt:true,instances:{select:{id:true}}}},
   shipment:{select:{carrier:true,trackingNumber:true,shippedAt:true,deliveredAt:true}},
@@ -85,13 +87,13 @@ export function classifyOverviewOrder(order:OverviewOrderSource,now=new Date()) 
   const open=!order.archivedAt&&!cancelled&&!completed&&!exceptionalParent&&!(exceptionalParcel&&CLOSED_SALES.has(order.salesStatus));
   const leaves=order.items.flatMap(item=>item.instances.length?item.instances.map(instance=>instance.productionStatus):[item.productionStatus]).filter(status=>status!=='CANCELLED');
   const fullReady=leaves.length>0?leaves.every(status=>status==='READY'):order.productionStatus==='READY';
-  const work=open&&!dispatched&&requiresProduction(order.type)&&!fullReady&&(WORK.has(order.productionStatus)||leaves.some(status=>WORK.has(status)||status==='READY'));
-  const ready=open&&!dispatched&&!partiallyDispatched&&(order.salesStatus==='READY_TO_SHIP'||(requiresProduction(order.type)?fullReady:order.shippingStatus==='READY'));
+  const work=!hasManagedEmptyItems(order)&&open&&!dispatched&&requiresProduction(order.type)&&!fullReady&&(WORK.has(order.productionStatus)||leaves.some(status=>WORK.has(status)||status==='READY'));
+  const ready=!hasManagedEmptyItems(order)&&open&&!dispatched&&!partiallyDispatched&&(order.salesStatus==='READY_TO_SHIP'||(requiresProduction(order.type)?fullReady:order.shippingStatus==='READY'));
   const trusted=order.sourceSystem!=='KEYCRM'||order.salesStatus!=='NEW_LEAD'||work||ready||hasTrustedOverviewDeadline(order);
   const paid=settlement(order);
   const unpaid=open&&!dispatched&&trusted&&paid!==null&&((order.depositRequiredMinor>0&&paid<order.depositRequiredMinor)||(order.salesStatus==='WAITING_FINAL_PAYMENT'&&paid<order.priceMinor));
   const expired=Boolean(order.requiredDeliveryAt&&day(order.requiredDeliveryAt)<financeBusinessDay(now));
-  const overdue=open&&!dispatched&&expired&&hasTrustedOverviewDeadline(order);
+  const overdue=!hasManagedEmptyItems(order)&&open&&!dispatched&&expired&&hasTrustedOverviewDeadline(order);
   const requiresVerification=open&&!dispatched&&(exceptionalParcel||!trusted||paid===null||(expired&&!hasTrustedOverviewDeadline(order)));
   let bucket:OverviewBucket|null=null;
   if(!order.archivedAt){
@@ -132,7 +134,7 @@ export function eligibleUpcomingShipmentRecords(sources:OverviewOrderSource[],in
   const today=financeBusinessDay(now),until=new Date(today+'T00:00:00Z');until.setUTCDate(until.getUTCDate()+7);
   const result:OverviewUpcomingShipmentRecord[]=[];
   for(const order of sources){
-    if(order.archivedAt||CLOSED_SALES.has(order.salesStatus)||order.productionStatus==='CANCELLED'||['REFUNDED','CANCELLED'].includes(order.paymentStatus)||['RETURNED','LOST'].includes(order.shippingStatus)||!hasTrustedOverviewDeadline(order)||!order.requiredDeliveryAt)continue;
+    if(hasManagedEmptyItems(order)||order.archivedAt||CLOSED_SALES.has(order.salesStatus)||order.productionStatus==='CANCELLED'||['REFUNDED','CANCELLED'].includes(order.paymentStatus)||['RETURNED','LOST'].includes(order.shippingStatus)||!hasTrustedOverviewDeadline(order)||!order.requiredDeliveryAt)continue;
     const expectedAt=order.requiredDeliveryAt.toISOString(),expected=day(order.requiredDeliveryAt);
     if(expected<today||(input.horizon&&expected>=day(until)))continue;
     if(order.orderShipments.length){

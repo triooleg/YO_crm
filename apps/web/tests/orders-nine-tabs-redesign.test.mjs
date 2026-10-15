@@ -4,6 +4,7 @@ import test from "node:test";
 
 const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
 const tabs = await readFile(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
+const designs = await readFile(new URL("../components/orders/designs-instances.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 const i18n = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
 
@@ -17,7 +18,6 @@ test("девять утверждённых вкладок остаются вн
 test("раскрытая карточка делегирует визуальные панели девяти доменным компонентам", () => {
   for (const component of [
     "OrderDetailsTab",
-    "OrderDesignsTab",
     "OrderMeasurementsTab",
     "OrderClientTab",
     "OrderFinanceTab",
@@ -26,6 +26,9 @@ test("раскрытая карточка делегирует визуальн�
     "OrderNotesTab",
     "OrderHistoryTab",
   ]) assert.match(tabs, new RegExp(`function ${component}`));
+  assert.match(tabs, /import \{\s*DesignsInstancesTab\b[^}]*\} from ['"]\.\/designs-instances['"]/);
+  assert.match(tabs, /<DesignsInstancesTab\b/);
+  assert.match(designs, /export function DesignsInstancesTab\b/);
 
   for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
     assert.match(tabs, new RegExp(`activeTab === "${key}"`));

@@ -45,7 +45,7 @@ test("загрузка производства делает второй огр
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.startsAt.lte.toISOString(), "2027-03-31T23:59:59.999Z");
   assert.equal(calls[0][1].where.OR[0].productionSlot.is.endsAt.gte.toISOString(), "2026-10-01T00:00:00.000Z");
   assert.deepEqual(plain(calls[0][1].where.type.notIn), ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
-  assert.deepEqual(plain(calls[1][1].where), { id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
+  assert.deepEqual(plain(calls[1][1].where), { AND: [{OR:[{items:{some:{archivedAt:null}}},{AND:[{compositionOperations:{none:{}}},{items:{none:{archivedAt:{not:null}}}}]}]}], id: exact.id, archivedAt: null, type: { notIn: ["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"] }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } });
   assert.equal(calls[1][1].select, productionOrderSelect);
   assert.deepEqual(plain(productionOrderSelect.shipment), { select: { trackingNumber: true, shippedAt: true, deliveredAt: true } });
   assert.equal(productionOrderSelect.deliveryTrackingCode, true);

@@ -42,7 +42,7 @@ const orderRequire = specifier => {
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
-  if (specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
@@ -188,6 +188,7 @@ function bindingFixture({ foreignMeasurement = false } = {}) {
       const draft = structuredClone(state);
       const tx = {
         $executeRawUnsafe: async (_sql, key) => draft.locks.push(key),
+        order: { findFirst: async () => ({clientId:"client-1",salesStatus:"NEW_LEAD",shippingStatus:"NOT_READY",orderShipments:[]}) },
         orderItem: {
           findFirst: async ({ where }) => structuredClone(draft.items.find(item => item.id === where.id && item.orderId === where.orderId) ?? null),
           update: async ({ where, data }) => { const index = draft.items.findIndex(item => item.id === where.id); draft.items[index] = { ...draft.items[index], ...data }; return structuredClone(draft.items[index]); },

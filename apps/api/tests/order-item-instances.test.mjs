@@ -72,16 +72,11 @@ test("quantity increase preserves old ids and appends missing ordinals", async (
   assert.deepEqual(rows.map((row) => row.ordinal), [1, 2, 3]);
 });
 
-test("quantity reduction archives unused instances without deleting history", async () => {
-  const { tx, rows } = fixture([
-    { id: "i1", orderItemId: "item-1", ordinal: 1 },
-    { id: "i2", orderItemId: "item-1", ordinal: 2 },
-    { id: "i3", orderItemId: "item-1", ordinal: 3 },
-  ]);
-  await reconcileOrderItemInstances(tx, item, 1, new Date("2026-10-13T12:00:00Z"));
-  assert.equal(rows[0].archivedAt, null);
-  assert.equal(rows[1].archivedAt.toISOString(), "2026-10-13T12:00:00.000Z");
-  assert.equal(rows[2].archivedAt.toISOString(), "2026-10-13T12:00:00.000Z");
+// Approved composition contract replaces the old implicit unused-tail shrink.
+test("quantity reduction preserves unused history until explicit instance selection", async () => {
+  const { tx, rows } = fixture([{id:"i1",ordinal:1},{id:"i2",ordinal:2},{id:"i3",ordinal:3}]);
+  await assert.rejects(()=>reconcileOrderItemInstances(tx,item,1),OrderItemInstanceConflictError);
+  assert.equal(rows.filter(row=>!row.archivedAt).length,3);
 });
 
 test("quantity reduction cannot archive a shipped or started instance", async () => {
@@ -117,4 +112,27 @@ test("quantity reduction cannot archive an instance assigned to an athlete or me
       (error) => error instanceof OrderItemInstanceConflictError,
     );
   }
+});
+
+test('non-last archive tombstone is preserved and active count drives append after historical max',async()=>{
+ const archived=new Date('2026-10-15T10:00:00Z');
+ const {tx,rows}=fixture([{id:'i1',ordinal:1},{id:'i2',ordinal:2,archivedAt:archived},{id:'i3',ordinal:3}]);
+ await reconcileOrderItemInstances(tx,item,2);
+ assert.equal(rows.find(x=>x.id==='i2').archivedAt.toISOString(),archived.toISOString());
+ assert.deepEqual(rows.filter(x=>!x.archivedAt).map(x=>x.id),['i1','i3']);
+ await reconcileOrderItemInstances(tx,item,3);
+ assert.deepEqual(rows.filter(x=>!x.archivedAt).map(x=>x.ordinal),[1,3,4]);
+ assert.equal(rows.find(x=>x.id==='i3').id,'i3');
+});
+
+test('legacy shrink requires explicit selected IDs even for unused pieces and performs no writes',async()=>{
+ const {tx,rows}=fixture([{id:'i1',ordinal:1},{id:'i2',ordinal:2}]);
+ await assert.rejects(()=>reconcileOrderItemInstances(tx,item,1),OrderItemInstanceConflictError);
+ assert.equal(rows.filter(x=>!x.archivedAt).length,2);
+});
+
+test('archived design cannot reconcile or resurrect physical pieces',async()=>{
+ const {tx,rows}=fixture([{id:'i1',ordinal:1,archivedAt:new Date()}]);
+ await assert.rejects(()=>reconcileOrderItemInstances(tx,{...item,archivedAt:new Date()},1),OrderItemInstanceConflictError);
+ assert.ok(rows[0].archivedAt);
 });

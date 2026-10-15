@@ -51,7 +51,7 @@ export class ClientsService {
         athletes: {
           where: { archivedAt: null },
           orderBy: { firstName: "asc" },
-          include: { measurements: { orderBy: { measuredAt: "desc" }, take: 1 } }
+          include: { measurements: { where: { archivedAt: null }, orderBy: { measuredAt: "desc" }, take: 1 } }
         },
         workTasks: {
           where: { archivedAt: null, completedAt: null, column: { archivedAt: null, isDone: false } },
@@ -180,11 +180,11 @@ export class ClientsService {
       const conversationIds=conversations.map(item=>item.id),splitAt=new Date();
 
       if(operation&&moved!.athletes.length){
-        const dependentOrder=await tx.order.findFirst({where:{clientId:targetId,id:{notIn:moved!.orders},OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}},{items:{some:{OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}}]}}}]},select:{id:true}});
+        const dependentOrder=await tx.order.findFirst({where:{clientId:targetId,id:{notIn:moved!.orders},OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}},{items:{some:{OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}},{instances:{some:{OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}}]}}}]}}}]},select:{id:true}});
         if(dependentOrder)throw new BadRequestException("CLIENT_SPLIT_DEPENDENCY_CONFLICT");
       }
       if(operation&&moved!.orders.length){
-        const foreignAthleteOrder=await tx.order.findFirst({where:{clientId:targetId,id:{in:moved!.orders},OR:[{athleteId:{not:null,notIn:moved!.athletes}},{measurement:{athleteId:{notIn:moved!.athletes}}},{items:{some:{OR:[{athleteId:{not:null,notIn:moved!.athletes}},{measurement:{athleteId:{notIn:moved!.athletes}}}]}}}]},select:{id:true}});
+        const foreignAthleteOrder=await tx.order.findFirst({where:{clientId:targetId,id:{in:moved!.orders},OR:[{athleteId:{not:null,notIn:moved!.athletes}},{measurement:{athleteId:{notIn:moved!.athletes}}},{items:{some:{OR:[{athleteId:{not:null,notIn:moved!.athletes}},{measurement:{athleteId:{notIn:moved!.athletes}}},{instances:{some:{OR:[{athleteId:{not:null,notIn:moved!.athletes}},{measurement:{athleteId:{notIn:moved!.athletes}}}]}}}]}}}]},select:{id:true}});
         if(foreignAthleteOrder)throw new BadRequestException("CLIENT_SPLIT_DEPENDENCY_CONFLICT");
       }
       if(operation&&(moved!.agreements.length||moved!.orders.length||conversationIds.length)){
@@ -307,11 +307,15 @@ export class ClientsService {
   }
 
   async addMeasurement(clientId: string, athleteId: string, dto: CreateMeasurementDto, actor: User) {
-    const athlete = await this.prisma.athlete.findFirst({ where: { id: athleteId, clientId, archivedAt: null } });
-    if (!athlete) throw new NotFoundException("Спортсмен не найден");
     const data = createMeasurementData(athleteId, dto);
     const { standardHeight } = dto;
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${clientId} FOR UPDATE`;
+      if (!await tx.client.findFirst({ where: { id: clientId, archivedAt: null }, select: { id: true } })) throw new NotFoundException("Клиент не найден");
+      await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${athleteId} FOR UPDATE`;
+      const athlete = await tx.athlete.findFirst({ where: { id: athleteId, clientId, archivedAt: null } });
+      if (!athlete) throw new NotFoundException("Спортсмен не найден");
       const measurement = await tx.measurement.create({
         data
       });

@@ -68,6 +68,11 @@ conversions, ranges or formulas without confirmed business rules.
 `Measurement Set` is a UI phrase for one `Measurement` snapshot, not another
 model.
 
+A Measurement may be soft-archived for future selection. Archiving changes only
+archive metadata; historical explicit references and immutable values remain
+readable. A new version can be copied from a historical snapshot without moving
+other order or instance references.
+
 ## Orders, production and fulfilment
 
 ### Order
@@ -108,12 +113,32 @@ or design description, quantity and unit `priceMinor`; its line amount is
 `quantity * priceMinor`. Pair and group orders use items to group equal products,
 while operationally distinct physical pieces are Order Item Instances.
 
+An archived Order Item retains its original quantity and references as history;
+it does not participate in active totals, production coverage or current item
+lists. Its optional discipline overrides the order discipline only for that
+design. Composition mutations preserve existing order adjustments by applying a
+line delta rather than replacing the order total with a sum of item amounts.
+
 ### Order Item Instance
 
 One physical piece represented by an Order Item. It has a stable identity and
 ordinal inside the item and may own its athlete, immutable measurement-snapshot
 reference and production state. An active instance is not another priced line:
 commercial price remains on the Order Item.
+
+Its optional standardHeight is a display size independent of the assigned
+immutable measurement snapshot. Equal display sizes do not merge physical IDs.
+Shrinking selects explicit instance IDs to archive. Growing creates new IDs and
+ordinals after the historical maximum; it never reactivates archived instances.
+
+### Order Composition Operation
+
+An immutable retry record for one previewed change of order composition. Stored
+as OrderCompositionOperation with a key unique inside the order, actor, request
+hash and minimal result. A repeated matching request returns the same operation;
+reusing its key for another payload conflicts. The record, active quantities,
+financial delta and audit are committed in the same transaction. It is not a
+payment ledger and does not grant a refund or mutate historical invoice snapshots.
 
 ### Imported Order Provenance
 
@@ -286,7 +311,7 @@ content are separate. `MessageTemplate` stores reusable communication text.
 - Client and athlete remain separate; one client may own several athletes.
 - Measurements are dated snapshots and referenced by orders, items and item
   instances.
-- For every Order Item, its quantity equals the number of active Order Item
+- For every active Order Item, its quantity equals the number of active Order Item
   Instances; archived instances preserve history but do not count.
 - Sales, production, payment and shipping statuses stay independent.
 - Production commitment is gated by the required deposit.

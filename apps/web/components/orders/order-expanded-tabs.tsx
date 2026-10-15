@@ -2,6 +2,14 @@
 import { orderSourceUi as sourceUi } from "../../lib/i18n";
 import { sourceLabel } from "../../lib/order-source";
 
+import "../../app/designs-instances.css";
+import { HistoricalInstance } from "./historical-instance";
+import { DesignsInstancesTab, CompositionEditor } from "./designs-instances";
+import { InstanceMeasurementDrawer } from "./instance-measurement-drawer";
+import { MeasurementUsage, MeasurementArchiveAction, type MeasurementUsageRow } from "./measurement-usage";
+import { designsInstancesUi as designsUi } from "../../lib/i18n";
+import { Select } from "@mantine/core";
+
 import { moneyLabel } from "../../lib/finance-report";
 import { orderSettlement } from "../../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../../lib/i18n";
@@ -23,17 +31,20 @@ import { OrderExpenseEditor } from "./order-expense-editor";
 import { InvoiceEditor } from "../invoice-editor";
 import type { Order } from "../orders-workspace";
 
-type Athlete = NonNullable<Order["athlete"]> & {
-  measurements?: Array<NonNullable<Order["measurement"]> & { notes?: string }>;
+export type Athlete = NonNullable<Order["athlete"]> & {
+  updatedAt?: string; archivedAt?: string | null;
+  measurements?: Array<NonNullable<Order["measurement"]> & { notes?: string; archivedAt?: string | null }>;
 };
 
 export type OrderItemInstanceView = {
   id: string;
   updatedAt: string;
   ordinal: number;
+  standardHeight?: number | null;
+  archivedAt?: string | null;
   productionStatus: string;
   athlete?: Athlete | null;
-  measurement?: NonNullable<Order["measurement"]> | null;
+  measurement?: (NonNullable<Order["measurement"]> & {archivedAt?: string | null}) | null;
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
   startedAt?: string | null;
@@ -41,8 +52,11 @@ export type OrderItemInstanceView = {
   orderShipment?: { id: string; status: string; trackingNumber?: string | null } | null;
 };
 
-export type ExpandedOrderItem = Order["items"][number] & {
+export type ExpandedOrderItem = Omit<Order["items"][number], "instances"> & {
   persistedItemId?: string;
+  archivedAt?: string | null;
+  discipline?: string | null;
+  notes?: string | null;
   athlete?: Athlete;
   measurementHistory?: Array<NonNullable<Order["measurement"]> & { notes?: string }>;
   instances?: OrderItemInstanceView[];
@@ -79,6 +93,7 @@ export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities"> &
     files?: OrderFileView[];
     orders?: Array<{ id: string; number: string; createdAt: string; priceMinor: number; currency: string; salesStatus: string; productionStatus: string; shippingStatus: string; modelImagePath?: string | null; externalImageUrl?: string | null }>;
   };
+  compositionManaged?: boolean;
   responsibleManager?: { id: string; displayName: string } | null;
   paymentHistory?: Array<Order["payments"][number] & { voidedAt?: string; voidReason?: string; canVoid?: boolean; isImported?: boolean }>;
   updatedAt?: string;
@@ -168,16 +183,47 @@ const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE
 export function OrderExpandedTabs(props: Props) {
   const { order } = props;
   const [activeTab, setActiveTab] = useState("details");
+  const [financeDesignEditor,setFinanceDesignEditor]=useState<{action:'ADD'|'EDIT';itemId?:string}>();
+  const [historyInstanceId,setHistoryInstanceId] = useState<string>();
+  const [focusInstanceId,setFocusInstanceId] = useState<string>();
+  const [focusAthleteId,setFocusAthleteId] = useState<string>();
   const [targetShipmentId, setTargetShipmentId] = useState<string>();
   useEffect(() => {
     const readContext = () => {
-      setActiveTab(orderInitialTab(window.location.search, order.id));
+      const params = new URLSearchParams(window.location.search);
+      const ownContext = params.get("orderId") === order.id;
+      setActiveTab(ownContext && ["designs","measurements"].includes(params.get("tab") ?? "") ? params.get("tab")! : orderInitialTab(window.location.search, order.id));
+      setHistoryInstanceId(ownContext ? params.get("historyInstanceId") ?? undefined : undefined);
+      setFocusInstanceId(ownContext ? params.get("instanceId") ?? undefined : undefined);
+      setFocusAthleteId(ownContext ? params.get("athleteId") ?? undefined : undefined);
       setTargetShipmentId(shipmentContextId(window.location.search, order.id));
     };
     readContext();
     window.addEventListener("popstate", readContext);
     return () => window.removeEventListener("popstate", readContext);
   }, [order.id]);
+  const closeHistorical = () => {
+    setHistoryInstanceId(undefined);
+    const url=new URL(window.location.href);url.searchParams.delete("historyInstanceId");
+    window.history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`);
+  };
+  const openInstance = (row:MeasurementUsageRow) => {
+    if(row.archived){
+      const url=new URL(window.location.href);url.searchParams.set("section","orders");url.searchParams.set("orderId",order.id);url.searchParams.set("tab","designs");url.searchParams.set("historyInstanceId",row.instanceId);url.searchParams.delete("instanceId");
+      window.history.pushState(null,"",`${url.pathname}${url.search}${url.hash}`);
+      setHistoryInstanceId(row.instanceId);setFocusInstanceId(undefined);setActiveTab("designs");return;
+    }
+    setHistoryInstanceId(undefined);
+    const url=new URL(window.location.href);url.searchParams.delete("historyInstanceId");url.searchParams.set("section","orders");url.searchParams.set("orderId",row.orderId);url.searchParams.set("tab","designs");url.searchParams.set("instanceId",row.instanceId);
+    window.history.pushState(null,"",`${url.pathname}${url.search}${url.hash}`);
+    if(row.orderId===order.id){setActiveTab("designs");setFocusInstanceId(row.instanceId);}else {
+      // Usage can refer outside the current Orders filter. Native explicit context avoids
+      // onOpenOrder rejecting a valid client record through the current list cohort.
+      for(const key of ["source","period","quick","status","search","page","clientId"])url.searchParams.delete(key);
+      window.location.assign(url.toString());
+    }
+  };
+  const openMeasurements = (instance:OrderItemInstanceView) => {setFocusInstanceId(instance.id);setFocusAthleteId(instance.athlete?.id);setActiveTab("measurements");};
   const items = expandedOrderItems(order);
   const tabPanelId = `order-tab-panel-${order.id}`;
   const tabs = [
@@ -208,15 +254,17 @@ export function OrderExpandedTabs(props: Props) {
     />
     <section id={tabPanelId} aria-labelledby={`order-tab-${order.id}-${activeTab}`} className={`orders-order-tab-panel orders-order-tab-${activeTab}`} role="tabpanel">
       {activeTab === "details" && <OrderDetailsTab {...props} items={items} />}
-      {activeTab === "designs" && <OrderDesignsTab {...props} items={items} />}
-      {activeTab === "measurements" && <OrderMeasurementsTab {...props} items={items} />}
+      {activeTab === "designs" && historyInstanceId && <HistoricalInstance key={`${order.id}-${historyInstanceId}`} contextOrderId={order.id} instanceId={historyInstanceId} bridge={props.measurementActions??props.financeActions} onClose={closeHistorical} renderMeasurements={measurement=><MeasurementGrid measurement={measurement}/>}/>}
+      {activeTab === "designs" && <DesignsInstancesTab order={order} items={items} bridge={props.financeActions} focusInstanceId={focusInstanceId} onMeasurements={openMeasurements} />}
+      {activeTab === "measurements" && <OrderMeasurementsTab {...props} items={items} focusAthleteId={focusAthleteId} focusInstanceId={focusInstanceId} onOpenInstance={openInstance} />}
       {activeTab === "client" && <OrderClientTab {...props} items={items} />}
-      {activeTab === "finance" && <OrderFinanceTab {...props} items={items} />}
+      {activeTab === "finance" && <OrderFinanceTab {...props} items={items} onAddDesign={()=>setFinanceDesignEditor({action:'ADD'})} onEditItem={itemId=>setFinanceDesignEditor({action:'EDIT',itemId})} />}
       {activeTab === "production" && <OrderProductionTab {...props} items={items} />}
       {activeTab === "delivery" && <OrderDeliveryTab {...props} items={items} targetShipmentId={targetShipmentId} />}
       {activeTab === "notes" && <OrderNotesTab {...props} />}
       {activeTab === "history" && <OrderHistoryTab order={order} />}
     </section>
+    {financeDesignEditor&&props.financeActions&&<CompositionEditor key={`${financeDesignEditor.action}-${financeDesignEditor.itemId??'new'}`} order={order} action={financeDesignEditor.action} item={items.find(item=>item.id===financeDesignEditor.itemId)} bridge={props.financeActions} onClose={()=>setFinanceDesignEditor(undefined)}/>}
   </>;
 }
 
@@ -277,111 +325,64 @@ function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliver
   </div>;
 }
 
-function OrderDesignsTab({ order, items, onAddDesign, onEditItem, onEdit, onImage, onUpdateInstance }: Props & { items: ExpandedOrderItem[] }) {
-  const instances = items.flatMap((item) => item.instances ?? []);
-  const [instanceAssignment, setInstanceAssignment] = useState<{ item: ExpandedOrderItem; instance: OrderItemInstanceView }>();
-  const assignedAthletes = instances.length ? instances.filter((item) => item.athlete).length : items.filter((item) => item.athlete).length;
-  const assignedMeasurements = instances.length ? instances.filter((item) => item.measurement).length : items.filter((item) => item.measurement).length;
-  return <div className="orders-tab-designs-approved">
-    <header className="orders-tab-section-header"><div><h3>{ui.designsInOrder}</h3><p>{ui.designsRealDataHint}</p></div><CrmButton size="compact-sm" onClick={onAddDesign}>＋ {ui.addDesign}</CrmButton></header>
-    <div className="orders-design-card-list">
-      {items.map((item, index) => {
-        const itemInstances = item.instances ?? [];
-        return <article className="orders-design-card" key={item.id}>
-          <div className="orders-design-summary">
-            <span className="orders-item-index">{index + 1}</span>
-            <OrderImageEditor item={item} onImage={onImage} />
-            <div className="orders-design-name"><h4>{item.name}</h4><p>{disciplineLabel(order.discipline)}</p><small>{ui.illustratorDesignNumber}: {item.designNumber || ui.notSpecified}</small><CrmButton tone="secondary" size="compact-xs" onClick={() => item.persistedItemId ? onEditItem(item.persistedItemId) : onEdit()}>{ui.editDesign}</CrmButton></div>
-            <Field label={ui.quantity} value={`${item.quantity} ${ui.pieces}`} />
-            <Field label={ui.unitPrice} value={money(item.priceMinor, order.currency)} />
-            <Field label={ui.total} value={money(item.priceMinor * item.quantity, order.currency)} />
-            <div className="orders-design-features"><strong>{ui.designFeatures}</strong><EmptyState text={ui.designFeaturesUnavailable} compact /></div>
-          </div>
-          <div className="orders-design-instances">
-            <header><div><h4>{ui.instances} ({itemInstances.length || item.quantity})</h4><small>{ui.instancesStableIdHint}</small></div></header>
-            {itemInstances.length ? itemInstances.map((instance) => <InstanceRow key={instance.id} item={item} instance={instance} order={order} onAssign={() => setInstanceAssignment({ item, instance })} />) : <EmptyState text={ui.instancesUnavailable} />}
-          </div>
-        </article>;
-      })}
-    </div>
-    <div className="orders-tab-summary-strip">
-      <SummaryMetric label={ui.totalDesigns} value={String(items.length)} />
-      <SummaryMetric label={ui.totalCostumes} value={String(itemQuantity(order))} />
-      <SummaryMetric label={ui.assignedAthletes} value={`${assignedAthletes} ${ui.of} ${itemQuantity(order)}`} />
-      <SummaryMetric label={ui.measurementsReceivedCount} value={`${assignedMeasurements} ${ui.of} ${itemQuantity(order)}`} />
-      <SummaryMetric label={ui.designsTotal} value={money(items.reduce((sum, item) => sum + item.priceMinor * item.quantity, 0), order.currency)} />
-    </div>
-    <Modal opened={Boolean(instanceAssignment)} onClose={() => setInstanceAssignment(undefined)} title={ui.assignAthleteAndMeasurements} aria-label={ui.assignAthleteAndMeasurements} closeButtonProps={{ "aria-label": ui.close }} centered size={520}>{instanceAssignment && <OrderInstanceAssignmentForm order={order} item={instanceAssignment.item} instance={instanceAssignment.instance} onCancel={() => setInstanceAssignment(undefined)} onSubmit={async (input) => { await onUpdateInstance(instanceAssignment.instance.id, input); setInstanceAssignment(undefined); }} />}</Modal>
-  </div>;
-}
-
-function OrderInstanceAssignmentForm({ order, item, instance, onCancel, onSubmit }: { order: ExpandedOrderView; item: ExpandedOrderItem; instance: OrderItemInstanceView; onCancel: () => void; onSubmit: (input: OrderItemInstanceInput) => Promise<void> }) {
-  const athletes = order.client.athletes ?? [];
-  const [athleteId, setAthleteId] = useState(instance.athlete?.id || "");
-  const selectedAthlete = athletes.find((athlete) => athlete.id === athleteId);
-  const measurementOptions = (selectedAthlete?.measurements ?? []).filter((measurement) => measurement.athleteId === athleteId);
-  const [measurementId, setMeasurementId] = useState(instance.measurement?.id || "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError("");
-    try { await onSubmit({ athleteId: athleteId || null, measurementId: measurementId || null, expectedUpdatedAt: instance.updatedAt }); }
-    catch (reason) { setError((reason as Error).message); }
-    finally { setBusy(false); }
-  }
-  return <form className="orders-instance-assignment-form" onSubmit={submit}>
-    <p>{item.name} · {displayInstanceNumber(expandedOrderItems(order), item, instance.ordinal)}</p>
-    <CrmNativeSelect data-autofocus label={ui.athlete} value={athleteId} onChange={(event) => { setAthleteId(event.currentTarget.value); setMeasurementId(""); }} data={[{ value: "", label: ui.notSpecifiedFeminine }, ...athletes.map((athlete) => ({ value: athlete.id, label: athleteName(athlete) }))]} />
-    <CrmNativeSelect label={ui.measurementVersion} value={measurementId} disabled={!athleteId} onChange={(event) => setMeasurementId(event.currentTarget.value)} data={[{ value: "", label: ui.notReceived }, ...measurementOptions.map((measurement) => ({ value: measurement.id, label: formatDate(measurement.measuredAt) }))]} />
-    {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
-    <footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onCancel}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.saveAssignment}</CrmButton></footer>
-  </form>;
-}
-
-function OrderMeasurementsTab({ order, items, onMeasurements, onAddAthlete, addAthleteButtonRef, onBindMeasurement, measurementActions }: Props & { items: ExpandedOrderItem[] }) {
+function OrderMeasurementsTab({ order, items, onMeasurements, onAddAthlete, addAthleteButtonRef, onBindMeasurement, measurementActions, financeActions, focusAthleteId, focusInstanceId, onOpenInstance }: Props & { items: ExpandedOrderItem[]; focusAthleteId?:string; focusInstanceId?:string; onOpenInstance:(row:MeasurementUsageRow)=>void }) {
   const athletes = [...new Map([...uniqueAthletes(order, items), ...(order.client.athletes ?? [])].map((athlete) => [athlete.id, athlete])).values()];
-  const [selectedAthleteId, setSelectedAthleteId] = useState(athletes[0]?.id);
+  const [scope,setScope]=useState<string | null>("client");
+  const [drawerInstance,setDrawerInstance]=useState<OrderItemInstanceView>();
+  const [selectedAthleteId, setSelectedAthleteId] = useState(focusAthleteId??athletes[0]?.id);
+  useEffect(()=>{if(focusAthleteId)setSelectedAthleteId(focusAthleteId);},[focusAthleteId]);
+  const assignedIds=new Set(items.flatMap(item=>item.instances?.length?item.instances.flatMap(i=>i.athlete?[i.athlete.id]:[]):item.athlete?[item.athlete.id]:[]));
+  const scopedAthletes=athletes.filter(a=>(!a.archivedAt||assignedIds.has(a.id))&&(scope!=="order"||assignedIds.has(a.id)));
   const [query, setQuery] = useState("");
-  const selectedAthlete = athletes.find((athlete) => athlete.id === selectedAthleteId) ?? athletes[0];
-  const visibleAthletes = athletes.filter((athlete) => athleteName(athlete).toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru")));
+  const selectedAthlete = scopedAthletes.find((athlete) => athlete.id === selectedAthleteId) ?? scopedAthletes[0];
+  const visibleAthletes = scopedAthletes.filter((athlete) => athleteName(athlete).toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru")));
   const assignments = items.flatMap<MeasurementAssignment>((item) => item.instances?.length
     ? item.instances.filter((instance) => instance.athlete && instance.athlete.id === selectedAthlete?.id).map((instance) => ({ id: instance.id, item, instance, measurement: ownedMeasurement(instance.measurement ?? undefined, instance.athlete ?? undefined) }))
     : item.athlete && item.athlete.id === selectedAthlete?.id ? [{ id: item.id, item, instance: undefined, measurement: ownedMeasurement(item.measurement, item.athlete) }] : []);
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>();
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>(focusInstanceId??"");
+  useEffect(()=>{if(focusInstanceId)setSelectedAssignmentId(focusInstanceId);},[focusInstanceId]);
   const assignment = assignments.find((entry) => entry.id === selectedAssignmentId) ?? assignments.find((entry) => entry.measurement) ?? assignments[0];
   const currentItem = assignment?.instance ? undefined : assignment?.item;
-  const currentMeasurement = assignment?.measurement ?? (!assignment && selectedAthlete ? latestMeasurement(selectedAthlete) : undefined);
+  const [chosenVersionId,setChosenVersionId]=useState<string>();
+  const baseMeasurement=assignment?.measurement ?? (!assignment && selectedAthlete ? latestMeasurement(selectedAthlete) : undefined);
+  const currentMeasurement:(NonNullable<Order["measurement"]>&{archivedAt?:string|null})|undefined=selectedAthlete?.measurements?.find(m=>m.id===chosenVersionId)??baseMeasurement;
+  useEffect(()=>setChosenVersionId(undefined),[selectedAthlete?.id,selectedAssignmentId]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
   const [measurementTab, setMeasurementTab] = useState("basic");
   const history = [...new Map([...(selectedAthlete?.measurements ?? []), ...assignments.flatMap((entry) => entry.measurement ? [entry.measurement] : [])].filter((entry) => entry.athleteId === selectedAthlete?.id).map((entry) => [entry.id, entry])).values()].sort((a, b) => b.measuredAt.localeCompare(a.measuredAt));
-  const chooseAssignment = (id: string) => setSelectedAssignmentId(id);
+  const chooseAssignment = (id: string) => {setChosenVersionId(undefined);setSelectedAssignmentId(id);};
   const options = currentItem ? clientMeasurementOptions(order, currentItem) : [];
   return <div className="orders-tab-measurements-approved">
-    <aside className="orders-athlete-rail"><header><h3>{ui.athletesInOrder}</h3><span>{athletes.length}</span></header>{onAddAthlete && <CrmButton ref={addAthleteButtonRef} tone="secondary" size="compact-xs" onClick={onAddAthlete}>{ui.addAthlete}</CrmButton>}<CrmTextInput aria-label={ui.searchAthletes} placeholder={ui.searchAthletes} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />{visibleAthletes.length ? visibleAthletes.map((athlete) => { const index = athletes.indexOf(athlete); return <button key={athlete.id} className={athlete.id === selectedAthlete?.id ? "active" : ""} onClick={() => setSelectedAthleteId(athlete.id)}><b>{index + 1}</b><span><strong>{athleteName(athlete)}</strong><small>{latestMeasurement(athlete) ? `${ui.measurementTakenAt}: ${formatDate(latestMeasurement(athlete)!.measuredAt)}` : ui.noMeasurements}</small></span></button>; }) : <EmptyState text={athletes.length ? ui.noSearchResults : ui.noAthletesInOrder} />}</aside>
+    <aside className="orders-athlete-rail"><Select className="design-measurements-scope" aria-label={designsUi.athletes} value={scope} onChange={setScope} data={[{value:"client",label:designsUi.clientScope},{value:"order",label:designsUi.orderScope}]}/><header><h3>{ui.athletesInOrder}</h3><span>{athletes.length}</span></header>{onAddAthlete && <CrmButton ref={addAthleteButtonRef} tone="secondary" size="compact-xs" onClick={onAddAthlete}>{ui.addAthlete}</CrmButton>}<CrmTextInput aria-label={ui.searchAthletes} placeholder={ui.searchAthletes} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />{visibleAthletes.length ? visibleAthletes.map((athlete) => { const index = athletes.indexOf(athlete); return <button key={athlete.id} className={athlete.id === selectedAthlete?.id ? "active" : ""} onClick={() => {setChosenVersionId(undefined);setSelectedAthleteId(athlete.id);}}><b>{index + 1}</b><span><strong>{athleteName(athlete)}{athlete.archivedAt ? ` · ${designsUi.archived}` : ""}</strong><small>{latestMeasurement(athlete) ? `${ui.measurementTakenAt}: ${formatDate(latestMeasurement(athlete)!.measuredAt)}` : ui.noMeasurements}</small></span></button>; }) : <EmptyState text={scopedAthletes.length ? ui.noSearchResults : athletes.length ? designsUi.noAssignedAthletes : designsUi.noClientAthletes} />}</aside>
     <div className="orders-measurement-workspace">
       {selectedAthlete ? <>
-        <header><div><span className="orders-avatar-small">{initials(athleteName(selectedAthlete))}</span><h3>{athleteName(selectedAthlete)}</h3><p>{currentMeasurement ? `${assignment ? ui.currentMeasurement : ui.profileMeasurements} · ${formatDate(currentMeasurement.measuredAt)}` : ui.noMeasurements}</p></div><div className="orders-measurement-toolbar">{measurementActions && <CrmButton tone="secondary" size="compact-sm" onClick={() => setNameOpen(true)}>{ui.editAthleteName}</CrmButton>}{measurementActions && (!assignment || assignment.instance) && <CrmButton tone="secondary" size="compact-sm" onClick={() => setEditorOpen(true)}>{currentMeasurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{currentItem?.persistedItemId && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(currentItem.persistedItemId)}>{currentMeasurement ? ui.newMeasurementVersion : ui.addMeasurements}</CrmButton>}</div></header>
+        <header><div><span className="orders-avatar-small">{initials(athleteName(selectedAthlete))}</span><h3>{athleteName(selectedAthlete)}</h3><p>{currentMeasurement ? `${assignment ? ui.currentMeasurement : ui.profileMeasurements} · ${formatDate(currentMeasurement.measuredAt)}` : ui.noMeasurements}</p></div><div className="orders-measurement-toolbar">{measurementActions && !selectedAthlete.archivedAt && <CrmButton tone="secondary" size="compact-sm" onClick={() => setNameOpen(true)}> {ui.editAthleteName}</CrmButton>}{measurementActions && !selectedAthlete.archivedAt && (!assignment || assignment.instance) && <CrmButton tone="secondary" size="compact-sm" onClick={() => setEditorOpen(true)}>{currentMeasurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{!selectedAthlete.archivedAt && currentItem?.persistedItemId && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(currentItem.persistedItemId)}>{currentMeasurement ? ui.newMeasurementVersion : ui.addMeasurements}</CrmButton>}</div></header>
+        {financeActions&&selectedAthlete.updatedAt&&!selectedAthlete.archivedAt&&<MeasurementArchiveAction label={designsUi.archiveAthlete} path={`/order-tabs/${order.id}/athletes/${selectedAthlete.id}/archive`} body={{expectedUpdatedAt:selectedAthlete.updatedAt}} bridge={financeActions}/>}
+        {financeActions&&currentMeasurement&&!currentMeasurement.archivedAt&&!selectedAthlete.archivedAt&&<MeasurementArchiveAction label={designsUi.archiveVersion} path={`/order-tabs/${order.id}/measurements/${currentMeasurement.id}/archive`} body={{expectedArchivedAt:null}} bridge={financeActions}/>}
+        {history.length>0&&<Select label={designsUi.version} value={currentMeasurement?.id??null} onChange={id=>setChosenVersionId(id??undefined)} data={history.map(m=>({value:m.id,label:`${formatDate(m.measuredAt)} · ${m.id}`}))}/>}
         {assignments.length > 1 && <CrmNativeSelect label={ui.measurementProductSelection} value={assignment?.id ?? ""} onChange={(event) => chooseAssignment(event.currentTarget.value)} data={assignments.map((entry) => ({ value: entry.id, label: `${entry.item.name} · ${entry.instance ? displayInstanceNumber(items, entry.item, entry.instance.ordinal) : ui.measurementAssignmentAtDesignLevel}` }))} />}
+        {assignment?.instance&&financeActions&&<CrmButton size="compact-sm" tone="secondary" onClick={()=>setDrawerInstance(assignment.instance)}>{designsUi.assign}</CrmButton>}
         <CrmTabList value={measurementTab} onChange={setMeasurementTab} className="orders-measurement-subtabs" ariaLabel={ui.measurementSections} tabs={[{ value: "basic", label: ui.basicMeasurements }, { value: "additional", label: ui.additionalMeasurements }, { value: "photo", label: ui.measurementPhoto }, { value: "history", label: ui.measurementHistory }]} />
         {currentItem?.persistedItemId && options.length > 0 && <CrmNativeSelect aria-label={`${ui.bindMeasurement}: ${currentItem.name}`} value={currentMeasurement?.id || ""} onChange={(event) => event.target.value && void onBindMeasurement(currentItem.persistedItemId!, event.target.value, currentMeasurement?.id ?? null)} data={[{ value: "", label: ui.bindMeasurement }, ...options]} />}
         {measurementTab === "basic" || measurementTab === "additional" ? currentMeasurement ? <MeasurementGrid measurement={currentMeasurement} numbers={measurementTab === "basic" ? basicMeasurementNumbers : additionalMeasurementNumbers} /> : <EmptyState text={ui.noMeasurements} /> : measurementTab === "photo" ? <EmptyState text={ui.noAthletePhoto} /> : history.length ? <ol className="orders-measurement-history-compact">{history.map((measurement, index) => <li key={measurement.id}><div><strong>{formatDate(measurement.measuredAt)}</strong><span>{measurement.id === currentMeasurement?.id ? assignment ? ui.measurementUsedInSelection : ui.currentVersion : `${ui.version} ${history.length - index}`}</span></div><p>{basicMeasurementNumbers.map(number => <span key={number} title={measurementFieldLabels[number - 1]}>№{number}: <strong>{measurement.values?.[`m${number}`] == null ? "—" : `${formatCm(measurement.values[`m${number}`]!)} см`}</strong></span>)}</p></li>)}</ol> : <EmptyState text={ui.noMeasurementHistory} />}
       </> : <EmptyState text={ui.noAthletesInOrder} />}
     </div>
     <aside className="orders-measurement-side">
-      <TabCard title={ui.usedInProducts}>{assignments.length ? assignments.map((entry) => <UnstyledButton className="orders-used-product" key={entry.id} onClick={() => chooseAssignment(entry.id)}><ItemThumb item={entry.item} /><span><strong>{entry.item.name}</strong><small>{entry.instance ? `${ui.instanceLabel} ${displayInstanceNumber(items, entry.item, entry.instance.ordinal)}` : ui.measurementAssignmentAtDesignLevel}</small></span></UnstyledButton>) : <EmptyState text={ui.measurementUsageUnavailable} />}</TabCard>
+      <TabCard title={ui.usedInProducts}><MeasurementUsage orderId={order.id} athleteId={selectedAthlete?.id} bridge={measurementActions??financeActions} onOpen={onOpenInstance}/></TabCard>
       <TabCard title={ui.measurementHistory}>{history.length ? history.map((measurement, index) => <div className="orders-history-dot" key={measurement.id}><i /><span><strong>{formatDate(measurement.measuredAt)}</strong><small>{measurement.id === currentMeasurement?.id ? assignment ? ui.measurementUsedInSelection : ui.currentVersion : `${ui.version} ${history.length - index}`}</small></span></div>) : <EmptyState text={ui.noMeasurementHistory} />}</TabCard>
     </aside>
     <div className="orders-measurement-summary orders-tab-span-full"><SummaryMetric label={ui.totalAthletes} value={String(athletes.length)} /><SummaryMetric label={ui.measurementsReceivedCount} value={`${athletes.filter((athlete) => latestMeasurement(athlete)).length} ${ui.of} ${athletes.length}`} /><SummaryMetric label={ui.usedInProducts} value={String(items.reduce((count, item) => count + (item.instances?.length ? item.instances.filter((instance) => instance.athlete).length : item.athlete ? 1 : 0), 0))} /><SummaryMetric label={ui.latestUpdate} value={latestClientMeasurementDate(athletes) || ui.notSpecified} /></div>
+    {drawerInstance&&financeActions&&<InstanceMeasurementDrawer key={drawerInstance.id} order={order} items={items} instance={drawerInstance} bridge={financeActions} onClose={()=>setDrawerInstance(undefined)}/>}
     {nameOpen && selectedAthlete && measurementActions && <AthleteNameEditor athlete={selectedAthlete} clientId={order.client.id} actions={measurementActions} onClose={() => setNameOpen(false)} />}
     {editorOpen && selectedAthlete && measurementActions && <OrderMeasurementEditor order={order} athlete={selectedAthlete} assignment={assignment} measurement={currentMeasurement} actions={measurementActions} onClose={() => setEditorOpen(false)} />}
   </div>;
 }
 
 function OrderMeasurementEditor({ order, athlete, assignment, measurement, actions, onClose }: { order: ExpandedOrderView; athlete: Athlete; assignment?: MeasurementAssignment; measurement?: NonNullable<Order["measurement"]>; actions: NonNullable<TabCallbacks["measurementActions"]>; onClose: () => void }) {
-  // Form values, destination and optimistic tokens must come from the same opening snapshot.
+  // Freeze the selected copy source separately from the current assigned snapshot CAS.
   const [original] = useState(() => ({ orderId: order.id, client: { id: order.client.id, displayName: order.client.displayName, athletes: [athlete] }, instance: assignment?.instance, measurement }));
-  return <MeasurementPanel client={original.client} request={(path, init) => original.instance && init?.method === "POST" ? actions.request(`/order-tabs/${original.orderId}/instances/${original.instance.id}/measurement`, { ...init, body: JSON.stringify({ ...JSON.parse(String(init.body)), expectedMeasurementId: original.measurement?.id ?? null, expectedUpdatedAt: original.instance.updatedAt }) }) : actions.request(path, init)} initialValues={original.measurement?.values} title={original.measurement ? ui.editMeasurements : ui.addMeasurements} onClose={onClose} onSaved={async () => { await actions.onSaved(); onClose(); }} />;
+  return <MeasurementPanel client={original.client} request={(path, init) => original.instance && init?.method === "POST" && path.endsWith("/measurements") ? actions.request(`/order-tabs/${original.orderId}/instances/${original.instance.id}/measurement`, { ...init, body: JSON.stringify({ ...JSON.parse(String(init.body)), expectedMeasurementId: original.instance.measurement?.id ?? null, expectedUpdatedAt: original.instance.updatedAt }) }) : actions.request(path, init)} initialValues={original.measurement?.values} title={original.measurement ? ui.editMeasurements : ui.addMeasurements} onClose={onClose} onSaved={async () => { await actions.onSaved(); onClose(); }} />;
 }
 
 function AthleteNameEditor({ athlete, clientId, actions, onClose }: { athlete: Athlete; clientId: string; actions: NonNullable<TabCallbacks["measurementActions"]>; onClose: () => void }) {
@@ -771,10 +772,11 @@ function MeasurementGrid({ measurement, numbers = Array.from({ length: 17 }, (_,
 function TabIcon({ name }: { name: string }) { const paths: Record<string, ReactNode> = { details: <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></>, designs: <><rect x="4" y="5" width="13" height="15" rx="2" /><path d="M8 5V3h12v15h-3" /></>, measurements: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h5" /></>, client: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>, finance: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6m-6 4h6m-6 4h4" /></>, production: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></>, delivery: <><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>, notes: <><path d="M4 20h16V4H4z" /><path d="M8 9h8m-8 4h8m-8 4h5" /></>, history: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>, edit: <><path d="m4 20 4-1 10-10-3-3L5 16l-1 4Z" /></>, file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></> }; return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.details}</svg>; }
 
 export function expandedOrderItems(order: ExpandedOrderView): ExpandedOrderItem[] {
-  if (order.items.length) return order.items.map((item, index) => {
+  if (!order.items.length && order.compositionManaged) return [];
+  if (order.items.length) return order.items.filter(item=>!item.archivedAt).map((item, index) => {
     const athlete = item.athlete || (order.items.length === 1 && index === 0 ? order.athlete as Athlete | undefined : undefined);
     const measurement = ownedMeasurement(item.measurement, athlete) || (order.items.length === 1 && index === 0 ? ownedMeasurement(order.measurement, athlete) : undefined);
-    return { ...item, persistedItemId: item.id, athlete, measurement, measurementHistory: item.measurementHistory?.length ? item.measurementHistory : athlete?.measurements ?? (order.items.length === 1 ? order.measurementHistory : []) };
+    return { ...item, instances:item.instances?.filter(instance=>!instance.archivedAt), persistedItemId: item.id, athlete, measurement, measurementHistory: item.measurementHistory?.length ? item.measurementHistory : athlete?.measurements ?? (order.items.length === 1 ? order.measurementHistory : []) };
   });
   return [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete as Athlete | undefined, measurement: ownedMeasurement(order.measurement, order.athlete as Athlete | undefined), measurementHistory: order.measurementHistory ?? [] }];
 }
@@ -786,7 +788,10 @@ function formatDate(value: string) { return new Intl.DateTimeFormat("ru-RU", { d
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function formatCm(value: number) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value); }
 function formatFileSize(value: number) { return value < 1024 * 1024 ? `${Math.max(1, Math.round(value / 1024))} КБ` : `${(value / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`; }
-function itemQuantity(order: ExpandedOrderView) { return order.items.reduce((sum, item) => sum + item.quantity, 0) || 1; }
+export function itemQuantity(order: ExpandedOrderView) {
+  const quantity = order.items.filter(item => !item.archivedAt).reduce((sum, item) => sum + item.quantity, 0);
+  return quantity || (order.compositionManaged ? 0 : 1);
+}
 function itemImage(item: ExpandedOrderItem) { return item.modelImagePath ? `/api/orders/images/${item.modelImagePath}` : item.externalImageUrl || null; }
 function athleteName(athlete: Athlete) { return [athlete.firstName, athlete.lastName].filter(Boolean).join(" "); }
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toLocaleUpperCase("ru")).join("") || "—"; }

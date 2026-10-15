@@ -1,3 +1,4 @@
+import {loadTargetModule} from "./overview-target-loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -14,13 +15,13 @@ vm.runInNewContext(javascript, {
   require: specifier => specifier === "@prisma/client"
     ? { PaymentStatus: paymentStatus }
     : specifier === "./production-status-graph"
-      ? { updateProductionStatusGraph: async (tx, orderId, nextStatus, orderData = {}) => {
+      ? { aggregateProductionStatus: loadTargetModule("orders/production-status-graph.ts").aggregateProductionStatus, updateProductionStatusGraph: async (tx, orderId, nextStatus, orderData = {}) => {
           const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus: nextStatus } });
           await tx.orderItem.updateMany({ where: { orderId }, data: { productionStatus: nextStatus } });
           await tx.orderItemInstance.updateMany({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus: nextStatus } });
           return order;
         } }
-      : undefined,
+      : specifier === "./order-shipping-evidence" ? loadTargetModule("orders/order-shipping-evidence.ts") : undefined,
   Date,
   Math,
 });
@@ -39,6 +40,7 @@ function fixture({ productionSlot = null } = {}) {
     },
     activities: [], audits: [],
   };
+  for(const item of state.order.items)item.instances=Array.from({length:item.quantity},(_,n)=>({id:`${item.id}-${n}`,orderItemId:item.id,ordinal:n+1,productionStatus:item.productionStatus,archivedAt:null}));
   const tx = {
     $executeRawUnsafe: async () => undefined,
     order: {
@@ -46,7 +48,7 @@ function fixture({ productionSlot = null } = {}) {
       update: async ({ data }) => { state.order = { ...state.order, ...data }; return structuredClone(state.order); },
     },
     orderItem: {
-      create: async ({ data }) => { const item={ id:`item-${state.order.items.length+1}`,createdAt:new Date(),productionStatus:"NOT_SCHEDULED",...data };state.order.items.push(item);return structuredClone(item); },
+      create: async ({ data }) => { const item={ id:`item-${state.order.items.length+1}`,createdAt:new Date(),productionStatus:"NOT_SCHEDULED",instances:[],...data };state.order.items.push(item);return structuredClone(item); },
       update: async ({ where, data }) => {
         const index = state.order.items.findIndex((item) => item.id === where.id);
         state.order.items[index] = { ...state.order.items[index], ...data };
@@ -58,8 +60,8 @@ function fixture({ productionSlot = null } = {}) {
       },
     },
     orderItemInstance: {
-      findMany: async () => [],
-      create: async ({ data }) => ({ id: `instance-${data.orderItemId}-${data.ordinal}`, ...data }),
+      findMany: async ({where}) => structuredClone(state.order.items.find(i=>i.id===where.orderItemId)?.instances??[]),
+      create: async ({ data }) => { const row={ id: `instance-${data.orderItemId}-${data.ordinal}`, ...data };state.order.items.find(i=>i.id===data.orderItemId).instances.push(row);return row; },
       update: async ({ where, data }) => ({ id: where.id, ...data }),
       updateMany: async () => ({ count: 0 }),
     },
@@ -83,7 +85,7 @@ test("исторический слот быстрой продажи не бл�
 test("снижение цены дизайна подтверждает предварительный слот при достаточной предоплате", async () => {
   const { state, tx } = fixture({ productionSlot: { id: "slot-1", tentative: true } });
   state.order.payments = [{ amountMinor: 10000, currency: "EUR" }];
-  await persistOrderItemDetails(tx, "order-1", "item-2", { ...expectedSecond, name: "Второй", quantity: 1, priceMinor: 5000 }, "owner-1");
+  await persistOrderItemDetails(tx, "order-1", "item-2", { ...expectedSecond, name: "Второй", quantity: 2, priceMinor: 2500 }, "owner-1");
   assert.equal(state.order.productionSlot.tentative, false);
   assert.equal(state.order.productionStatus, "SCHEDULED");
   assert.ok(state.order.items.every((item) => item.productionStatus === "SCHEDULED"));

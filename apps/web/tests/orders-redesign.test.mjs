@@ -27,7 +27,8 @@ test("Orders redesign keeps real controls and deterministic guidance", () => {
   for (const token of ["orders-filter-trigger", "orders-filter-chips", "orders-export", "orders-pagination", "refreshOrder", "orderProblems", "OrderChannelIcon"]) {
     assert.match(dashboard, new RegExp(token));
   }
-  assert.match(tabs, /orders-tab-designs/);
+  assert.match(tabs, /<DesignsInstancesTab/);
+  assert.match(readFileSync(new URL("../components/orders/designs-instances.tsx", import.meta.url), "utf8"), /className="designs-instances"/);
   assert.match(ui, /Финансы по заказу/);
   assert.match(ui, /Пожелания клиента/);
   assert.match(ui, /Заметки менеджера/);

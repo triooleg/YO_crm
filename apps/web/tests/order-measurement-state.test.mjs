@@ -6,6 +6,13 @@ const athlete = { id: "athlete-1" };
 const owned = { athleteId: athlete.id };
 const foreign = { athleteId: "athlete-2" };
 
+test('physical assignments determine readiness and missing new costume is not hidden by a legacy item snapshot',()=>{
+ const instances=Array.from({length:6},(_,i)=>({id:`p${i}`,athlete:{id:`a${i}`},measurement:{athleteId:`a${i}`}}));
+ const order={type:'GROUP_ORDER',items:[{id:'d',quantity:6,instances}]};assert.equal(orderMeasurementState(order).complete,true);
+ order.items[0].athlete=athlete;order.items[0].measurement=owned;order.items[0].instances.push({id:'new'});order.items[0].quantity=7;assert.equal(orderMeasurementState(order).complete,false);
+ assert.equal(orderMeasurementState({type:'CUSTOM_ORDER',compositionManaged:true,items:[]}).complete,true);
+});
+
 test("чужой снимок мерок считается отсутствующим и требует действие «замеры»", () => {
   for (const order of [
     { type: "CUSTOM_ORDER", athlete, measurement: foreign, items: [] },

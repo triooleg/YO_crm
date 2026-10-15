@@ -14,6 +14,10 @@ import { OrdersController } from "./orders/orders.controller";
 import { OrdersService } from "./orders/orders.service";
 import { OrderTabsController } from "./orders/order-tabs.controller";
 import { OrderTabsService } from "./orders/order-tabs.service";
+import { OrderCompositionController } from "./orders/order-composition.controller";
+import { OrderCompositionService } from "./orders/order-composition.service";
+import { OrderMeasurementAssignmentsController } from "./orders/order-measurement-assignments.controller";
+import { OrderMeasurementAssignmentsService } from "./orders/order-measurement-assignments.service";
 import { FinanceController } from "./finance/finance.controller";
 import { FinanceService } from "./finance/finance.service";
 import { FinanceReportService } from "./finance/finance-report.service";
@@ -36,7 +40,7 @@ import { KeycrmWorkerService } from "./keycrm/keycrm-worker.service";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
-  controllers: [OverviewController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
-  providers: [OverviewService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, OrderTabsService, FinanceService, FinanceReportService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
+  controllers: [OverviewController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, OrderCompositionController, OrderMeasurementAssignmentsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
+  providers: [OverviewService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, OrderTabsService, OrderCompositionService, OrderMeasurementAssignmentsService, FinanceService, FinanceReportService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
 })
 export class AppModule {}

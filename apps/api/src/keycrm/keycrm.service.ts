@@ -448,6 +448,25 @@ export class KeycrmService {
         await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "ORDER_CURRENCY_CHANGED", message: `KeyCRM передал валюту ${order.currency}, но заказ ${existing.number} и его история сохранены в ${existing.currency}. Заказ пропущен без изменений.` } });
         return "SKIPPED" as const;
       }
+      const hasLocalCompositionItems = existing?.sourceLinkMode === "IMPORTED" && await tx.orderItem.count({ where: { orderId: existing.id, sourceSystem: null } }) > 0;
+      const preserveComposition = Boolean(existing && (hasLocalCompositionItems || await tx.activity.findFirst({ where: { orderId: existing.id, type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["composition"], equals: true } }, select: { id: true } })));
+      const matchedExistingOrder = Boolean(existing && (!externallyLinked || existing.sourceLinkMode === "MATCHED_EXISTING"));
+      const preserveExistingItems = matchedExistingOrder && await tx.orderItem.count({ where: { orderId: existing!.id, OR: [{ sourceSystem: null }, { sourceSystem: { not: SOURCE_SYSTEM } }] } }) > 0;
+      if (existing && preserveComposition && !preserveExistingItems) {
+        // Check before buyer/client/order writes: a frozen manual total cannot absorb
+        // a provider line delta. Tombstones and explicit item overrides stay protected.
+        for (const item of order.items) {
+          if (!item.externalId && externallyLinked) continue;
+          const beforeItem = item.externalId ? await tx.orderItem.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: item.externalId } } }) : null;
+          if (beforeItem?.orderId === existing.id && beforeItem.archivedAt) continue;
+          const manualItemOverride = beforeItem?.orderId === existing.id && Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, type: "ORDER_ITEM_DETAILS_UPDATED", AND: [{ metadata: { path: ["itemId"], equals: beforeItem.id } }, { metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
+          if (manualItemOverride) continue;
+          if (!beforeItem || beforeItem.orderId !== existing.id || beforeItem.quantity !== item.quantity || beforeItem.priceMinor !== item.priceMinor) {
+            await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "LOCAL_COMPOSITION_IMPORT_CONFLICT", message: "В KeyCRM изменились количество, цена или состав товаров после ручного изменения состава CRM. Заказ пропущен без изменений. Сверьте состав и суммы в CRM и KeyCRM перед повторным импортом.", details: { orderId: existing.id, externalItemId: item.externalId, itemId: beforeItem?.id ?? null } } });
+            return "SKIPPED" as const;
+          }
+        }
+      }
       const matchedCarrierBeforeWrite = matchedShippingCarrier(order.delivery.serviceName);
       const activeShipmentsBeforeWrite = existing && tx.orderShipment
         ? await tx.orderShipment.findMany({ where: { orderId: existing.id, archivedAt: null }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] })
@@ -480,7 +499,7 @@ export class KeycrmService {
         persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number: order.number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {
-        const manualPriceOverride = Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, OR: [{ type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, { type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
+        const manualPriceOverride = preserveComposition || Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, OR: [{ type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, { type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
         const depositRequiredMinor = manualPriceOverride
           ? existing.depositRequiredMinor
           : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
@@ -494,14 +513,16 @@ export class KeycrmService {
         persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId, manualPriceOverride), priceMinor: shippingFinance.priceMinor, deliveryMinor: shippingFinance.deliveryMinor, ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor: shippingFinance.depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
         if (!externallyLinked) await tx.auditLog.create({ data: { actorId, action: "LINK", entityType: "Order", entityId: persisted.id, before: existing, after: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       }
-      const matchedExistingOrder = Boolean(existing && (!externallyLinked || existing.sourceLinkMode === "MATCHED_EXISTING"));
       const items = order.items.length ? order.items : [{ sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: null, name: `Заказ KeyCRM #${order.externalId}`, sku: null, quantity: 1, priceMinor: order.priceMinor, notes: order.buyerComment, externalImageUrl: null, properties: [] }];
-      const preserveExistingItems = matchedExistingOrder && await tx.orderItem.count({ where: { orderId: persisted.id, OR: [{ sourceSystem: null }, { sourceSystem: { not: SOURCE_SYSTEM } }] } }) > 0;
       if (preserveExistingItems) await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "MATCHED_ORDER_ITEMS_PRESERVED", message: `Позиции существующего заказа ${persisted.number} сохранены без дублирования; позиции KeyCRM доступны в исходных данных заказа.` } });
       for (const item of preserveExistingItems ? [] : items) {
         if (item.externalId) {
           const identity = { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: item.externalId };
           const beforeItem = await tx.orderItem.findUnique({ where: { sourceSystem_sourceAccount_externalId: identity } });
+          if (beforeItem?.archivedAt) {
+            await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "ARCHIVED_ORDER_ITEM_PRESERVED", message: "Архивный дизайн сохранён без восстановления и изменения экземпляров", details: { itemId: beforeItem.id } } });
+            continue;
+          }
           const manualItemOverride = beforeItem ? Boolean(await tx.activity.findFirst({ where: { orderId: persisted.id, type: "ORDER_ITEM_DETAILS_UPDATED", AND: [{ metadata: { path: ["itemId"], equals: beforeItem.id } }, { metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } })) : false;
           const localImage = item.externalImageUrl === mainExternalImageUrl ? importedModelImagePath : null;
           const replaceItemImage = shouldReplaceImportedImage(beforeItem?.modelImagePath, localImage);
@@ -575,7 +596,9 @@ export class KeycrmService {
       const paidMinor = activePayments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
       const derivedPaymentStatus = paidMinor >= persisted.priceMinor && persisted.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
       if (persisted.paymentStatus !== derivedPaymentStatus) persisted = await tx.order.update({ where: { id: persisted.id }, data: { paymentStatus: derivedPaymentStatus } });
-      await this.syncProductionSlot(tx, order, persisted, paidMinor, actorId, runId);
+      // A local composition change must not silently move promised production dates
+      // using the stale provider quantity. Existing receipt/deposit confirmation below remains owned by its gate.
+      if (!preserveComposition) await this.syncProductionSlot(tx, order, persisted, paidMinor, actorId, runId);
       let slot = requiresProduction(persisted.type) ? await tx.productionSlot.findUnique({ where: { orderId: persisted.id } }) : null;
       if (slot?.tentative && paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor) {
         const previousSlot = slot;
@@ -1084,9 +1107,24 @@ function rollbackSnapshotValue(value: unknown): ParsedRollbackSnapshot {
 
 function rollbackSnapshotMatches(current: RollbackSnapshot, storedValue: unknown) {
   const stored = rollbackSnapshotValue(storedValue);
-  if (stored.version === 2) return jsonValuesEqual(current, stored);
-  if (current.orderItemInstances.length || current.orderShipments.length) return false;
-  const { version: _version, orderItemInstances: _instances, orderShipments: _shipments, ...legacyCurrent } = current;
+  const compatible = jsonSnapshot(current) as unknown as RollbackSnapshot;
+  // Schema expansion adds NULL metadata to old rows. Ignore only absent old keys
+  // with NULL values; actual new archive/size/discipline intent must block rollback.
+  const oldItems = rowsById(stored.order?.items);
+  for (const item of rows(compatible.order?.items)) {
+    const previous = oldItems.get(String(item.id));
+    if (previous) for (const field of ["archivedAt", "discipline"]) {
+      if (!Object.hasOwn(previous, field) && item[field] === null) delete item[field];
+    }
+  }
+  const oldInstances = rowsById(stored.orderItemInstances);
+  for (const instance of compatible.orderItemInstances) {
+    const previous = oldInstances.get(String(instance.id));
+    if (previous && !Object.hasOwn(previous, "standardHeight") && instance.standardHeight === null) delete instance.standardHeight;
+  }
+  if (stored.version === 2) return jsonValuesEqual(compatible, stored);
+  if (compatible.orderItemInstances.length || compatible.orderShipments.length) return false;
+  const { version: _version, orderItemInstances: _instances, orderShipments: _shipments, ...legacyCurrent } = compatible;
   return jsonValuesEqual(legacyCurrent, storedValue);
 }
 

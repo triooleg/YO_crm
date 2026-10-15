@@ -43,7 +43,7 @@ const requireForOrders = specifier => {
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => { const order = await tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }); await tx.orderItem?.updateMany?.({ where: { orderId }, data: { productionStatus } }); await tx.orderItemInstance?.updateMany?.({ where: { orderItem: { orderId }, archivedAt: null }, data: { productionStatus } }); return order; } };
   if (specifier === "./production-context") return { loadProductionOrders: (...args) => productionLoader(...args) };
   if (specifier === "sharp") return () => ({});
-  if (specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 const source = readFileSync(new URL("../src/orders/orders.service.ts", import.meta.url), "utf8");

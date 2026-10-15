@@ -1,5 +1,125 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — User authorized 0.3.0 verification and deployment
+
+Current request "делай проверку и дпелой" authorizes the scoped release workflow,
+backup/isolated rehearsal/additive migration and API/web switch for accepted Designs/Measurements.
+Version0.3.0 per projectminor policy; 1549/tests/types/build repeated PASS in
+.local/designs-instances/deploy/quality-v030.log. FULL20261015T163120Z-619f944-pre-v030
+checksums/dump/uploads/manifest/COMPLETED verified. ActualPG16 isolated restore57tables,
+raw migration rollback/apply and originalrowfingerprints/advisorycontention PASS.
+Prisma tracker+actual domain race rehearsal, stagedbuild/independentmigration+switchreview
+and liveverification pending. No production schema or runtime switch performed yet.
+Only scoped release commit/tag/push allowed as necessary deployment workflow; no mainmerge,
+seed/import/businessrepair or customer/provider writes. Oldimage rollback afternewarchivewrites
+is unsafe; prewrite fallback only after exact business equality, else failclosed/rollforward.
+
+## 2026-10-15 — Designs/Measurements LOCAL ACCEPTANCE PASS; Production HOLD
+
+User approved DB plan and LOCAL implementation only. Integration branch codex/website-sales,
+HEAD13f2891, uncommitted implementation; primary D:/Projects/YO_crm unrelated work untouched.
+Designs/instances and shared Measurements implemented with previewed CAS/idempotent writes,
+selected soft archive, immutable versions, client ownership, actual money and protected progress.
+C4 KeyCRM provider-delta/local-composition conflict now preflights before business writes.
+Legacy assignment/structural bypasses and unmaterialized sibling production rollup fixed.
+R1 response-loss preserves original operation; confirmed apply + refresh failure repeats only read.
+
+quality-final3.log exit0:1549(1047API+478web+24DB), alltypes/API+NextbuildPASS.
+Runtime/tests verified unchanged vs candidate-before-quality3.json; generated next-env2imports
+restored only after diff review. ui-model-final4PASS; 32 unique browsercasesPASS across bounded
+receipts: new18,retained8,visual6. Visual independentPASS46frames at1920/1703/1366/390.
+CompatibilityPASS (C4implemented byHume independentlyclosedbyErdos), BusinessPASS;
+RegressionfinalPASS; ReleaseLOCAL ACCEPTANCE PASS (independentR1behavior4/4).
+No open local blockers. Production gates7/8UNVERIFIED/HOLD; no deployauthorization.
+Tracked report docs/ui/designs-measurements-instances-validation.md with inventory/screenshots.
+Private receipts .local/designs-instances; failedlogsretained with honest corrected-testboundaries.
+
+Migration expand-only20261015160000_design_composition notappliedtoliveDB. PGlite7PASS included
+inDB24; NO realPostgreSQL lock/contention rehearsal (Dockerunavailable). Production gateHOLD,
+needs PostgreSQL rehearsal, backup and separateuserpermission. NoDB/live/provider/customerwrite,
+credentialaccess,commit,push,deploy. SeparateOverview3/2/1legendCSSpreserved.
+
+## 2026-10-15 — retained measurement browser fixture frozen
+
+Only affected parameterized measurement test in mantine-orders-controls.spec.ts
+updated for new paginated usageAPI (exact2 rows, current owned athlete/order),
+selector design-usage-row. Preserved assigned/profile/CAS/editor/context/4+13/mobile
+assertions; pending pieceSCHEDULED, firstREADY untouched. Full immutable history now
+retains original second snapshot too (4versions after edit, not3). No product change.
+After combined25 finished22PASS/3FAIL, authorized narrow1920/1366/390 rerun3/3PASS23.6s.
+Receipt browser-retained-measurements-fixed.log and retained-measurements-source-freeze.json.
+No further browser runs by this worker. Finalquality3/C4+whole regression pending.
+
+
+## 2026-10-15 — R1 browser selector follow-up frozen
+
+Focused actual local browser5/5 PASS27.3s: historical copy/CAS + four R1 ADD/DUP
+retry/refresh cases. Test-only fixes: Mantine combobox role avoids shared-label
+listbox collision; required textboxes selected by role/name; fieldset disabled
+attribute AND real textbox disabled verified. No product/fixture/assertion removal.
+Preserve browser-final14PASS/4FAIL and browser-r1-selector-fixed.log. Owned spec
+re-frozen in r1-source-freeze.json. Rootquality2 still fails new eligibility-helper
+resolution in legacy VM loaders; MAIN owns correction/final root and review gates.
+
+
+## 2026-10-15 — R1 CompositionEditor timeout fix frozen locally
+
+Directly authorized narrow integration fix: after first apply attempt, editing and
+repreview stay disabled; retry keeps original command/token/operationKey. After
+acknowledged apply, a rejected parent refresh retries only refresh (no second POST).
+Visual/menu markup preserved; two stale browser selectors updated to open Actions
+then menuitem. Four behavioral RED->GREEN cases cover ADD/DUPLICATE unknown result
+and rejected parent refresh. Three private actual-service probes promoted into
+existing API test seams: 3 designs/distinct versions, all surviving fields 5->7->4,
+30% deposit with immutable issued invoice/receipts/confirmed slot dates/assignments.
+Focused results4+3 PASS, web tsc --noEmit --incremental false exit0; Playwright list
+18 cases including4 new R1 cases. Browser execution/final root quality/build and
+independent final regression/release approval remain MAIN gates. No devserver,
+DB/live/provider/commit/push/deploy. Private r1-source-freeze.json and r1-*.log.
+R1 owner freezes five source/test files; MAIN may append a separate screenshot spec.
+
+
+## 2026-10-15 — Designs/Measurements local implementation approved and active
+
+User explicitly confirmed proposed DB plan and local implementation, including
+archive/schema risk. This does NOT authorize production DB/deploy/commit/push.
+MAIN INTEGRATOR owns schema20261015160000_design_composition and newcomposition
+preview/apply API/domain plus appmodule. Separate isolated uncommitted DAG workers:
+designs-ui-worker (expandedtabs/newUI/i18n/CSS/e2e), designs-measurements-worker
+(newassignment/usage/archiveAPI), designs-compat-worker(activeitemconsumers/import/
+legacyreconcile). No worker commits authorized; integrator copies reviewed owned
+diffs, does not merge/push. Existing local Overviewlegend CSS preserved.
+Core REDmissingmodule then GREEN6planningtests; added5writebehavior tests PASS,
+schemaPrisma generate/APItypecheckPASS. Fullintegration/quality/visual/reviews pending.
+No production connection or data mutation performed. Do not call feature complete.
+
+## 2026-10-15 — Designs/Measurements audit plan; Overview compact source legend
+
+New user feature: D:/download/YO_CRM_Designs_Measurements_Order_Editing_Codex_TZ (1).md
+with approved Designs reference/current screenshots. Preserve existing top card,
+9tabs,17measurement fields and shared Athlete/Measurement snapshots. Existing
+OrderItemInstance already provides stable physical pieces/assignments/shipment links.
+Audited models/DTO/services/UI/tests/import. Gap: selected-instance shrink instead
+of ordinal/resurrection, design archive/duplicate, financial preview+whole-composition
+CAS/idempotency, atomic bulk assignment, client/order scope and cross-order usage.
+Reviewable plan docs/plans/designs-measurements-instances.md and non-executable
+designs-measurements-schema-draft.sql prepared; no Prisma/migration/database changes.
+Compatibility plan review PASS; baseline52 existing contracts PASS. User confirmation
+requested before proposed archive/schema risk, as instructed. No new permission for
+production migration/deploy/commit/push. Main feature NOT implemented/accepted yet.
+Risk: old code would count archived designs after new business operations; application
+rollback needs compatible reads or reviewed restore, not blind prior-image rollback.
+
+Separate user refinement implemented locally: overview-workspace.css only scoped
+Overview sources legend below donut,3columns>440px/2<=440px/1<=270px container;
+Finance/standard mode/source calculations/handlers unchanged. Existing all-modes
+browser PASS1 at1920/1366/820/390,8 source/standard visual frames reviewed PASS.
+Rootquality exit0:1399tests(911API+471web+17DB),types/buildPASS. Generatednext-env
+restored. Failed first browser attempt on3553 preserved (existingdev3532 lock);
+secondrun reused existing3532 without stopping/restarting it. Synthetic fixtures
+only; no live/provider writes/DBapply/deploy. Primary D:/Projects/YO_crm unrelated
+dirty work preserved; integrationworktree remains finance-approved-redesign/YO_crm.
+
 ## 2026-10-15 — 0.2.0 deployed; acceptance complete
 
 Runtime/tag crm-v0.2.0 = 619f9446cfcc2e1841141b76e6e5d4e32e200c4a.

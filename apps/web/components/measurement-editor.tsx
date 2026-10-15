@@ -2,7 +2,7 @@
 
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Drawer, Tabs } from "@mantine/core";
-import { athleteMeasurementWizardUi as ui, ordersDashboardUi, measurementEditorUi } from "../lib/i18n";
+import { athleteMeasurementWizardUi as ui, ordersDashboardUi, measurementEditorUi, measurementDefinitionUi } from "../lib/i18n";
 import { CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 import { additionalMeasurementNumbers, basicMeasurementNumbers, measurementFieldLabels, measurementPresetHeights } from "./measurement-definition";
 
@@ -54,7 +54,7 @@ export function MeasurementEditor({ opened = true, title, description, values, s
             <div className="measurement-editor-table">
               <header><span>{ui.measurementNumber}</span><span>{ui.measurementParameter}</span><span>{ui.measurementValue}</span></header>
               {numbers.map(number => <label key={number} className={basicMeasurementNumbers.includes(number) ? "required" : undefined}>
-                <b>{number}</b><span>{measurementFieldLabels[number - 1]}{basicMeasurementNumbers.includes(number) ? " *" : ""}</span>
+                <b>{number}</b><span title={number === 15 ? measurementDefinitionUi.torsoHelp : undefined}>{measurementFieldLabels[number - 1]}{basicMeasurementNumbers.includes(number) ? " *" : ""}</span>
                 <CrmTextInput name={`m${number}`} aria-label={`${number}. ${measurementFieldLabels[number - 1]}`} type="number" min={1} step={0.5} required={basicMeasurementNumbers.includes(number)} disabled={busy} value={values[`m${number}`] || ""} onChange={event => { const value = event.currentTarget.value; onValue(`m${number}`, value); }} placeholder="см" />
               </label>)}
             </div>
