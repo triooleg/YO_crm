@@ -68,7 +68,7 @@ export class ShippingService{
     }
     const category=await tx.expenseCategory.findFirst({where:{name:"Доставка",active:true}});
     if(!category)throw new ConflictException("Сначала создайте или активируйте финансовую категорию «Доставка» с правами бухгалтера");
-    const expense=before?await tx.expense.update({where:{id:before.id},data:{categoryId:category.id,orderId,amountMinor,currency,incurredAt:shippedAt??new Date(),notes:"Расход перевозчика по посылке",archivedAt:null}}):await tx.expense.create({data:{categoryId:category.id,orderId,amountMinor,currency,incurredAt:shippedAt??new Date(),notes:"Расход перевозчика по посылке"}});
+    const expense=before?await tx.expense.update({where:{id:before.id},data:{categoryId:category.id,orderId,amountMinor,currency,incurredAt:shippedAt??before.incurredAt,notes:"Расход перевозчика по посылке",archivedAt:null}}):await tx.expense.create({data:{categoryId:category.id,orderId,amountMinor,currency,incurredAt:shippedAt??new Date(),notes:"Расход перевозчика по посылке"}});
     await tx.auditLog.create({data:{actorId,action:before?"UPDATE":"CREATE",entityType:"Expense",entityId:expense.id,before:before??undefined,after:expense}});
     return expense.id;
   }

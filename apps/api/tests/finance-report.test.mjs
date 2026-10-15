@@ -125,3 +125,22 @@ test('export over documented ceiling fails, never silently truncates matching re
   const page=build(data,{tab:'expenses'});assert.equal(page.table.total,50001);assert.equal(page.table.rows.length,10);
   assert.throws(()=>report.buildFinanceReport(data,{month:'2026-10',currency:'EUR',tab:'expenses'},{provider:'NBU',cache},now,true),/50 000/);
 });
+
+
+test('cancelled foreign invoice needs FX only when its document is requested',()=>{
+  const invoice={id:'cancelled',number:'CANCELLED-USD',orderId:'o',order:order(),issueDate:now,totalMinor:1000,currency:'USD',status:'CANCELLED'};
+  const data=base({invoices:[invoice]});
+  const valuation={provider:'NBU',cache:null};
+  for(const tab of ['payments','expenses']) for(const exportAll of [false,true]) {
+    const result=report.buildFinanceReport(data,{month:'2026-10',currency:'EUR',tab},valuation,now,exportAll);
+    assert.equal(result.current.receivedMinor,2000);
+    assert.equal(result.current.expensesMinor,1000);
+    assert.equal(result.invoiceCount,0);
+  }
+  assert.throws(()=>report.buildFinanceReport(data,{month:'2026-10',currency:'EUR',tab:'invoices'},valuation,now),/курс/);
+  const visible=build(data,{tab:'invoices'});
+  assert.equal(visible.table.rows[0].status,'CANCELLED');
+  assert.equal(visible.table.rows[0].amountMinor,800);
+  assert.equal(visible.invoiceCount,0);
+  assert.throws(()=>report.buildFinanceReport(base({invoices:[{...invoice,status:'ISSUED'}]}),{month:'2026-10',currency:'EUR'},valuation,now),/курс/);
+});

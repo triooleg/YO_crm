@@ -8,6 +8,13 @@
 
 - Изменения следующей сборки добавляются сюда до назначения версии.
 
+## [0.1.62] - 2026-10-15
+
+- Finance: reserve chart label clearance, keep expense donut text readable across viewports, clarify page-size labels and neutral unavailable comparisons.
+- Cancelled foreign invoices require conversion only in their own document list/export; active invoice and cash FX validation stays strict.
+- Saving an unsent parcel preserves its existing expense date; explicit shipment dates and new expense creation remain compatible.
+- Code/UI release only: no financial import, stored-data repair, debt reconciliation or calendar-policy change.
+
 ## [0.1.61] - 2026-10-15
 
 ### Исправлено

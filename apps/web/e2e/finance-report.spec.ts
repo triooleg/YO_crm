@@ -102,7 +102,7 @@ test('all expense entry points clear hidden client filters and page sizes match 
  const size=page.locator('.finance-report-pagination').getByRole('combobox');
  for(const value of [25,50,100,10]){
   await size.click();await expect(page.getByRole('option',{name:/^20 /})).toHaveCount(0);
-  await page.getByRole('option',{name:new RegExp(`^${value} /`)}).click();
+  await page.getByRole('option',{name:new RegExp(`^${value} строк$`)}).click();
   await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('pageSize')).toBe(String(value));
  }
 });
@@ -156,5 +156,36 @@ test('reference-size layout has readable rows, aligned date controls and working
  await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('month')).toBe(`${initial.slice(0,4)}-03`);
  await page.getByLabel('От даты',{exact:true}).fill('01.03.2026');await page.getByLabel('От даты',{exact:true}).press('Tab');
  await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('from')).toBe('2026-03-01');
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+
+for(const width of [1536,1366,390]) for(const currency of ['EUR','USD','UAH']) test(`chart labels retain clearance and readable donut ${width} ${currency}`,async({page},info)=>{
+ await page.setViewportSize({width,height:1024});const calls=await setup(page);
+ await page.goto(`/?section=finance&currency=${currency}`);
+ await expect(page.locator('.finance-report-kpi')).toHaveCount(6);
+ await expect.poll(()=>calls.filter(call=>call.path==='/api/finance/report').at(-1)?.query.get('currency')).toBe(currency);
+ const chart=page.locator('.finance-report-bar-chart');
+ await expect.poll(()=>chart.evaluate((node:SVGSVGElement)=>Math.abs(node.viewBox.baseVal.width-node.clientWidth))).toBeLessThan(2);
+ const collisions=await chart.evaluate(node=>{
+  const bars=Array.from(node.querySelectorAll('rect')).map(bar=>bar.getBoundingClientRect());
+  return Array.from(node.querySelectorAll('.finance-chart-value')).flatMap(label=>{
+   const box=label.getBoundingClientRect();const svg=node.getBoundingClientRect();
+   const overlap=bars.some(bar=>bar.height>0&&Math.min(box.right,bar.right)-Math.max(box.left,bar.left)>1&&Math.min(box.bottom,bar.bottom)-Math.max(box.top,bar.top)>1);
+   return overlap||box.top<svg.top+4?[label.textContent]:[];
+  });
+ });expect(collisions).toEqual([]);
+ if(width>=1366)await expect(page.locator('.finance-chart-value')).toHaveCount(12);
+ const textSizes=await page.locator('.finance-report-donut-content svg text').evaluateAll(nodes=>nodes.map(node=>parseFloat(getComputedStyle(node).fontSize)*(node as SVGTextElement).getScreenCTM()!.a));
+ expect(textSizes.length).toBeGreaterThan(0);expect(Math.min(...textSizes)).toBeGreaterThanOrEqual(11.9);
+ expect(await page.locator('.finance-report-info').evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:info.outputPath(`finance-fixed-${width}-${currency}.png`),fullPage:true});
+ const clearance=await page.locator('.finance-report-table tbody tr').first().evaluate(row=>{
+  const badge=row.querySelector('.mantine-Badge-root')!.getBoundingClientRect();
+  const cell=row.querySelectorAll('td')[6]!.getBoundingClientRect();
+  const method=row.querySelector('.finance-report-method')!.getBoundingClientRect();
+  return {inside:badge.right<=cell.right,gap:method.left-badge.right};
+ });expect(clearance.inside).toBe(true);expect(clearance.gap).toBeGreaterThanOrEqual(8);
  expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
 });
