@@ -1,4 +1,4 @@
-import { createTheme, type MantineTheme, type ButtonProps, type MantineColorsTuple } from "@mantine/core";
+import { createTheme, type MantineTheme, type ButtonProps, type SelectProps, type MantineColorsTuple } from "@mantine/core";
 
 const yoleotardViolet: MantineColorsTuple = [
   "#f7f3ff",
@@ -12,6 +12,22 @@ const yoleotardViolet: MantineColorsTuple = [
   "#522bb8",
   "#432590",
 ];
+
+/** Approved Overview variant; mount only around the overview workspace. */
+export const overviewTheme = createTheme({
+  fontSizes:{xs:'12px',sm:'12px',md:'14px'},
+  radius:{md:'7px'},
+  other:{crmControls:{controlHeight:38,horizontalPadding:12,buttonFontWeight:500,fieldLabelMarginBottom:5,fieldLabelColor:'#7772b6',fieldLabelFontWeight:400,fieldBorderColor:'#e5e0ff',highlightedFieldBackground:'#f5f2ff',editableTextColor:'#6635ff',fieldDescriptionMarginTop:5,fieldDescriptionColor:'#7772b6',fieldDescriptionLineHeight:1.4},overviewControls:{kpiPadding:{base:12,sm:15},attention:{red:{color:'#df1737',background:'#fff0f1',borderColor:'#ffe0e4'},orange:{color:'#a84b05',background:'#fff4e6',borderColor:'#ffe7cb'},violet:{color:'#5e21eb',background:'#eee8ff',borderColor:'#e3dbff'},blue:{color:'#0065ce',background:'#e7f4ff',borderColor:'#d3e9ff'}},periodArrowMinWidth:{base:35,sm:42},periodArrowPadding:{base:9,sm:12},shipment:{height:25,padding:8,radius:20,fontWeight:400}}},
+  components:{
+    Button:{styles:(_theme:MantineTheme,props:ButtonProps)=>({root:{fontSize:12,...(props.variant==='default'?{color:'#4c25eb',borderColor:'#e5e0ff',background:'#fff'}:{})}})},
+    Input:{styles:{input:{fontSize:12,borderRadius:6,borderColor:'#e5e0ff'}}},
+    Select:{styles:(_theme:MantineTheme,props:SelectProps)=>({input:{fontSize:12,...(props.size==='xs'?{height:27,minHeight:27,paddingLeft:8,paddingRight:25}:{height:40})}})},
+    Badge:{styles:{root:{maxWidth:'100%',height:'auto',minHeight:22,lineHeight:1.25,padding:'3px 8px',fontSize:12,fontWeight:500,textTransform:'none'},label:{whiteSpace:'normal',overflow:'visible',textOverflow:'clip'}}},
+    Tooltip:{styles:{tooltip:{fontSize:12}}},
+    Checkbox:{styles:{input:{cursor:'pointer'}}},
+    SegmentedControl:{styles:{root:{background:'#fff',border:'1px solid #e5e0ff',borderRadius:5,padding:1},label:{fontSize:12,fontWeight:400,padding:'3px 6px',lineHeight:1.4},indicator:{background:'linear-gradient(120deg,#7841ff,#6332f2)',borderRadius:4}}},
+  },
+});
 
 export const yoleotardTheme = createTheme({
   primaryColor: "yoleotard",

@@ -28,4 +28,5 @@ export class TasksController {
   @Post("columns") @Roles("OWNER", "ADMIN") createColumn(@Body() dto: CreateTaskColumnDto, @Req() req: Request & { user: User }) { return this.tasks.createColumn(dto, req.user); }
   @Patch("columns/:id") @Roles("OWNER", "ADMIN") updateColumn(@Param("id") id: string, @Body() dto: UpdateTaskColumnDto, @Req() req: Request & { user: User }) { return this.tasks.updateColumn(id, dto, req.user); }
   @Post("columns/:id/archive") @Roles("OWNER", "ADMIN") archiveColumn(@Param("id") id: string, @Req() req: Request & { user: User }) { return this.tasks.archiveColumn(id, req.user); }
+  @Get(":id") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") detail(@Param("id") id: string) { return this.tasks.detail(id); }
 }

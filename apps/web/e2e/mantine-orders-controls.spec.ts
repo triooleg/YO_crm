@@ -668,6 +668,135 @@ test("карточка заказа сохраняет утверждённую 
   }
 });
 
+test("Overview context sends server cohort and period, survives search and clears explicitly", async ({ page }) => {
+  await mockOrdersApi(page);
+  const queries: URLSearchParams[] = [];
+  await page.route(/\/api\/orders(?:\?.*)?$/, route => {
+    const query = new URL(route.request().url()).searchParams;
+    queries.push(query);
+    return route.fulfill({ json: [{ ...order, productionStatus: "NOT_SCHEDULED" }] });
+  });
+  await page.goto("/?section=orders&overviewFilter=work&period=2026-10");
+  await expect.poll(() => queries.some(query => query.get("overviewFilter") === "work" && query.get("period") === "2026-10")).toBe(true);
+  await expect(page.locator(".orders-summary-row")).toHaveCount(1);
+  await expect(page.locator(".orders-overview-context")).toBeVisible();
+  const beforeMutation = queries.length;
+  await page.getByRole("combobox", { name: "Изменить статус" }).click();
+  await page.getByRole("option", { name: "Оплачено", exact: true }).click();
+  await expect.poll(() => queries.length).toBeGreaterThan(beforeMutation);
+  expect(queries.at(-1)?.get("overviewFilter")).toBe("work");
+  expect(queries.at(-1)?.get("period")).toBe("2026-10");
+  await page.locator(".orders-search input").fill("Mantine");
+  await expect.poll(() => queries.some(query => query.get("search") === "Mantine" && query.get("overviewFilter") === "work" && query.get("period") === "2026-10")).toBe(true);
+  await page.locator(".orders-overview-context").getByRole("button").click();
+  await expect.poll(() => queries.at(-1)?.get("overviewFilter")).toBe(null);
+  expect(queries.at(-1)?.get("search")).toBe("Mantine");
+  await expect(page).not.toHaveURL(/overviewFilter=|period=/);
+  await expect(page.locator(".orders-overview-context")).toHaveCount(0);
+});
+
+for (const width of [1920, 390]) test(`Overview delivery link highlights exact parcel without writes ${width}`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 1080 });
+  const writes = await mockOrdersApi(page);
+  const detail = richOrderDetail(order);
+  const shipments = Array.from({ length: 5 }, (_, index) => ({ ...detail.orderShipments[0], id: `shipment-${index + 1}`, trackingNumber: `PARCEL-${index + 1}` }));
+  await page.route(`**/api/orders/${order.id}`, route => route.fulfill({ json: { ...detail, orderShipments: shipments } }));
+  await page.goto(`/?section=orders&orderId=${order.id}&tab=delivery&shipmentId=shipment-5`);
+  await expect(page.getByRole("tab", { name: "Доставка", exact: true })).toHaveAttribute("aria-selected", "true");
+  const target = page.locator('.orders-shipment-card[data-shipment-id="shipment-5"]');
+  await expect(target).toHaveAttribute("data-context-selected", "true");
+  await expect(target).toBeInViewport();
+  await expect(target).toContainText("PARCEL-5");
+  await expect(page.locator('.orders-shipment-card[data-context-selected="true"]')).toHaveCount(1);
+  await page.screenshot({ path: screenshotPath(info, `overview-parcel-${width}.png`) });
+  expect(writes).toEqual([]);
+});
+
+test("Overview delivery link reports missing parcel rather than selecting another", async ({ page }) => {
+  const writes = await mockOrdersApi(page, undefined, undefined, { richDetail: true });
+  await page.goto(`/?section=orders&orderId=${order.id}&tab=delivery&shipmentId=missing-parcel`);
+  await expect(page.locator(".orders-shipment-context-missing")).toHaveAttribute("role", "alert");
+  await expect(page.locator(".orders-shipment-context-missing")).not.toBeEmpty();
+  await expect(page.locator('.orders-shipment-card[data-context-selected="true"]')).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
+test("Overview missing order is explicit while unrelated list remains usable", async ({ page }) => {
+  const writes = await mockOrdersApi(page);
+  await page.route("**/api/orders/missing-order", route => route.fulfill({ status: 404, json: { message: "Заказ недоступен" } }));
+  await page.goto("/?section=orders&orderId=missing-order");
+  await expect(page.locator(".orders-error")).toContainText(/заказ/i);
+  await expect(page.locator(".orders-summary-row")).toHaveCount(1);
+  expect(writes).toEqual([]);
+});
+
+test("Overview context never pins an order outside the server cohort", async ({ page }) => {
+  const writes = await mockOrdersApi(page);
+  await page.route(/\/api\/orders(?:\?.*)?$/, route => route.fulfill({ json: [] }));
+  await page.goto(`/?section=orders&overviewFilter=completed&period=2026-10&orderId=${order.id}`);
+  await expect(page.locator(".orders-error")).toContainText(/заказ/i);
+  await expect(page.locator(".orders-summary-row")).toHaveCount(0);
+  await expect(page.locator(".orders-overview-context")).toBeVisible();
+  expect(writes).toEqual([]);
+});
+
+test("Overview clear ignores an in-flight response from the old server cohort", async ({ page }) => {
+  await mockOrdersApi(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let delayed = false;
+  await page.route(/\/api\/orders(?:\?.*)?$/, async route => {
+    const query = new URL(route.request().url()).searchParams;
+    if (query.get("search") === "held" && query.has("overviewFilter")) {
+      delayed = true; await held;
+      return route.fulfill({ json: [{ ...order, id: "stale", number: "STALE-COHORT" }] });
+    }
+    return route.fulfill({ json: [order] });
+  });
+  await page.goto("/?section=orders&overviewFilter=work&period=2026-10");
+  await expect(page.locator(".orders-overview-context")).toBeVisible();
+  await page.locator(".orders-search input").fill("held");
+  await expect.poll(() => delayed).toBe(true);
+  await page.locator(".orders-overview-context").getByRole("button").click();
+  await expect(page.locator(".orders-summary-row")).toHaveCount(1);
+  const staleResponse = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/orders" && url.searchParams.get("search") === "held" && url.searchParams.has("overviewFilter");
+  });
+  release();
+  await staleResponse;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.locator(".orders-summary-row")).toContainText(order.number);
+  await expect(page.locator(".orders-summary-row")).not.toContainText("STALE-COHORT");
+});
+
+test("Overview back and forward restore server cohort and exact parcel context", async ({ page }) => {
+  const writes = await mockOrdersApi(page, undefined, undefined, { richDetail: true });
+  const queries: string[] = [];
+  await page.route(/\/api\/orders(?:\?.*)?$/, route => {
+    queries.push(new URL(route.request().url()).searchParams.get("overviewFilter") || "");
+    return route.fulfill({ json: [order] });
+  });
+  const original = `/?section=orders&overviewFilter=work&period=2026-10&orderId=${order.id}&tab=delivery&shipmentId=shipment-1`;
+  await page.goto(original);
+  await expect(page.locator('.orders-shipment-card[data-context-selected="true"]')).toHaveAttribute("data-shipment-id", "shipment-1");
+  await page.evaluate(orderId => {
+    history.pushState(null, "", `/?section=orders&overviewFilter=ready&period=2026-09&orderId=${orderId}&tab=delivery&shipmentId=missing`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, order.id);
+  await expect(page.locator(".orders-shipment-context-missing")).toBeVisible();
+  await expect.poll(() => queries.at(-1)).toBe("ready");
+  await page.goBack();
+  await expect.poll(() => queries.at(-1)).toBe("work");
+  await expect(page.locator('.orders-shipment-card[data-context-selected="true"]')).toHaveAttribute("data-shipment-id", "shipment-1");
+  await expect(page.locator(".orders-shipment-context-missing")).toHaveCount(0);
+  await page.goForward();
+  await expect.poll(() => queries.at(-1)).toBe("ready");
+  await expect(page.locator(".orders-shipment-context-missing")).toBeVisible();
+  await expect(page.locator('.orders-shipment-card[data-context-selected="true"]')).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
 test("выбранная сортировка сохраняется после обновления страницы", async ({ page }) => {
   await mockOrdersApi(page);
   await page.goto("/?section=orders");

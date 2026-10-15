@@ -88,10 +88,13 @@ export class OrdersService {
     };
   }
 
-  async list(search?: string) {
+  async list(search?: string, overview?: { overviewFilter?: string; period?: string }) {
     const query = search?.trim();
+    const overviewIds = overview?.overviewFilter || overview?.period
+      ? await (await import("../overview/overview-order-model")).resolveOverviewOrderIds(this.prisma, overview)
+      : undefined;
     const orders = await this.prisma.order.findMany({
-      where: { archivedAt: null, ...(query ? { OR: [
+      where: { archivedAt: null, ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
         { number: { contains: query, mode: "insensitive" as const } },
         { client: { displayName: { contains: query, mode: "insensitive" as const } } },
         { athlete: { is: { firstName: { contains: query, mode: "insensitive" as const } } } },
@@ -203,9 +206,11 @@ export class OrdersService {
     return { ...order, athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
   }
 
-  async productionList(orderId?: string, from?: string, to?: string) {
+  async productionList(orderId?: string, from?: string, to?: string, overviewFilter?: string) {
     try {
-      return await loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId, from, to);
+      if (overviewFilter && overviewFilter !== "work") throw new BadRequestException("Некорректный фильтр производства");
+      const overview = overviewFilter ? { orderIds: await (await import("../overview/overview-order-model")).resolveOverviewOrderIds(this.prisma, { overviewFilter }) } : undefined;
+      return await loadProductionOrders(this.prisma.order as unknown as ProductionOrderRepository, orderId, from, to, new Date(), overview);
     } catch (error) {
       const code = error && typeof error === "object" && "message" in error ? String(error.message) : "";
       if (code === "INVALID_PRODUCTION_RANGE") {

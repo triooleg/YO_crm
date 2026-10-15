@@ -1,3 +1,32 @@
+export const overviewUi = {
+  morning:'Доброе утро', day:'Добрый день', evening:'Добрый вечер', brand:'Yoleotard',
+  subtitle:'Вот что происходит в вашем ателье сегодня', title:'Обзор',
+  previousMonth:'Предыдущий месяц обзора', nextMonth:'Следующий месяц обзора', selectMonth:'Выбрать месяц и год обзора', currency:'Валюта обзора',
+  total:'Всего заказов', work:'В производстве', ready:'Готовы к отправке', overdue:'Просрочено', received:'Получено', expenses:'Расходы', result:'Финансовый результат',
+  period:'За выбранный месяц', kpiPeriod:'За месяц', now:'Сейчас', previous:'к предыдущему месяцу', noComparison:'Нет базы для сравнения', production:'Производство', orders:'Смотреть заказы', attentionAction:'Требуют внимания',
+  statusChart:'Заказы по статусам', trendChart:'Динамика заказов', financeChart:'Финансы (поступления и расходы)',
+  ringTotal:'всего заказов', excluded:'Исключено из диаграммы', excludedHint:'Не включены отменённые, архивированные, возвращённые и утерянные заказы; отправленные без подтверждения завершения; заказы с непроверенными импортированными статусами или расчётами и некоторые частично отправленные заказы. История сохранена.', trendOrders:'Заказы', trendIncome:'Доходы', trendClients:'Клиенты', trendMode:'Показатель динамики', trendRange:'Горизонт динамики', financeRange:'Горизонт финансов', months:'месяцев',
+  buckets:{new:'Новый заказ',work:'В производстве',ready:'Готов к отправке',awaiting:'Ожидает оплаты',completed:'Завершён'},
+  tasks:'Мои задачи', recentOrders:'Последние заказы', shipments:'Ближайшие отправки', messages:'Последние сообщения',
+  allTasks:'Все задачи', allOrders:'Все заказы', allShipments:'Все отправки', allMessages:'Все',
+  completeTask:'Завершить задачу', taskSaveError:'Не удалось завершить задачу', noDoneColumn:'Колонка завершённых задач не настроена',
+  today:'Сегодня', tomorrow:'Завтра', overdueTask:'Просрочено', noDueDate:'Без срока',
+  prepare:'Подготовить', send:'Отправить', forecast:'План заказа', unknownStatus:'Статус требует проверки',
+  emptyTasks:'Нет открытых задач', emptyOrders:'Нет доступных заказов', emptyMessages:'Нет доступных сообщений', emptyShipments:'Нет запланированных отправок', emptyChart:'Нет данных за выбранный период',
+  loading:'Загрузка данных', error:'Не удалось загрузить данные', retry:'Повторить', unavailable:'Требует проверки', conversionError:'Сумма недоступна: проверьте курс валюты', original:'Исходная сумма', model:'Модель заказа', noModel:'Нет изображения модели',
+  attention:'На что обратить внимание', hideAttention:'Скрыть панель внимания', restoreAttention:'Показать панель внимания', overdueOrders:'Просроченные заказы', unpaidOrders:'Ожидают оплаты', upcomingShipments:'Отправки в ближайшие 7 дней', newMessages:'Новые сообщения', verification:'Сроки требуют проверки',
+  attentionHint:'Держите важные дела под контролем', noAccess:'Нет доступных блоков обзора для вашей роли',
+  orderVerification:'Сроки заказов требуют проверки', shipmentVerification:'Сроки отправок требуют проверки', valuationProvider:'Источник курса', valuationDate:'Дата курса', valuationFetchedAt:'Курс получен', noConversionNeeded:'Пересчёт валюты не требовался',
+  unknownChannel:'Канал не указан', channels:{FACEBOOK:'Facebook',INSTAGRAM:'Instagram',WHATSAPP:'WhatsApp',CHATWOOT:'Chatwoot',EMAIL:'Email',TELEGRAM:'Telegram',WEBSITE:'Сайт',MANUAL:'Вручную'},
+};
+export const overviewContextUi = {
+  appliedFilter:'Фильтр из обзора',clearFilter:'Снять фильтр',
+  clientsCreatedPeriod:'Клиенты, созданные за период',clearPeriod:'Снять период',
+  filter:'Фильтр из обзора',clear:'Снять фильтр',period:'Период',orderUnavailable:'Заказ недоступен или архивирован',shipmentUnavailable:'Посылка недоступна или архивирована',financeUnavailable:'Нет доступа к финансовым данным',
+  filters:{period:'Заказы за период',new:'Новые заказы',work:'Фактически в работе',ready:'Готовы к отправке',awaiting:'Ожидают оплаты',completed:'Завершённые заказы',overdue:'Подтверждённые просроченные',unpaid:'Ожидают оплаты'},
+};
+export const overviewTargetUi = {workFilter:'В работе · все сроки',upcomingShipments:'Ближайшие отправки',upcomingDays:'Ближайшие {days} дней',conversationUnavailable:'Диалог из перехода не найден или недоступен'};
+
 export const ru = {
   brand: "Yoleotard",
   product: "CRM",
@@ -940,6 +969,16 @@ export const releaseHistoryUi = {
   expandVersion: "Развернуть версию",
   collapseVersion: "Свернуть версию",
   releases: [
+    {
+      version: "0.1.60",
+      date: "15.10.2026",
+      changes: [
+        "Новая стартовая страница «Обзор»: семь показателей, три диаграммы, задачи, заказы, сообщения и отправки по утверждённому макету.",
+        "Реальные данные, выбор месяца и EUR/USD/UAH. Доход учитывает только действующие фактические оплаты.",
+        "Переходы открывают нужные записи и фильтры; контекст восстанавливается при обновлении и навигации. Черновики сохраняются перед переходом.",
+      ],
+      compatibility: "Платежи, расходы, инвойсы, интеграции и история сохранены. Миграций базы данных нет. Откат к crm-v0.1.59 совместим.",
+    },
     {
       version: "0.1.59",
       date: "15.10.2026",

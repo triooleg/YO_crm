@@ -6,13 +6,14 @@ import { CrmNavIcon } from "./crm-nav-icon";
 import { ClientWorkspace } from "./client-workspace";
 import { OrdersDashboard } from "./orders-dashboard";
 import { ProductionWorkspace } from "./production-workspace";
+import { OverviewWorkspace } from "./overview-workspace";
 import { FinanceWorkspace } from "./finance-workspace";
 import { SettingsWorkspace } from "./settings-workspace";
 import { authUi, navigationUi, releaseHistoryUi, communicationsUi } from "../lib/i18n";
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
-import { crmSectionHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
+import { createCrmNavigationHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
 import { useBranding, type Branding } from "../lib/branding";
 import { CrmSearchField } from "./crm/search-field";
 import { CrmAvatar } from "./crm/avatar";
@@ -25,8 +26,10 @@ const topbarItems = [items[0], items[1], items[3], items[4], items[5], items[7],
 
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 
-export function CrmShell({initialSectionId="inbox"}:{initialSectionId?:CrmSectionId}){
+export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSectionId}){
   const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
+  const [routeVersion,setRouteVersion]=useState(0);
+  const routeSequence=useRef(0),committedRoute=useRef({section:initialSectionId,href:typeof window==="undefined"?"/":`${window.location.pathname}${window.location.search}${window.location.hash}`});
   const [inboxSearch,setInboxSearch]=useState(""),[inboxUnreadRequest,setInboxUnreadRequest]=useState(0),[unreadCount,setUnreadCount]=useState(0);
   const authSequence=useRef(0),unreadRequests=useRef(createUnreadRequestGuard()),baseBrowserTitle=useRef("CRM Yoleotard"),inboxBeforeLeave=useRef<null|(()=>Promise<boolean>)>(null);
   const branding=useBranding(Boolean(auth));
@@ -37,8 +40,32 @@ export function CrmShell({initialSectionId="inbox"}:{initialSectionId?:CrmSectio
   useEffect(()=>{if(!authenticated){unreadRequests.current.invalidate();setUnreadCount(0);return}void refreshUnreadCount();const timer=window.setInterval(refreshUnreadCount,5000),focus=()=>void refreshUnreadCount();window.addEventListener("focus",focus);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus)}},[authenticated]);
   useEffect(()=>{if(typeof document==="undefined")return;baseBrowserTitle.current=document.title||baseBrowserTitle.current;return applyUnreadBrowserState(unreadCount,baseBrowserTitle.current)},[unreadCount]);
   const registerInboxBeforeLeave=useCallback((handler:(()=>Promise<boolean>)|null)=>{inboxBeforeLeave.current=handler},[]);
-  const navigate=async(next:CrmSectionId,context?:Record<string,string>)=>{if(next===sectionId&&!context)return;if(sectionId==="inbox"&&next!=="inbox"&&inboxBeforeLeave.current&&!await inboxBeforeLeave.current())return;setSectionId(next);const url=new URL(crmSectionHref(next,window.location.search),window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);for(const[key,value]of Object.entries(context||{}))url.searchParams.set(key,value);window.history.pushState(null,"",url)};
-  useEffect(()=>{const sync=()=>setSectionId(parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined));window.addEventListener("popstate",sync);return()=>window.removeEventListener("popstate",sync)},[]);
+  const navigate=async(next:CrmSectionId,context?:Record<string,string>)=>{
+    if(next===sectionId&&!context)return;
+    const sequence=++routeSequence.current;
+    if(sectionId==="inbox"&&(next!=="inbox"||context)&&inboxBeforeLeave.current){
+      let saved=false;try{saved=await inboxBeforeLeave.current()}catch{/* Keep the mounted composer when saving is unavailable. */}
+      if(!saved||sequence!==routeSequence.current)return;
+    }
+    if(sequence!==routeSequence.current)return;
+    const href=createCrmNavigationHref(next,window.location.search,context);
+    window.history.pushState(null,"",href);committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
+  };
+  useEffect(()=>{
+    const sync=()=>{
+      const href=`${window.location.pathname}${window.location.search}${window.location.hash}`,next=parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined),sequence=++routeSequence.current,previous=committedRoute.current;
+      void(async()=>{
+        if(previous.section==="inbox"&&inboxBeforeLeave.current){
+          let saved=false;try{saved=await inboxBeforeLeave.current()}catch{/* A failed save must not discard the current composer. */}
+          if(sequence!==routeSequence.current)return;
+          if(!saved){window.history.replaceState(window.history.state,"",previous.href);return}
+        }
+        if(sequence!==routeSequence.current)return;
+        committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
+      })();
+    };
+    window.addEventListener("popstate",sync);return()=>{routeSequence.current++;window.removeEventListener("popstate",sync)};
+  },[]);
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:<CrmLoadingState label={authUi.loading}/>}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
@@ -54,7 +81,7 @@ export function CrmShell({initialSectionId="inbox"}:{initialSectionId?:CrmSectio
       <button type="button" className={`crm-topbar-notifications${unreadCount>0?" has-unread":""}`} aria-label={unreadCount?`${communicationsUi.unreadMessages}: ${unreadCount}`:communicationsUi.unreadChats} title={unreadCount?`${communicationsUi.unreadMessages}: ${unreadCount}`:communicationsUi.unreadChats} onClick={showUnread}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Zm5 3h4"/></svg>{unreadCount>0&&<span className="crm-topbar-notification-badge" aria-hidden="true">{unreadBadgeText(unreadCount)}</span>}</button>
       <div className="crm-topbar-user"><CrmAvatar className="crm-topbar-avatar" size={36} name={auth.displayName}/><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{navigationUi.userRoles[auth.role as keyof typeof navigationUi.userRoles]||navigationUi.unknownRole}</small></div><CrmMenu className="crm-profile-menu-trigger" label={navigationUi.profileMenu} items={[{label:navigationUi.settings,onClick:()=>navigate("settings")},{label:navigationUi.version,onClick:()=>setReleaseHistoryOpen(true)},{label:authUi.logout,onClick:()=>void logout()}]}/></div>
     </header>
-    <section className="crm-content">{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="clients"?<ClientWorkspace onNavigate={next=>void navigate(next)}/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} onRegisterBeforeLeave={registerInboxBeforeLeave} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined} onUnreadDelta={adjustUnreadCount} onUnreadRefresh={()=>void refreshUnreadCount()}/>:sectionId==="orders"?<OrdersDashboard role={auth.role} onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace role={auth.role} onOpenOrder={orderId=>void navigate("orders",{orderId})} onCreateOrder={()=>void navigate("orders",{action:"new-order"})}/>:sectionId==="finance"?<FinanceWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content" key={`${sectionId}-${routeVersion}`}>{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="overview"?<OverviewWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="clients"?<ClientWorkspace onNavigate={next=>void navigate(next)}/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} onRegisterBeforeLeave={registerInboxBeforeLeave} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined} onUnreadDelta={adjustUnreadCount} onUnreadRefresh={()=>void refreshUnreadCount()}/>:sectionId==="orders"?<OrdersDashboard role={auth.role} onNavigate={navigate}/>:sectionId==="production"?<ProductionWorkspace role={auth.role} onOpenOrder={orderId=>void navigate("orders",{orderId})} onCreateOrder={()=>void navigate("orders",{action:"new-order"})}/>:sectionId==="finance"?<FinanceWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
     <ReleaseHistoryDialog opened={releaseHistoryOpen} onClose={()=>setReleaseHistoryOpen(false)}/>
   </main>
 }

@@ -58,7 +58,7 @@ test("смена статуса сериализована, откатывает
   const source = dashboard.match(/async function changeStatus\([\s\S]*?\r?\n  }\r?\n  async function changeDeadline/)?.[0] ?? "";
   assert.match(source, /statusRequests\.current\.has\(order\.id\)/);
   assert.match(source, /previous/);
-  assert.match(source, /await refreshOrder\(order\.id\)/);
+  assert.match(source, /await refreshOrder\(order\.id, true\)/);
   assert.doesNotMatch(source, /await load\(\)/);
 });
 

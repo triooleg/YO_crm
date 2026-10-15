@@ -1,3 +1,5 @@
+import { OverviewController } from "./overview/overview.controller";
+import { OverviewService } from "./overview/overview.service";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { HealthController } from "./health.controller";
@@ -34,7 +36,7 @@ import { KeycrmWorkerService } from "./keycrm/keycrm-worker.service";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
-  controllers: [HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
-  providers: [AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, OrderTabsService, FinanceService, FinanceReportService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
+  controllers: [OverviewController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
+  providers: [OverviewService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, OrderTabsService, FinanceService, FinanceReportService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
 })
 export class AppModule {}

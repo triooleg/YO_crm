@@ -77,6 +77,7 @@ async function api(path: string, init?: RequestInit) {
 
 export function TasksWorkspace() {
   const [data, setData] = useState<Board>({ columns: [], users: [] }),
+    [boardReady, setBoardReady] = useState(false),
     [view, setView] = useState<"compact" | "visual">("compact"),
     [search, setSearch] = useState(""),
     [assignee, setAssignee] = useState(""),
@@ -89,10 +90,15 @@ export function TasksWorkspace() {
     [columnEditor, setColumnEditor] = useState<Partial<Column>>(),
     [saving, setSaving] = useState(false),
     dragged = useRef<string | undefined>(undefined),
-    contextActionHandled=useRef(false);
+    contextActionHandled=useRef(false), contextTaskHandled=useRef(false), loadSequence=useRef(0);
+  function openTaskEditor(task: Partial<Task> & { sourceMessageId?: string }) {
+    loadSequence.current++;
+    setEditing(task);
+  }
   async function load(archived = showArchived) {
     try {
       setData(await api(`/tasks/board?archived=${archived}`));
+      setBoardReady(true);
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -100,7 +106,30 @@ export function TasksWorkspace() {
   }
   useEffect(() => {
     load(false);
+    return () => { loadSequence.current++; };
   }, []);
+  useEffect(() => {
+    if (!boardReady || contextTaskHandled.current) return;
+    contextTaskHandled.current = true;
+    const params = new URLSearchParams(window.location.search), sequence = ++loadSequence.current;
+    void (async () => {
+      try {
+        if (params.get("assignee") === "me") {
+          const { user } = await api("/auth/me");
+          if (sequence !== loadSequence.current) return;
+          if (!user?.id) throw new Error(tasksUi.actionError);
+          setAssignee(user.id);
+        } else if (params.get("assignee")) setAssignee(params.get("assignee")!);
+        if (params.get("taskId")) {
+          const task = await api(`/tasks/${encodeURIComponent(params.get("taskId")!)}`) as Task;
+          if (sequence !== loadSequence.current) return;
+          setEditing(task);
+        }
+      } catch (reason) {
+        if (sequence === loadSequence.current) setError((reason as Error).message);
+      }
+    })();
+  }, [boardReady]);
   useEffect(()=>{if(contextActionHandled.current||!data.columns.length)return;const params=new URLSearchParams(window.location.search);if(params.get("action")!=="new")return;const clientId=params.get("clientId"),clientName=params.get("clientName");if(!clientId)return;contextActionHandled.current=true;setEditing({columnId:data.columns[0]?.id,type:"CLIENT",markerColor:"#7047eb",labels:[],client:{id:clientId,displayName:clientName||tasksUi.client}});clearContextAction()},[data.columns]);
   const labels = useMemo(
     () =>
@@ -137,7 +166,7 @@ export function TasksWorkspace() {
     }
   }
   function newAdmin() {
-    setEditing({
+    openTaskEditor({
       columnId: data.columns[0]?.id,
       type: "ADMINISTRATIVE",
       markerColor: "#e49a34",
@@ -176,7 +205,7 @@ export function TasksWorkspace() {
               <button
                 className="phase2-primary"
                 onClick={() =>
-                  setEditing({
+                  openTaskEditor({
                     columnId: data.columns[0]?.id,
                     type: "CLIENT",
                     markerColor: "#7047eb",
@@ -231,7 +260,7 @@ export function TasksWorkspace() {
         <select
           aria-label={tasksUi.assignee}
           value={assignee}
-          onChange={(e) => setAssignee(e.target.value)}
+          onChange={(e) => { loadSequence.current++; setAssignee(e.target.value); }}
         >
           <option value="">{tasksUi.allAssignees}</option>
           {data.users.map((u) => (
@@ -361,7 +390,7 @@ export function TasksWorkspace() {
                     onClick={() =>
                       showArchived
                         ? setArchivedTask(task)
-                        : setEditing(task)
+                        : openTaskEditor(task)
                     }
                     onKeyDown={(event) => {
                       if (
@@ -370,7 +399,7 @@ export function TasksWorkspace() {
                         event.preventDefault();
                         showArchived
                           ? setArchivedTask(task)
-                          : setEditing(task);
+                          : openTaskEditor(task);
                       }
                     }}
                     style={{ borderLeftColor: task.markerColor }}
@@ -499,7 +528,7 @@ export function TasksWorkspace() {
           close={() => setIncoming(null)}
           choose={(item) => {
             setIncoming(null);
-            setEditing({
+            openTaskEditor({
               columnId: data.columns[0]?.id,
               type: "CLIENT",
               markerColor: "#7047eb",

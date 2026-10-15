@@ -6,7 +6,7 @@ import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
-import { orderFormUi, ordersDashboardUi as ui, productionUi } from "../lib/i18n";
+import { orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
@@ -31,6 +31,7 @@ type ColumnId = "client" | "model" | "quantity" | "deadline" | "payment" | "prod
 type SortColumnId = Exclude<ColumnId, "menu">;
 type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "depositShortfall" | "work" | "ready" | "completed" | "overdue";
+type OverviewContext = { filter: string; period: string };
 type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void };
 type Preview = { src: string; left: number; top: number; width: number };
 type OrderClientBrief = { id: string; displayName: string; country?: string };
@@ -55,6 +56,32 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [overviewContext, setOverviewContext] = useState<OverviewContext | null>();
+  const [routeRevision, setRouteRevision] = useState(0);
+  const listContext = useRef({ search, overviewContext });
+  listContext.current = { search, overviewContext };
+  useEffect(() => {
+    const readContext = () => {
+      const params = new URLSearchParams(window.location.search);
+      const filter = params.get("overviewFilter") || "";
+      const period = params.get("period") || "";
+      const next = filter || period ? { filter, period } : null;
+      setOverviewContext(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+      return params.get("orderId") || undefined;
+    };
+    readContext();
+    const onHistory = () => {
+      const orderId = readContext();
+      if (orderId !== initialOrderId.current) setExpandedId(undefined);
+      initialOrderId.current = orderId;
+      cancelPreviousOrderNavigation();
+      listSequence.current++;
+      skipNavigationSearchReload.current = false;
+      setRouteRevision(current => current + 1);
+    };
+    window.addEventListener("popstate", onHistory);
+    return () => window.removeEventListener("popstate", onHistory);
+  }, []);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [disciplineFilter, setDisciplineFilter] = useState("all");
@@ -116,33 +143,60 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     return response.json();
   }
 
+  function orderListPath(query: string, context: OverviewContext | null | undefined) {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("search", query.trim());
+    if (context?.filter) params.set("overviewFilter", context.filter);
+    if (context?.period) params.set("period", context.period);
+    return `/orders${params.size ? `?${params}` : ""}`;
+  }
+
+  function clearOverviewContext() {
+    listSequence.current++;
+    cancelPreviousOrderNavigation();
+    skipNavigationSearchReload.current = false;
+    previousOrderContext.current = undefined;
+    setOverviewContext(null);
+    setPage(1);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("overviewFilter");
+    url.searchParams.delete("period");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
   async function load() {
+    const { search: requestedSearch, overviewContext: context } = listContext.current;
+    if (context === undefined) return;
     const sequence=++listSequence.current;
+    const path = orderListPath(requestedSearch, context);
     setLoading(true);
     try {
-      const listed = await request(`/orders${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`) as Order[];
+      const listed = await request(path) as Order[];
+      let contextUnavailable = false;
       const contextOrder = initialOrderId.current
-        ? await request(`/orders/${encodeURIComponent(initialOrderId.current)}`).catch(() => undefined) as OrderDetail | undefined
+        ? await request(`/orders/${encodeURIComponent(initialOrderId.current)}`).catch(() => { contextUnavailable = true; return undefined; }) as OrderDetail | undefined
         : undefined;
-      if(sequence!==listSequence.current)return;
-      const retainedContext=contextOrder ?? (!search.trim()?previousOrderContext.current:undefined);
+      if(sequence!==listSequence.current || path !== orderListPath(listContext.current.search, listContext.current.overviewContext))return;
+      if (context && contextOrder && !listed.some(order => order.id === contextOrder.id)) contextUnavailable = true;
+      const retainedContext = contextUnavailable ? undefined : contextOrder ?? (!requestedSearch.trim() && !context ? previousOrderContext.current : undefined);
       setOrders(retainedContext && !listed.some((order) => order.id === retainedContext.id) ? [retainedContext, ...listed] : listed);
-      if (contextOrder) {
+      if (contextOrder && !contextUnavailable) {
         setOrderDetails((current) => ({ ...current, [contextOrder.id]: contextOrder }));
         setExpandedId(contextOrder.id);
       }
-      setError("");
+      setError(contextUnavailable ? overviewContextUi.orderUnavailable : "");
     } catch (reason) {
-      if(sequence===listSequence.current)setError((reason as Error).message);
+      if(sequence===listSequence.current && path === orderListPath(listContext.current.search, listContext.current.overviewContext))setError((reason as Error).message);
     } finally {
       if(sequence===listSequence.current)setLoading(false);
     }
   }
 
-  async function refreshOrder(orderId: string) {
+  async function refreshOrder(orderId: string, reconcileOverview = false) {
     const detail = await request(`/orders/${orderId}`) as OrderDetail;
     setOrderDetails((current) => ({ ...current, [orderId]: detail }));
     setOrders((items) => items.map((item) => item.id === orderId ? detail : item));
+    if (reconcileOverview && listContext.current.overviewContext) await load();
     return detail;
   }
 
@@ -151,9 +205,10 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     try {
       const [detail,fullList]=await Promise.all([
         request(`/orders/${encodeURIComponent(orderId)}`) as Promise<OrderDetail>,
-        search.trim()?request("/orders") as Promise<Order[]>:Promise.resolve(undefined),
+        search.trim() || listContext.current.overviewContext ? request(orderListPath("", listContext.current.overviewContext)) as Promise<Order[]> : Promise.resolve(undefined),
       ]);
       if(sequence!==navigationSequence.current)return;
+      if (listContext.current.overviewContext && !fullList?.some(order => order.id === orderId)) { setError(overviewContextUi.orderUnavailable); return; }
       listSequence.current++;setLoading(false);previousOrderContext.current=detail;
       initialOrderId.current=undefined;
       setOrderDetails(current=>({...current,[orderId]:detail}));
@@ -172,11 +227,11 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     const update = (current: OrderDetail) => ({...current, updatedAt: result.orderUpdatedAt, paymentStatus: result.paymentStatus, payments: current.payments.filter(payment => payment.id !== paymentId), paymentHistory: current.paymentHistory?.map(payment => payment.id === paymentId ? {...payment, voidedAt: result.payment.voidedAt, voidReason: result.payment.voidReason, canVoid: false} : payment)});
     setOrderDetails(current => current[orderId] ? {...current, [orderId]: update(current[orderId])} : current);
     setOrders(current => current.map(order => order.id === orderId ? update(order as OrderDetail) : order));
-    try { await refreshOrder(orderId); } catch { setError(ui.paymentRefreshWarning); }
+    try { await refreshOrder(orderId, true); } catch { setError(ui.paymentRefreshWarning); }
   }
 
   async function refreshAfterMutation(orderId: string) {
-    try { return await refreshOrder(orderId); }
+    try { return await refreshOrder(orderId, true); }
     catch {
       setOrderDetails((current) => { const next = { ...current }; delete next[orderId]; return next; });
       await load();
@@ -207,37 +262,37 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
   async function updateOrderNote(orderId: string, noteId: string, input: OrderNoteInput & { expectedUpdatedAt: string }) {
     await request(`/order-tabs/${orderId}/notes/${noteId}`, { method: "PATCH", body: JSON.stringify(input) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function archiveOrderNote(orderId: string, noteId: string) {
     await request(`/order-tabs/${orderId}/notes/${noteId}`, { method: "DELETE" });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function createOrderShipment(orderId: string, input: OrderShipmentInput) {
     await request(`/shipping/orders/${orderId}/shipments`, { method: "POST", body: JSON.stringify(input) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function updateOrderShipment(orderId: string, shipmentId: string, input: OrderShipmentInput) {
     await request(`/shipping/orders/${orderId}/shipments/${shipmentId}`, { method: "PUT", body: JSON.stringify(input) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function updateOrderItemInstance(orderId: string, instanceId: string, input: OrderItemInstanceInput) {
     await request(`/order-tabs/${orderId}/instances/${instanceId}`, { method: "PATCH", body: JSON.stringify(input) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function updateClientPreferences(orderId: string, clientId: string, preferences: Record<string, unknown>, expectedUpdatedAt: string | undefined) {
     await request(`/order-tabs/clients/${clientId}/preferences`, { method: "PATCH", body: JSON.stringify({ preferences, expectedUpdatedAt }) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function uploadClientFile(orderId: string, clientId: string, file: File) {
     await request(`/order-tabs/clients/${clientId}/files`, { method: "POST", body: JSON.stringify({ name: file.name, mimeType: file.type || "application/octet-stream", data: await fileToData(file) }) });
-    await refreshOrder(orderId);
+    await refreshOrder(orderId, true);
   }
 
   async function toggleExpanded(order: Order) {
@@ -255,7 +310,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if(skipNavigationSearchReload.current&&!search){skipNavigationSearchReload.current=false;return;}
     const timer = window.setTimeout(() => void load(), 220);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [search, overviewContext, routeRevision]);
 
   useEffect(() => {
     const saved = parseOrderColumnSettings(localStorage.getItem(COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS)
@@ -288,7 +343,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
   useEffect(() => {
     if (!paginationReady) return;
-    const criteria = JSON.stringify([quickFilter, statusFilter, disciplineFilter, sort, search]);
+    const criteria = JSON.stringify([quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext]);
     if (previousListCriteria.current === undefined) {
       previousListCriteria.current = criteria;
       return;
@@ -297,7 +352,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       previousListCriteria.current = criteria;
       setPage(1);
     }
-  }, [paginationReady, quickFilter, statusFilter, disciplineFilter, sort, search]);
+  }, [paginationReady, quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext]);
 
   useEffect(() => {
     if (!paginationReady) return;
@@ -453,7 +508,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       setStatusPending((current) => { const next = new Set(current); next.delete(order.id); return next; });
       return;
     }
-    try { await refreshOrder(order.id); setError(""); }
+    try { await refreshOrder(order.id, true); setError(""); }
     catch (reason) { setError((reason as Error).message); }
     finally { statusRequests.current.delete(order.id); setStatusPending((current) => { const next = new Set(current); next.delete(order.id); return next; }); }
   }
@@ -533,6 +588,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <CrmButton ref={newOrderTrigger} className="orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder} <span aria-hidden="true">⌄</span></CrmButton>
     </header>
     {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
+    {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}
 
     <div className="orders-kpi-grid">
       <Kpi label={ui.kpis.all} value={metrics.total} icon="bag" active={quickFilter === "all"} onClick={() => selectQuickFilter("all")} />

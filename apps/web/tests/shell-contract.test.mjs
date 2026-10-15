@@ -74,7 +74,7 @@ test("collapsed navigation keeps Russian accessible names", () => {
   assert.match(shell, /aria-label=\{id==="inbox"&&unreadCount\?[\s\S]*:name\}/);
 });
 
-test("CRM без указанного раздела открывает Входящие, а не скрытую страницу клиентов", () => {
-  assert.match(sections, /: "inbox"/);
-  assert.match(shell, /initialSectionId="inbox"/);
+test("CRM без указанного раздела открывает утверждённый Обзор", () => {
+  assert.match(sections, /: "overview"/);
+  assert.match(shell, /initialSectionId="overview"/);
 });

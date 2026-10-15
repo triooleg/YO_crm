@@ -63,7 +63,7 @@ test("production reads use a dedicated least-privilege projection", () => {
   assert.match(productionContext, /const \{ deliveryTrackingCode, payments, shipment, \.\.\.safeOrder \} = order/);
   assert.match(productionContext, /latestPaymentAt/);
   assert.match(productionContext, /hasTrackingNumber: Boolean\(shipment\?\.trackingNumber\?\.trim\(\) \|\| deliveryTrackingCode\?\.trim\(\)\)/);
-  assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to\)/);
+  assert.match(productionMethod, /loadProductionOrders\(this\.prisma\.order(?: as unknown as ProductionOrderRepository)?, orderId, from, to, new Date\(\), overview\)/);
 });
 
 function escapeRegExp(value) {

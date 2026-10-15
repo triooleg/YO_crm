@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Modal } from "@mantine/core";
-import { productionUi } from "../lib/i18n";
+import { Badge, Group, Modal } from "@mantine/core";
+import { productionUi, overviewTargetUi } from "../lib/i18n";
 import { clearOrderContextUrl, orderContextId, resolveOrderContext } from "../lib/order-context";
 import { buildProductionMetrics, groupProductionOrdersBySchedule, orderMatchesProductionFilters, productionAddDays, productionDayDiff, productionIso, productionLocalDate, productionRange, sortProductionOrdersByShippingProximity, type ProductionFilters, type ProductionOrderView, type ProductionRangeMode, type ProductionSlotView, type ProductionSortMode } from "../lib/production-view";
 import { CrmAlert } from "./crm/alert";
@@ -29,6 +29,7 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   const [productionSettings, setProductionSettings] = useState<ProductionSettings | null>(null);
   const [filters, setFilters] = useState<ProductionFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [overviewWork, setOverviewWork] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("overviewFilter") === "work");
   const [sortMode, setSortMode] = useState<ProductionSortMode>("schedule");
   const [capacityPerDay, setCapacity] = useState(3);
   const [previewWidth, setPreviewWidth] = useState(600);
@@ -40,7 +41,7 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
 
   async function load(signal?: AbortSignal) {
     const sequence = ++loadSequence.current, contextId = orderContextId(window.location.search), rangeEnd = productionAddDays(base, range.days - 1);
-    const params = new URLSearchParams({ from: productionIso(base), to: productionIso(rangeEnd) });
+    const params = overviewWork ? new URLSearchParams({ overviewFilter: "work" }) : new URLSearchParams({ from: productionIso(base), to: productionIso(rangeEnd) });
     if (contextId) params.set("orderId", contextId);
     const productionUrl = `/api/orders/production?${params.toString()}`;
     try {
@@ -72,7 +73,7 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
     }
   }
 
-  useEffect(() => { const controller = new AbortController(), timer = window.setTimeout(() => void load(controller.signal), 80); return () => { window.clearTimeout(timer); controller.abort(); }; }, [base, mode]);
+  useEffect(() => { const controller = new AbortController(), timer = window.setTimeout(() => void load(controller.signal), 80); return () => { window.clearTimeout(timer); controller.abort(); }; }, [base, mode, overviewWork]);
   useEffect(() => { const capacity = Number(localStorage.getItem("production-capacity")); if (capacity >= 1 && capacity <= 10) setCapacity(capacity); const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY)); if (Number.isFinite(width) && width >= 200 && width <= 1200) setPreviewWidth(width); }, []);
 
   const activeOrders = useMemo(() => orders.filter((order) => order.productionStatus !== "CANCELLED"), [orders]);
@@ -89,6 +90,10 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
       ? new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(base)
       : `${new Intl.DateTimeFormat("ru-RU", { month: "short", year: "numeric" }).format(base)} — ${new Intl.DateTimeFormat("ru-RU", { month: "short", year: "numeric" }).format(periodEnd)}`;
   const canManageOrders = role === "OWNER" || role === "ADMIN" || role === "MANAGER";
+  function clearOverviewFilter() {
+    const url = new URL(window.location.href); url.searchParams.delete("overviewFilter");
+    window.history.replaceState(window.history.state, "", url); setOverviewWork(false);
+  }
   function setCapacityValue(value: number) { setCapacity(value); localStorage.setItem("production-capacity", String(value)); }
   function setPreviewWidthValue(value: number) { const safe = Math.max(200, Math.min(1200, Math.round(value))); setPreviewWidth(safe); localStorage.setItem(PREVIEW_WIDTH_KEY, String(safe)); }
 
@@ -143,8 +148,9 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
 
   return <main className="production-page">
     <ProductionHeader periodLabel={periodLabel} mode={mode} onMode={setMode} onPrevious={() => setBase(productionAddDays(base, -range.shiftDays))} onNext={() => setBase(productionAddDays(base, range.shiftDays))} onToday={() => setBase(startOfCalendarWeek(new Date()))} onCreateOrder={onCreateOrder} canCreateOrder={canManageOrders}/>
+    {overviewWork && <Group role="status"><Badge>{overviewTargetUi.workFilter}</Badge><CrmButton tone="secondary" onClick={clearOverviewFilter}>{productionUi.resetFilters}</CrmButton></Group>}
     <ProductionKpis metrics={metrics} capacity={capacityPerDay}/>
-    <ProductionFiltersBar filters={filters} opened={filtersOpen} sortMode={sortMode} capacity={capacityPerDay} previewWidth={previewWidth} onSortMode={setSortMode} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => setFilters(DEFAULT_FILTERS)}/>
+    <ProductionFiltersBar filters={filters} opened={filtersOpen} sortMode={sortMode} capacity={capacityPerDay} previewWidth={previewWidth} onSortMode={setSortMode} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => { setFilters(DEFAULT_FILTERS); if(overviewWork)clearOverviewFilter(); }}/>
     {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
     <div className={`production-board-shell${selectedOrder ? " has-selection" : ""}`}>
       <ProductionTimeline orders={visibleOrders} days={days} base={base} dayWidth={range.dayWidth} capacity={capacityPerDay} selectedId={selected} onSelect={(orderId) => setSelected((current) => current === orderId ? undefined : orderId)} onDrag={drag} onToggleLock={(order) => order.productionSlot && void saveSlot(order, { ...order.productionSlot, locked: !order.productionSlot.locked })} onSchedule={autoSchedule} onPreview={setPreview}/>

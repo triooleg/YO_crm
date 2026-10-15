@@ -16,8 +16,8 @@ const { parseCrmSection, crmSectionHref } = module.exports;
 test("CRM section query accepts only stable section identifiers", () => {
   assert.equal(parseCrmSection("settings"), "settings");
   assert.equal(parseCrmSection("inbox"), "inbox");
-  assert.equal(parseCrmSection("unknown"), "inbox");
-  assert.equal(parseCrmSection(undefined), "inbox");
+  assert.equal(parseCrmSection("unknown"), "overview");
+  assert.equal(parseCrmSection(undefined), "overview");
 });
 
 test("CRM section links preserve unrelated query parameters", () => {
@@ -32,5 +32,5 @@ test("CRM shell restores section from the URL and synchronizes browser history",
   assert.match(shell, /popstate/);
   assert.match(shell, /parseCrmSection/);
   assert.match(shell, /if\(next===sectionId&&!context\)return/);
-  assert.match(shell, /Object\.entries\(context\|\|\{\}\)/);
+  assert.match(shell, /createCrmNavigationHref\(next,window\.location\.search,context\)/);
 });

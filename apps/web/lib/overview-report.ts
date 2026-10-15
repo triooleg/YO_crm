@@ -1,0 +1,9 @@
+import type { CrmSectionId } from './crm-sections';
+export type OverviewNavigate=(section:CrmSectionId,context?:Record<string,string>)=>void|Promise<void>;
+export type OverviewBucket='new'|'work'|'ready'|'awaiting'|'completed';
+export type OverviewOrderFilter=OverviewBucket|'period'|'overdue'|'unpaid';
+export type OverviewOrders={month:string;currency:string;today:string;counts:{total:number;previousTotal:number;work:number;ready:number;overdue:number;requiresVerification:number;awaitingPayment:number};ring:{total:number;excluded:number;segments:{key:OverviewBucket;count:number}[]};trend:{month:string;orders:number;clients:number}[];recent:{id:string;number:string;clientName:string;modelImagePath:string|null;salesStatus:string;createdAt:string;amountMinor:number|null;originalAmountMinor:number;originalCurrency:string}[];valuationError:string|null};
+export type OverviewTasks={userId:string;doneColumnId:string|null;rows:{id:string;title:string;columnId:string;dueAt:string|null;clientName:string|null;orderId:string|null;orderNumber:string|null}[]};
+export type OverviewMessages={unreadCount:number;rows:{conversationId:string;clientId:string;clientName:string;avatarUrl:string|null;channel:string;preview:string;at:string;unreadCount:number}[]};
+export type OverviewShipments={today:string;count7:number;requiresVerification:number;rows:{id:string;orderId:string;shipmentId:string|null;number:string;clientName:string;carrier:string|null;status:string;expectedAt:string;forecast:boolean}[]};
+export function overviewPermissions(role:string){return {orders:['OWNER','ADMIN','MANAGER'].includes(role),production:['OWNER','ADMIN','MANAGER','PRODUCTION'].includes(role),finance:['OWNER','ADMIN','ACCOUNTANT'].includes(role),tasks:['OWNER','ADMIN','MANAGER','PRODUCTION'].includes(role),messages:['OWNER','ADMIN','MANAGER'].includes(role),shipments:['OWNER','ADMIN','MANAGER'].includes(role)}}

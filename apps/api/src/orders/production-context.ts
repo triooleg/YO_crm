@@ -82,24 +82,24 @@ function productionDate(value: string | undefined, fallback: Date, endOfDay = fa
   return date;
 }
 
-export async function loadProductionOrders(repository: ProductionOrderRepository, orderId?: string, from?: string, to?: string, now = new Date()) {
+export async function loadProductionOrders(repository: ProductionOrderRepository, orderId?: string, from?: string, to?: string, now = new Date(), overview?: { orderIds: string[] }) {
   const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const defaultTo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 6, 0, 23, 59, 59, 999));
   const startsAt = productionDate(from, defaultFrom);
   const endsAt = productionDate(to, defaultTo, true);
   if (endsAt < startsAt || endsAt.getTime() - startsAt.getTime() > MAX_PRODUCTION_RANGE_DAYS * 24 * 60 * 60 * 1000) throw new Error("INVALID_PRODUCTION_RANGE");
   const orders = await repository.findMany({
-    where: { archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, OR: [
+    where: { archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] }, ...(overview ? { id: { in: overview.orderIds } } : { OR: [
       { productionSlot: { is: { startsAt: { lte: endsAt }, endsAt: { gte: startsAt } } } },
       { requiredDeliveryAt: { gte: startsAt, lte: endsAt } },
       { productionSlot: { is: null }, requiredDeliveryAt: null },
-    ] },
+    ] }) },
     orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
     take: PRODUCTION_RESULT_LIMIT + 1,
     select: productionOrderSelect,
   });
   if (orders.length > PRODUCTION_RESULT_LIMIT) throw new Error("PRODUCTION_RESULT_LIMIT_EXCEEDED");
-  if (!orderId || orders.some((order) => order.id === orderId)) return orders.map(presentProductionOrder);
+  if (overview || !orderId || orders.some((order) => order.id === orderId)) return orders.map(presentProductionOrder);
   const requested = await repository.findFirst({ where: { id: orderId, archivedAt: null, type: { notIn: NON_PRODUCTION_ORDER_TYPES }, salesStatus: { notIn: ["COMPLETED", "CANCELLED"] } }, select: productionOrderSelect });
   return includeRequestedProductionOrder(orders, requested).map(presentProductionOrder);
 }

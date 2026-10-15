@@ -16,8 +16,8 @@ export class ClientsController {
 
   @Get()
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
-  list(@Query("search") search?: string) {
-    return this.clients.list(search);
+  list(@Query("search") search?: string, @Query("period") period?: string) {
+    return this.clients.list(search, period);
   }
 
   @Get(":id")

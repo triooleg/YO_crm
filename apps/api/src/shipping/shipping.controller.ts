@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import type { ShippingCarrier, User } from "@prisma/client";
 import { Roles } from "../auth/roles.decorator";
@@ -10,7 +10,7 @@ import { ArchiveOrderShipmentDto, UpdateCarrierSettingDto, UpsertOrderShipmentDt
 @Controller("shipping") @UseGuards(SessionGuard,RolesGuard)
 export class ShippingController {
   constructor(private readonly shipping:ShippingService){}
-  @Get() @Roles("OWNER","ADMIN","MANAGER") list(){return this.shipping.list()}
+  @Get() @Roles("OWNER","ADMIN","MANAGER") list(@Query("filter") filter?:string,@Query("horizon") horizon?:string){return this.shipping.list({filter,horizon:horizon===undefined?undefined:Number(horizon)})}
   @Put("orders/:orderId") @Roles("OWNER","ADMIN","MANAGER") upsert(@Param("orderId") orderId:string,@Body() dto:UpsertShipmentDto,@Req() req:Request&{user:User}){return this.shipping.upsert(orderId,dto,req.user)}
   @Get("orders/:orderId/shipments") @Roles("OWNER","ADMIN","MANAGER") shipments(@Param("orderId") orderId:string){return this.shipping.shipments(orderId)}
   @Post("orders/:orderId/shipments") @Roles("OWNER","ADMIN","MANAGER") createShipment(@Param("orderId") orderId:string,@Body() dto:UpsertOrderShipmentDto,@Req() req:Request&{user:User}){return this.shipping.createShipment(orderId,dto,req.user)}

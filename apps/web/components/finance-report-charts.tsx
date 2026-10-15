@@ -6,9 +6,9 @@ import { useResizeObserver } from '@mantine/hooks';
 import { financeReportUi as ui } from '../lib/i18n';
 import { moneyLabel, financeMonth, type FinanceReport } from '../lib/finance-report';
 
-export function FinanceReportCharts({report,range,onRange,onCategory,onMonth}:{report:FinanceReport;range:number;onRange:(range:number)=>void;onMonth:(month:string)=>void;onCategory:(id:string)=>void}){
+export function FinanceReportCharts({report,range,onRange,onCategory,onMonth,initialMetric='received'}:{report:FinanceReport;range:number;onRange:(range:number)=>void;onMonth:(month:string)=>void;onCategory:(id:string)=>void;initialMetric?:'received'|'expenses'|'result'}){
   const gradientId=useId().replace(/:/g,'');
-  const [metric,setMetric]=useState('received');
+  const [metric,setMetric]=useState<string>(initialMetric);
   const [chartRef,chartRect]=useResizeObserver<HTMLDivElement>();
   const chartWidth=Math.max(240,Math.round(chartRect.width)||810),plotRight=chartWidth-6,plotWidth=Math.max(1,plotRight-58);
   const theme=useMantineTheme();

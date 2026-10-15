@@ -2,7 +2,8 @@ export type OrderContextResult<T> = { requested: boolean; order: T | undefined }
 
 export function orderInitialTab(search: string, orderId: string) {
   const params = new URLSearchParams(search);
-  return params.get("orderId") === orderId && params.get("tab") === "finance" ? "finance" : "details";
+  const tab=params.get("tab");
+  return params.get("orderId") === orderId && (tab === "finance" || tab === "delivery") ? tab : "details";
 }
 
 export function orderContextId(search: string) {
@@ -22,4 +23,9 @@ export function clearOrderContextUrl(href: string) {
 
 export function canOpenOrderFinance(role: string) {
   return role === "OWNER" || role === "ADMIN" || role === "ACCOUNTANT";
+}
+
+export function shipmentContextId(search:string,orderId:string){
+ const params=new URLSearchParams(search);
+ return params.get('orderId')===orderId&&params.get('tab')==='delivery'?params.get('shipmentId')||undefined:undefined;
 }

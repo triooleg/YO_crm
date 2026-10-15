@@ -99,11 +99,21 @@ test("активный канал отделяемого аккаунта зам
 });
 
 test("разделение снимает фильтр удалённого канала, сохраняет выбранного клиента и отменяет autosave и вложение",async({page})=>{
+  const clockStart=new Date('2026-10-15T12:00:00Z');
+  await page.clock.install({time:clockStart});
+  await page.clock.pauseAt(new Date(clockStart.getTime()+1000));
   const state=await mockMergedClient(page,{secondClient:true,postSplitDelayMs:150});
   await page.goto("/?section=inbox");
   const whatsappFilter=page.getByRole("button",{name:"WhatsApp: 1"});
+  // Finish the filter's 250ms debounce before testing split's single reload.
+  let filteredListReceived=false;
+  const filteredList=page.waitForResponse(response=>{const url=new URL(response.url());if(url.pathname!=='/api/communications'||url.searchParams.get('channels')!=='WHATSAPP')return false;filteredListReceived=true;return true});
+  const filteredDetail=page.waitForResponse(response=>filteredListReceived&&new URL(response.url()).pathname==='/api/communications/merged-client');
   await whatsappFilter.click();
   await expect(whatsappFilter).toHaveAttribute("aria-pressed","true");
+  await page.clock.runFor(250);
+  await filteredList;
+  await filteredDetail;
   await page.locator(".communications-chat-header select").selectOption("WHATSAPP");
   const composer=page.locator(".communications-compose textarea");
   await composer.fill("Не должен сохраниться после разделения");
@@ -116,7 +126,8 @@ test("разделение снимает фильтр удалённого ка
   await expect(composer).toHaveValue("");
   await expect(page.getByText("proof.png")).toBeHidden();
   const writesAfterSplit=state.draftWrites();
-  await page.waitForTimeout(1100);
+  // Exercise the 900ms autosave deadline without reaching the 5s polling tick.
+  await page.clock.runFor(1100);
   expect(state.draftWrites()).toBe(writesAfterSplit);
   expect(state.postSplitListRequests()).toBe(1);
 });
@@ -185,6 +196,7 @@ test("быстрое переключение диалога сначала со
 });
 
 test("переход из Входящих сначала сохраняет текст composer",async({page})=>{
+  await page.setViewportSize({width:1920,height:1080});
   const state=await mockMergedClient(page,{delayedDraftMs:120});
   await page.goto("/?section=inbox");
   await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");

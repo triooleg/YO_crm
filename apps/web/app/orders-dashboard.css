@@ -379,3 +379,6 @@
   .orders-instance-measurements{grid-column:2/-1;grid-row:2}
   .orders-quick-action-grid .mantine-Button-label{white-space:normal;line-height:1.2;text-align:center}
 }
+.orders-dashboard .orders-overview-context{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin-bottom:12px;border:1px solid var(--line);border-radius:var(--mantine-radius-md);background:var(--mantine-color-violet-0);color:var(--ink)}
+.orders-dashboard .orders-shipment-card[data-context-selected="true"]{outline:2px solid var(--mantine-color-violet-6);outline-offset:3px;scroll-margin-block:100px}
+.orders-dashboard .orders-shipment-context-missing{margin-bottom:12px}

@@ -56,6 +56,20 @@ export class TasksService {
     return messages.map((message) => ({ ...message, taskCreated: message.workTasks.length > 0, workTasks: undefined }));
   }
 
+  async detail(id: string) {
+    const task = await this.prisma.workTask.findFirst({
+      where: { id, archivedAt: null, column: { archivedAt: null } },
+      include: {
+        client: { select: { id: true, displayName: true, source: true, preferredChannel: true } },
+        assignee: { select: { id: true, displayName: true, role: true } },
+        attachments: { orderBy: { createdAt: "asc" } },
+        sourceMessage: { select: { id: true, content: true, conversation: { select: { channel: true } } } },
+      },
+    });
+    if (!task) throw new NotFoundException("Задача не найдена");
+    return task;
+  }
+
   private async attachmentData(paths: string[] = []) {
     const unique = [...new Set(paths)];
     return Promise.all(unique.map(async (path) => {

@@ -2,9 +2,9 @@
 
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Badge, Menu, Modal, UnstyledButton } from "@mantine/core";
-import { orderFormUi, ordersDashboardUi as ui } from "../../lib/i18n";
+import { orderFormUi, ordersDashboardUi as ui, overviewContextUi } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
-import { orderInitialTab } from "../../lib/order-context";
+import { orderInitialTab, shipmentContextId } from "../../lib/order-context";
 import { repairMojibake } from "../../lib/text-encoding.mjs";
 import { CrmAlert } from "../crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "../crm/settings-controls";
@@ -160,7 +160,16 @@ const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE
 export function OrderExpandedTabs(props: Props) {
   const { order } = props;
   const [activeTab, setActiveTab] = useState("details");
-  useEffect(() => { setActiveTab(orderInitialTab(window.location.search, order.id)); }, [order.id]);
+  const [targetShipmentId, setTargetShipmentId] = useState<string>();
+  useEffect(() => {
+    const readContext = () => {
+      setActiveTab(orderInitialTab(window.location.search, order.id));
+      setTargetShipmentId(shipmentContextId(window.location.search, order.id));
+    };
+    readContext();
+    window.addEventListener("popstate", readContext);
+    return () => window.removeEventListener("popstate", readContext);
+  }, [order.id]);
   const items = expandedOrderItems(order);
   const tabPanelId = `order-tab-panel-${order.id}`;
   const tabs = [
@@ -196,7 +205,7 @@ export function OrderExpandedTabs(props: Props) {
       {activeTab === "client" && <OrderClientTab {...props} items={items} />}
       {activeTab === "finance" && <OrderFinanceTab {...props} items={items} />}
       {activeTab === "production" && <OrderProductionTab {...props} items={items} />}
-      {activeTab === "delivery" && <OrderDeliveryTab {...props} items={items} />}
+      {activeTab === "delivery" && <OrderDeliveryTab {...props} items={items} targetShipmentId={targetShipmentId} />}
       {activeTab === "notes" && <OrderNotesTab {...props} />}
       {activeTab === "history" && <OrderHistoryTab order={order} />}
     </section>
@@ -525,7 +534,17 @@ function OrderProductionTab({ order, items, onProduction, onUpdateInstance, stat
   </div>;
 }
 
-function OrderDeliveryTab({ order, items, onDelivery, onDeliveryContact, onCreateShipment, onUpdateShipment }: Props & { items: ExpandedOrderItem[] }) {
+function OrderDeliveryTab({ order, items, onDelivery, onDeliveryContact, onCreateShipment, onUpdateShipment, targetShipmentId }: Props & { items: ExpandedOrderItem[]; targetShipmentId?: string }) {
+  const targetShipmentRef = useRef<HTMLElement | null>(null);
+  const targetShipmentExists = Boolean(targetShipmentId && order.orderShipments?.some(shipment => shipment.id === targetShipmentId));
+  useEffect(() => {
+    if (!targetShipmentExists) return;
+    const frame = requestAnimationFrame(() => {
+      targetShipmentRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
+      targetShipmentRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targetShipmentExists, targetShipmentId]);
   const tracking = trackingNumber(order);
   const [shipmentEditor, setShipmentEditor] = useState<{ shipment?: OrderShipmentView }>();
   const editingShipment = shipmentEditor?.shipment;
@@ -536,7 +555,8 @@ function OrderDeliveryTab({ order, items, onDelivery, onDeliveryContact, onCreat
     </TabCard>
     <div className="orders-shipment-column">
       <header className="orders-tab-section-header"><div><h3>{ui.shipments}</h3><p>{ui.shipmentsRealDataHint}</p></div>{onCreateShipment && <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>＋ {ui.addShipment}</CrmButton>}</header>
-      {order.orderShipments?.length ? order.orderShipments.map((shipment, index) => <article className="orders-shipment-card" key={shipment.id}><header><span>{index + 1}</span><div><h4>{ui.shipmentNumber} {index + 1}</h4><CrmStatusBadge domain="shipping" status={shipment.status} /></div>{onUpdateShipment && <CrmButton tone="secondary" size="compact-xs" onClick={() => setShipmentEditor({ shipment })}>{ui.editShipment}</CrmButton>}</header><FieldGrid><Field label={ui.method} value={shipmentMethodLabel(shipment)} /><Field label={ui.tracking} value={shipment.trackingNumber || ui.notSpecified} /><Field label={ui.actualShipping} value={shipment.shippedAt ? formatDate(shipment.shippedAt) : ui.notSpecifiedFeminine} /><Field label={ui.actualDelivery} value={shipment.deliveredAt ? formatDate(shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Field label={ui.shipmentWeight} value={shipment.weightGrams ? `${shipment.weightGrams} ${ui.grams}` : ui.notSpecified} /><Field label={ui.shipmentDimensions} value={shipment.lengthMm && shipment.widthMm && shipment.heightMm ? `${shipment.lengthMm} × ${shipment.widthMm} × ${shipment.heightMm} ${ui.millimeters}` : ui.notSpecified} /><Field label={ui.shippingPaidByClient} value={money(shipment.customerChargeMinor, shipment.currency)} /><Field label={ui.shippingAtelierExpense} value={money(shipment.atelierCostMinor, shipment.currency)} /></FieldGrid><div className="orders-shipment-contents"><strong>{ui.shipmentContents}</strong>{shipment.instances.length ? shipment.instances.map((instance) => { const item = items.find((candidate) => candidate.id === instance.orderItemId); return <span key={instance.id}>{item?.name || ui.item} · {item ? displayInstanceNumber(items, item, instance.ordinal) : instance.ordinal}</span>; }) : <small>{ui.noShipmentContents}</small>}</div></article>) : <EmptyState text={ui.noShipment} action={onCreateShipment ? <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>{ui.addShipment}</CrmButton> : <CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton>} />}
+      {targetShipmentId && !targetShipmentExists && <CrmAlert className="orders-shipment-context-missing">{overviewContextUi.shipmentUnavailable}</CrmAlert>}
+      {order.orderShipments?.length ? order.orderShipments.map((shipment, index) => <article className="orders-shipment-card" key={shipment.id} data-shipment-id={shipment.id} data-context-selected={shipment.id === targetShipmentId ? "true" : undefined} tabIndex={shipment.id === targetShipmentId ? -1 : undefined} ref={shipment.id === targetShipmentId ? targetShipmentRef : undefined}><header><span>{index + 1}</span><div><h4>{ui.shipmentNumber} {index + 1}</h4><CrmStatusBadge domain="shipping" status={shipment.status} /></div>{onUpdateShipment && <CrmButton tone="secondary" size="compact-xs" onClick={() => setShipmentEditor({ shipment })}>{ui.editShipment}</CrmButton>}</header><FieldGrid><Field label={ui.method} value={shipmentMethodLabel(shipment)} /><Field label={ui.tracking} value={shipment.trackingNumber || ui.notSpecified} /><Field label={ui.actualShipping} value={shipment.shippedAt ? formatDate(shipment.shippedAt) : ui.notSpecifiedFeminine} /><Field label={ui.actualDelivery} value={shipment.deliveredAt ? formatDate(shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Field label={ui.shipmentWeight} value={shipment.weightGrams ? `${shipment.weightGrams} ${ui.grams}` : ui.notSpecified} /><Field label={ui.shipmentDimensions} value={shipment.lengthMm && shipment.widthMm && shipment.heightMm ? `${shipment.lengthMm} × ${shipment.widthMm} × ${shipment.heightMm} ${ui.millimeters}` : ui.notSpecified} /><Field label={ui.shippingPaidByClient} value={money(shipment.customerChargeMinor, shipment.currency)} /><Field label={ui.shippingAtelierExpense} value={money(shipment.atelierCostMinor, shipment.currency)} /></FieldGrid><div className="orders-shipment-contents"><strong>{ui.shipmentContents}</strong>{shipment.instances.length ? shipment.instances.map((instance) => { const item = items.find((candidate) => candidate.id === instance.orderItemId); return <span key={instance.id}>{item?.name || ui.item} · {item ? displayInstanceNumber(items, item, instance.ordinal) : instance.ordinal}</span>; }) : <small>{ui.noShipmentContents}</small>}</div></article>) : <EmptyState text={ui.noShipment} action={onCreateShipment ? <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>{ui.addShipment}</CrmButton> : <CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton>} />}
       {onCreateShipment && <UnstyledButton className="orders-add-shipment-card" onClick={() => setShipmentEditor({})}>＋ {ui.addShipment}</UnstyledButton>}
     </div>
     <aside className="orders-delivery-side"><TabCard title={ui.tracking}>{tracking ? <><strong className="orders-tracking-number">{tracking}</strong><p>{shipmentMethod(order)}</p>{trackingUrl(order) && <a className="orders-tracking-link" href={trackingUrl(order)!} target="_blank" rel="noreferrer">{ui.trackAtCarrier}</a>}</> : <EmptyState text={ui.trackingMissing} />}</TabCard><TabCard title={ui.usefulLinks}><div className="orders-carrier-links">{carrierLinks().map((link) => <a key={link.href} href={link.href} target="_blank" rel="noreferrer">{link.label}</a>)}</div></TabCard></aside>

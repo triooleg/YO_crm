@@ -1,10 +1,11 @@
 ﻿"use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { Alert, Group } from "@mantine/core";
 import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
-import { clientAthleteUi, clientMergeUi, clientWorkspaceUi } from "../lib/i18n";
+import { clientAthleteUi, clientMergeUi, clientWorkspaceUi, overviewContextUi } from "../lib/i18n";
 import { ClientAvatar } from "./client-avatar";
 import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 import { CrmTabList } from "./crm/tab-list";
@@ -55,6 +56,11 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
   const mergeSelectRef = useRef<HTMLSelectElement>(null);
   const mergeBusyRef = useRef(false);
   const detailRequestId=useRef(0);
+  const listRequestId=useRef(0);
+  const [createdPeriod,setCreatedPeriod]=useState(()=>{
+    const period=typeof window==="undefined"?null:new URLSearchParams(window.location.search).get("period");
+    return period&&/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(period)?period:"";
+  });
   const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
   const initialOrderId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("orderId")||undefined);
   const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
@@ -91,17 +97,25 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
     return r.json();
   }
   async function load(q = "") {
-    const data = await request(
-      `/clients${q ? `?search=${encodeURIComponent(q)}` : ""}`,
-    );
+    const requestId=++listRequestId.current;
+    const query=new URLSearchParams();if(q)query.set("search",q);if(createdPeriod)query.set("period",createdPeriod);
+    let data:Client[];
+    try{data=await request(`/clients${query.size?`?${query}`:""}`)}catch(reason){if(requestId===listRequestId.current)throw reason;return}
+    if(requestId!==listRequestId.current)return;
+    if(createdPeriod)setError("");
     setClients(data);
     setAuth(true);
     if (!selected && data[0]) setSelected(pendingOrderClientId.current||initialClientId.current||data[0].id);
   }
   useEffect(() => {
+    let cancelled=false;
     request("/auth/me")
-      .then(() => load())
-      .catch(() => setAuth(false));
+      .then(async () => {
+        if(cancelled)return;
+        try{await load()}catch(reason){if(!cancelled){if(!createdPeriod){setAuth(false);return}setAuth(current=>current===false?false:true);setError((reason as Error).message)}}
+      })
+      .catch(() => {if(!cancelled)setAuth(false)});
+    return()=>{cancelled=true;listRequestId.current++};
   }, []);
   useEffect(() => {
     if (!auth) return;
@@ -109,8 +123,13 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
       () => load(search).catch((e) => setError(e.message)),
       250,
     );
-    return () => clearTimeout(t);
-  }, [search, auth]);
+    return () => {clearTimeout(t);listRequestId.current++};
+  }, [search, auth, createdPeriod]);
+  function clearCreatedPeriod(){
+    listRequestId.current++;setCreatedPeriod("");setError("");
+    const url=new URL(window.location.href);url.searchParams.delete("period");
+    window.history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`);
+  }
   useEffect(() => {
     const requestId=++detailRequestId.current;
     setDetail(undefined);setMergeSuggestions([]);setMergeSourceId("");setMergeOpen(false);
@@ -196,6 +215,7 @@ export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>vo
             <CrmButton ref={createClientTriggerRef} onClick={() => setCreating(true)}>+ Новый клиент</CrmButton>
           </div>
         </header>
+        {createdPeriod&&<Alert role="status" color="violet"><Group justify="space-between"><span>{overviewContextUi.clientsCreatedPeriod}: {new Intl.DateTimeFormat("ru-RU",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${createdPeriod}-01T12:00:00Z`)).replace(/\s?г\.$/,"")}</span><CrmButton tone="secondary" onClick={clearCreatedPeriod}>{overviewContextUi.clearPeriod}</CrmButton></Group></Alert>}
         {error && (
           <div className="phase2-error">
             {error}

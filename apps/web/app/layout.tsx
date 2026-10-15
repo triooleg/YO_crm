@@ -30,6 +30,7 @@ import "./workspace-layout-standard.css";
 import "./inbox-reference.css";
 import "./mantine-overrides.css";
 import "./finance-report.css";
+import "./overview-workspace.css";
 
 export const metadata: Metadata = {
   title: "CRM Yoleotard",

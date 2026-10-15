@@ -3,7 +3,7 @@ import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Alert, Button, Modal, NativeSelect } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { communicationsUi as ui, labels } from "../lib/i18n";
+import { communicationsUi as ui, labels, overviewTargetUi } from "../lib/i18n";
 import {
   canRefreshInbox,
   isCurrentInboxDetailRequest,
@@ -286,7 +286,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [search, setSearch] = useState(()=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get("clientName")||""),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
-    [conversationScope,setConversationScope]=useState<ConversationScope>("ALL"),
+    [conversationScope,setConversationScope]=useState<ConversationScope>(()=>{const scope=typeof window!=="undefined"?new URLSearchParams(window.location.search).get("conversationScope"):null;return scope&&["UNREAD","WAITING","CLIENTS"].includes(scope)?scope as ConversationScope:"ALL"}),
     [spamScope,setSpamScope]=useState(false),
     [spamTarget,setSpamTarget]=useState<{id:string;name:string;spam:boolean;expectedSpamAt:string|null}>(),
     [spamBusy,setSpamBusy]=useState(false),
@@ -339,6 +339,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     selectedClientId = useRef<string | undefined>(undefined),
     initialClientId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined),
     initialOrderId = useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("orderId")||undefined),
+    initialConversationContext = useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.has("conversationId")||params.has("channel")?{id:params.get("conversationId"),channel:params.get("channel")}:undefined})()),
+    openSequence = useRef(0),
     composeEpoch = useRef(0),
     listRequestSequence = useRef(0),
     refreshRequestSequence = useRef(0),
@@ -399,6 +401,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     clientIdentityRef=useRef<HTMLSpanElement|null>(null),
     currentActiveChannel=useRef(activeChannel),
     currentComposerText=useRef(text),
+    currentComposerAiRunId=useRef(composerAiRunId),
     currentSpamScope=useRef(spamScope),
     spamPending=useRef(false);
   currentSpamScope.current=spamScope;
@@ -407,6 +410,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   currentOrderScope.current=orderScope;
   currentActiveChannel.current=activeChannel;
   currentComposerText.current=text;
+  currentComposerAiRunId.current=composerAiRunId;
   currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
   currentMessages.current=messages;
@@ -527,6 +531,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   }
   useEffect(()=>{if(searchQuery!==undefined)setSearch(searchQuery)},[searchQuery]);
   useEffect(()=>{if(unreadRequest)setConversationScope("UNREAD")},[unreadRequest]);
+  useEffect(()=>{const url=new URL(window.location.href);if(conversationScope==="ALL")url.searchParams.delete("conversationScope");else url.searchParams.set("conversationScope",conversationScope);window.history.replaceState(window.history.state,"",url)},[conversationScope]);
   useEffect(()=>{if(contextTab==="SUMMARY"&&client)void loadConversationSummaries(client.id,activeChannel)},[contextTab,client?.id,activeChannel]);
   async function autosaveDraftFor(operationClientId:string,operationChannel:string,content:string,operationAiRunId?:string){
     const operationEpoch=composeEpoch.current,sequence=++draftSequence.current;
@@ -550,15 +555,25 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     return autosaveDraftFor(operationClientId,activeChannel,content,operationAiRunId);
   }
   async function flushComposerDraftBeforeNavigation(){
-    const operationClientId=selectedClientId.current,operationChannel=activeChannel,operationAiRunId=composerAiRunId;
-    if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
-    if(draftSavePromise.current){const saved=await draftSavePromise.current;if(!saved)return false}
-    const content=(composerTextarea.current?.value??currentComposerText.current).trim();
-    if(!operationClientId||!inboxDraftNeedsSave(lastAutosavedText.current,lastAutosavedAiRunId.current,content,operationAiRunId))return true;
-    const promise=autosaveDraftFor(operationClientId,operationChannel,content,operationAiRunId);draftSavePromise.current=promise;
-    const saved=await promise;
-    if(draftSavePromise.current===promise)draftSavePromise.current=null;
-    return saved;
+    const operationClientId=selectedClientId.current,operationChannel=currentActiveChannel.current,operationEpoch=composeEpoch.current;
+    if(!operationClientId)return true;
+    for(;;){
+      if(selectedClientId.current!==operationClientId||currentActiveChannel.current!==operationChannel||composeEpoch.current!==operationEpoch)return false;
+      if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
+      const pending=draftSavePromise.current;
+      if(pending){
+        const saved=await pending;
+        if(draftSavePromise.current===pending)draftSavePromise.current=null;
+        if(!saved)return false;
+        continue;
+      }
+      const content=(composerTextarea.current?.value??currentComposerText.current).trim(),operationAiRunId=currentComposerAiRunId.current;
+      if(!inboxDraftNeedsSave(lastAutosavedText.current,lastAutosavedAiRunId.current,content,operationAiRunId))return true;
+      const promise=autosaveDraftFor(operationClientId,operationChannel,content,operationAiRunId);draftSavePromise.current=promise;
+      const saved=await promise;
+      if(draftSavePromise.current===promise)draftSavePromise.current=null;
+      if(!saved)return false;
+    }
   }
   async function navigateFromInbox(section:ContextTarget,context?:Record<string,string>){
     if(!navigate)return;
@@ -795,8 +810,29 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       setError((e as Error).message);
     }
   }
-  async function open(c: Client) {
+  async function open(c: Client, explicitSelection=false) {
+    const openingSequence=++openSequence.current;
+    if(!explicitSelection&&initialConversationContext.current&&c.id!==initialClientId.current){setError(initialClientId.current?ui.contextClientUnavailable:overviewTargetUi.conversationUnavailable);return}
+    const context=!explicitSelection&&c.id===initialClientId.current?initialConversationContext.current:undefined;
+    let contextChannel:string|undefined;
+    if(context){
+      if(!context.id||!context.channel||!c.conversations.some(item=>item.id===context.id&&item.channel===context.channel)){setError(overviewTargetUi.conversationUnavailable);return}
+      const validationVersion=++detailVersion.current;
+      try{
+        const detail=await api(`/communications/${encodeURIComponent(c.id)}?channel=${encodeURIComponent(context.channel)}`);
+        if(validationVersion!==detailVersion.current||openingSequence!==openSequence.current)return;
+        if(detail.id!==context.id||detail.clientId!==c.id||detail.channel!==context.channel||detail.archivedAt){setError(overviewTargetUi.conversationUnavailable);return}
+        contextChannel=context.channel;
+      }catch(reason){if(validationVersion===detailVersion.current&&openingSequence===openSequence.current)setError((reason as Error).message);return}
+    }
     if(c.id!==selectedClientId.current&&!await flushComposerDraftBeforeNavigation())return;
+    if(openingSequence!==openSequence.current)return;
+    if(explicitSelection&&(initialConversationContext.current||initialClientId.current||initialOrderId.current)){
+      initialConversationContext.current=undefined;initialClientId.current=undefined;initialOrderId.current=undefined;
+      clearInboxContextAction(true);
+      setError("");notifications.hide("communications-error");
+    }
+    if(context)initialConversationContext.current=undefined;
     setMobileClientListOpen(false);
     if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
       if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
@@ -827,7 +863,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     manualLoading.current = true;
     setClient(c);
     setNewMessageCount(0);
-    const openingChannel=latestConversation(c)?.channel||channel(c);
+    const openingChannel=contextChannel||latestConversation(c)?.channel||channel(c);
     setActiveChannel(openingChannel);
     autoScrollPending.current = true;
     stickToBottom.current = true;
@@ -849,7 +885,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         const nextMessages=x.messages||[],prepared=prepareInboxMessages(nextMessages,openingChannel);
         setMessages(nextMessages);
         setText(prepared.draft?.content||"");setComposerAiRunId(prepared.draftAiRunId);composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";lastAutosavedAiRunId.current=prepared.draftAiRunId;setDraftStatus(prepared.draft?"SAVED":"IDLE");
-        const firstForChannel=nextMessages.find((message:Message)=>message.channel===(latestConversation(c)?.channel||channel(c)))||nextMessages[0];
+        const firstForChannel=nextMessages.find((message:Message)=>message.channel===openingChannel)||nextMessages[0];
         const initialDate=localDateKey(firstForChannel?.createdAt||new Date());
         setSummaryDate(initialDate);setSummaryMonth(new Date(`${initialDate}T12:00:00`));
       }
@@ -876,6 +912,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     }
   }
   async function loadClients(id?: string, requestedCount=visibleClientCount, requestedSearch=search, requestedChannels=socialFilters, requestedOrderScope=orderScope, requestedConversationScope=conversationScope) {
+    const openingSequence=openSequence.current;
     refreshRequestSequence.current++;
     const request=++listRequestSequence.current;
     const spam=currentSpamScope.current,scope=clientScopeKey(requestedSearch,requestedChannels,requestedOrderScope,requestedConversationScope,spam);
@@ -891,6 +928,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       reconcileClientPagination(page,scope);
       setClientTotal(page.total);setScopeCounts(page.scopeCounts);setChannelTotals(page.channelCounts);
       const selected = id ? data.find((x) => x.id === id) : data[0];
+      if(openingSequence!==openSequence.current)return selected;
       if(id&&!selected&&id===initialClientId.current){setError(ui.contextClientUnavailable);initialClientId.current=undefined;initialOrderId.current=undefined;clearInboxContextAction()}
       if (selected&&selected.id===selectedClientId.current)setClient(selected);
       else if(id&&selected)await open(selected);
@@ -987,7 +1025,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       .then(setTemplates)
       .catch((e) => setError((e as Error).message));
     const timer = setInterval(() => void refreshInbox(), 5000);
-    return () => {clearInterval(timer);listRequestSequence.current++;refreshRequestSequence.current++};
+    return () => {clearInterval(timer);listRequestSequence.current++;refreshRequestSequence.current++;openSequence.current++};
   }, []);
   useEffect(() => {
     if (!preview) return;
@@ -1451,7 +1489,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                   key={c.id}
                   className={client?.id === c.id ? "active" : ""}
                   onPointerDown={()=>{if(c.id!==selectedClientId.current)void flushComposerDraftBeforeNavigation()}}
-                  onClick={() => void open(c)}
+                  onClick={() => void open(c,true)}
                 >
                   <span className="communications-client-avatar-wrap">
                     <ClientAvatar className="communications-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
@@ -1960,4 +1998,4 @@ function InboxCountryFlag({country}:{country:string}){
   return code?<span className={`fi fi-${code}`} aria-hidden="true"/>:null;
 }
 function clientLocalTime(timezone:string){try{return new Intl.DateTimeFormat("ru-RU",{timeZone:timezone,hour:"2-digit",minute:"2-digit",timeZoneName:"shortOffset"}).format(new Date())}catch{return timezone}}
-function clearInboxContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}
+function clearInboxContextAction(clearConversation=false){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId",...(clearConversation?["conversationId","channel"]:[])])url.searchParams.delete(key);window.history.replaceState(window.history.state,"",url)}

@@ -16,11 +16,16 @@ function comparablePhone(value?:string|null){return value?.replace(/\D/g,"")||""
 export class ClientsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(search?: string) {
+  async list(search?: string, period?: string) {
+    if (period !== undefined && period !== "" && (typeof period !== "string" || !/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(period))) {
+      throw new BadRequestException("Некорректный месяц создания клиентов");
+    }
+    const [year, month] = period ? period.split("-").map(Number) : [];
     const query = search?.trim();
     const clients = await this.prisma.client.findMany({
       where: {
         archivedAt: null,
+        ...(period ? { createdAt: { gte: new Date(Date.UTC(year!, month! - 1, 1)), lt: new Date(Date.UTC(year!, month!, 1)) } } : {}),
         ...(query ? {
           OR: [
             { displayName: { contains: query, mode: "insensitive" as const } },
@@ -32,8 +37,9 @@ export class ClientsService {
       },
       orderBy: [{ nextActionAt: "asc" }, { displayName: "asc" }],
       include: { _count: { select: { athletes: true, orders: true } } },
-      take: 100
+      take: period ? 1001 : 100
     });
+    if (period && clients.length > 1000) throw new BadRequestException("За период найдено более 1000 клиентов. Уточните поиск.");
     return clients.map(presentClientContact);
   }
 

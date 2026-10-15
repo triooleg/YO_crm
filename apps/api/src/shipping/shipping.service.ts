@@ -17,7 +17,21 @@ const allowed=(from:ShippingStatus,to:ShippingStatus)=>from===to||transitions[fr
 export class ShippingService{
   constructor(private readonly prisma:PrismaService){}
   private async carrierData(){const saved=await this.prisma.appSetting.findMany({where:{section:"shipping",key:{startsWith:"carrier."}}});const map=new Map(saved.map(x=>[x.key,x.value as Record<string,unknown>]));return Object.values(ShippingCarrier).map(carrier=>({carrier,label:labels[carrier],enabled:map.get("carrier."+carrier)?.enabled!==false,account:String(map.get("carrier."+carrier)?.account||""),sender:String(map.get("carrier."+carrier)?.sender||""),dispatchPoint:String(map.get("carrier."+carrier)?.dispatchPoint||"")}))}
-  async list(){const orders=await this.prisma.order.findMany({where:{archivedAt:null},orderBy:[{requiredDeliveryAt:"asc"},{createdAt:"desc"}],select:{id:true,number:true,requiredDeliveryAt:true,shippingStatus:true,currency:true,modelImagePath:true,client:{select:{displayName:true,country:true,city:true,address:true,postalCode:true}},items:{select:{quantity:true,modelImagePath:true}},shipment:true,orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}]}}});const carriers=(await this.carrierData()).map(({carrier,label,enabled})=>({carrier,label,enabled}));return{orders,carriers}}
+  async list(input:{filter?:string;horizon?:number}={}){
+    if(input.filter!==undefined&&input.filter!=="upcoming")throw new BadRequestException("Некорректный фильтр отправок");
+    if(input.horizon!==undefined&&(input.filter!=="upcoming"||input.horizon!==7))throw new BadRequestException("Поддерживается горизонт отправок 7 дней");
+    const read=async(db:Pick<Prisma.TransactionClient,"order">)=>{
+      const eligible=input.filter==="upcoming"?await (async()=>{
+        const {eligibleUpcomingShipmentRecords,loadOverviewOrderSources}=await import("../overview/overview-order-model");
+        return eligibleUpcomingShipmentRecords(await loadOverviewOrderSources(db),{horizon:input.horizon});
+      })():undefined;
+      const ids=eligible?[...new Set(eligible.map(row=>row.orderId))]:undefined;
+      const orders=await db.order.findMany({where:{archivedAt:null,...(ids?{id:{in:ids}}:{})},orderBy:[{requiredDeliveryAt:"asc"},{createdAt:"desc"}],select:{id:true,number:true,requiredDeliveryAt:true,shippingStatus:true,currency:true,modelImagePath:true,client:{select:{displayName:true,country:true,city:true,address:true,postalCode:true}},items:{select:{quantity:true,modelImagePath:true}},shipment:true,orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}]}}});
+      const carriers=(await this.carrierData()).map(({carrier,label,enabled})=>({carrier,label,enabled}));
+      return{orders:eligible?orders.map(order=>({...order,upcomingShipments:eligible.filter(row=>row.orderId===order.id),orderShipments:order.orderShipments.filter(parcel=>eligible.some(row=>row.orderId===order.id&&row.shipmentId===parcel.id))})):orders,carriers};
+    };
+    return input.filter==="upcoming"?this.prisma.$transaction(read,{isolationLevel:"RepeatableRead",timeout:30000,maxWait:5000}):read(this.prisma);
+  }
   async carriers(){return(await this.carrierData()).map(({carrier,label,enabled})=>({carrier,label,enabled}))}
   async carrierSettings(){return this.carrierData()}
   async saveCarrier(carrier:ShippingCarrier,d:UpdateCarrierSettingDto,u:User){if(!Object.values(ShippingCarrier).includes(carrier))throw new BadRequestException("Служба доставки не поддерживается");return this.prisma.$transaction(async tx=>{const key="carrier."+carrier,before=await tx.appSetting.findUnique({where:{section_key:{section:"shipping",key}}}),x=await tx.appSetting.upsert({where:{section_key:{section:"shipping",key}},create:{section:"shipping",key,value:d as unknown as Prisma.InputJsonValue},update:{value:d as unknown as Prisma.InputJsonValue}});await tx.auditLog.create({data:{actorId:u.id,action:before?"UPDATE":"CREATE",entityType:"ShippingCarrierSetting",entityId:x.id,before:before??undefined,after:x}});return x})}

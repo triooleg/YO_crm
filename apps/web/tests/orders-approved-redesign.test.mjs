@@ -35,7 +35,7 @@ test("смена статуса обновляет локальное состо
   const source = dashboard.match(/async function changeStatus\([\s\S]*?\r?\n  }\r?\n  async function changeDeadline/)?.[0] ?? "";
   assert.match(source, /await request\(`\/orders\/\$\{order\.id\}\/statuses`/);
   assert.doesNotMatch(source, /await load\(\)/);
-  assert.match(source, /await refreshOrder\(order\.id\)/);
+  assert.match(source, /await refreshOrder\(order\.id, true\)/);
   assert.match(source, /setOrders/);
   assert.match(source, /previous/);
 });
