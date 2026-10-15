@@ -54,3 +54,40 @@ and read-only live acceptance are separate from the local evidence above.
 
 No schema migration, seed or business-data backfill is part of this release.
 The previously completed 319 profile confirmations must not be replayed.
+
+
+## Deployment and live verification
+
+Deployed **0.4.0 / c187304d4df8c6e43cf303e465b53afe93baaa67**, immutable tag
+`crm-v0.4.0`. Exact GitHub Quality and CRM Release workflows succeeded. Previous
+0.3.1 tag is retained; it was never installed independently. API and web were built
+and recreated; PostgreSQL, Redis, storage/private configuration and all 36 applied
+migrations stayed unchanged. A fresh verified FULL backup preceded the switch.
+
+The first guard stopped before app shutdown because Docker returned identical
+mounts in a different array order. A narrowly reviewed private-helper correction
+canonicalized comparison, with 16 offline guards; original failure evidence was
+retained. The separately approved retry and strict post-checks passed without
+business rebaseline, migration, seed, restore or data backfill.
+
+Actual live read-only acceptance: **23 checks, 16 screenshots, zero errors and no
+unavailable paths**, at 1366/390 pixels. Both discount entry points, real server
+preview and cancellation, current/selected/cleared photo, actual external image
+fallback, Overview and Finance source panels passed. Root and health returned
+HTTP 200 with dependencies up. Full post window preserved all columns of 22
+business tables plus the operation ledger and complete migration tracker; old/new
+app logs were clean. Received payments, invoices and prior 319 profile confirmations
+were retained. No customer discount was saved and no image uploaded for live proof.
+
+Private actual screenshots/receipt:
+`.local/order-discount-deploy/actual-v040-2026-10-15T19-18-07-060Z/`.
+API image `40e3cb2e4bb83126ab7abe3f0420152469315d8eade273dd9401e8fe1c9f82e8`;
+web image `39eabc71debdbec5894452316b9f5490889da36aec7d88e08fc3083a7ec9ab55`.
+Local intercepted-browser mutation tests and simulated actual-service transaction
+fixtures remain distinct from live preview/cancel proof; no real-PG concurrency
+rehearsal or customer financial mutation is claimed.
+
+Independent live visual review inspected all 16 supplied frames: scoped PASS, no
+blocking visual finding. Compatibility, business/security, regression and visual
+roles remain distinct from the final release gate; exact execution/acceptance
+receipts are retained privately in `independent-release.md`.

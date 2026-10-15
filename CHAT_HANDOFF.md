@@ -1,5 +1,48 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — CRM 0.4.0 deployed; live verification
+
+Runtime/tag c187304d4df8c6e43cf303e465b53afe93baaa67 / crm-v0.4.0.
+API40e3cb2e4bb83126ab7abe3f0420152469315d8eade273dd9401e8fe1c9f82e8;
+WEB39eabc71debdbec5894452316b9f5490889da36aec7d88e08fc3083a7ec9ab55.
+Archive5d0475fcef13fc45589d67035ecad38f3d63d77c3e4cb7390b83ffe269dd949f,
+819files, manifest498b660bd08e3c55015cba21d6d12972fe638864a8864be513f92d1e595534b9.
+Published 0.3.1 remains immutable/nondeployed;0.4.0 includes its UI fixes.
+No schema/migration/seed/backfill/provider write/profile replay. Draft PR3 remains unmerged.
+
+Discount: both Finance-tab amounts open a compact fixed/percent preview editor.
+Server CAS/idempotency/audit, authoritative undiscounted basis, one-time percent,
+manual-import protection and inherited deposit gates. Same-value confirmation
+advances only version metadata to prevent older import rollback. Three remaining
+mutation list loads now background; initial/filter navigation remains intentional.
+
+Quality1594PASS=1082API+488web+24DB, types/API+Nextbuild/restoredwebtscPASS;
+browser13PASS plus local1366/390 visual acceptance. Exact CI Quality38791246264
+and Release38791244740 SUCCESS. Fresh FULL20261015T185837Z-81a6b62-pre-v040
+verified after the prior319 profile confirmations. Isolated API+WEB build passed;
+independent fifth-role release gate reviewed exact archive/helper/plan/receipts.
+
+First switch guard rejected Docker's reordered Mounts array BEFORE started/stop;
+read-only five-sample diagnosis confirmed identical mount fields/IDs/health and
+nonconsumed attempt. Private helper now sorts mounts (16offline guard tests),
+new hash d66c731b218694b1e5b4a84ec5d1a928e9abb5a9121dfa17897767e5ec21532b.
+Exact retry separately approved; old failed evidence/helper/plans preserved.
+No business rebaseline or bypass. Only API+WEB recreated; PG/Redis identities,
+volumes/private config/start-only API and full36 migration tracker unchanged.
+
+Live actual read-only harness: PASS23checks,16screens,0unavailable/zeroerrors,
+1366/390 photo/current/blob/clear/cancel/external fallback, Overview/Finance8sources,
+discount FIXED0 server preview then CANCEL at both entry points. No real customer
+apply/upload/save. Root and /api/health HTTP200, dependencies up. Strict post full
+window19:17:03.840307Z–19:19:26.818353Z: all22business-table full-column fingerprints
+PLUS operation history unchanged, fulltracker36 unchanged, exact app identities,
+source/private config/mounts and PGRedis preserved; old/new stdout+stderr clean.
+Private evidence .local/order-discount-deploy; docs/ui/order-discount-validation.md.
+Local tests prove mutations; live checks prove installed UI/preview only, not a
+real customer financial mutation or real-PG concurrency rehearsal. Independent live
+visual review inspected all16 frames and passed within the captured read-only scope;
+final release disposition is recorded in .local/order-discount-deploy/independent-release.md.
+
 ## 2026-10-15 — 0.4.0 discount/async candidate verified locally; 0.3.1 held
 
 User steering before the live switch adds: all order mutation completions must
