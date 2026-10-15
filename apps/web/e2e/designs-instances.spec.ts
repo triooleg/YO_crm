@@ -48,6 +48,126 @@ async function assignmentFixture(page:Page){
  return {calls,order};
 }
 
+test('design photo editor shows current image and clearly selects a replacement',async({page})=>{
+ const {order}=await assignmentFixture(page);order.items[0].modelImagePath='current-design.png';
+ await page.route('**/api/orders/images/**',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')}));
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'Редактировать дизайн',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+ await expect(dialog.getByRole('img',{name:'Текущее фото дизайна',exact:true})).toHaveAttribute('src','/api/orders/images/current-design.png');
+ await expect(dialog.getByText('Выберите фото для загрузки', {exact:true})).toBeVisible();
+ await dialog.locator('input[type=file]').setInputFiles({name:'replacement.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')});
+ await expect(dialog.getByRole('img',{name:'Новое фото дизайна',exact:true})).toHaveAttribute('src',/^blob:/);
+ await expect(dialog).toContainText('replacement.png');
+});
+
+test('saving design keeps the mounted order, open pieces and tab while refreshing server totals',async({page})=>{
+ const {order}=await assignmentFixture(page);let applied=false;
+ await page.route('**/api/orders/design-order/composition/**',async route=>{
+  const body=route.request().postDataJSON();
+  const summary={quantity:6,totalMinor:60000,depositRequiredMinor:30000,paidMinor:0,balanceMinor:60000,overpaymentMinor:0};
+  if(route.request().url().endsWith('/preview'))return route.fulfill({json:{token:'edit-token',currency:'EUR',before:summary,after:summary,blockers:[],warnings:[]}});
+  order.items[0].name=body.command.name;applied=true;return route.fulfill({json:{operationId:'edit-op'}});
+ });
+ let listRequested=false;let releaseList!:()=>void;const listGate=new Promise<void>(resolve=>{releaseList=resolve});
+ await page.route(/\/api\/orders\?/,async route=>{
+  if(applied){listRequested=true;await listGate;}
+  return route.fulfill({json:buildOrderListPage([order],Object.fromEntries(new URL(route.request().url()).searchParams),new Date('2026-10-15T12:00:00Z'))});
+ });
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'134 × 2',exact:true}).click();
+ await page.locator('.design-instance-card').first().evaluate(el=>{(window as any).__originalDesignCard=el;(window as any).__sameDocument=true;});
+ await page.getByRole('button',{name:'Редактировать дизайн',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+ await dialog.getByRole('textbox',{name:/Название дизайна/}).fill('Updated QA design');
+ await dialog.getByRole('button',{name:'Предварительный расчёт',exact:true}).click();
+ await dialog.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
+ await expect.poll(()=>listRequested).toBe(true);
+ await expect.poll(()=>page.evaluate(()=>(window as any).__originalDesignCard.isConnected)).toBe(true);
+ releaseList();
+ await expect(dialog).not.toBeVisible();
+ await expect(page.locator('.design-instance-name h4')).toHaveText('Updated QA design');
+ await expect(page.locator('[data-instance-id]')).toHaveCount(2);
+ await expect(page.getByRole('tab',{name:/Дизайны/})).toHaveAttribute('aria-selected','true');
+ expect(await page.evaluate(()=>(window as any).__sameDocument)).toBe(true);
+ expect(await page.evaluate(()=>(window as any).__originalDesignCard.isConnected)).toBe(true);
+});
+
+test('changing sport saves asynchronously without remounting the expanded order',async({page})=>{
+ const {order}=await assignmentFixture(page);let saved=false,listRequested=false,writes=0;
+ let releaseList!:()=>void;const gate=new Promise<void>(resolve=>{releaseList=resolve});
+ await page.route('**/api/orders/design-order/discipline',route=>{
+  writes++;order.discipline=route.request().postDataJSON().discipline;saved=true;return route.fulfill({json:order});
+ });
+ await page.route(/\/api\/orders\?/,async route=>{
+  if(saved){listRequested=true;await gate;}
+  return route.fulfill({json:buildOrderListPage([order],Object.fromEntries(new URL(route.request().url()).searchParams),new Date('2026-10-15T12:00:00Z'))});
+ });
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'134 × 2',exact:true}).click();
+ await page.locator('.design-instance-card').first().evaluate(el=>{(window as any).__sportCard=el;(window as any).__sportDocument=true;});
+ await page.locator('.orders-discipline-trigger').click();
+ await page.getByRole('menuitem',{name:'Фигурное катание',exact:true}).click();
+ await expect.poll(()=>listRequested).toBe(true);
+ expect(await page.evaluate(()=>(window as any).__sportCard.isConnected)).toBe(true);
+ releaseList();
+ await expect(page.locator('.orders-discipline-trigger')).toHaveText('Фигурное катание');
+ await expect(page.locator('.design-instance-name')).toContainText('Фигурное катание');
+ await expect(page.locator('[data-instance-id]')).toHaveCount(2);
+ await expect(page.getByRole('tab',{name:/Дизайны/})).toHaveAttribute('aria-selected','true');
+ expect(await page.evaluate(()=>(window as any).__sportCard.isConnected&&(window as any).__sportDocument)).toBe(true);
+ expect(writes).toBe(1);
+});
+
+for(const failedRead of ['detail','list'])test(`photo save retries ${failedRead} refresh without repeating upload or committed apply`,async({page})=>{
+ const {order}=await assignmentFixture(page);let applied=false,fail=true,uploads=0,applies=0;
+ await page.route('**/api/orders/model-image',route=>{uploads++;return route.fulfill({json:{path:'saved-photo.png'}});});
+ await page.route('**/api/orders/design-order/composition/**',route=>{
+  const body=route.request().postDataJSON(),summary={quantity:6,totalMinor:60000,depositRequiredMinor:30000,paidMinor:0,balanceMinor:60000,overpaymentMinor:0};
+  if(route.request().url().endsWith('/preview'))return route.fulfill({json:{token:'photo-token',currency:'EUR',before:summary,after:summary,blockers:[],warnings:[]}});
+  applies++;applied=true;order.items[0].modelImagePath=body.command.modelImagePath;return route.fulfill({json:{operationId:'photo-op'}});
+ });
+ await page.route('**/api/orders/design-order',route=>{
+  if(applied&&fail&&failedRead==='detail'){fail=false;return route.fulfill({status:503,json:{message:'QA detail refresh failed'}});}
+  return route.fulfill({json:order});
+ });
+ await page.route(/\/api\/orders\?/,route=>{
+  if(applied&&fail&&failedRead==='list'){fail=false;return route.fulfill({status:503,json:{message:'QA list refresh failed'}});}
+  return route.fulfill({json:buildOrderListPage([order],Object.fromEntries(new URL(route.request().url()).searchParams),new Date('2026-10-15T12:00:00Z'))});
+ });
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'Редактировать дизайн',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+ await dialog.locator('input[type=file]').setInputFiles({name:'saved-photo.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')});
+ await dialog.getByRole('button',{name:'Предварительный расчёт',exact:true}).click();
+ await dialog.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
+ await expect(dialog).toContainText(`QA ${failedRead} refresh failed`);
+ await expect(dialog.getByRole('textbox',{name:/Название дизайна/})).toBeDisabled();
+ await dialog.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
+ await expect(dialog).not.toBeVisible();
+ expect(uploads).toBe(1);expect(applies).toBe(1);
+ await expect(page.getByRole('tab',{name:/Дизайны/})).toHaveAttribute('aria-selected','true');
+});
+
+for(const width of [1366,390])test(`photo editor current/replacement and clear at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:900});const {order,calls}=await assignmentFixture(page);
+ order.items[0].externalImageUrl='https://design-photo-fixture.invalid/current.svg';
+ await page.route('https://design-photo-fixture.invalid/**',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="128" height="144"><rect width="128" height="144" fill="#efe8ff"/><path d="M30 15L55 28H73L98 15L111 50L86 75L80 130H48L42 75L17 50Z" fill="#7947ff"/></svg>'}));
+ const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'Редактировать дизайн',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+ await expect(dialog.getByRole('img',{name:'Текущее фото дизайна',exact:true})).toBeVisible();
+ await dialog.locator('input[type=file]').setInputFiles({name:'new-photo.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')});
+ await expect(dialog.getByRole('img',{name:'Новое фото дизайна',exact:true})).toBeVisible();
+ await dialog.screenshot({path:`../../.local/design-photo-fix/photo-editor-${width}.png`});
+ await dialog.locator('input[type=file]').setInputFiles([]);
+ await expect(dialog.getByRole('img',{name:'Новое фото дизайна',exact:true})).toHaveCount(0);
+ await expect(dialog.getByRole('img',{name:'Текущее фото дизайна',exact:true})).toBeVisible();
+ await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
+ expect(calls).toEqual([]);expect(errors).toEqual([]);
+});
+
 test('assignment explicitly shares one immutable version with selected stable pieces only',async({page})=>{
  const {calls}=await assignmentFixture(page);
  await page.goto('/?section=orders&orderId=design-order&tab=designs');
@@ -256,14 +376,14 @@ for(const action of ['ADD','DUPLICATE'] as const)test(`${action} retry after com
 
 
 for(const action of ['ADD','DUPLICATE'] as const)test(`${action} parent refresh read failure never resubmits a committed mutation`,async({page})=>{
- await assignmentFixture(page);let writes=0,failedReads=0;
+ const {order}=await assignmentFixture(page);let writes=0,failedReads=0;
  await page.route('**/api/orders/design-order/composition/preview',route=>{
   const summary={quantity:6,totalMinor:60000,depositRequiredMinor:30000,paidMinor:0,balanceMinor:60000,overpaymentMinor:0};
   return route.fulfill({json:{token:'refresh-frozen-token',currency:'EUR',before:summary,after:summary,warnings:[],blockers:[]}});
  });
  await page.route('**/api/orders/design-order/composition/apply',async route=>{
   writes++;
-  await page.route('**/api/orders/design-order',read=>{failedReads++;return read.fulfill({status:503,json:{message:'QA refresh failure'}});});
+  await page.route('**/api/orders/design-order',read=>{failedReads++;return failedReads===1?read.fulfill({status:503,json:{message:'QA refresh failure'}}):read.fulfill({json:order});});
   return route.fulfill({json:{operationId:'already-saved'}});
  });
  await page.goto('/?section=orders&orderId=design-order&tab=designs');
@@ -273,7 +393,8 @@ for(const action of ['ADD','DUPLICATE'] as const)test(`${action} parent refresh 
  if(action==='ADD'){await modal.getByRole('textbox',{name:'Название дизайна',exact:true}).fill('Refresh design');await modal.getByRole('textbox',{name:'Цена за единицу',exact:true}).fill('100');}
  await modal.getByRole('button',{name:'Предварительный расчёт',exact:true}).click();
  await modal.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
- // The dashboard currently handles refresh failure itself. The component-level
- // behavioral tests separately cover a rejected onSaved callback and its retry.
- await expect(modal).toHaveCount(0);expect(failedReads).toBeGreaterThan(0);expect(writes).toBe(1);
+ await expect(modal).toContainText('QA refresh failure');
+ await expect(modal.getByRole('textbox',{name:/Название дизайна/})).toBeDisabled();
+ await modal.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
+ await expect(modal).toHaveCount(0);expect(failedReads).toBe(2);expect(writes).toBe(1);
 });

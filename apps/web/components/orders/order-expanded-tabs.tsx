@@ -141,6 +141,7 @@ type MeasurementAssignment = { id: string; item: ExpandedOrderItem; instance?: O
 type TabCallbacks = {
   measurementActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
   financeActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
+  compositionActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
   onVoidPayment?: (paymentId: string, reason: string, expectedOrderUpdatedAt: string) => Promise<void>;
   onOpenOrder?: (id:string)=>void;
   expenseActions?: { request: (path:string,init?:RequestInit)=>Promise<any>;onSaved:()=>Promise<void> };
@@ -255,7 +256,7 @@ export function OrderExpandedTabs(props: Props) {
     <section id={tabPanelId} aria-labelledby={`order-tab-${order.id}-${activeTab}`} className={`orders-order-tab-panel orders-order-tab-${activeTab}`} role="tabpanel">
       {activeTab === "details" && <OrderDetailsTab {...props} items={items} />}
       {activeTab === "designs" && historyInstanceId && <HistoricalInstance key={`${order.id}-${historyInstanceId}`} contextOrderId={order.id} instanceId={historyInstanceId} bridge={props.measurementActions??props.financeActions} onClose={closeHistorical} renderMeasurements={measurement=><MeasurementGrid measurement={measurement}/>}/>}
-      {activeTab === "designs" && <DesignsInstancesTab order={order} items={items} bridge={props.financeActions} focusInstanceId={focusInstanceId} onMeasurements={openMeasurements} />}
+      {activeTab === "designs" && <DesignsInstancesTab order={order} items={items} bridge={props.financeActions} compositionBridge={props.compositionActions} focusInstanceId={focusInstanceId} onMeasurements={openMeasurements} />}
       {activeTab === "measurements" && <OrderMeasurementsTab {...props} items={items} focusAthleteId={focusAthleteId} focusInstanceId={focusInstanceId} onOpenInstance={openInstance} />}
       {activeTab === "client" && <OrderClientTab {...props} items={items} />}
       {activeTab === "finance" && <OrderFinanceTab {...props} items={items} onAddDesign={()=>setFinanceDesignEditor({action:'ADD'})} onEditItem={itemId=>setFinanceDesignEditor({action:'EDIT',itemId})} />}
@@ -264,7 +265,7 @@ export function OrderExpandedTabs(props: Props) {
       {activeTab === "notes" && <OrderNotesTab {...props} />}
       {activeTab === "history" && <OrderHistoryTab order={order} />}
     </section>
-    {financeDesignEditor&&props.financeActions&&<CompositionEditor key={`${financeDesignEditor.action}-${financeDesignEditor.itemId??'new'}`} order={order} action={financeDesignEditor.action} item={items.find(item=>item.id===financeDesignEditor.itemId)} bridge={props.financeActions} onClose={()=>setFinanceDesignEditor(undefined)}/>}
+    {financeDesignEditor&&props.financeActions&&<CompositionEditor key={`${financeDesignEditor.action}-${financeDesignEditor.itemId??'new'}`} order={order} action={financeDesignEditor.action} item={items.find(item=>item.id===financeDesignEditor.itemId)} bridge={props.compositionActions??props.financeActions} onClose={()=>setFinanceDesignEditor(undefined)}/>}
   </>;
 }
 

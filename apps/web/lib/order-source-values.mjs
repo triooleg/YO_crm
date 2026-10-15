@@ -1,4 +1,12 @@
 const orderSources=['WEBSITE','MANUAL','INSTAGRAM','FACEBOOK','CHAT','WHATSAPP','VIBER','EMAIL','OTHER','UNKNOWN'];
+export const reportSources=orderSources.filter(source=>source!=='OTHER'&&source!=='UNKNOWN');
+/** Report presentation only: omitted categories remain in totals as a passive residual. */
+export function reportSourceValues(rows,filter=''){
+ const selected=source=>!filter||(filter==='NON_WEBSITE'?source!=='WEBSITE':source===filter);
+ const named=reportSources.filter(selected).map(source=>({source,value:rows.filter(row=>row.source===source).reduce((sum,row)=>sum+row.value,0)}));
+ const residual=rows.filter(row=>selected(row.source)&&!reportSources.includes(row.source)).reduce((sum,row)=>sum+row.value,0);
+ return residual?[...named,{source:'RESIDUAL',value:residual}]:named;
+}
 export function parseSource(value){return value==='NON_WEBSITE'||orderSources.includes(value)?value:'';}
 /** Largest remainders: nonempty distributions total exactly 100%, with stable ties. */
 export function sourcePercentages(values){

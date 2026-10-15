@@ -1,5 +1,52 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — User authorized 0.3.1 deployment; candidate verification
+
+Current explicit deploy request covers the accepted photo/async fix and subsequent
+user steering before commit: eight named report-source options in Overview/Finance,
+Overview legend on right like Finance; sport changes preserve expanded order/tab;
+compact common Mantine Modal header/body spacing. Stored OTHER/UNKNOWN sources,
+all real totals/percent denominators/trend stacks/legacy URL scopes remain intact;
+passive neutral residual preserves omitted amounts. Orders retains all10 sources.
+Finance table and chart use same report-only filter. No backend/schema/shared changes.
+Broader local browser48PASS (25 Designs +23 website-sales), then latest report2PASS
+including nonzero omitted categories and honest legacy scopes; math6PASS. Final release quality EXIT0:1555=1047API+484web+24DB, types/API+Nextbuild
+(.local/design-photo-deploy/quality-release-final.log). Next-generated ambient dev/build
+references restored to tracked baseline after build, then final web typecheck.
+Fresh FULL20261015T181159Z-81a6b62-pre-v031 verified after319 client confirmations.
+Server baseline oldsource800/APIwebPGRedishealthy/start-only/schema36 PASS.
+Plan: immutable release/tag/archive; preserve all36 deployed SQL bytes; build/recreate
+WEB ONLY; exact API/PG/Redis identities preserved, no migration/seed or client replay.
+Read-only live UI checks after switch. Production remains0.3.0 pending switch.
+
+## 2026-10-15 — Design photo / asynchronous refresh LOCAL; 319 profiles confirmed LIVE
+
+User requested explicit photo upload/current preview and asynchronous design saving,
+then explicitly requested confirmation of all existing order-linked profiles.
+Integration checkout remains codex/website-sales at da7a730; new UI diff uncommitted,
+not deployed. Runtime stays 0.3.0 /81a6b62; no migration/restart/provider action.
+UI: Mantine FileInput placeholder/icon/formats, current and selected photo previews,
+blob cleanup; background list reconciliation keeps expanded order/tab/instances mounted.
+Dedicated optional compositionActions/compositionBridge strictly propagates read failures
+ONLY to CompositionEditor, preserving frozen acknowledged operation for refresh-only retry.
+Finance/measurement/archive/assignment consumers retain original regular callbacks.
+RED tests reproduced absent current photo and parent DOM disconnect; browser24PASS,
+then final exact-source focused7PASS; quality:check1549/types/API+Nextbuild EXIT0.
+Screens1366/390 and private reviews/logs in .local/design-photo-fix/.
+
+Authorized LIVE data operation completed:319 canonical nonarchived nonspam LEAD profiles
+with any existing order (316 nonarchived orders,3 archived-orders-only) -> ACTIVE.
+Fresh verified FULL20261015T174813Z-81a6b62-pre-client-confirm; immutable manifestSHA
+bf81db118654cc55fa38cc70ab58ea0e8d64561c3538d91112120e309069c466; full22 BEFORE SHA
+3b73359bc9c3279d65b6f951b00a8f75c3415148a5b181b227258f250e13ee9b.
+Reviewed frozen helper/apply with owner/run/hash/count/CAS/locks, single transaction:
+319 profiles,319 Activity,319 Audit; after READ ONLY full22 verification PASS.
+All19 other tables, noncandidate clients and history outside run unchanged; only
+Client.status/updatedAt changed. No new clients/contact/source/manager/spam/merge changes.
+Recount eligible0 (including archived-orders-only0), external root/health200 ok=true.
+No future importer/native behavior change in this one-time operation.
+Report docs/ui/design-photo-async-refresh-validation.md; compatibility/regression/business/visual PASS; final local release closure recorded in private release.md. New UI live paths remain unverified until a separate deployment.
+
 ## 2026-10-15 — CRM 0.3.0 deployed; acceptance complete
 
 User authorized check+deploy. Runtime/tag81a6b62afd0694247c9b768edf88accb9dce7c47 /crm-v0.3.0.

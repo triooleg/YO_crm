@@ -74,6 +74,17 @@ export const yoleotardTheme = createTheme({
   focusRing: "auto",
   cursorType: "pointer",
   respectReducedMotion: true,
+  components: {
+    Modal: {
+      defaultProps: { padding: "md" },
+      styles: {
+        header: { margin: 0, minHeight: 44, padding: "12px 12px 8px", flexDirection: "row", alignItems: "center", gap: 12 },
+        title: { margin: 0, fontSize: 14, fontWeight: 600, lineHeight: 1.35, textAlign: "left", overflowWrap: "anywhere" },
+        body: { padding: "0 12px 12px" },
+        close: { flexShrink: 0 },
+      },
+    },
+  },
   other: {
     crmControls: {
       controlHeight: 38,

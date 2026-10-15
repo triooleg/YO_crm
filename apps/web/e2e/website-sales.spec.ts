@@ -6,17 +6,29 @@ const {buildFinanceReport,financeReportCsv}=loadTargetModule('finance/finance-re
 const {classifyOrderSource,countOrderSources,CONFIRMED_WEBSITE_SOURCE}=loadTargetModule('orders/order-source.ts');
 const now=new Date('2026-10-15T12:00:00Z');
 
-test('Every named source is available across Overview, Finance and Orders',async({page})=>{
+test('Reports show eight named sources with a right-side legend and preserve Orders sources',async({page})=>{
  await fixture(page);
- const names=['С сайта','Ручной / CRM','Instagram','Facebook','Чат','WhatsApp','Viber','E-mail','Другое','Не определён'];
+ const names=['С сайта','Ручной / CRM','Instagram','Facebook','Чат','WhatsApp','Viber','E-mail'];
  for(const section of ['overview','finance']){
   await page.goto(`/?section=${section}&period=2026-10`);
   const card=page.locator(section==='overview'?'.overview-status-card':'.finance-report-charts');
-  await expect(card.locator('.order-source-legend button')).toHaveCount(10);
+  await expect(card.locator('.order-source-legend button')).toHaveCount(8);
   for(const name of names)await expect(card.locator('.order-source-legend')).toContainText(name);
+  await expect(card.locator('.order-source-legend')).not.toContainText('Другое');
+  await expect(card.locator('.order-source-legend')).not.toContainText('Не определён');
+  const ring=await card.locator('.order-source-donut').boundingBox(),legend=await card.locator('.order-source-legend').boundingBox();
+  expect(legend!.x).toBeGreaterThan(ring!.x+ring!.width-1);
   const filter=page.getByRole('combobox',{name:'Источник в динамике',exact:true});await filter.click();
   for(const name of names)await expect(page.getByRole('option',{name,exact:true})).toBeVisible();
+  await expect(page.getByRole('option',{name:'Другое',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('option',{name:'Не определён',exact:true})).toHaveCount(0);
   await page.getByRole('option',{name:'Facebook',exact:true}).click();
+  if(section==='finance'){
+   const tableFilter=page.getByRole('combobox',{name:'Источник заказа',exact:true});await tableFilter.click();
+   await expect(page.getByRole('option',{name:'Другое',exact:true})).toHaveCount(0);
+   await expect(page.getByRole('option',{name:'Не определён',exact:true})).toHaveCount(0);
+   await page.keyboard.press('Escape');
+  }
   await expect(page).toHaveURL(section==='overview'?/sourceTrend=FACEBOOK/:/source=FACEBOOK/);
   await expect(page.locator('.order-source-trend-legend')).toContainText('Facebook');
   if(section==='overview')await expect(page.locator('.overview-trend-card .order-source-empty')).toBeVisible();
@@ -24,6 +36,31 @@ test('Every named source is available across Overview, Finance and Orders',async
  await page.goto('/?section=orders&source=VIBER');
  await expect(page.locator('.orders-filter-chips')).toContainText('Viber');
  await expect(page.locator('.orders-summary-row')).toHaveCount(0);
+});
+
+test('omitted report categories keep exact real totals, passive residual and legacy filter scope',async({page})=>{
+ const original={...ledger.orderSources};
+ try{
+  for(const id of Object.keys(ledger.orderSources))ledger.orderSources[id]='OTHER';
+  ledger.orderSources['order-0']='UNKNOWN';await fixture(page);
+  for(const section of ['overview','finance']){
+   await page.goto(`/?section=${section}&period=2026-10`);
+   const card=page.locator(section==='overview'?'.overview-status-card':'.finance-report-charts').filter({has:page.locator('.order-source-breakdown')});
+   await expect(card.locator('.order-source-center strong')).toHaveText(section==='overview'?'54':/100,00/);
+   await expect(card.locator('.order-source-legend button')).toHaveCount(8);
+   await expect(card.locator('circle[role=img]')).toHaveCount(1);
+   await expect(card.locator('.order-source-legend')).toContainText('Учтено в общем итоге');
+   await expect(card.locator('.order-source-legend')).not.toContainText('Другое');
+   await expect(card.locator('.order-source-legend')).not.toContainText('Не определён');
+   await expect(card.getByRole('button',{name:/Учтено в общем итоге/})).toHaveCount(0);
+  }
+  await page.goto('/?section=finance&period=2026-10&source=UNKNOWN');
+  const filter=page.getByRole('combobox',{name:'Источник в динамике',exact:true});
+  await expect(filter).toHaveValue('Сохранённый фильтр источника');
+  await expect(page.getByText('Применён источник из ранее сохранённой ссылки. Очистите поле, чтобы показать все данные.',{exact:true})).toHaveCount(2);
+  await expect(page.getByRole('combobox',{name:'Источник заказа',exact:true})).toHaveValue('Сохранённый фильтр источника');
+  await expect(page).toHaveURL(/source=UNKNOWN/);
+ }finally{Object.assign(ledger.orderSources,original);}
 });
 
 test('Overview plot regions align in every chart mode without stretching SVG text',async({page},info)=>{
@@ -86,6 +123,8 @@ test('Manager note opens its current text, saves only that note and preserves dr
  const dialog=page.getByRole('dialog',{name:'Редактирование заметки менеджера',exact:true});
  const input=dialog.getByRole('textbox',{name:'Заметки менеджера',exact:true});
  await expect(input).toHaveValue(comment);
+ const titleBox=await dialog.locator('.mantine-Modal-title').boundingBox(),labelBox=await dialog.locator('label').first().boundingBox();
+ expect(labelBox!.y-(titleBox!.y+titleBox!.height),'compact shared modal heading-to-field gap').toBeLessThanOrEqual(26);
  await dialog.screenshot({path:info.outputPath('manager-note-editor.png')});
  await input.fill('Несохранённый черновик');await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
  expect(writes).toEqual([]);
