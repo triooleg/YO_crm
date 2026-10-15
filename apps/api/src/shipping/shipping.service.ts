@@ -26,7 +26,7 @@ export class ShippingService{
         return eligibleUpcomingShipmentRecords(await loadOverviewOrderSources(db),{horizon:input.horizon});
       })():undefined;
       const ids=eligible?[...new Set(eligible.map(row=>row.orderId))]:undefined;
-      const orders=await db.order.findMany({where:{archivedAt:null,...(ids?{id:{in:ids}}:{})},orderBy:[{requiredDeliveryAt:"asc"},{createdAt:"desc"}],select:{id:true,number:true,requiredDeliveryAt:true,shippingStatus:true,currency:true,modelImagePath:true,client:{select:{displayName:true,country:true,city:true,address:true,postalCode:true}},items:{select:{quantity:true,modelImagePath:true}},shipment:true,orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}]}}});
+      const orders=await db.order.findMany({where:{archivedAt:null,...(ids?{id:{in:ids}}:{})},orderBy:[{requiredDeliveryAt:"asc"},{createdAt:"desc"}],select:{id:true,number:true,requiredDeliveryAt:true,deliveryTrackingCode:true,shippingStatus:true,currency:true,modelImagePath:true,client:{select:{displayName:true,country:true,city:true,address:true,postalCode:true}},items:{select:{quantity:true,modelImagePath:true}},shipment:true,orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}]}}});
       const carriers=(await this.carrierData()).map(({carrier,label,enabled})=>({carrier,label,enabled}));
       return{orders:eligible?orders.map(order=>({...order,upcomingShipments:eligible.filter(row=>row.orderId===order.id),orderShipments:order.orderShipments.filter(parcel=>eligible.some(row=>row.orderId===order.id&&row.shipmentId===parcel.id))})):orders,carriers};
     };

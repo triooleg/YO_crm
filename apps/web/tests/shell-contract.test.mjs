@@ -71,7 +71,7 @@ test("font variables resolved from root declarations", async () => {
 });
 
 test("collapsed navigation keeps Russian accessible names", () => {
-  assert.match(shell, /aria-label=\{id==="inbox"&&unreadCount\?[\s\S]*:name\}/);
+  assert.match(shell, /aria-label=\{id==="inbox"&&unreadState==="ready"&&unreadCount\?[\s\S]*:name\}/);
 });
 
 test("CRM без указанного раздела открывает утверждённый Обзор", () => {

@@ -6,6 +6,7 @@ import { MeasurementPanel } from "./measurement-panel";
 import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
 import { clientAthleteUi, clientMergeUi, clientWorkspaceUi, overviewContextUi } from "../lib/i18n";
+import { orderLabel } from "../lib/orders-i18n";
 import { ClientAvatar } from "./client-avatar";
 import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 import { CrmTabList } from "./crm/tab-list";
@@ -14,6 +15,8 @@ type Client = {
   id: string;
   displayName: string;
   avatarUrl?: string;
+  status?: string;
+  files?: {id:string;name:string;path:string;sizeBytes:number;createdAt:string}[];
   country?: string;
   city?: string;
   phone?: string;
@@ -399,7 +402,7 @@ function Card({
           <ClientAvatar className="phase2-avatar big" displayName={detail.displayName} avatarUrl={detail.avatarUrl} />
           <div>
             <h2>{detail.displayName}</h2>
-            <em>Активный клиент</em>
+            <em>{clientWorkspaceUi.statuses[detail.status as keyof typeof clientWorkspaceUi.statuses]||clientWorkspaceUi.statusUnknown}</em>
           </div>
         </div>
         <div className="phase2-card-actions">
@@ -452,7 +455,7 @@ function Card({
             </div>
           ))}
           {!detail.athletes.length && <Empty t="Спортсмены ещё не добавлены" />}
-          <Title t="Последние заказы" a="Все заказы" />
+          <Title t="Последние заказы" a="Все заказы" onClick={()=>setTab("orders")} />
           {detail.orders.slice(0, 3).map((o) => (
             <OrderLine o={o} key={o.id} />
           ))}
@@ -485,7 +488,7 @@ function Card({
           )}
         </div>
       )}
-      {tab === "files" && <Empty t="Файлы клиента будут собраны здесь" />}
+      {tab === "files" && <div className="phase2-card-content">{detail.files?.length?detail.files.map(file=><a key={file.id} href={`/api/order-tabs/client-files/${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">{file.name}</a>):<Empty t={detail.files?clientWorkspaceUi.noFiles:clientWorkspaceUi.filesUnavailable}/>}</div>}
       {viewing && (
         <MeasurementViewer
           athleteName={viewing.athleteName}
@@ -764,7 +767,7 @@ function OrderLine({ o, focused = false }: { o: Order; focused?: boolean }) {
           }).format(o.priceMinor / 100)}
         </small>
       </div>
-      <em>{o.salesStatus}</em>
+      <em>{orderLabel("sales",o.salesStatus)}</em>
     </div>
   );
 }

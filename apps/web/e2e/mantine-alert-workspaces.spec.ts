@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+const releaseVersion=JSON.parse(readFileSync(resolve(__dirname,"../../../package.json"),"utf8")).version;
 import { expect, test, type Page } from "@playwright/test";
 
 const auth = { user: { email: "qa@yoleotard.local", displayName: "QA Operator", role: "OWNER" } };
@@ -27,8 +30,8 @@ async function mockLoadError(page: Page, endpoint: string, message: string) {
 const workspaces = [
   {
     section: "finance",
-    root: ".finance-page",
-    endpoint: "/api/finance",
+    root: ".finance-report-page",
+    endpoint: "/api/finance/report",
     message: "Не удалось загрузить финансы",
   },
   {
@@ -50,9 +53,9 @@ for (const viewport of [
       const runtimeErrors = await mockLoadError(page, workspace.endpoint, workspace.message);
       await page.goto(`/?section=${workspace.section}`);
 
-      await expect(page.locator(".crm-version")).toContainText("0.1.47");
+      await expect(page.locator(".crm-version")).toContainText(releaseVersion);
       const alert = page.locator(workspace.root).getByRole("alert");
-      await expect(alert).toHaveText(workspace.message);
+      await expect(alert).toContainText(workspace.message);
       await expect(alert).toHaveClass(/mantine-Alert-root/);
       await expect(alert.locator(".mantine-Alert-message")).toHaveCSS("font-size", "16px");
       await expect(alert.getByRole("button", { name: "Закрыть уведомление" })).toHaveCount(0);

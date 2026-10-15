@@ -348,7 +348,7 @@ test("inbox secondary filters and channel counters are server complete", () => {
   assert.match(service, /query\.conversationScope==="UNREAD"/);
   assert.match(service, /query\.conversationScope==="WAITING"/);
   assert.match(service, /unreadCount:\{gt:0\}/);
-  assert.match(service, /scopeCounts:\{all:/);
+  assert.match(service, /scopeCounts:\{allChannels:allChannelsTotal,normalAll:normalAllTotal,all:/);
   assert.match(service, /waitingForReply:/);
   assert.match(service, /channelCounts:Object\.fromEntries/);
 });

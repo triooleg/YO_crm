@@ -39,6 +39,7 @@ type ProductionOrder = Prisma.OrderGetPayload<{ select: typeof productionOrderSe
 type ProductionOrderView = Omit<ProductionOrder, "deliveryTrackingCode" | "payments" | "shipment" | "orderShipments"> & {
   hasTrackingNumber: boolean;
   paidMinor: number;
+  paymentSettlementKnown: boolean;
   latestPaymentAt: Date | null;
   shippedAt: Date | null;
   deliveredAt: Date | null;
@@ -65,6 +66,10 @@ function presentProductionOrder(order: ProductionOrder): ProductionOrderView {
     ...safeOrderWithoutShipments,
     hasTrackingNumber: orderShipments.some((parcel) => parcel.trackingNumber?.trim()) || legacyShipmentProjection.hasTrackingNumber,
     paidMinor,
+    paymentSettlementKnown: Number.isSafeInteger(paidMinor) && activePayments.every(payment => {
+      const amount = payment.currency === order.currency ? payment.amountMinor : payment.appliedCurrency === order.currency ? payment.appliedAmountMinor : null;
+      return amount != null && Number.isSafeInteger(amount) && amount >= 0;
+    }),
     latestPaymentAt,
     shippedAt: orderShipments.length>0?orderShipments.find(parcel=>parcel.shippedAt)?.shippedAt??null:shipment?.shippedAt??null,
     deliveredAt: orderShipments.length>0?(orderShipments.every(parcel=>parcel.deliveredAt)?orderShipments.reduce<Date|null>((latest,parcel)=>!latest||parcel.deliveredAt!>latest?parcel.deliveredAt!:latest,null):null):shipment?.deliveredAt??null,

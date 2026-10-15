@@ -28,6 +28,7 @@ export type ProductionOrderView = {
   priceMinor: number;
   depositRequiredMinor: number;
   paidMinor: number;
+  paymentSettlementKnown?: boolean;
   currency: string;
   client: { displayName: string; country?: string };
   items: {
@@ -90,9 +91,10 @@ export function productionOrderImage(order: ProductionOrderView) {
   return stored ? `/api/orders/images/${stored}` : undefined;
 }
 
-export function paymentPresentation(order: Pick<ProductionOrderView, "paidMinor" | "priceMinor" | "depositRequiredMinor" | "paymentStatus">) {
+export function paymentPresentation(order: Pick<ProductionOrderView, "paidMinor" | "priceMinor" | "depositRequiredMinor" | "paymentStatus" | "paymentSettlementKnown">) {
   if (order.paymentStatus === "REFUNDED") return { code: "refunded" as const };
   if (order.paymentStatus === "CANCELLED") return { code: "cancelled" as const };
+  if (order.paymentSettlementKnown === false) return { code: "unknown" as const };
   if (order.priceMinor > 0 && order.paidMinor >= order.priceMinor) return { code: "paid" as const };
   if (order.depositRequiredMinor > 0 && order.paidMinor >= order.depositRequiredMinor) return { code: "deposit" as const };
   if (order.paidMinor > 0) return { code: "partial" as const };
@@ -132,6 +134,16 @@ export function orderProductionStatusPresentation(order: {
   const statuses = { shipped: "SHIPPED", delivered: "DELIVERED", returned: "RETURNED", lost: "LOST" } as const;
   if (shipping.code in statuses) return { domain: "shipping" as const, status: statuses[shipping.code as keyof typeof statuses] };
   return { domain: "production" as const, status: order.productionStatus };
+}
+
+export function orderReadyToShip(order: Parameters<typeof orderProductionStatusPresentation>[0]) {
+  if (["COMPLETED", "CANCELLED"].includes(order.salesStatus ?? "")) return false;
+  if (orderProductionStatusPresentation(order).domain === "shipping") return false;
+  return order.shippingStatus === "READY" || order.productionStatus === "READY";
+}
+
+export function orderDeadlineDays(order: { requiredDeliveryAt?: string }, today: Date = new Date()) {
+  return order.requiredDeliveryAt ? productionDayDiff(order.requiredDeliveryAt, today) : 9999;
 }
 
 export function sortProductionOrdersByShippingProximity(orders: ProductionOrderView[], today: Date = new Date()) {
@@ -174,7 +186,8 @@ export function buildProductionMetrics(orders: ProductionOrderView[], base: Date
     const payment = paymentPresentation(order).code;
     return payment === "deposit" || payment === "paid";
   }).length;
-  const awaitingPayment = orders.length - depositReceived;
+  const paymentUnknown = orders.filter(order => paymentPresentation(order).code === "unknown").length;
+  const awaitingPayment = orders.length - depositReceived - paymentUnknown;
   const averagePercent = days ? Math.round(dailyLoad.reduce((sum, value) => sum + value, 0) / days / capacityPerDay * 100) : 0;
   const peakPercent = Math.round(Math.max(0, ...dailyLoad) / capacityPerDay * 100);
   let nextWindow: string | null = null;
@@ -184,7 +197,7 @@ export function buildProductionMetrics(orders: ProductionOrderView[], base: Date
       break;
     }
   }
-  return { total: orders.length, scheduled: scheduled.length, depositReceived, awaitingPayment, dailyLoad, averagePercent, peakPercent, nextWindow };
+  return { total: orders.length, scheduled: scheduled.length, depositReceived, awaitingPayment, paymentUnknown, dailyLoad, averagePercent, peakPercent, nextWindow };
 }
 
 export function orderMatchesProductionFilters(order: ProductionOrderView, filters: ProductionFilters, today: Date = new Date()) {
@@ -197,7 +210,7 @@ export function orderMatchesProductionFilters(order: ProductionOrderView, filter
   const productionMatches = filters.production === "all" || order.productionStatus === filters.production;
   const shippingMatches = filters.shipping === "all" || (filters.shipping === "tracking" ? order.hasTrackingNumber : shipping === filters.shipping);
   const slotMatches = filters.slot === "all" || slotState === filters.slot;
-  const overdue = Boolean(order.requiredDeliveryAt) && productionLocalDate(order.requiredDeliveryAt!) < productionLocalDate(today) && !["shipped", "delivered", "returned"].includes(shipping);
+  const overdue = Boolean(order.requiredDeliveryAt) && productionLocalDate(order.requiredDeliveryAt!) < productionLocalDate(today) && !["shipped", "delivered", "returned", "lost"].includes(shipping);
   const deadlineMatches = filters.deadline === "all" || overdue;
   return queryMatches && paymentMatches && productionMatches && shippingMatches && slotMatches && deadlineMatches;
 }

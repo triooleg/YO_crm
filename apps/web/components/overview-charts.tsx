@@ -30,9 +30,9 @@ export function OverviewStatusChart({ring,month,go}:{ring:OverviewOrders['ring']
  let offset=0;
  const percentages=displayShares(ring.segments,ring.total);
  return <><div className="overview-ring-content"><div className="overview-ring"><svg viewBox="0 0 220 220" role="group" aria-label={`${ui.statusChart}: ${ring.total}`}>
-   {ring.total>0?ring.segments.map(segment=>{
+   {ring.total>0?ring.segments.map((segment,index)=>{
     const start=offset,share=segment.count/ring.total;offset+=share;
-    const label=`${ui.buckets[segment.key]}: ${segment.count} (${Math.round(share*100)}%)`,action=()=>go(overviewTargets.orders(segment.key,month));
+    const label=`${ui.buckets[segment.key]}: ${segment.count} (${percentages[index]}%)`,action=()=>go(overviewTargets.orders(segment.key,month));
     return share>0?<g key={segment.key} role="button" aria-label={label} tabIndex={0} onClick={action} onKeyDown={event=>activate(event,action)}><title>{label}</title><circle cx="110" cy="110" r="87" fill="none" stroke={bucketColors[segment.key]} strokeWidth="38" pathLength="100" strokeDasharray={`${share*100} ${100-share*100}`} strokeDashoffset={-start*100} transform="rotate(-90 110 110)"/></g>:null;
    }):<circle cx="110" cy="110" r="87" fill="none" stroke="#efebff" strokeWidth="38"/>}
    <text x="110" y="107" textAnchor="middle" className="overview-ring-total">{ring.total}</text><text x="110" y="128" textAnchor="middle" className="overview-ring-caption">{ui.ringTotal}</text>

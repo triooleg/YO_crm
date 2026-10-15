@@ -355,3 +355,26 @@ for (const viewport of [
     await page.locator("#settings-ai-panel").screenshot({ path: screenshotPath(testInfo, `mantine-ai-panel-${viewport.width}x${viewport.height}.png`) });
   });
 }
+
+
+test('Finance settings never expose fallback values as loaded configuration after a failed read',async({page})=>{
+ await mockSettings(page);await page.route('**/api/finance/settings',route=>route.fulfill({status:503,json:{message:'Settings offline'}}));
+ await page.goto('/?section=settings');await page.getByRole('tablist',{name:'Настройки'}).getByRole('tab',{name:'Финансы',exact:true}).click();
+ await expect(page.locator('#settings-finance-panel').getByRole('alert')).toContainText('Не удалось загрузить настройки');
+ await expect(page.locator('#settings-finance-panel input')).toHaveCount(0);
+});
+test('KeyCRM first selected run loads issue details and does not report no issues on failure',async({page})=>{
+ const calls:string[]=[];await mockSettings(page);
+ await page.route('**/api/keycrm/sync-runs/*/issues',route=>{calls.push(route.request().url());return route.fulfill({status:503,json:{message:'Issue details offline'}})});
+ await page.goto('/?section=settings');await page.getByRole('tablist',{name:'Настройки'}).getByRole('tab',{name:'KeyCRM',exact:true}).click();
+ await expect.poll(()=>calls.length).toBeGreaterThan(0);await expect(page.locator('#settings-keycrm-panel').getByRole('alert')).toContainText('Issue details offline');
+});
+
+
+test('AI status distinguishes enabled configuration from measured health and queue history',async({page})=>{
+ await mockSettings(page);await page.goto('/?section=settings');await page.getByRole('tablist',{name:'Настройки'}).getByRole('tab',{name:/AI/}).click();
+ await expect(page.locator('#settings-ai-panel')).toContainText('Обработка по настройкам');
+ await expect(page.locator('#settings-ai-panel')).toContainText('Поставлено в очередь');
+ await expect(page.locator('#settings-ai-panel')).toContainText('Нет данных');
+ await expect(page.locator('#settings-ai-panel')).not.toContainText('Автоматически отправлено: 0');
+});

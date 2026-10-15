@@ -58,7 +58,7 @@ test("сортировка оплаты не смешивает валюты б�
   const converted = { ...orders[0], id: "converted", number: "KC-4", currency: "EUR", priceMinor: 30000, payments: [{ amountMinor: 30000, currency: "USD", appliedAmountMinor: 20000, appliedCurrency: "EUR" }] };
   const wrongTarget = { ...orders[0], id: "wrong-target", number: "KC-5", currency: "EUR", priceMinor: 30000, payments: [{ amountMinor: 30000, currency: "USD", appliedAmountMinor: 25000, appliedCurrency: "UAH" }] };
 
-  assert.deepEqual(sortOrders([converted, foreign, wrongTarget], { column: "payment", direction: "desc" }).map((order) => order.id), ["foreign", "wrong-target", "converted"]);
+  assert.deepEqual(sortOrders([converted, foreign, wrongTarget], { column: "payment", direction: "desc" }).map((order) => order.id), ["converted", "foreign", "wrong-target"]);
 });
 
 test("переплаченные заказы сортируются по тому же нулевому остатку, который показан в таблице", () => {

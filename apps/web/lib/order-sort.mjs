@@ -1,3 +1,4 @@
+import { orderSettlement } from "./order-settlement.mjs";
 export const SORTABLE_ORDER_COLUMNS = [
   "client",
   "model",
@@ -40,14 +41,6 @@ export function nextOrderSort(current, column) {
   return { column, direction: current.direction === "asc" ? "desc" : "asc" };
 }
 
-function paid(order) {
-  return (order.payments ?? []).filter((payment) => !payment.voidedAt).reduce((sum, payment) => {
-    if (payment.appliedCurrency === order.currency && payment.appliedAmountMinor != null) return sum + payment.appliedAmountMinor;
-    if (payment.currency === order.currency) return sum + (payment.amountMinor ?? 0);
-    return sum;
-  }, 0);
-}
-
 function value(order, column) {
   if (column === "client") return order.client?.displayName ?? "";
   if (column === "model") return `${order.items?.[0]?.name ?? order.notes ?? ""}|${order.discipline ?? ""}`;
@@ -55,7 +48,7 @@ function value(order, column) {
   if (column === "discipline") return order.discipline ?? "";
   if (column === "designs") return order.items?.[0]?.name ?? order.notes ?? "";
   if (column === "deadline") return order.requiredDeliveryAt ? Date.parse(order.requiredDeliveryAt) : null;
-  if (column === "payment") return Math.max(0, (order.priceMinor ?? 0) - paid(order));
+  if (column === "payment") return orderSettlement(order).balanceMinor;
   if (column === "production") return order.productionSlot?.startsAt ? `${order.productionSlot.startsAt}|${order.productionStatus ?? ""}` : null;
   if (column === "status") return order.salesStatus ?? "";
   if (column === "nextAction") return `${order.productionStatus ?? ""}|${order.salesStatus ?? ""}`;

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  orderReadyToShip,
+  orderDeadlineDays,
   buildProductionMetrics,
   groupProductionOrdersBySchedule,
   orderMatchesProductionFilters,
@@ -164,4 +166,31 @@ test("режим графика сохраняет запланированны�
   const orders = [order({ id: "unscheduled-1", productionSlot: undefined }), order({ id: "scheduled-1" }), order({ id: "unscheduled-2", productionSlot: undefined }), order({ id: "scheduled-2" })];
   assert.deepEqual(groupProductionOrdersBySchedule(orders).map(({ id }) => id), ["scheduled-1", "scheduled-2", "unscheduled-1", "unscheduled-2"]);
   assert.deepEqual(orders.map(({ id }) => id), ["unscheduled-1", "scheduled-1", "unscheduled-2", "scheduled-2"]);
+});
+
+
+test('lost parcel is terminal and does not remain in the overdue-production cohort',()=>{
+ const candidate=order({shippingStatus:'LOST',requiredDeliveryAt:'2026-10-01'});
+ assert.equal(orderMatchesProductionFilters(candidate,{query:'',payment:'all',production:'all',shipping:'all',slot:'all',deadline:'overdue'},new Date('2026-10-15')),false);
+});
+
+test('unknown settlement is not counted as unpaid or deposit covered',()=>{
+ const unknown=order({paymentSettlementKnown:false,paidMinor:0});
+ assert.equal(paymentPresentation(unknown).code,'unknown');
+ assert.equal(paymentPresentation({...unknown,paymentStatus:'REFUNDED'}).code,'refunded');
+ assert.equal(paymentPresentation({...unknown,paymentStatus:'CANCELLED'}).code,'cancelled');
+ const metrics=buildProductionMetrics([unknown],new Date('2026-10-15'),1,4,1);
+ assert.equal(metrics.awaitingPayment,0);
+ assert.equal(metrics.depositReceived,0);
+ assert.equal(metrics.paymentUnknown,1);
+});
+
+test('ready to ship excludes terminal orders and dispatched parcels',()=>{
+ for(const overrides of [{salesStatus:'CANCELLED'},{salesStatus:'COMPLETED'},{shippingStatus:'LOST'},{shippingStatus:'RETURNED'},{deliveryTrackingCode:'TRACK'},{shippingStatus:'SHIPPED'}]) assert.equal(orderReadyToShip({...order({productionStatus:'READY',shippingStatus:'READY'}),...overrides}),false);
+ assert.equal(orderReadyToShip(order({productionStatus:'READY',shippingStatus:'READY'})),true);
+});
+test('order deadline labels count calendar days rather than remaining 24 hour blocks',()=>{
+ const today=new Date(2026,9,15,10);
+ assert.equal(orderDeadlineDays({requiredDeliveryAt:new Date(2026,9,14,14).toISOString()},today),-1);
+ assert.equal(orderDeadlineDays({requiredDeliveryAt:new Date(2026,9,15,15).toISOString()},today),0);
 });

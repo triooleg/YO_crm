@@ -1,4 +1,5 @@
 "use client";
+import { dataEvidenceUi } from "../lib/i18n";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { ActionIcon, Badge, Collapse, HoverCard, Menu, NumberInput, SegmentedControl, Select, TextInput, Tooltip, alpha, useMantineTheme, type MantineTheme } from "@mantine/core";
@@ -22,7 +23,7 @@ import {
 import { CrmButton } from "./crm/settings-controls";
 import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
 
-const PAYMENT_COLORS: Record<ReturnType<typeof paymentPresentation>["code"],string> = { unpaid:"red",partial:"yellow",deposit:"green",paid:"green",refunded:"orange",cancelled:"gray" };
+const PAYMENT_COLORS: Record<ReturnType<typeof paymentPresentation>["code"],string> = { unknown:"gray",unpaid:"red",partial:"yellow",deposit:"green",paid:"green",refunded:"orange",cancelled:"gray" };
 const SHIPPING_COLORS: Record<ReturnType<typeof shippingPresentation>["code"],string> = {none:"gray",planned:"cyan",shipped:"green",delivered:"teal",returned:"orange",lost:"red"};
 function productionStatusStyle(theme:MantineTheme,color:string):CSSProperties {
   const palette=theme.colors[color] ?? theme.colors.gray!;
@@ -66,7 +67,7 @@ function formatMoney(minor: number, currency: string) {
 }
 
 function paymentLabel(code: ReturnType<typeof paymentPresentation>["code"]) {
-  return ({ unpaid: productionUi.paymentUnpaid, partial: productionUi.paymentPartial, deposit: productionUi.paymentDeposit, paid: productionUi.paymentPaid, refunded: productionUi.paymentRefunded, cancelled: productionUi.paymentCancelled })[code];
+  return ({ unknown: dataEvidenceUi.unavailable, unpaid: productionUi.paymentUnpaid, partial: productionUi.paymentPartial, deposit: productionUi.paymentDeposit, paid: productionUi.paymentPaid, refunded: productionUi.paymentRefunded, cancelled: productionUi.paymentCancelled })[code];
 }
 
 function shippingLabel(code: ReturnType<typeof shippingPresentation>["code"]) {
@@ -270,7 +271,7 @@ export function ProductionOrderDetails({ order, onClose, onOpenOrder, onSaveSlot
     <button type="button" className="production-details-close" aria-label={productionUi.closeDetails} onClick={onClose}>×</button>
     <section className="production-details-identity">{image ? <img src={image} alt={productionUi.modelImage}/> : <i>{productionUi.modelFallback}</i>}<div><small>{productionUi.selectedOrder}</small><h2>{order.number}</h2><b>{countryFlag(order.client.country)} {order.client.displayName}</b><p>{order.items.map((item) => item.name).filter(Boolean).join(", ") || order.notes || productionUi.noDescription}</p><span>{productionUi.items}: {quantity} {productionUi.pieces}</span></div></section>
     <section className="production-lifecycle">
-      <div className={`is-${payment.code}`}><span>✓</span><b>{productionUi.lifecyclePayment}</b><Badge variant="light" component="small" color={PAYMENT_COLORS[payment.code]} radius="sm" size="sm">{paymentLabel(payment.code)}</Badge><em>{formatMoney(order.paidMinor, order.currency)} / {formatMoney(order.depositRequiredMinor, order.currency)}</em></div>
+      <div className={`is-${payment.code}`}><span>✓</span><b>{productionUi.lifecyclePayment}</b><Badge variant="light" component="small" color={PAYMENT_COLORS[payment.code]} radius="sm" size="sm">{paymentLabel(payment.code)}</Badge><em>{order.paymentSettlementKnown === false ? dataEvidenceUi.unavailable : formatMoney(order.paidMinor, order.currency)} / {formatMoney(order.depositRequiredMinor, order.currency)}</em></div>
       <div className={`is-${order.productionStatus.toLocaleLowerCase()}`}><span>♙</span><b>{productionUi.lifecycleProduction}</b><Badge variant="light" component="small" color={crmStatusPresentation("production",order.productionStatus).color} radius="sm" size="sm">{productionLabel(order.productionStatus)}</Badge><em>{order.productionSlot ? `${formatDate(order.productionSlot.startsAt)} – ${formatDate(order.productionSlot.endsAt)}` : "—"}</em></div>
       <div className={`is-${shipping.code}`}><span>🚚</span><b>{productionUi.lifecycleShipping}</b><Badge variant="light" component="small" color={SHIPPING_COLORS[shipping.code]} radius="sm" size="sm">{shippingLabel(shipping.code)}</Badge><em>{formatDate(shipping.date)}</em></div>
     </section>

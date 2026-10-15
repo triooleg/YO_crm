@@ -1,4 +1,6 @@
-import path from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+const releaseVersion=JSON.parse(readFileSync(resolve(__dirname,"../../../package.json"),"utf8")).version;
 import { expect, test, type Page } from "@playwright/test";
 
 const clients = [
@@ -95,7 +97,7 @@ for (const viewport of [
     expect(originalFaviconHref).toBeTruthy();
     state.releaseDelayedUnread();
 
-    await expect(page.locator(".crm-version")).toContainText("0.1.47");
+    await expect(page.locator(".crm-version")).toContainText(releaseVersion);
     await expect(page).toHaveTitle("(7) CRM Yoleotard");
     await expect(page.locator('link[data-yoleotard-unread-icon="true"]')).toHaveAttribute("href", /^data:image\/svg\+xml/);
     const bell = page.locator(".crm-topbar-notifications");
@@ -124,7 +126,7 @@ for (const viewport of [
     await expect(page).toHaveTitle("(2) CRM Yoleotard");
 
     await page.screenshot({
-      path: path.resolve(process.cwd(), "../../output/playwright", `unread-notifications-${viewport.name}.png`),
+      path: resolve(process.cwd(), "../../output/playwright", `unread-notifications-${viewport.name}.png`),
       fullPage: false,
     });
 

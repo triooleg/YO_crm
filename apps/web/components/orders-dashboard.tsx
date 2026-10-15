@@ -1,5 +1,9 @@
 "use client";
 
+import { moneyLabel } from "../lib/finance-report";
+import { orderSettlement } from "../lib/order-settlement.mjs";
+import { dataEvidenceUi } from "../lib/i18n";
+
 import { QuickPayment } from "./order-payment-dialog";
 import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
@@ -14,7 +18,7 @@ import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, C
 import { CrmSearchField } from "./crm/search-field";
 import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
 import { canOpenOrderFinance } from "../lib/order-context";
-import { orderProductionStatusPresentation } from "../lib/production-view";
+import { orderDeadlineDays, orderReadyToShip, orderProductionStatusPresentation } from "../lib/production-view";
 import { orderMeasurementState } from "../lib/order-measurement-state";
 import { ORDER_PAGE_SIZES, type OrderPageSize, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination";
 import { defaultOrderSort, nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
@@ -381,7 +385,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     total: orders.length,
     active: orders.filter(isActiveOrder).length,
     unpaid: orders.filter((order) => isActiveOrder(order) && paid(order) === 0).length,
-    deposit: orders.filter((order) => isActiveOrder(order) && paid(order) < order.depositRequiredMinor).length,
+    deposit: orders.filter((order) => isActiveOrder(order) && depositShortfall(order)).length,
     urgent: orders.filter((order) => isActiveOrder(order) && days(order) >= 0 && days(order) <= 7).length,
     overdue: orders.filter((order) => isActiveOrder(order) && days(order) < 0).length,
     ready: orders.filter(isReadyToShip).length,
@@ -396,7 +400,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if (quickFilter === "active" && !isActiveOrder(order)) return false;
     if (quickFilter === "urgent" && !(isActiveOrder(order) && days(order) >= 0 && days(order) <= 7)) return false;
     if (quickFilter === "deposit" && !(isActiveOrder(order) && paid(order) === 0)) return false;
-    if (quickFilter === "depositShortfall" && !(isActiveOrder(order) && paid(order) < order.depositRequiredMinor)) return false;
+    if (quickFilter === "depositShortfall" && !(isActiveOrder(order) && depositShortfall(order))) return false;
     if (quickFilter === "work" && !["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)) return false;
     if (quickFilter === "ready" && !isReadyToShip(order)) return false;
     if (quickFilter === "completed" && order.salesStatus !== "COMPLETED") return false;
@@ -539,7 +543,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     setPreview({ src: image.src, left, top, width });
   }
   function exportOrders() {
-    const rows = [[...ui.csvHeaders], ...sorted.map((order) => [order.number, order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), String(paid(order)), String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; ")])];
+    const rows = [[...ui.csvHeaders], ...sorted.map((order) => [order.number, order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; ")])];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
@@ -591,12 +595,12 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}
 
     <div className="orders-kpi-grid">
-      <Kpi label={ui.kpis.all} value={metrics.total} icon="bag" active={quickFilter === "all"} onClick={() => selectQuickFilter("all")} />
-      <Kpi label={ui.kpis.deposit} value={metrics.deposit} icon="payment" tone="amber" active={quickFilter === "depositShortfall"} onClick={() => selectQuickFilter("depositShortfall")} />
-      <Kpi label={ui.kpis.urgent} value={metrics.urgent} icon="calendar" tone="red" active={quickFilter === "urgent"} onClick={() => selectQuickFilter("urgent")} />
-      <Kpi label={ui.kpis.overdue} value={metrics.overdue} icon="clock" tone="red" active={quickFilter === "overdue"} onClick={() => selectQuickFilter("overdue")} />
-      <Kpi label={ui.kpis.ready} value={metrics.ready} icon="truck" tone="green" active={quickFilter === "ready"} onClick={() => selectQuickFilter("ready")} />
-      <Kpi label={ui.kpis.completed} value={metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
+      <Kpi label={ui.kpis.all} value={loading || error ? null : metrics.total} icon="bag" active={quickFilter === "all"} onClick={() => selectQuickFilter("all")} />
+      <Kpi label={ui.kpis.deposit} value={loading || error ? null : metrics.deposit} icon="payment" tone="amber" active={quickFilter === "depositShortfall"} onClick={() => selectQuickFilter("depositShortfall")} />
+      <Kpi label={ui.kpis.urgent} value={loading || error ? null : metrics.urgent} icon="calendar" tone="red" active={quickFilter === "urgent"} onClick={() => selectQuickFilter("urgent")} />
+      <Kpi label={ui.kpis.overdue} value={loading || error ? null : metrics.overdue} icon="clock" tone="red" active={quickFilter === "overdue"} onClick={() => selectQuickFilter("overdue")} />
+      <Kpi label={ui.kpis.ready} value={loading || error ? null : metrics.ready} icon="truck" tone="green" active={quickFilter === "ready"} onClick={() => selectQuickFilter("ready")} />
+      <Kpi label={ui.kpis.completed} value={loading || error ? null : metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
     </div>
 
     <div className="orders-command-bar">
@@ -609,7 +613,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
           <CrmButton tone="secondary" onClick={clearFilters}>{ui.clearAll}</CrmButton>
         </div>}
       </div>
-      <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{value}</small></button>)}</div>
+      <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
       <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
@@ -691,7 +695,7 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
   if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
-  if (id === "payment") { const received = paid(order), percent = order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div><small className={balance(order) > 0 ? "orders-balance-line" : "orders-paid-line"}>{balance(order) > 0 ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent}%</em></td>; }
+  if (id === "payment") { const received = paid(order), percent = received === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={percent === null ? dataEvidenceUi.unavailable : `${percent}%`}><i style={{ width: `${percent ?? 0}%` }} /></div><small className={hasBalance(order) ? "orders-balance-line" : "orders-paid-line"}>{balance(order) === null ? dataEvidenceUi.unavailable : hasBalance(order) ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent === null ? dataEvidenceUi.unavailable : `${percent}%`}</em></td>; }
   if (id === "production") {
     const presentation = orderProductionStatusPresentation(order);
     const shippingLabels: Record<string, string> = { SHIPPED: productionUi.shippingShipped, DELIVERED: productionUi.shippingDelivered, RETURNED: productionUi.shippingReturned, LOST: productionUi.shippingLost };
@@ -717,7 +721,7 @@ function ExpandedOrder({ onOpenOrder, expenseActions, financeActions, onVoidPaym
   const primaryImage = designPaths(order)[0];
   const problems = orderProblems(order);
   const paidMinor = paid(order);
-  const paymentPercent = order.priceMinor > 0 ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
+  const paymentPercent = paidMinor === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
   const requiresProduction = !NON_PRODUCTION_ORDER_TYPES.has(order.type);
   return <div className="orders-approved-expanded">
     <section className="orders-order-overview">
@@ -726,7 +730,7 @@ function ExpandedOrder({ onOpenOrder, expenseActions, financeActions, onVoidPaym
         <div><p>{ui.selectedOrder}</p><h2>{order.number}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small><small><OrderChannelIcon channel={order.client.source} />{orderLabel("source", order.client.source)}</small><em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
       </div>
       <div ref={flowRef} className="orders-order-flow" aria-label={`${ui.payment} → ${ui.tabs.production} → ${ui.shipping}`}>
-        <article className={paidMinor >= order.depositRequiredMinor ? "complete" : "warning"}><i><UiIcon name="check" /></i><div className="orders-flow-caption"><b>{ui.payment}</b><CrmStatusBadge domain="payment" status={order.paymentStatus}/><strong>{money(paidMinor, order.currency)} / {money(order.priceMinor, order.currency)}</strong><small>{paymentPercent}% · {ui.balancePrefix} {money(balance(order), order.currency)}</small></div></article>
+        <article className={paidMinor !== null && paidMinor >= order.depositRequiredMinor ? "complete" : "warning"}><i><UiIcon name="check" /></i><div className="orders-flow-caption"><b>{ui.payment}</b><CrmStatusBadge domain="payment" status={order.paymentStatus}/><strong>{money(paidMinor, order.currency)} / {money(order.priceMinor, order.currency)}</strong><small>{paymentPercent === null ? dataEvidenceUi.unavailable : `${paymentPercent}%`} · {ui.balancePrefix} {money(balance(order), order.currency)}</small></div></article>
         <article className="active"><i><UiIcon name="settings" /></i><div className="orders-flow-caption"><b>{ui.tabs.production}</b><CrmStatusBadge domain="production" status={order.productionStatus}/><small>{order.productionSlot ? slotDateRange(order) : ui.notSpecified}</small></div></article>
         <article><i><UiIcon name="truck" /></i><div className="orders-flow-caption"><b>{ui.shipping}</b><CrmStatusBadge domain="shipping" status={order.shippingStatus}/><small>{ui.actualShipping}: {order.shipment?.shippedAt ? date(order.shipment.shippedAt) : ui.notSpecifiedFeminine}</small></div></article>
       </div>
@@ -898,7 +902,7 @@ function OrderClientPicker({ clients, loading, query, onQuery, onSelect, onClose
 
 function CountryFlag({ country }: { country?: string }) { const code = countryCode(country); return code ? <span className={`fi fi-${code.toLowerCase()} orders-country-flag`} role="img" aria-label={code} /> : null; }
 
-function Kpi({ label, value, icon, tone = "purple", active, onClick }: { label: string; value: number; icon: string; tone?: string; active?: boolean; onClick: () => void }) { return <button className={`orders-kpi tone-${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><i><UiIcon name={icon} /></i><span><small>{label}</small><strong>{value}</strong></span></button>; }
+function Kpi({ label, value, icon, tone = "purple", active, onClick }: { label: string; value: number | null; icon: string; tone?: string; active?: boolean; onClick: () => void }) { return <button className={`orders-kpi tone-${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><i><UiIcon name={icon} /></i><span><small>{label}</small><strong>{value ?? "—"}</strong></span></button>; }
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) { return <button className="orders-filter-chip" onClick={onRemove}>{label}<span aria-hidden="true">×</span></button>; }
 function Detail({ label, value }: { label: string; value: ReactNode }) { return <div className="orders-detail"><small>{label}</small><strong>{value}</strong></div>; }
 function EditableDetail({ label, value, onClick }: { label: string; value: ReactNode; onClick: () => void }) { return <UnstyledButton className="orders-detail orders-editable-detail" onClick={onClick} aria-label={`${ui.editDeliveryAddress}: ${label}`}><small>{label}</small><strong>{value}</strong></UnstyledButton>; }
@@ -907,9 +911,11 @@ function UiIcon({ name }: { name: string }) { const paths: Record<string, React.
 function OrderChannelIcon({ channel }: { channel: string }) { const key = channel.toUpperCase(); if (key === "FACEBOOK") return <span className="orders-channel facebook" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4.3c-.5-.1-2-.3-3.8-.3C9.7 4 7.3 6.1 7.3 10v2H4v4h3.3v8h4V16h3.3l.5-4h-3.8v-1.6C11.3 8.8 11.7 8 14 8Z" /></svg></span>; if (key === "INSTAGRAM") return <span className="orders-channel instagram" title="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="5" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="17" cy="7" r="1" /></svg></span>; if (key === "WHATSAPP") return <span className="orders-channel whatsapp" title="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.7a8 8 0 0 1-11.8 7L4 20l1.3-4A8 8 0 1 1 20 11.7Z" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M9 8c.5 3 2 4.5 5 5l1-1 2 1.5c-1 2-3 2-5.5.7A8 8 0 0 1 7.8 10C7.5 8.5 8 7.5 9 8Z" /></svg></span>; if (key === "EMAIL") return <span className="orders-channel email" title="Email"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="2" /><path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></span>; if (key === "CHATWOOT") return <span className="orders-channel chatwoot" title="Chatwoot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z" /></svg></span>; return <span className="orders-channel manual" title={ui.manualChannel}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17-1 4 4-1L19 8l-3-3L4 17Z" /></svg></span>; }
 
 function isActiveOrder(order: Order) { return !["COMPLETED", "CANCELLED"].includes(order.salesStatus); }
-function isReadyToShip(order: Order) { return order.shippingStatus === "READY" || (order.productionStatus === "READY" && !["SHIPPED", "IN_TRANSIT", "DELIVERED"].includes(order.shippingStatus)); }
-function paid(order: Order) { return order.payments.reduce((sum, payment) => sum + (payment.currency === order.currency ? payment.amountMinor : payment.appliedCurrency === order.currency ? payment.appliedAmountMinor || 0 : 0), 0); }
-function balance(order: Order) { return Math.max(0, order.priceMinor - paid(order)); }
+function isReadyToShip(order: Order) { return orderReadyToShip(order); }
+function paid(order: Order) { return orderSettlement(order).paidMinor; }
+function depositShortfall(order: Order) { const value = paid(order); return value !== null && value < order.depositRequiredMinor; }
+function hasBalance(order: Order) { const value = balance(order); return value !== null && value > 0; }
+function balance(order: Order) { return orderSettlement(order).balanceMinor; }
 function itemQuantity(order: Order) { return order.items.reduce((sum, item) => sum + item.quantity, 0) || 1; }
 function athleteCount(order: Order) { return new Set(order.items.map((item) => item.athlete?.id).filter(Boolean)).size || Number(Boolean(order.athlete)); }
 function itemImage(item: Order["items"][number]) { return item.modelImagePath ? `/api/orders/images/${item.modelImagePath}` : null; }
@@ -917,8 +923,8 @@ function designPaths(order: Order) { const paths = order.items.map(itemImage).fi
 function designCount(order: Order) { return Math.max(1, new Set(order.items.map((item) => item.modelImagePath || item.externalImageUrl || item.name)).size || designPaths(order).length); }
 function quantitySummary(order: Order) { return `${itemQuantity(order)} ${ui.pieces}`; }
 function OrderDesigns({ order, onPreview, onLeave }: { order: Order; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onLeave: () => void }) { const paths = designPaths(order); if (!paths.length) return <span className="orders-design-placeholder"><UiIcon name="image" /></span>; return <div className="orders-design-stack">{paths.slice(0, 3).map((path) => <img key={path} loading="lazy" src={path} alt={ui.orderDesignAlt} referrerPolicy="no-referrer" onMouseEnter={onPreview} onMouseMove={onPreview} onMouseLeave={onLeave} />)}{paths.length > 3 && <b>+{paths.length - 3}</b>}</div>; }
-function orderProblems(order: Order) { const problems: string[] = []; if (days(order) < 0 && isActiveOrder(order)) problems.push(ui.problems.overdue); if (orderMeasurementState(order).problem === "dimensions") problems.push(ui.problems.dimensions); if (!hasDeliveryAddress(order)) problems.push(ui.problems.address); if (paid(order) < order.depositRequiredMinor && isActiveOrder(order)) problems.push(ui.problems.payment); if (!designPaths(order).length) problems.push(ui.problems.design); return problems; }
-function nextOrderAction(order: Order): { label: string; detail?: string; tone: string; icon: string } { if (orderMeasurementState(order).nextAction === "dimensions") return { label: ui.actions.dimensions, tone: "amber", icon: "warning" }; if (!hasDeliveryAddress(order) && isReadyToShip(order)) return { label: ui.actions.address, tone: "red", icon: "warning" }; if (paid(order) < order.depositRequiredMinor) return { label: ui.actions.deposit, detail: money(order.depositRequiredMinor - paid(order), order.currency), tone: "amber", icon: "payment" }; if (["DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL"].includes(order.salesStatus)) return { label: ui.actions.design, tone: "purple", icon: "image" }; if (!NON_PRODUCTION_ORDER_TYPES.has(order.type) && order.productionStatus === "NOT_SCHEDULED") return { label: ui.actions.production, tone: "green", icon: "check" }; if (order.productionStatus === "READY" && balance(order) > 0) return { label: ui.actions.balance, detail: money(balance(order), order.currency), tone: "amber", icon: "payment" }; if (isReadyToShip(order)) return { label: ui.actions.shipping, tone: "green", icon: "truck" }; return { label: ui.actions.none, tone: "muted", icon: "check" }; }
+function orderProblems(order: Order) { const problems: string[] = []; if (days(order) < 0 && isActiveOrder(order)) problems.push(ui.problems.overdue); if (orderMeasurementState(order).problem === "dimensions") problems.push(ui.problems.dimensions); if (!hasDeliveryAddress(order)) problems.push(ui.problems.address); if (paid(order) === null && isActiveOrder(order)) problems.push(dataEvidenceUi.unavailable); else if (depositShortfall(order) && isActiveOrder(order)) problems.push(ui.problems.payment); if (!designPaths(order).length) problems.push(ui.problems.design); return problems; }
+function nextOrderAction(order: Order): { label: string; detail?: string; tone: string; icon: string } { if (orderMeasurementState(order).nextAction === "dimensions") return { label: ui.actions.dimensions, tone: "amber", icon: "warning" }; if (!hasDeliveryAddress(order) && isReadyToShip(order)) return { label: ui.actions.address, tone: "red", icon: "warning" }; if (paid(order) === null) return { label: dataEvidenceUi.unavailable, tone: "amber", icon: "warning" }; if (depositShortfall(order)) return { label: ui.actions.deposit, detail: money(order.depositRequiredMinor - paid(order)!, order.currency), tone: "amber", icon: "payment" }; if (["DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL"].includes(order.salesStatus)) return { label: ui.actions.design, tone: "purple", icon: "image" }; if (!NON_PRODUCTION_ORDER_TYPES.has(order.type) && order.productionStatus === "NOT_SCHEDULED") return { label: ui.actions.production, tone: "green", icon: "check" }; if (order.productionStatus === "READY" && hasBalance(order)) return { label: ui.actions.balance, detail: money(balance(order), order.currency), tone: "amber", icon: "payment" }; if (isReadyToShip(order)) return { label: ui.actions.shipping, tone: "green", icon: "truck" }; return { label: ui.actions.none, tone: "muted", icon: "check" }; }
 function hasMeasurements(order: Order) { return orderMeasurementState(order).complete; }
 function isMultiOrder(order: Order) { return order.type === "GROUP_ORDER" || order.type === "PAIR" || order.items.length > 1; }
 function primaryMeasurement(order: Order) { return ownedMeasurement(order.measurement, order.athlete) || ownedMeasurement(order.items[0]?.measurement, order.items[0]?.athlete || order.athlete); }
@@ -927,8 +933,8 @@ function measurementSizes(values?: Record<string, number>) { if (!values) return
 function discipline(value?: string) { const codes: Record<string, string> = { RHYTHMIC_GYMNASTICS: "RG", ACROBATIC_GYMNASTICS: "ACRO", FIGURE_SKATING: "FS", AEROBIC_GYMNASTICS: "AERO", BATON_TWIRLING_MAJORETTE: "TW", OTHER: "—" }; const labels = ui.disciplines as Record<string, string>; return { code: codes[value || ""] || "—", label: labels[value || ""] || ui.disciplines.missing }; }
 function parseSavedOrderSort(value: string | null): SortState | undefined { try { const parsed = JSON.parse(value || "null") as Partial<SortState> | null; return parsed && SORTABLE_ORDER_COLUMNS.includes(parsed.column as SortColumnId) && (parsed.direction === "asc" || parsed.direction === "desc") ? parsed as SortState : undefined; } catch { return undefined; } }
 function carrierLabel(value: string) { return (ui.carriers as Record<string, string>)[value] || value; }
-function money(value: number, currency: string) { return new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(value / 100); }
-function days(order: Order) { return order.requiredDeliveryAt ? Math.ceil((new Date(order.requiredDeliveryAt).getTime() - Date.now()) / 86400000) : 9999; }
+function money(value: number | null, currency: string) { return value === null ? dataEvidenceUi.unavailable : moneyLabel(value,currency); }
+function days(order: Order) { return orderDeadlineDays(order); }
 function date(value: string) { return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)); }
 function deliveryDate(order: Order) { return order.requiredDeliveryAt ? date(order.requiredDeliveryAt) : ui.notSpecified; }
 function dayText(order: Order) { const value = days(order); return value === 9999 ? ui.noDeadline : value < 0 ? `${ui.overdueBy} ${Math.abs(value)} ${ui.daysShort}` : value === 0 ? ui.today : `${ui.inDays} ${value} ${ui.daysShort}`; }

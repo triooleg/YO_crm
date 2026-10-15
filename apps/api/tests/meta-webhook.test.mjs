@@ -732,3 +732,13 @@ test("marks shared posts and story mentions as replyable chat context",()=>{
   assert.equal(events[1].metadata.engagement.kind,"mention");
   assert.equal(events[1].metadata.engagement.surface,"story");
 });
+
+for(const field of ['comments','live_comments','mentions'])for(const nested of [false,true])test(`Instagram ${field} ${nested?'nested':'direct'} timestamp units follow the selected timestamp`,()=>{
+ const seconds=1792021575;
+ for(const [entryTime,createdTime,expected] of [[seconds,undefined,seconds*1000],[String(seconds),undefined,seconds*1000],[seconds*1000,undefined,seconds*1000],[seconds*1000,seconds+60,(seconds+60)*1000],[seconds,(seconds+60)*1000,(seconds+60)*1000]]){
+  const change={field,value:{id:'comment-unit-test',from:{id:'sender-unit-test'},text:'Timestamp fixture',...(createdTime===undefined?{}:{created_time:createdTime})}};
+  const events=normalizeMetaWebhook({object:'instagram',entry:[{id:'account-unit-test',time:entryTime,...(nested?{changes:[change]}:change)}]});
+  assert.equal(events.length,1);assert.equal(events[0].receivedAt.toISOString(),new Date(expected).toISOString());
+  assert.equal(events[0].externalMessageId,'comment-unit-test');assert.equal(events[0].receiverId,'account-unit-test');
+ }
+});

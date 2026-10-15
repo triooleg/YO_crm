@@ -1,4 +1,8 @@
 "use client";
+
+import { moneyLabel } from "../lib/finance-report";
+import { orderSettlement } from "../lib/order-settlement.mjs";
+import { dataEvidenceUi } from "../lib/i18n";
 import { useRef, useState } from "react";
 import { Modal } from "@mantine/core";
 import { ordersDashboardUi as ui } from "../lib/i18n";
@@ -6,8 +10,8 @@ import { parseOrderPriceMinor } from "../lib/order-price";
 import { CrmAlert } from "./crm/alert";
 import { CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 export type PaymentOrder = { id:string;number:string;currency:string;priceMinor:number;payments:{amountMinor:number;currency:string;appliedAmountMinor?:number|null;appliedCurrency?:string|null}[] };
-function balance(order:PaymentOrder){ return Math.max(0,order.priceMinor-order.payments.reduce((sum,p)=>sum+(p.currency===order.currency?p.amountMinor:p.appliedCurrency===order.currency?p.appliedAmountMinor||0:0),0)); }
-function money(value:number,currency:string){return new Intl.NumberFormat("ru-RU",{style:"currency",currency}).format(value/100)}
+function balance(order:PaymentOrder){ return orderSettlement(order).balanceMinor; }
+function money(value: number | null, currency: string){ return value === null ? dataEvidenceUi.unavailable : moneyLabel(value,currency); }
 export function QuickPayment({ order, request, onClose, onSaved }: { order: PaymentOrder; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
   const submitting = useRef(false); const [amount, setAmount] = useState(""); const [currency, setCurrency] = useState(order.currency); const [method, setMethod] = useState("BANK_TRANSFER"); const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10)); const [reference, setReference] = useState(""); const [notes, setNotes] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   async function submit(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); if (submitting.current) return; const amountMinor = parseOrderPriceMinor(amount); if (amountMinor == null || amountMinor <= 0) { setError(ui.paymentAmountError); return; } submitting.current = true; setBusy(true); setError(""); try { await request(`/orders/${order.id}/payments`, { method: "POST", body: JSON.stringify({ amountMinor, currency, method, receivedAt: new Date(`${receivedAt}T12:00:00`).toISOString(), reference: reference.trim() || undefined, notes: notes.trim() || undefined }) }); await onSaved(); } catch (reason) { setError((reason as Error).message); } finally { submitting.current = false; setBusy(false); } }

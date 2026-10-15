@@ -28,3 +28,24 @@ test('закреплённая вне поиска переписка сохра
   assert.equal((await service.list({clientId:'pinned',search:'Other',limit:15,offset:0})).preferredItem,undefined);
   assert.equal((await service.list({clientId:'pinned',search:'Other',limit:15,offset:0,spamScope:'SPAM'})).preferredItem.id,'pinned');
 });
+
+test('All counters describe the destination after channel and spam filters are cleared',async()=>{
+ const rows=[{id:'a',inboxSpamAt:null,channel:'INSTAGRAM',status:'LEAD'},{id:'b',inboxSpamAt:null,channel:'FACEBOOK',status:'ACTIVE'},{id:'c',inboxSpamAt:new Date(),channel:'INSTAGRAM',status:'LEAD'}];
+ const matches=(row,where)=> (!('inboxSpamAt' in where)||(where.inboxSpamAt===null?!row.inboxSpamAt:Boolean(row.inboxSpamAt)))&&(!where.status||row.status!==where.status.not)&&(!where.conversations?.some?.channel||(typeof where.conversations.some.channel==='string'?row.channel===where.conversations.some.channel:where.conversations.some.channel.in.includes(row.channel)))&&(!where.conversations?.some?.unreadCount)&&(!where.id?.in||where.id.in.includes(row.id));
+ const db={client:{findMany:async()=>[],count:async({where})=>rows.filter(row=>matches(row,where)).length},$queryRaw:async()=>[],appSetting:{findMany:async()=>[]}};
+ const result=await new CommunicationsService(db,{}).list({channels:['INSTAGRAM'],limit:15,offset:0});
+ assert.equal(result.total,1);assert.equal(result.scopeCounts.allChannels,2);assert.equal(result.scopeCounts.normalAll,1);
+ const spam=await new CommunicationsService(db,{}).list({channels:['INSTAGRAM'],spamScope:'SPAM',limit:15,offset:0});
+ assert.equal(spam.scopeCounts.normalAll,1);assert.equal(spam.scopeCounts.allChannels,1);
+});
+
+test('aggregate timestamp excludes drafts but retains them in the detail window',async()=>{
+ const db={client:{findFirst:async()=>({id:'a',source:'INSTAGRAM'})},conversation:{findMany:async()=>[{id:'c',unreadCount:0}]}};
+ const service=new CommunicationsService(db,{});
+ service.latestVisibleMessages=async()=>[
+ {id:'real',direction:'INBOUND',status:'RECEIVED',messageType:'text',receivedAt:new Date('2026-10-15T12:00:00Z'),createdAt:new Date('2026-10-15T11:00:00Z')},
+ {id:'draft',direction:'OUTBOUND',status:'DRAFT',createdAt:new Date('2026-10-15T13:00:00Z')}
+ ];
+ const result=await service.detail('a');
+ assert.equal(result.messages.length,2);assert.equal(result.lastMessageAt.toISOString(),'2026-10-15T12:00:00.000Z');
+});

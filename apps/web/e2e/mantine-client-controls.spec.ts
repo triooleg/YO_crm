@@ -165,3 +165,10 @@ for (const viewport of [
     await page.screenshot({ path: screenshotPath(testInfo, `mantine-clients-${viewport.width}x${viewport.height}.png`), fullPage: true });
   });
 }
+
+
+test('client card shows its real status and existing files instead of a placeholder',async({page})=>{
+ await mockClients(page);await page.route('**/api/clients/client-eve',route=>route.fulfill({json:{id:'client-eve',displayName:'Eve Emeterio',status:'INACTIVE',athletes:[],orders:[],activities:[],files:[{id:'file-1',name:'Actual-file.pdf',path:'00000000-0000-4000-8000-000000000001.pdf',sizeBytes:20,createdAt:'2026-10-01T12:00:00Z'}]}}));
+ await page.goto('/?section=clients&clientId=client-eve');await expect(page.getByText('Неактивный клиент',{exact:true})).toBeVisible();
+ await page.getByRole('tab',{name:'Файлы',exact:true}).click();await expect(page.getByRole('link',{name:/Actual-file.pdf/})).toHaveAttribute('href',/client-files/);
+});

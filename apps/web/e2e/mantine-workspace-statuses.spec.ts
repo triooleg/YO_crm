@@ -182,6 +182,7 @@ for (const viewport of [
 }
 
 test("производственный план соответствует утверждённой геометрии 1703×895", async ({ page }, testInfo) => {
+  await page.clock.setFixedTime(new Date(`${currentYearMonth}-10T12:00:00Z`));
   await page.setViewportSize({ width: 1703, height: 895 });
   const { consoleErrors } = await mockWorkspaceApi(page, { denseProduction: true });
   await page.goto("/?section=production");
@@ -286,7 +287,7 @@ test("ширина предпросмотра настраивается и со
   await page.setViewportSize({ width: 1366, height: 768 });
   const { consoleErrors } = await mockWorkspaceApi(page);
   await page.goto("/?section=production");
-  await page.getByRole("button", { name: /Фильтры/ }).click();
+  await page.getByRole("button", { name: "☷ Фильтры", exact:true }).click();
   const width = page.getByLabel("Ширина предпросмотра");
   await width.fill("750");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("orders-image-preview-width-v1"))).toBe("750");

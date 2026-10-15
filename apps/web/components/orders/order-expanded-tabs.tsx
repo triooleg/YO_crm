@@ -1,5 +1,9 @@
 "use client";
 
+import { moneyLabel } from "../../lib/finance-report";
+import { orderSettlement } from "../../lib/order-settlement.mjs";
+import { dataEvidenceUi } from "../../lib/i18n";
+
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Badge, Menu, Modal, UnstyledButton } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui, overviewContextUi } from "../../lib/i18n";
@@ -423,7 +427,7 @@ function ClientPreferencesForm({ preferences, onCancel, onSubmit }: { preference
 }
 
 function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, onVoidPayment }: Props & { items: ExpandedOrderItem[] }) {
-  const paidMinor = paid(order), percentage = order.priceMinor ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
+  const paidMinor = paid(order), percentage = paidMinor === null ? null : order.priceMinor ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
   const paymentHistory = order.paymentHistory ?? order.payments;
   const productsMinor = items.reduce((sum, item) => sum + item.priceMinor * item.quantity, 0);
   const latestPayment = [...paymentHistory].filter(payment => !("voidedAt" in payment && payment.voidedAt)).sort((a,b) => Date.parse(b.receivedAt)-Date.parse(a.receivedAt))[0];
@@ -454,7 +458,7 @@ function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, o
       <MoneyRow label={ui.total} value={order.priceMinor} currency={order.currency} strong />
       <MoneyRow label={ui.paid} value={paidMinor} currency={order.currency} tone="success" />
       <MoneyRow label={ui.balance} value={balance(order)} currency={order.currency} tone={balance(order) ? "danger" : "success"} />
-      <div className="orders-finance-progress"><i style={{width:`${percentage}%`}} /></div><small className="orders-finance-progress-label">{percentage}% {ui.financePaidPercent}</small>
+      <div className="orders-finance-progress"><i style={{width:`${percentage ?? 0}%`}} /></div><small className="orders-finance-progress-label">{percentage === null ? dataEvidenceUi.unavailable : `${percentage}% ${ui.financePaidPercent}`}</small>
       <div className="orders-finance-currency"><small>{ui.currency}</small><strong>{order.currency}</strong><CrmButton tone="secondary" size="compact-sm" onClick={onCurrency}>{ui.changeCurrency}: {order.currency}</CrmButton></div>
     </TabCard>
     <div className="orders-finance-side">
@@ -724,7 +728,7 @@ function EditableField({ label, value, onClick }: { label: string; value: ReactN
 function EmptyState({ text, compact, action }: { text: string; compact?: boolean; action?: ReactNode }) { return <div className={`orders-approved-empty${compact ? " is-compact" : ""}`}><span>—</span><p>{text}</p>{action}</div>; }
 function SummaryMetric({ label, value }: { label: string; value: string }) { return <div className="orders-summary-metric"><small>{label}</small><strong>{value}</strong></div>; }
 function Stage({ icon, label, value }: { icon: string; label: string; value: string }) { return <div><TabIcon name={icon} /><span><strong>{label}</strong><small>{value}</small></span></div>; }
-function MoneyRow({ label, value, currency, strong, tone }: { label: string; value: number; currency: string; strong?: boolean; tone?: "success" | "danger" }) { return <div className={`orders-approved-money${strong ? " is-strong" : ""}${tone ? ` is-${tone}` : ""}`}><span>{label}</span><b>{money(value, currency)}</b></div>; }
+function MoneyRow({ label, value, currency, strong, tone }: { label: string; value: number | null; currency: string; strong?: boolean; tone?: "success" | "danger" }) { return <div className={`orders-approved-money${strong ? " is-strong" : ""}${tone ? ` is-${tone}` : ""}`}><span>{label}</span><b>{money(value, currency)}</b></div>; }
 function ClientIdentity({ order, large }: { order: ExpandedOrderView; large?: boolean }) { return <div className={`orders-client-identity${large ? " is-large" : ""}`}><span className="orders-client-portrait"><TabIcon name="client" /><small>{initials(order.client.displayName)}</small></span><div><strong>{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.notSpecifiedFeminine}</small></div></div>; }
 function ItemThumb({ item }: { item: ExpandedOrderItem }) { const image = itemImage(item); return image ? <img className="orders-item-thumb" src={image} alt={item.name} /> : <span className="orders-item-thumb is-empty"><TabIcon name="designs" /></span>; }
 
@@ -769,9 +773,9 @@ export function expandedOrderItems(order: ExpandedOrderView): ExpandedOrderItem[
   return [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete as Athlete | undefined, measurement: ownedMeasurement(order.measurement, order.athlete as Athlete | undefined), measurementHistory: order.measurementHistory ?? [] }];
 }
 
-function paid(order: ExpandedOrderView) { const payments = (order.paymentHistory ?? order.payments) as Array<Order["payments"][number] & { voidedAt?: string }>; return payments.reduce((sum, payment) => payment.voidedAt ? sum : sum + (payment.currency === order.currency ? payment.amountMinor : payment.appliedCurrency === order.currency ? payment.appliedAmountMinor || 0 : 0), 0); }
-function balance(order: ExpandedOrderView) { return Math.max(0, order.priceMinor - paid(order)); }
-function money(value: number, currency: string) { return new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(value / 100); }
+function paid(order: ExpandedOrderView) { return orderSettlement({ ...order, payments: order.paymentHistory ?? order.payments }).paidMinor; }
+function balance(order: ExpandedOrderView) { return orderSettlement({ ...order, payments: order.paymentHistory ?? order.payments }).balanceMinor; }
+function money(value: number | null, currency: string) { return value === null ? dataEvidenceUi.unavailable : moneyLabel(value,currency); }
 function formatDate(value: string) { return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)); }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function formatCm(value: number) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value); }

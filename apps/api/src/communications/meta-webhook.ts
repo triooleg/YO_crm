@@ -190,11 +190,12 @@ function instagramEngagementMessages(payload: AnyRecord) {
     const mediaId = String(media.id || value.media_id || "");
     const isComment = field === "comments" || field === "live_comments";
     const surface = field === "live_comments" ? "live" : socialSurface(media.media_product_type || value.media_product_type, "post");
+    const rawTime = value.created_time || entry.time;
     output.push({
       channel: "INSTAGRAM", externalSenderId: senderId, externalMessageId: objectId,
       content: String(value.text || value.message || (isComment ? "[Комментарий]" : "[Упоминание]")).trim().slice(0, 5000),
       displayName: username || undefined, receiverId: String(entry.id || "") || undefined,
-      receivedAt: asDate(value.created_time || entry.time, Boolean(value.created_time && Number(value.created_time) < 10_000_000_000)),
+      receivedAt: asDate(rawTime, Number(rawTime) < 10_000_000_000),
       metadata: { messageType: isComment ? "social_comment" : "social_mention", engagement: {
         kind: isComment ? "comment" : "mention", surface, objectExternalId: objectId,
         ...(mediaId ? { mediaId } : {}), ...(typeof media.media_url === "string" ? { mediaUrl: media.media_url } : {}),

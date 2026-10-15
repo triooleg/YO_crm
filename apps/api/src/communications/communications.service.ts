@@ -232,6 +232,17 @@ export class CommunicationsService {
         ...(query.conversationScope === "UNREAD" ? { unreadCount: { gt: 0 } } : {}),
       } } } : {}),
     };
+    // Each All button clears different filters; count its actual destination.
+    const { orders: _orders, status: _status, ...normalSearchWhere } = baseWhere;
+    const normalAllWhere: Prisma.ClientWhereInput = {
+      ...normalSearchWhere, inboxSpamAt: null,
+      ...(selectedChannels ? { conversations: { some: { archivedAt: null, channel: { in: selectedChannels } } } } : {}),
+    };
+    const allChannelsWhere: Prisma.ClientWhereInput = {
+      ...baseWhere,
+      ...(query.conversationScope === "WAITING" ? { id: { in: [...new Set(replyStateRows.filter(row => row.direction === MessageDirection.INBOUND).map(row => row.clientId))] } } : {}),
+      ...(query.conversationScope === "UNREAD" ? { conversations: { some: { archivedAt: null, unreadCount: { gt: 0 } } } } : {}),
+    };
     const limit = query.limit ?? 15;
     const countedChannels=[ContactChannel.FACEBOOK,ContactChannel.INSTAGRAM,ContactChannel.WHATSAPP,ContactChannel.CHATWOOT,ContactChannel.EMAIL];
     const clientListInclude = Prisma.validator<Prisma.ClientInclude>()({
@@ -249,7 +260,7 @@ export class CommunicationsService {
       .slice(query.offset ?? 0, (query.offset ?? 0) + limit)
       .map(client => client.id);
     const pagePosition = new Map(pageClientIds.map((id, index) => [id, index]));
-    const [unorderedPageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal, spamTotal] = await Promise.all([pageClientIds.length ? this.p.client.findMany({
+    const [unorderedPageClients, total, metaSettings, chatwootSettings, channelTotals, allScopeTotal, unreadScopeTotal, spamTotal, allChannelsTotal, normalAllTotal] = await Promise.all([pageClientIds.length ? this.p.client.findMany({
       where: { AND: [where, { id: { in: pageClientIds } }] },
       include: clientListInclude,
     }) : Promise.resolve([]), this.p.client.count({ where }), this.sectionValues("integration.meta"), this.sectionValues("integration.chatwoot"),Promise.all(countedChannels.map(channel=>query.conversationScope === "WAITING"
@@ -258,6 +269,8 @@ export class CommunicationsService {
       this.p.client.count({where:scopeBaseWhere}),
       this.p.client.count({where:{...baseWhere,conversations:{some:{archivedAt:null,...(selectedChannels?{channel:{in:selectedChannels}}:{}),unreadCount:{gt:0}}}}}),
       this.p.client.count({where:{...scopeBaseWhere,inboxSpamAt:{not:null}}}),
+      this.p.client.count({where:allChannelsWhere}),
+      this.p.client.count({where:normalAllWhere}),
     ]);
     const pageClients = unorderedPageClients.sort((left, right) => pagePosition.get(left.id)! - pagePosition.get(right.id)!);
     const requestedClient = (query.offset ?? 0) === 0 && query.clientId && !pageClients.some(client => client.id === query.clientId)
@@ -342,7 +355,7 @@ export class CommunicationsService {
     });});
     const preferredItem = preferredPage.preferredId ? aggregateItems.find(item => item.id === preferredPage.preferredId) : undefined;
     const items = preferredPage.preferredId ? aggregateItems.filter(item => item.id !== preferredPage.preferredId) : aggregateItems;
-    return { items, ...(preferredItem ? { preferredItem } : {}), total, scopeCounts:{all:allScopeTotal,unread:unreadScopeTotal,waiting:waitingClientIds.size,spam:spamTotal}, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + pageClients.length < total };
+    return { items, ...(preferredItem ? { preferredItem } : {}), total, scopeCounts:{allChannels:allChannelsTotal,normalAll:normalAllTotal,all:allScopeTotal,unread:unreadScopeTotal,waiting:waitingClientIds.size,spam:spamTotal}, channelCounts:Object.fromEntries(countedChannels.map((channel,index)=>[channel,channelTotals[index]])), hasMore: (query.offset ?? 0) + pageClients.length < total };
   }
   templates() {
     return this.p.messageTemplate.findMany({
@@ -1946,7 +1959,12 @@ export class CommunicationsService {
     if (!channel) {
       const conversations = await this.p.conversation.findMany({ where: { clientId, archivedAt: null } });
       const messages = await this.latestVisibleMessages({ conversation: { clientId, archivedAt: null } });
-      return { id: null, clientId, channel: null, unreadCount: conversations.reduce((sum,x) => sum + x.unreadCount, 0), lastMessageAt: messages.at(-1)?.createdAt ?? null, messages };
+      return { id: null, clientId, channel: null, unreadCount: conversations.reduce((sum,x) => sum + x.unreadCount, 0), lastMessageAt: messages.reduce<Date | null>((latest, message) => {
+        if (message.messageType === "reaction" || isSoftDeletedMessage(message.metadata) || isDeduplicatedDraft(message.metadata)) return latest;
+        if (!((message.direction === MessageDirection.INBOUND && message.status === MessageStatus.RECEIVED) || (message.direction === MessageDirection.OUTBOUND && message.status === MessageStatus.SENT))) return latest;
+        const at = message.direction === MessageDirection.INBOUND ? message.receivedAt ?? message.createdAt : message.sentAt ?? message.createdAt;
+        return !latest || at > latest ? at : latest;
+      }, null), messages };
     }
     const selected = channel;
     const c = await this.p.conversation.findUnique({

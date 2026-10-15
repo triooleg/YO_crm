@@ -12,3 +12,22 @@ async function verifyBusyTaskDialog(page:Page,open:()=>Promise<void>){const gate
 test("задача из раздела Задачи блокирует закрытие и двойную отправку",async({page})=>{await verifyBusyTaskDialog(page,async()=>{await page.goto("/?section=tasks");await page.getByRole("button",{name:"+ Новая задача"}).click()})});
 
 test("задача из Входящих блокирует закрытие и двойную отправку",async({page})=>{await verifyBusyTaskDialog(page,async()=>{await page.goto("/?section=inbox");await page.getByRole("button",{name:"Создать задачу",exact:true}).first().click()})});
+
+
+test('unknown board metrics stay unavailable rather than zero',async({page})=>{
+ await mockTaskApi(page,async(route,path)=>{if(path==='/api/tasks/board'){await route.fulfill({status:503,json:{message:'Board offline'}});return true}return false});
+ await page.goto('/?section=tasks');await expect(page.getByRole('alert').filter({hasText:'Board offline'})).toContainText('Board offline');
+ await expect(page.locator('.tasks-stats b')).toHaveText(['—','—','—','—']);
+});
+test('completed past-due task agrees with the non-overdue counter',async({page})=>{
+ await mockTaskApi(page,async(route,path)=>{if(path!=='/api/tasks/board')return false;
+  await route.fulfill({json:{columns:[{...board.columns[0],id:'done',isDone:true,tasks:[{id:'done-task',title:'Completed example',columnId:'done',dueAt:'2020-01-01T12:00:00Z',type:'ADMIN',labels:[],attachments:[]}]}],users:board.users}});return true});
+ await page.goto('/?section=tasks');await expect(page.getByText('Completed example',{exact:true})).toBeVisible();
+ await expect(page.locator('.tasks-stats b').nth(2)).toHaveText('0');await expect(page.locator('time.late')).toHaveCount(0);
+});
+test('failed archived-board load retains the active mode',async({page})=>{
+ await mockTaskApi(page,async(route,path)=>{if(path==='/api/tasks/board'&&new URL(route.request().url()).searchParams.get('archived')==='true'){await route.fulfill({status:503,json:{message:'Archive offline'}});return true}return false});
+ await page.goto('/?section=tasks');await expect(page.locator('.tasks-stats b').first()).toHaveText('0');
+ await page.getByRole('button',{name:'Архивные',exact:true}).click();await expect(page.getByRole('alert').filter({hasText:'Archive offline'})).toContainText('Archive offline');
+ await expect(page.getByRole('button',{name:'Архивные',exact:true})).toHaveAttribute('aria-pressed','false');
+});

@@ -36,8 +36,8 @@ export class ClientsService {
         } : {})
       },
       orderBy: [{ nextActionAt: "asc" }, { displayName: "asc" }],
-      include: { _count: { select: { athletes: true, orders: true } } },
-      take: period ? 1001 : 100
+      include: { _count: { select: { athletes: {where:{archivedAt:null}}, orders: {where:{archivedAt:null}} } } },
+      take: period ? 1001 : undefined
     });
     if (period && clients.length > 1000) throw new BadRequestException("За период найдено более 1000 клиентов. Уточните поиск.");
     return clients.map(presentClientContact);
@@ -59,7 +59,8 @@ export class ClientsService {
           take: 5,
           include: { assignee: { select: { id: true, displayName: true } }, column: { select: { id: true, name: true, color: true, isDone: true } } }
         },
-        orders: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 20 },
+        orders: { where: { archivedAt: null }, orderBy: { createdAt: "desc" } },
+        files: {orderBy:{createdAt:"desc"},select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,createdAt:true}},
         activities: { orderBy: { createdAt: "desc" }, take: 50 }
       }
     });

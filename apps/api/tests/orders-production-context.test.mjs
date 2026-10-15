@@ -125,6 +125,7 @@ test("производственная проекция считает толь�
     { id: "deposit", paidMinor: 15000, latestPaymentAt: "2026-10-04T12:00:00.000Z", shippedAt: null, deliveredAt: null },
     { id: "paid", paidMinor: 30000, latestPaymentAt: "2026-10-05T12:00:00.000Z", shippedAt: "2026-10-06T12:00:00.000Z", deliveredAt: "2026-10-09T12:00:00.000Z" },
   ]);
+  assert.deepEqual(orders.map(order=>order.paymentSettlementKnown), [true,false,true,true]);
   for (const order of orders) {
     assert.equal("payments" in order, false);
     assert.equal("shipment" in order, false);

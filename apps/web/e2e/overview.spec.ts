@@ -186,3 +186,12 @@ for(const width of [1536,390])test(`overview valuation tooltip contains long off
  expect(await tooltip.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
  await page.screenshot({path:test.info().outputPath(`overview-valuation-tooltip-${width}.png`)});
 });
+
+
+test('ring sector tooltip and legend use the same rounded shares',async({page})=>{
+ await overviewFixture(page,'OWNER',{transform:(path,json)=>path==='/api/overview/orders'?{...json,ring:{total:3,excluded:0,segments:[{key:'new',count:1},{key:'work',count:1},{key:'ready',count:1},{key:'awaiting',count:0},{key:'completed',count:0}]}}:json});
+ await page.goto('/?section=overview&period=2026-10&currency=EUR');
+ await expect(page.locator('.overview-ring-legend small')).toHaveText(['34%','33%','33%','0%','0%']);
+ await expect(page.locator('.overview-ring svg g[role=button]').first()).toHaveAttribute('aria-label',/\(34%\)/);
+ await expect(page.locator('.overview-ring svg title').first()).toHaveText(/\(34%\)/);
+});

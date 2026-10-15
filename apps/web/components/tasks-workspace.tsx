@@ -78,6 +78,7 @@ async function api(path: string, init?: RequestInit) {
 export function TasksWorkspace() {
   const [data, setData] = useState<Board>({ columns: [], users: [] }),
     [boardReady, setBoardReady] = useState(false),
+    [boardLoading,setBoardLoading]=useState(true), [boardLoadError,setBoardLoadError]=useState(false),
     [view, setView] = useState<"compact" | "visual">("compact"),
     [search, setSearch] = useState(""),
     [assignee, setAssignee] = useState(""),
@@ -90,20 +91,22 @@ export function TasksWorkspace() {
     [columnEditor, setColumnEditor] = useState<Partial<Column>>(),
     [saving, setSaving] = useState(false),
     dragged = useRef<string | undefined>(undefined),
-    contextActionHandled=useRef(false), contextTaskHandled=useRef(false), loadSequence=useRef(0);
+    boardRequest=useRef(0), contextActionHandled=useRef(false), contextTaskHandled=useRef(false), loadSequence=useRef(0);
   function openTaskEditor(task: Partial<Task> & { sourceMessageId?: string }) {
     loadSequence.current++;
     setEditing(task);
   }
   async function load(archived = showArchived) {
+    const sequence=++boardRequest.current;setBoardLoading(true);
     try {
-      setData(await api(`/tasks/board?archived=${archived}`));
-      setBoardReady(true);
-      setError("");
+      const next=await api(`/tasks/board?archived=${archived}`);
+      if(sequence!==boardRequest.current)return;
+      setData(next);setShowArchived(archived);setBoardReady(true);setBoardLoadError(false);setError("");
     } catch (e) {
-      setError((e as Error).message);
-    }
+      if(sequence===boardRequest.current){setBoardLoadError(true);setError((e as Error).message);}
+    } finally {if(sequence===boardRequest.current)setBoardLoading(false);}
   }
+
   useEffect(() => {
     load(false);
     return () => { loadSequence.current++; };
@@ -222,30 +225,29 @@ export function TasksWorkspace() {
       {error && (
         <CrmAlert>{error}</CrmAlert>
       )}
-      <div className="tasks-stats">
+      {boardLoadError&&boardReady&&<p role="status">{tasksUi.staleData}</p>}
+      <div className="tasks-stats" aria-busy={boardLoading}>
         <span>
           {tasksUi.total}
-          <b>{all.length}</b>
+          <b>{boardReady&&!boardLoadError?all.length:"—"}</b>
         </span>
         <span>
           {tasksUi.inWork}
           <b>
             {
-              data.columns.filter((c) => !c.isDone).flatMap((c) => c.tasks)
-                .length
+              boardReady&&!boardLoadError?data.columns.filter((c) => !c.isDone).flatMap((c) => c.tasks).length:"—"
             }
           </b>
         </span>
         <span>
           {tasksUi.overdue}
-          <b>{overdue}</b>
+          <b>{boardReady&&!boardLoadError?overdue:"—"}</b>
         </span>
         <span>
           {tasksUi.done}
           <b>
             {
-              data.columns.filter((c) => c.isDone).flatMap((c) => c.tasks)
-                .length
+              boardReady&&!boardLoadError?data.columns.filter((c) => c.isDone).flatMap((c) => c.tasks).length:"—"
             }
           </b>
         </span>
@@ -296,9 +298,9 @@ export function TasksWorkspace() {
         <button
           className={showArchived ? "active" : ""}
           aria-pressed={showArchived}
+          disabled={boardLoading}
           onClick={async () => {
             const next = !showArchived;
-            setShowArchived(next);
             await load(next);
           }}
         >
@@ -430,7 +432,7 @@ export function TasksWorkspace() {
                         {task.dueAt && (
                           <time
                             className={
-                              new Date(task.dueAt) < new Date() ? "late" : ""
+                              !column.isDone && new Date(task.dueAt) < new Date() ? "late" : ""
                             }
                           >
                             {new Date(task.dueAt).toLocaleDateString("ru-RU")}

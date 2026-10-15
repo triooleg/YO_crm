@@ -26,3 +26,10 @@ test('ordinary shipping list is unchanged and invalid target filters fail before
  for(const input of [{filter:'other'},{filter:'upcoming',horizon:0},{filter:'upcoming',horizon:8},{horizon:7}])await assert.rejects(()=>service.list(input),error=>error.getStatus()===400);
  assert.equal(fixture.reads.length,1);
 });
+
+
+test('ordinary Shipping retains an existing order-level legacy tracking code',async()=>{
+ const stored={id:'legacy',number:'LEGACY',deliveryTrackingCode:'LEGACY-TRACK',shippingStatus:'NOT_READY',currency:'EUR',client:{displayName:'Example'},items:[],orderShipments:[],shipment:null};
+ const db={order:{findMany:async({select})=>[Object.fromEntries(Object.entries(stored).filter(([key])=>select[key]))]},appSetting:{findMany:async()=>[]}};
+ const result=await new ShippingService(db).list();assert.equal(result.orders[0].deliveryTrackingCode,'LEGACY-TRACK');assert.equal(result.orders[0].shippingStatus,'NOT_READY');
+});

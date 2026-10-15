@@ -1,3 +1,5 @@
+export const dataEvidenceUi = { unavailable: "Требует проверки" };
+
 export const overviewUi = {
   morning:'Доброе утро', day:'Добрый день', evening:'Добрый вечер', brand:'Yoleotard',
   subtitle:'Вот что происходит в вашем ателье сегодня', title:'Обзор',
@@ -532,6 +534,7 @@ export const athleteMeasurementWizardUi = {
 } as const;
 
 export const clientWorkspaceUi = {
+  statuses:{LEAD:"Потенциальный клиент",ACTIVE:"Активный клиент",VIP:"VIP-клиент",INACTIVE:"Неактивный клиент",BLOCKED:"Заблокированный клиент"},statusUnknown:"Статус клиента не указан",noFiles:"Файлы клиента не добавлены",filesUnavailable:"Не удалось получить список файлов",
   collapseList: "Свернуть список клиентов",
   expandList: "Развернуть список клиентов",
   closeCreateClient: "Закрыть форму создания клиента",
@@ -581,6 +584,8 @@ export const clientMergeUi = {
 } as const;
 
 export const settingsUi = {
+  loadError:"Не удалось загрузить настройки",
+  loading:"Загрузка настроек…",
   accountTab: "Учётная запись",
   accountTitle: "Логин и пароль",
   accountHint: "Для изменения логина или пароля подтвердите текущий пароль. После сохранения остальные сеансы будут завершены.",
@@ -851,7 +856,7 @@ export const settingsUi = {
     "Настройки заказов, производства, доставки и интерфейса будут добавляться сюда по мере реализации соответствующих функций.",
   comingSoon: "Настройки раздела появятся позже",
   aiTab: "AI-помощник",
-  aiControl:{title:"Управление AI",hint:"Фактическое состояние с учётом серверной политики, глобальных и канальных настроек.",status:"Статус AI",global:"Глобальный AI",mode:"Эффективный режим",provider:"Провайдер",model:"Модель анализа",worker:"Обработчик",outbox:"Очередь",autoReplies:"Автоматические ответы",lastRun:"Последний успешный запуск",running:"работает",stopped:"остановлен",healthy:"норма",warning:"требует внимания",never:"ещё не запускался",disabledByServer:"Отключено конфигурацией сервера",serverPolicy:"Серверная политика имеет приоритет и не может быть обойдена через интерфейс.",channel:"Канал для тестового включения",globalScope:"Все каналы",conversation:"Анализ переписки",memory:"Память клиента",facts:"Факты и договорённости",knowledge:"База знаний",replies:"AI-ответы",actions:"Действия CRM",danger:"Опасные возможности",limits:"Лимиты",operatingMode:"Режим работы",statistics:"За последние 24 часа",experimental:"Экспериментально — недоступно",policyDisabled:"Недоступно в текущей политике сервера",saved:"Настройка сохранена",saveError:"Не удалось сохранить настройку AI",rollout:"Доля теневого анализа",messagesQueued:"В очереди",completed:"Завершено",failed:"Ошибки",retries:"Повторы",latency:"Средняя задержка",tokens:"Токены вход/выход",cost:"Оценочная стоимость",automaticSent:"Автоматически отправлено",readOnly:"ТОЛЬКО ЧТЕНИЕ",approvalRequired:"ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ",disabled:"ОТКЛЮЧЕНО",stateLabels:{on:"Включён",off:"Выключен"},channelLabels:{INSTAGRAM:"Instagram",FACEBOOK:"Facebook",WHATSAPP:"WhatsApp",EMAIL:"Электронная почта"},modeLabels:{OFF:"Выключен",SHADOW:"Теневой анализ",ASSIST:"Помощник",AUTO_SAFE:"Безопасная автоматизация",AGENT:"Агент",AUTONOMOUS:"Автономный режим"},actionNames:["Читать данные клиента","Читать заказы","Читать производство","Читать финансы","Читать доставку","Создать задачу","Добавить заметку","Добавить требование заказа","Изменить заказ","Изменить цену","Подтвердить оплату","Отправить сообщение"],limitNames:{maxConcurrency:"Максимальная параллельность",maxRetries:"Максимум повторов",requestTimeoutMs:"Таймаут запроса, мс",maxInputCharacters:"Максимум входных символов",maxOutputTokens:"Максимум выходных токенов",maxAnalysesPerMinute:"Анализов в минуту",maxAnalysesPerHour:"Анализов в час"},labels:{masterEnabled:"Включить AI Intelligence",analyzeIncoming:"Анализировать входящие сообщения",detectLanguage:"Определять язык",detectIntent:"Определять намерение",detectUrgency:"Определять срочность",detectReplyRequired:"Определять необходимость ответа",extractEntities:"Извлекать сущности",extractCandidateFacts:"Извлекать факты-кандидаты",extractCustomerRequests:"Извлекать запросы клиента",extractDesignRequirements:"Извлекать требования к дизайну",detectPaymentClaims:"Определять заявления об оплате",detectShippingQuestions:"Определять вопросы доставки",detectProductionQuestions:"Определять вопросы производства",extractMemoryCandidates:"Извлекать кандидаты памяти",storeMemoryCandidates:"Сохранять кандидаты памяти",autoPromoteMemories:"Автоматически подтверждать память",useCustomerMemory:"Использовать память в контексте",showMemoryInCustomerCard:"Показывать память в карточке клиента",extractConversationFacts:"Извлекать факты переписки",detectAgreements:"Находить возможные договорённости",storeAgreementCandidates:"Сохранять кандидаты договорённостей",autoConfirmAgreements:"Автоматически подтверждать договорённости",useConfirmedAgreements:"Использовать подтверждённые договорённости",knowledgeRetrieval:"Включить поиск по базе знаний",semanticSearch:"Семантический поиск",generalKnowledge:"Общие знания компании",pricingKnowledge:"Знания о ценах",deliveryKnowledge:"Знания о доставке",productionKnowledge:"Знания о производстве",sportsKnowledge:"Знания о спорте и правилах",draftReplies:"Создавать черновики ответов",showDrafts:"Показывать AI-черновики во Входящих",employeeEditing:"Разрешить редактирование сотрудником",saveDraftFeedback:"Сохранять финальную правку как feedback",autoReplies:"Автоматически отправлять ответы"}},
+  aiControl:{title:"Управление AI",hint:"Фактическое состояние с учётом серверной политики, глобальных и канальных настроек.",status:"Статус AI",global:"Глобальный AI",mode:"Эффективный режим",provider:"Провайдер",model:"Модель анализа",worker:"Обработка по настройкам",outbox:"Ошибки AI за 24 часа",currentQueue:"Сейчас ожидают обработки",milliseconds: "мс", noData:"Нет данных",costUnitUnavailable:"Валюта оценки не указана",autoReplies:"Автоматические ответы",lastRun:"Последний успешный запуск",running:"включена",stopped:"выключена",healthy:"не зарегистрированы",warning:"зарегистрированы",never:"ещё не запускался",disabledByServer:"Отключено конфигурацией сервера",serverPolicy:"Серверная политика имеет приоритет и не может быть обойдена через интерфейс.",channel:"Канал для тестового включения",globalScope:"Все каналы",conversation:"Анализ переписки",memory:"Память клиента",facts:"Факты и договорённости",knowledge:"База знаний",replies:"AI-ответы",actions:"Действия CRM",danger:"Опасные возможности",limits:"Лимиты",operatingMode:"Режим работы",statistics:"За последние 24 часа · все каналы",experimental:"Экспериментально — недоступно",policyDisabled:"Недоступно в текущей политике сервера",saved:"Настройка сохранена",saveError:"Не удалось сохранить настройку AI",rollout:"Доля теневого анализа",messagesQueued:"Поставлено в очередь",completed:"Завершено",failed:"Ошибки",retries:"Повторы",latency:"Средняя задержка",tokens:"Токены вход/выход",cost:"Оценочная стоимость",automaticSent:"Автоматически отправлено",readOnly:"ТОЛЬКО ЧТЕНИЕ",approvalRequired:"ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ",disabled:"ОТКЛЮЧЕНО",stateLabels:{on:"Включён",off:"Выключен"},channelLabels:{INSTAGRAM:"Instagram",FACEBOOK:"Facebook",WHATSAPP:"WhatsApp",EMAIL:"Электронная почта"},modeLabels:{OFF:"Выключен",SHADOW:"Теневой анализ",ASSIST:"Помощник",AUTO_SAFE:"Безопасная автоматизация",AGENT:"Агент",AUTONOMOUS:"Автономный режим"},actionNames:["Читать данные клиента","Читать заказы","Читать производство","Читать финансы","Читать доставку","Создать задачу","Добавить заметку","Добавить требование заказа","Изменить заказ","Изменить цену","Подтвердить оплату","Отправить сообщение"],limitNames:{maxConcurrency:"Максимальная параллельность",maxRetries:"Максимум повторов",requestTimeoutMs:"Таймаут запроса, мс",maxInputCharacters:"Максимум входных символов",maxOutputTokens:"Максимум выходных токенов",maxAnalysesPerMinute:"Анализов в минуту",maxAnalysesPerHour:"Анализов в час"},labels:{masterEnabled:"Включить AI Intelligence",analyzeIncoming:"Анализировать входящие сообщения",detectLanguage:"Определять язык",detectIntent:"Определять намерение",detectUrgency:"Определять срочность",detectReplyRequired:"Определять необходимость ответа",extractEntities:"Извлекать сущности",extractCandidateFacts:"Извлекать факты-кандидаты",extractCustomerRequests:"Извлекать запросы клиента",extractDesignRequirements:"Извлекать требования к дизайну",detectPaymentClaims:"Определять заявления об оплате",detectShippingQuestions:"Определять вопросы доставки",detectProductionQuestions:"Определять вопросы производства",extractMemoryCandidates:"Извлекать кандидаты памяти",storeMemoryCandidates:"Сохранять кандидаты памяти",autoPromoteMemories:"Автоматически подтверждать память",useCustomerMemory:"Использовать память в контексте",showMemoryInCustomerCard:"Показывать память в карточке клиента",extractConversationFacts:"Извлекать факты переписки",detectAgreements:"Находить возможные договорённости",storeAgreementCandidates:"Сохранять кандидаты договорённостей",autoConfirmAgreements:"Автоматически подтверждать договорённости",useConfirmedAgreements:"Использовать подтверждённые договорённости",knowledgeRetrieval:"Включить поиск по базе знаний",semanticSearch:"Семантический поиск",generalKnowledge:"Общие знания компании",pricingKnowledge:"Знания о ценах",deliveryKnowledge:"Знания о доставке",productionKnowledge:"Знания о производстве",sportsKnowledge:"Знания о спорте и правилах",draftReplies:"Создавать черновики ответов",showDrafts:"Показывать AI-черновики во Входящих",employeeEditing:"Разрешить редактирование сотрудником",saveDraftFeedback:"Сохранять финальную правку как feedback",autoReplies:"Автоматически отправлять ответы"}},
   aiTitle: "AI-помощник для переписки",
   aiHint:
     "Переводит сообщения, улучшает черновики и предлагает ответы. Отправку клиенту всегда подтверждает менеджер.",
@@ -969,6 +974,16 @@ export const releaseHistoryUi = {
   expandVersion: "Развернуть версию",
   collapseVersion: "Свернуть версию",
   releases: [
+    {
+      version: "0.1.63",
+      date: "15.10.2026",
+      changes: [
+        "Исправлены полнота списка клиентов, показ статусов и файлов, счётчики Входящих и согласованность долей «Обзора».",
+        "Недоступные показатели и непроверенные оплаты явно обозначаются; уточнены индикаторы заказов, производства, доставки, задач и настроек.",
+        "Исправлено определение секунд и миллисекунд для времени новых комментариев и упоминаний Instagram.",
+      ],
+      compatibility: "Без изменения существующих финансовых данных, импорта и правил оплаты. История сообщений не переписывается. Миграций нет. Откат к crm-v0.1.62 совместим.",
+    },
     {
       version: "0.1.62",
       date: "15.10.2026",
@@ -1658,6 +1673,7 @@ export const releaseHistoryUi = {
 } as const;
 
 export const tasksUi = {
+  staleData:"Не удалось обновить доску. Ниже показаны последние загруженные задачи.",
   eyebrow: "КОНТРОЛЬ РАБОТЫ",
   title: "Задачи",
   subtitle: "Клиентские поручения, закупки и внутренняя работа на одной доске",
@@ -1718,6 +1734,7 @@ export const tasksUi = {
 } as const;
 
 export const communicationsUi = {
+  unreadLoading:"Загружается количество непрочитанных сообщений",unreadUnavailable:"Количество непрочитанных сообщений недоступно",
   measurementFields: {height:"Рост",standardHeight:"Ростовой стандарт",chest:"Грудь",waist:"Талия",hips:"Бёдра",torso:"Обхват"},
   orderScopeMenu:"С заказом",
   replyAi:"Ответ AI",
