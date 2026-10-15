@@ -187,6 +187,28 @@ test('Order timeline and Details reconcile tracking without changing persisted s
  expect(tracked.productionStatus).toBe('SCHEDULED');expect(tracked.shippingStatus).toBe('NOT_READY');
 });
 
+test('Long tracking captions stay within their stage without moving connectors',async({page},info)=>{
+ const calls=await fixture(page);const tracking='PC000020000072122NPG';
+ const tracked={...orders[0]!,salesStatus:'SHIPPED',shipment:{trackingNumber:tracking},managerComment:null};
+ await page.route('**/api/orders/order-0',route=>route.fulfill({json:tracked}));
+ for(const width of [1536,390]){
+  await page.setViewportSize({width,height:1080});await page.goto('/?section=orders&orderId=order-0');
+  const flow=page.locator('#order-details-order-0 .orders-order-flow');
+  const caption=flow.locator('article').last().locator('.orders-flow-caption small');
+  await expect(caption).toContainText(tracking);
+  const bounds=await caption.evaluate(node=>{
+   const range=document.createRange();range.selectNodeContents(node);
+   const stage=node.closest('article')!.getBoundingClientRect(),card=node.closest('.orders-order-overview')!.getBoundingClientRect();
+   return {fits:[...range.getClientRects()].every(r=>r.left>=stage.left-1&&r.right<=stage.right+1&&r.bottom<=card.bottom+1),font:getComputedStyle(node).fontSize};
+  });
+  expect(bounds.fits,'complete tracking text remains inside its stage and card').toBe(true);expect(bounds.font).toBe('11px');
+  const centers=await flow.locator('article>i').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return r.top+r.height/2;}));
+  expect(Math.max(...centers)-Math.min(...centers)).toBeLessThan(1);
+  await flow.screenshot({path:info.outputPath(`long-tracking-${width}.png`)});
+ }
+ expect(calls.filter(c=>c.method!=='GET')).toEqual([]);
+});
+
 test('Production selected timeline keeps full badge labels and dispatched facts',async({page},info)=>{
  const calls=await fixture(page);
  const tracked={...orders[0]!,hasTrackingNumber:true,paidMinor:60000,priceMinor:120000,depositRequiredMinor:60000,salesStatus:'SHIPPED',productionStatus:'SCHEDULED',shippingStatus:'NOT_READY',productionSlot:{id:'slot',startsAt:'2026-10-02',endsAt:'2026-10-12',tentative:false,locked:false,capacity:1}};

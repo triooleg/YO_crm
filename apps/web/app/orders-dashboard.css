@@ -387,3 +387,6 @@
 .orders-order-flow article:has([data-domain=shipping][data-status=RETURNED]){--flow-icon-background:var(--mantine-color-orange-6);--flow-icon-text:var(--mantine-color-white)}
 
 .orders-channel.website{background:var(--mantine-color-yoleotard-6)}.orders-channel.website svg{fill:none}.orders-website-sale{color:var(--mantine-color-yoleotard-7)}
+.orders-order-flow{grid-template-columns:repeat(3,minmax(0,1fr))}
+.orders-order-flow article,.orders-flow-caption{min-width:0}
+.orders-flow-caption small{min-width:0;max-width:100%;overflow-wrap:anywhere}
