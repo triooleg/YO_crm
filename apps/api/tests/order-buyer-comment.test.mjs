@@ -1,3 +1,4 @@
+import {loadTargetModule} from './overview-target-loader.mjs';
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -32,6 +33,7 @@ const orderRequire = specifier => {
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
+  if (specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module, exports: module.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });

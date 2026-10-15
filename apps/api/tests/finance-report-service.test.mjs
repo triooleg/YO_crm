@@ -20,7 +20,7 @@ function load(path) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true },
   }).outputText;
   const localRequire = name => name.startsWith('.') && existsSync(resolve(dirname(filename), name + '.ts'))
-    ? load(resolve(dirname(filename), name + '.ts')) : require(name);
+    ? load(resolve(dirname(filename), name + '.ts')) : require(name.startsWith('.')&&existsSync(resolve(dirname(filename),name))?resolve(dirname(filename),name):name);
   vm.runInThisContext(`(function(require,module,exports){${source}\n})`, { filename })(localRequire, module, module.exports);
   return module.exports;
 }
@@ -106,7 +106,7 @@ test('report and export read one repeatable snapshot, with no economic writes or
 test('report crosses the 500-row boundary for every ledger without gaps or duplicate totals', async t => {
   freeze(t);
   const ids = Array.from({ length: 501 }, (_, i) => String(i).padStart(4, '0'));
-  const db = database(sources({ order: ids.map(id => order(id)), payment: ids.map(id => payment(id, { orderId: id, amountMinor: 100 })), expense: ids.map(id => expense(id, { amountMinor: 2 })), invoice: ids.map(id => invoice(id)), expenseCategory: ids.map(id => ({ id, name: id, active: true, expenses: [] })) }));
+  const db = database(sources({ order: ids.map(id => order(id)), payment: ids.map(id => payment(id, { orderId: id, amountMinor: 100 })), expense: ids.map(id => expense(id, { amountMinor: 2, orderId: id })), invoice: ids.map(id => invoice(id, { orderId: id })), expenseCategory: ids.map(id => ({ id, name: id, active: true, expenses: [] })) }));
   const result = await db.service.report(query({ page: 51, pageSize: 10, sort: 'number', direction: 'asc' }));
   assert.equal(result.table.total, 501);
   assert.equal(result.table.rows.length, 1);
@@ -297,4 +297,14 @@ test('all reporting handlers enforce the finance read roles with real Nest guard
   assert.equal(calls[0][0], input); assert.equal(calls[0][1], true);
   assert.equal(headers['Content-Type'], 'text/csv; charset=utf-8');
   assert.equal(headers['Cache-Control'], 'no-store');
+});
+
+test('archived cash order resolves real persisted WEBSITE provenance inside the same read-only report snapshot',async t=>{
+ freeze(t);const {CONFIRMED_WEBSITE_SOURCE}=load('orders/order-source.ts');
+ const archived=order('archived',{archivedAt:date('2026-09-01'),sourceSystem:'KEYCRM',sourceAccount:CONFIRMED_WEBSITE_SOURCE.account,externalId:'42',sourceLinkMode:'IMPORTED',externalData:{source_id:12,secret:'never public'},activities:[{id:'event',createdAt:date('2026-09-01'),type:'KEYCRM_ORDER_IMPORTED',metadata:{keycrmOrderId:'42',sourceName:'Вебсайт'}}]});
+ const db=database(sources({order:[order(),archived],payment:[payment(),payment('archived-cash',{orderId:'archived',order:{archivedAt:date('2026-09-01')},amountMinor:700})],expense:[],invoice:[]}));
+ const before=JSON.stringify(db.data),result=await db.service.report(query({source:'WEBSITE'}));
+ assert.equal(result.sourceAnalytics.websiteReceivedMinor,700);assert.equal(result.current.receivedMinor,2700);assert.equal(result.table.total,0);
+ assert.ok(!JSON.stringify(result).includes('secret'));assert.ok(!JSON.stringify(result).includes('sourceName'));assert.ok(db.reads.every(read=>read.transactional));assert.equal(JSON.stringify(db.data),before);
+ assert.ok(db.reads.some(read=>read.model==='order'&&read.query.where.id?.in.includes('archived')));
 });

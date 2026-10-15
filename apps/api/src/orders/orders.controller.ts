@@ -1,3 +1,4 @@
+import type {OrderListReadQuery} from './order-list-read-model';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { join } from "node:path";
@@ -19,7 +20,7 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
   @Get("defaults") @Roles("OWNER", "ADMIN", "MANAGER", "PRODUCTION") defaults() { return this.orders.defaults(); }
   @Get("production") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.PRODUCTION) productionList(@Query("orderId") orderId?: string, @Query("from") from?: string, @Query("to") to?: string, @Query("overviewFilter") overviewFilter?: string) { return this.orders.productionList(orderId, from, to, overviewFilter); }
-  @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string, @Query("overviewFilter") overviewFilter?: string, @Query("period") period?: string) { return this.orders.list(search, { overviewFilter, period }); }
+  @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string, @Query("overviewFilter") overviewFilter?: string, @Query("period") period?: string, @Query() query?:OrderListReadQuery) { return this.orders.list(search, { ...query, overviewFilter, period }); }
   @Get(":id") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) detail(@Param("id") id: string) { return this.orders.detail(id); }
   @Patch("archive") @Roles(UserRole.OWNER, UserRole.ADMIN) archiveOrders(@Body() dto: ArchiveOrdersDto, @Req() req: Request & { user: User }) { return this.orders.archiveOrders(dto, req.user); }
   @Post("maintenance/website-sales") @Roles(UserRole.OWNER, UserRole.ADMIN) correctWebsiteSales(@Body() dto: WebsiteSalesCorrectionDto, @Req() req: Request & { user: User }) { return this.orders.correctWebsiteSales(dto, req.user); }

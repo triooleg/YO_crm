@@ -1,4 +1,6 @@
 "use client";
+import { orderSourceUi as sourceUi } from "../../lib/i18n";
+import { sourceLabel } from "../../lib/order-source";
 
 import { moneyLabel } from "../../lib/finance-report";
 import { orderSettlement } from "../../lib/order-settlement.mjs";
@@ -222,7 +224,7 @@ function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliver
   return <div className="orders-tab-details-approved">
     <TabCard title={ui.primaryInformation} action={<CrmButton tone="secondary" size="compact-xs" onClick={onEdit}>{ui.edit}</CrmButton>}>
       <FieldGrid>
-        <Field label={ui.orderNumber} value={order.number} />
+        <Field label={ui.orderNumber} value={order.number} /><Field label={sourceUi.filter} value={sourceLabel(order.orderSource)} />
         <Field label={ui.orderTypeName} value={orderTypeLabel(order.type)} />
         <Field label={ui.createdAt} value={formatDate(order.createdAt)} />
         <Field label={ui.source} value={orderLabel("source", order.client.source)} />

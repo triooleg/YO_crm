@@ -1,3 +1,5 @@
+import {loadOrderSourceMap,matchesOrderSource} from './order-source';
+import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,type OrderListReadQuery} from './order-list-read-model';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
@@ -88,20 +90,18 @@ export class OrdersService {
     };
   }
 
-  async list(search?: string, overview?: { overviewFilter?: string; period?: string }) {
-    const query = search?.trim();
-    const overviewIds = overview?.overviewFilter || overview?.period
-      ? await (await import("../overview/overview-order-model")).resolveOverviewOrderIds(this.prisma, overview)
-      : undefined;
-    const orders = await this.prisma.order.findMany({
-      where: { archivedAt: null, ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
+  async list(search?: string, overview?: OrderListReadQuery) {
+    const options=normalizeOrderListRead(overview??{}),paged=overview?.page!==undefined||overview?.pageSize!==undefined;
+    const query=search?.trim();if((query?.length??0)>200)throw new BadRequestException('Слишком длинный поиск заказов');
+    const read=async(db:Prisma.TransactionClient)=>{
+      const overviewIds=overview?.overviewFilter||overview?.period?await (await import('../overview/overview-order-model')).resolveOverviewOrderIds(db,overview):undefined;
+      const where:Prisma.OrderWhereInput={ archivedAt: null, ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
         { number: { contains: query, mode: "insensitive" as const } },
         { client: { displayName: { contains: query, mode: "insensitive" as const } } },
         { athlete: { is: { firstName: { contains: query, mode: "insensitive" as const } } } },
         { athlete: { is: { lastName: { contains: query, mode: "insensitive" as const } } } },
-      ] } : {}) },
-      orderBy: [{ requiredDeliveryAt: "asc" }, { createdAt: "desc" }],
-      select: {
+      ] } : {}) };
+      const richSelect={
         id: true, number: true, type: true, discipline: true, country: true,
         deliveryAddressSet: true, deliveryRecipient: true, deliveryRecipientPhone: true, deliveryEmail: true, deliveryAddressLine1: true, deliveryAddressLine2: true,
         deliveryCity: true, deliveryRegion: true, deliveryPostalCode: true, deliveryAddressText: true,
@@ -121,12 +121,22 @@ export class OrdersService {
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
-      },
-    });
-    return orders.map((order) => ({
-      ...order,
-      client: presentClientContact(order.client),
-    }));
+      } satisfies Prisma.OrderSelect;
+      if(paged){
+        const candidates:Prisma.OrderGetPayload<{select:typeof orderListCandidateSelect}>[]=[];let cursor:string|undefined;
+        for(;;){const batch=await db.order.findMany({where,select:orderListCandidateSelect,orderBy:{id:'asc'},take:500,...(cursor?{cursor:{id:cursor},skip:1}:{})});candidates.push(...batch);if(batch.length<500)break;cursor=batch.at(-1)!.id;}
+        const origins=await loadOrderSourceMap(db,candidates.map(order=>order.id));
+        const result=buildOrderListPage(candidates.map(order=>({...order,orderSource:origins[order.id]??'UNKNOWN'})),overview??{});
+        const pageIds=result.items.map(order=>order.id);
+        const rich=pageIds.length?await db.order.findMany({where:{id:{in:pageIds}},select:richSelect,take:options.pageSize}):[];
+        const byId=new Map(rich.map(order=>[order.id,order]));
+        return {...result,items:pageIds.map(id=>{const order=byId.get(id)!;return {...order,orderSource:origins[id]??'UNKNOWN',client:presentClientContact(order.client)};})};
+      }
+      const orders=await db.order.findMany({where,orderBy:[{requiredDeliveryAt:'asc'},{createdAt:'desc'}],select:richSelect});
+      const origins=await loadOrderSourceMap(db,orders.map(order=>order.id));
+      return orders.map(order=>({...order,orderSource:origins[order.id]??'UNKNOWN',client:presentClientContact(order.client)})).filter(order=>matchesOrderSource(order.orderSource,options.source));
+    };
+    return paged?this.prisma.$transaction(read,{isolationLevel:'RepeatableRead',timeout:30000,maxWait:5000}):read(this.prisma);
   }
 
   async detail(orderId: string) {
@@ -203,7 +213,8 @@ export class OrdersService {
     const measurementHistory = legacyAthlete?.measurements ?? [];
     const athlete = legacyAthlete ? { id: legacyAthlete.id, firstName: legacyAthlete.firstName, lastName: legacyAthlete.lastName } : null;
     const presentedPaymentHistory = paymentHistory.map(({ sourceSystem, sourceAccount, externalId, ...payment }) => ({ ...payment, isImported: Boolean(sourceSystem || sourceAccount || externalId), canVoid: !payment.voidedAt && !sourceSystem && !sourceAccount && !externalId }));
-    return { ...order, athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
+    const origins=await loadOrderSourceMap(this.prisma,[order.id]);
+    return { ...order, orderSource:origins[order.id]??'UNKNOWN', athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
   }
 
   async productionList(orderId?: string, from?: string, to?: string, overviewFilter?: string) {

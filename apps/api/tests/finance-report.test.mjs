@@ -9,7 +9,7 @@ function load(path) {
   const filename = new URL(path, import.meta.url);
   const module = { exports: {} };
   const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText;
-  vm.runInNewContext(source,{module,exports:module.exports,require:(name)=>name==='@nestjs/common'?{BadRequestException:Error,ConflictException:Error,ServiceUnavailableException:Error,Injectable:()=>x=>x}:name==='./exchange-rates'?load('../src/finance/exchange-rates.ts'):name==='../prisma.service'?{}:require(name),Date,Intl,Buffer,console});
+  vm.runInNewContext(source,{module,exports:module.exports,require:(name)=>name==='@nestjs/common'?{BadRequestException:Error,ConflictException:Error,ServiceUnavailableException:Error,Injectable:()=>x=>x}:name==='../orders/order-source'?load('../src/orders/order-source.ts'):name==='./exchange-rates'?load('../src/finance/exchange-rates.ts'):name==='../prisma.service'?{}:require(name),Date,Intl,Buffer,console});
   return module.exports;
 }
 const report = load('../src/finance/finance-report-model.ts');

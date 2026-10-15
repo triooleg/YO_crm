@@ -1,3 +1,4 @@
+import {loadOrderSourceMap,countOrderSources} from '../orders/order-source';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
@@ -32,6 +33,9 @@ export class OverviewService {
     const previousStart=financePeriod(month,-1),trendStart=financePeriod(month,1-query.range);
     return this.prisma.$transaction(async tx=>{
       const sources=await loadOverviewOrderSources(tx);
+      const orderSources=await loadOrderSourceMap(tx,sources.map(order=>order.id));
+      const breakdown=countOrderSources(sources,orderSources,start,end);
+      const sourceAnalytics={total:breakdown.reduce((sum,row)=>sum+row.count,0),websiteCount:breakdown.find(row=>row.source==='WEBSITE')!.count,breakdown,trend:Array.from({length:query.range},(_,index)=>{const from=financePeriod(month,index-query.range+1),to=financePeriod(month,index-query.range+2);return {month:from.toISOString().slice(0,7),breakdown:countOrderSources(sources,orderSources,from,to)};})};
       const period=sources.filter(order=>order.createdAt>=start&&order.createdAt<end);
       const states=sources.map(order=>({order,state:classifyOverviewOrder(order,now)}));
       const ringStates=period.map(order=>classifyOverviewOrder(order,now));
@@ -54,7 +58,7 @@ export class OverviewService {
         try{amountMinor=convert(order.priceMinor,order.currency);}catch(error){valuationError=error instanceof Error?error.message:'Курс валют недоступен';}
         return {id:order.id,number:order.number,clientName:order.client.displayName,modelImagePath:order.modelImagePath??order.items[0]?.modelImagePath??null,salesStatus:order.salesStatus,createdAt:order.createdAt.toISOString(),amountMinor,originalAmountMinor:order.priceMinor,originalCurrency:order.currency};
       });
-      return {month,currency:query.currency,today:financeBusinessDay(now),counts:{total:period.length,previousTotal:sources.filter(order=>order.createdAt>=previousStart&&order.createdAt<start).length,work:states.filter(row=>row.state.work).length,ready:states.filter(row=>row.state.ready).length,overdue:states.filter(row=>row.state.overdue).length,requiresVerification:states.filter(row=>row.state.requiresVerification).length,awaitingPayment:states.filter(row=>row.state.unpaid).length},ring:{total:ringTotal,excluded:period.length-ringTotal,segments},trend:Array.from({length:query.range},(_,index)=>{
+      return {sourceAnalytics,month,currency:query.currency,today:financeBusinessDay(now),counts:{total:period.length,previousTotal:sources.filter(order=>order.createdAt>=previousStart&&order.createdAt<start).length,work:states.filter(row=>row.state.work).length,ready:states.filter(row=>row.state.ready).length,overdue:states.filter(row=>row.state.overdue).length,requiresVerification:states.filter(row=>row.state.requiresVerification).length,awaitingPayment:states.filter(row=>row.state.unpaid).length},ring:{total:ringTotal,excluded:period.length-ringTotal,segments},trend:Array.from({length:query.range},(_,index)=>{
         const from=financePeriod(month,index-query.range+1),to=financePeriod(month,index-query.range+2),key=from.toISOString().slice(0,7);
         return {month:key,orders:sources.filter(order=>order.createdAt>=from&&order.createdAt<to).length,clients:Number(clientMonths.find(row=>row.month===key)?.count??0)};
       }),recent:recentRows,valuationError};

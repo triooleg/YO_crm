@@ -314,3 +314,15 @@ content are separate. `MessageTemplate` stores reusable communication text.
 - UI language and current visual implementation: `apps/web/lib/i18n.ts`,
   `apps/web/components/crm-shell.tsx`, `apps/web/app/*.css`
 - Durable decisions: `docs/decisions/`
+
+### Order Origin / Order Source
+
+The proven origin of an Order, independently of Client.source, conversation channel,
+payment method, import transport and fulfillment OrderType. One server classifier
+(`apps/api/src/orders/order-source.ts`) provides WEBSITE/MANUAL/INSTAGRAM/OTHER/UNKNOWN
+for Orders, Overview and Finance. The owner-confirmed KeyCRM source12 alias is pinned
+to the existing account and persisted order provenance; uncertain/conflicting history
+remains UNKNOWN. Counts use unique Order.id and creation month. Cash uses unique valid
+Payment.id and receivedAt, valued through the existing reporting FX policy; it never
+substitutes order price. See [source policy](docs/website-sales-source-policy.md) and
+[ADR0006](docs/decisions/0006-proven-order-origin-for-analytics.md).

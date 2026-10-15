@@ -24,7 +24,7 @@ export function crmSectionHref(section: CrmSectionId, currentSearch = "") {
 }
 
 /** Context keys belong to one destination; unrelated display parameters remain intact. */
-export const crmContextKeys=['action','clientId','clientName','orderId','conversationId','channel','conversationScope','taskId','shipmentId','tab','overviewFilter','filter','period','currency','range','metric','assignee','horizon'] as const;
+export const crmContextKeys=['action','clientId','clientName','orderId','conversationId','channel','conversationScope','taskId','shipmentId','tab','overviewFilter','filter','period','currency','range','metric','assignee','horizon','source','sourceChart','sourceTrend','search','quick','status','discipline','sort','direction','page','pageSize','from','to','clientId','categoryId','scope'] as const;
 export function createCrmNavigationHref(section:CrmSectionId,currentSearch='',context:Record<string,string>={}){
  const params=new URLSearchParams(currentSearch);
  for(const key of crmContextKeys)params.delete(key);

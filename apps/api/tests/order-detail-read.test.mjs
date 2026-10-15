@@ -1,3 +1,4 @@
+import {loadTargetModule} from './overview-target-loader.mjs';
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -31,6 +32,7 @@ const orderRequire = specifier => {
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
+  if (specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
@@ -52,7 +54,7 @@ test("lazy detail returns the canonical order with expanded manager, finance, ac
     items: [{ id: "item-1", measurement: { id: "measurement-current", values: { m1: 81 } }, athlete: { id: "athlete-1", clientId: "client-1", archivedAt: null, firstName: "Anna", measurements: [historyMeasurement] } }],
   };
   const service = new OrdersService({
-    order: { findFirst: async value => { query = value; return row; } },
+    order: { findFirst: async value => { query = value; return row; }, findMany:async()=>[{id:row.id,activities:[]}] },
     payment: { findMany: async value => { paymentHistoryQuery = value; return [activePayment, voidedPayment]; } },
   }, {});
 
@@ -60,6 +62,7 @@ test("lazy detail returns the canonical order with expanded manager, finance, ac
 
   assert.deepEqual(JSON.parse(JSON.stringify(query.where)), { id: "order-1", archivedAt: null });
   assert.equal(query.select.id, true);
+  assert.equal(result.orderSource,"UNKNOWN");
   assert.deepEqual(JSON.parse(JSON.stringify(query.select.responsibleManager.select)), { id: true, displayName: true });
   assert.equal(query.select.activities.take > 30, true);
   assert.deepEqual(JSON.parse(JSON.stringify(query.select.payments.where)), { voidedAt: null });

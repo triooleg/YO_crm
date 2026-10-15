@@ -975,6 +975,16 @@ export const releaseHistoryUi = {
   collapseVersion: "Свернуть версию",
   releases: [
     {
+      version: "0.1.64",
+      date: "15.10.2026",
+      changes: [
+        "Добавлены метки, фильтры и показатели заказов с yoleotard.com в заказах, «Обзоре» и «Финансах».",
+        "Диаграммы и экспорт поступлений с сайта учитывают реальные оплаты и выбранную валюту EUR/USD/UAH.",
+        "Список заказов загружает подробные данные постранично, сохраняя полный поиск и переходы.",
+      ],
+      compatibility: "История, интеграции и финансовые записи сохранены. Без миграций и импорта данных. Откат к crm-v0.1.63 совместим.",
+    },
+    {
       version: "0.1.63",
       date: "15.10.2026",
       changes: [
@@ -2722,4 +2732,11 @@ export const financeReportUi = {
   operationCurrency:'Валюта операции', amountInvalid:'Введите положительную сумму, не более двух знаков после запятой.', noCategories:'Нет доступных статей расходов. Добавьте статью.', chooseOrder:'Выберите заказ', orderDetails:'Финансы заказа', invoiceSelect:'Инвойс',
   activePayments:'Действующие оплаты в валюте отчёта', createCategory:'Новая статья', categoryName:'Название статьи', archiveConfirm:'Архивировать расход? История сохранится.', archiveCategoryConfirm:'Архивировать статью расходов?',
   paymentMethods:{CASH:'Наличные',BANK_TRANSFER:'Банковский перевод',CARD:'Карта',PAYPAL:'PayPal',WISE:'Wise',OTHER:'Другой способ'},
+} as const;
+
+export const orderSourceUi = {
+ labels:{WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',OTHER:'Другое',UNKNOWN:'Не определён'},
+ receiptsKpi:'Получено с сайта',actualReceipts:'Фактические оплаты',months:'мес.',all:'Все источники',rest:'Остальные',filter:'Источник заказа',onlineOrders:'Онлайн-заказы (с сайта)',onlineReceipts:'Поступления по заказам с сайта',shareOrders:'от всех заказов периода',shareReceipts:'от всех поступлений периода',
+ bySource:'По источникам',standard:'Основные показатели',chartMode:'Режим диаграмм',trendFilter:'Источник в динамике',statusChart:'Заказы по статусам',orderChart:'Заказы по источнику',receiptsChart:'Поступления по источникам',dynamics:'Динамика по источникам',distribution:'Распределение по источникам',
+ totalOrders:'всего заказов',receipts:'Поступления',empty:'Нет данных за выбранный период',ordersScope:'По дате создания заказа. Неархивные заказы, включая отменённые.',receiptsScope:'По дате получения действительных оплат, включая оплаты архивных заказов. Источник относится к заказу.',
 } as const;

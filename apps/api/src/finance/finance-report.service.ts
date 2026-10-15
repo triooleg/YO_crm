@@ -1,3 +1,4 @@
+import {classifyOrderSource,orderOriginSelect,loadOrderSourceMap} from '../orders/order-source';
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
@@ -5,7 +6,7 @@ import { parseExchangeRateCache, type ExchangeRateCache } from "./exchange-rates
 import { assertValuationVersion, buildFinanceReport, createReportConverter, financePeriod, financeReportCsv, normalizeFinanceQuery, type FinanceReportQuery, type FinanceValuation } from "./finance-report-model";
 
 const BATCH_SIZE = 500;
-const orderSelect = { id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
+const orderSelect = { ...orderOriginSelect, id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
 const paymentSelect = { id: true, orderId: true, amountMinor: true, currency: true, receivedAt: true, method: true, notes: true, appliedAmountMinor: true, appliedCurrency: true } satisfies Prisma.PaymentSelect;
 const expenseSelect = { id: true, categoryId: true, category: { select: { name: true } }, amountMinor: true, currency: true, incurredAt: true, orderId: true, order: { select: { number: true } }, notes: true, orderShipment: { select: { id: true } } } satisfies Prisma.ExpenseSelect;
 const invoiceSelect = { id: true, number: true, orderId: true, order: { select: { number: true, clientId: true, client: { select: { displayName: true } } } }, issueDate: true, dueDate: true, totalMinor: true, currency: true, status: true } satisfies Prisma.InvoiceSelect;
@@ -42,7 +43,10 @@ export class FinanceReportService {
       const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end } }, select: expenseSelect }));
       const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
       const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end } } } }] }, select: { id: true, name: true, active: true } }));
-      const result = buildFinanceReport({ orders, payments, expenses, invoices, categories }, query, valuation, now, exportAll);
+      const orderSources=Object.fromEntries(orders.map(order=>[order.id,classifyOrderSource(order)]));
+      const missingIds=[...new Set([...payments.map(row=>row.orderId),...invoices.map(row=>row.orderId),...expenses.map(row=>row.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
+      Object.assign(orderSources,await loadOrderSourceMap(tx,missingIds));
+      const result = buildFinanceReport({ orderSources, orders, payments, expenses, invoices, categories }, query, valuation, now, exportAll);
       return exportAll ? financeReportCsv(result, query.tab) : result;
     }, { isolationLevel: "RepeatableRead", timeout: 30_000, maxWait: 5_000 });
   }

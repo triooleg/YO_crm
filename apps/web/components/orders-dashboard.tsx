@@ -1,5 +1,8 @@
 "use client";
 
+import { orderSourceUi as sourceUi } from "../lib/i18n";
+import { parseSource, sourceOptions, sourceLabel, type OrderSourceFilter } from "../lib/order-source";
+import { OrderSourceBadge, CartIcon } from "./order-source-analytics";
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../lib/i18n";
@@ -9,7 +12,7 @@ import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { Select, Badge, Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
@@ -35,6 +38,8 @@ type ColumnId = "client" | "model" | "quantity" | "deadline" | "payment" | "prod
 type SortColumnId = Exclude<ColumnId, "menu">;
 type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "depositShortfall" | "work" | "ready" | "completed" | "overdue";
+type OrderListPage = {items:Order[];total:number;page:number;pageSize:number;focusFound:boolean;metrics:{total:number;active:number;unpaid:number;deposit:number;urgent:number;overdue:number;ready:number;completed:number;work:number};sources:{total:number;websiteCount:number};disciplines:string[]};
+
 type OverviewContext = { filter: string; period: string };
 type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void };
 type Preview = { src: string; left: number; top: number; width: number };
@@ -56,17 +61,26 @@ const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE
 export function OrdersDashboard({ role, onNavigate }: Props) {
   const theme = useMantineTheme();
   const editableTextColor = (theme.other.crmControls as { editableTextColor: string }).editableTextColor;
+  const [source,setSource]=useState<OrderSourceFilter>('');
+  const [serverPage,setServerPage]=useState<OrderListPage>();
+  const restoringRoute=useRef(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [overviewContext, setOverviewContext] = useState<OverviewContext | null>();
   const [routeRevision, setRouteRevision] = useState(0);
-  const listContext = useRef({ search, overviewContext });
-  listContext.current = { search, overviewContext };
+  const listContext = useRef({ search, overviewContext, source });
   useEffect(() => {
     const readContext = () => {
       const params = new URLSearchParams(window.location.search);
+      restoringRoute.current=true;
+      setSource(parseSource(params.get('source')));setSearch(params.get('search')||'');
+      const quick=params.get('quick');if(quick&&['all','active','urgent','deposit','depositShortfall','work','ready','completed','overdue'].includes(quick))setQuickFilter(quick as QuickFilter);else setQuickFilter('all');
+      setStatusFilter(params.get('status')||'all');setDisciplineFilter(params.get('discipline')||'all');
+      const sortValue=params.get('sort');if(sortValue&&SORTABLE_ORDER_COLUMNS.includes(sortValue as SortColumnId))setSort({column:sortValue as SortColumnId,direction:params.get('direction')==='asc'?'asc':'desc'});else setSort({column:'created',direction:'desc'});
+      const requestedPage=Number(params.get('page'));setPage(Number.isInteger(requestedPage)&&requestedPage>0?requestedPage:1);
+      const size=Number(params.get('pageSize'));setPageSize(ORDER_PAGE_SIZES.includes(size as OrderPageSize)?size as OrderPageSize:20);
       const filter = params.get("overviewFilter") || "";
       const period = params.get("period") || "";
       const next = filter || period ? { filter, period } : null;
@@ -78,7 +92,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       const orderId = readContext();
       if (orderId !== initialOrderId.current) setExpandedId(undefined);
       initialOrderId.current = orderId;
-      cancelPreviousOrderNavigation();
+      cancelPreviousOrderNavigation(true);
       listSequence.current++;
       skipNavigationSearchReload.current = false;
       setRouteRevision(current => current + 1);
@@ -93,7 +107,10 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<OrderPageSize>(20);
   const [paginationReady, setPaginationReady] = useState(false);
+  listContext.current={search,overviewContext,source};
+  const currentRead=useRef({quickFilter,statusFilter,disciplineFilter,sort,page,pageSize});currentRead.current={quickFilter,statusFilter,disciplineFilter,sort,page,pageSize};
   const previousListCriteria = useRef<string | undefined>(undefined);
+  const criteriaPageReset=useRef(false);
   const [expandedId, setExpandedId] = useState<string>();
   const [navigationTarget,setNavigationTarget]=useState<string>();
   const navigationSequence=useRef(0);
@@ -147,11 +164,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     return response.json();
   }
 
-  function orderListPath(query: string, context: OverviewContext | null | undefined) {
+  function orderListPath(query: string, context: OverviewContext | null | undefined, origin=listContext.current.source, overrides:Record<string,string>={}) {
     const params = new URLSearchParams();
     if (query.trim()) params.set("search", query.trim());
     if (context?.filter) params.set("overviewFilter", context.filter);
     if (context?.period) params.set("period", context.period);
+    const state=currentRead.current;params.set('page',String(state.page));params.set('pageSize',String(state.pageSize));params.set('quick',state.quickFilter);params.set('status',state.statusFilter);params.set('discipline',state.disciplineFilter);params.set('sort',state.sort.column);params.set('direction',state.sort.direction);
+    if(origin)params.set('source',origin);if(initialOrderId.current)params.set('focusId',initialOrderId.current);for(const [key,value] of Object.entries(overrides))params.set(key,value);
     return `/orders${params.size ? `?${params}` : ""}`;
   }
 
@@ -170,24 +189,27 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
   async function load() {
     const { search: requestedSearch, overviewContext: context } = listContext.current;
-    if (context === undefined) return;
+    if (context === undefined || !paginationReady) return;
     const sequence=++listSequence.current;
     const path = orderListPath(requestedSearch, context);
     setLoading(true);
     try {
-      const listed = await request(path) as Order[];
+      const response = await request(path) as OrderListPage | Order[];
+      const paged=Array.isArray(response)?undefined:response;const listed=Array.isArray(response)?response:response.items;
       let contextUnavailable = false;
       const contextOrder = initialOrderId.current
         ? await request(`/orders/${encodeURIComponent(initialOrderId.current)}`).catch(() => { contextUnavailable = true; return undefined; }) as OrderDetail | undefined
         : undefined;
       if(sequence!==listSequence.current || path !== orderListPath(listContext.current.search, listContext.current.overviewContext))return;
-      if (context && contextOrder && !listed.some(order => order.id === contextOrder.id)) contextUnavailable = true;
+      if ((context || listContext.current.source || paged) && contextOrder && (paged? !paged.focusFound : !listed.some(order => order.id === contextOrder.id))) contextUnavailable = true;
       const retainedContext = contextUnavailable ? undefined : contextOrder ?? (!requestedSearch.trim() && !context ? previousOrderContext.current : undefined);
-      setOrders(retainedContext && !listed.some((order) => order.id === retainedContext.id) ? [retainedContext, ...listed] : listed);
+      setServerPage(paged);if(paged)setPage(paged.page);
+      setOrders(!paged && retainedContext && !listed.some((order) => order.id === retainedContext.id) ? [retainedContext, ...listed] : listed);
       if (contextOrder && !contextUnavailable) {
         setOrderDetails((current) => ({ ...current, [contextOrder.id]: contextOrder }));
-        setExpandedId(contextOrder.id);
+        setExpandedId(contextOrder.id);if(paged)setNavigationTarget(contextOrder.id);
       }
+      if(paged)initialOrderId.current=undefined;
       setError(contextUnavailable ? overviewContextUi.orderUnavailable : "");
     } catch (reason) {
       if(sequence===listSequence.current && path === orderListPath(listContext.current.search, listContext.current.overviewContext))setError((reason as Error).message);
@@ -200,31 +222,29 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     const detail = await request(`/orders/${orderId}`) as OrderDetail;
     setOrderDetails((current) => ({ ...current, [orderId]: detail }));
     setOrders((items) => items.map((item) => item.id === orderId ? detail : item));
-    if (reconcileOverview && listContext.current.overviewContext) await load();
+    if (reconcileOverview && (serverPage || listContext.current.overviewContext)) await load();
     return detail;
   }
 
   async function openPreviousOrder(orderId:string) {
     const sequence=++navigationSequence.current;
     try {
-      const [detail,fullList]=await Promise.all([
+      const [detail,response]=await Promise.all([
         request(`/orders/${encodeURIComponent(orderId)}`) as Promise<OrderDetail>,
-        search.trim() || listContext.current.overviewContext ? request(orderListPath("", listContext.current.overviewContext)) as Promise<Order[]> : Promise.resolve(undefined),
+        request(orderListPath('',listContext.current.overviewContext,listContext.current.source,{page:'1',focusId:orderId,quick:'all',status:'all',discipline:'all'})) as Promise<OrderListPage|Order[]>,
       ]);
       if(sequence!==navigationSequence.current)return;
-      if (listContext.current.overviewContext && !fullList?.some(order => order.id === orderId)) { setError(overviewContextUi.orderUnavailable); return; }
-      listSequence.current++;setLoading(false);previousOrderContext.current=detail;
-      initialOrderId.current=undefined;
-      setOrderDetails(current=>({...current,[orderId]:detail}));
-      setOrders(current=>{const listed=fullList??current;return listed.some(order=>order.id===orderId)?listed.map(order=>order.id===orderId?detail:order):[...listed,detail];});
-      if(search)skipNavigationSearchReload.current=true;
-      setQuickFilter("all");setStatusFilter("all");setDisciplineFilter("all");setSearch("");setError("");
+      const paged=Array.isArray(response)?undefined:response,listed=Array.isArray(response)?response:response.items;
+      if((listContext.current.overviewContext||listContext.current.source||paged)&&!(paged?paged.focusFound:listed.some(order=>order.id===orderId))){setError(overviewContextUi.orderUnavailable);return;}
+      listSequence.current++;setLoading(false);previousOrderContext.current=detail;initialOrderId.current=undefined;
+      setOrderDetails(current=>({...current,[orderId]:detail}));setServerPage(paged);setOrders(listed.some(order=>order.id===orderId)?listed:[...listed,detail]);
+      previousListCriteria.current=undefined;setQuickFilter('all');setStatusFilter('all');setDisciplineFilter('all');setSearch('');setError('');if(paged)setPage(paged.page);setExpandedId(orderId);
       setNavigationTarget(orderId);
-      const url=new URL(window.location.href);url.searchParams.set("orderId",orderId);window.history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`);
+      const url=new URL(window.location.href);url.searchParams.set('orderId',orderId);window.history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
     }catch(reason){if(sequence===navigationSequence.current)setError((reason as Error).message);}
   }
 
-  function cancelPreviousOrderNavigation(){navigationSequence.current++;setNavigationTarget(undefined);}
+  function cancelPreviousOrderNavigation(keepRoute=false){navigationSequence.current++;setNavigationTarget(undefined);if(!keepRoute){initialOrderId.current=undefined;const url=new URL(window.location.href);url.searchParams.delete('orderId');window.history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);}}
 
   async function voidOrderPayment(orderId: string, paymentId: string, reason: string, expectedOrderUpdatedAt: string) {
     const result = await request(`/orders/${orderId}/payments/${paymentId}/void`, {method: "POST", body: JSON.stringify({reason, expectedOrderUpdatedAt})});
@@ -314,7 +334,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if(skipNavigationSearchReload.current&&!search){skipNavigationSearchReload.current=false;return;}
     const timer = window.setTimeout(() => void load(), 220);
     return () => window.clearTimeout(timer);
-  }, [search, overviewContext, routeRevision]);
+  }, [search, overviewContext, source, quickFilter,statusFilter,disciplineFilter,sort,page,pageSize,paginationReady,routeRevision]);
 
   useEffect(() => {
     const saved = parseOrderColumnSettings(localStorage.getItem(COLUMN_SETTINGS_KEY), DEFAULT_COLUMNS)
@@ -327,13 +347,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
   useEffect(() => {
     const saved = parseSavedOrderSort(localStorage.getItem(SORT_SETTINGS_KEY));
-    if (saved) setSort(saved);
+    if (saved&&!new URLSearchParams(window.location.search).has("sort")) setSort(saved);
   }, []);
 
   useEffect(() => {
     const saved = parseOrderPaginationState(sessionStorage.getItem(PAGINATION_SETTINGS_KEY));
-    setPage(saved.page);
-    setPageSize(saved.pageSize);
+    const params=new URLSearchParams(window.location.search);if(!params.has("page"))setPage(saved.page);
+    if(!params.has("pageSize"))setPageSize(saved.pageSize);
     setPaginationReady(true);
   }, []);
 
@@ -347,21 +367,30 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
   useEffect(() => {
     if (!paginationReady) return;
-    const criteria = JSON.stringify([quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext]);
-    if (previousListCriteria.current === undefined) {
+    const criteria = JSON.stringify([quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext,source]);
+    if (previousListCriteria.current === undefined || restoringRoute.current) {
       previousListCriteria.current = criteria;
       return;
     }
     if (previousListCriteria.current !== criteria) {
       previousListCriteria.current = criteria;
-      setPage(1);
+      if(page!==1){criteriaPageReset.current=true;setPage(1);}
     }
-  }, [paginationReady, quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext]);
+  }, [paginationReady, quickFilter, statusFilter, disciplineFilter, sort, search, overviewContext,source]);
 
   useEffect(() => {
     if (!paginationReady) return;
     sessionStorage.setItem(PAGINATION_SETTINGS_KEY, JSON.stringify({ page, pageSize }));
   }, [paginationReady, page, pageSize]);
+
+  useEffect(()=>{
+    if(!paginationReady||overviewContext===undefined)return;
+    if(criteriaPageReset.current){criteriaPageReset.current=false;return;}
+    const restore=restoringRoute.current;restoringRoute.current=false;
+    const url=new URL(window.location.href),query=new URLSearchParams(orderListPath(search,overviewContext).split('?')[1]);query.delete('focusId');
+    for(const key of ['source','search','quick','status','discipline','sort','direction','page','pageSize']){const value=query.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}
+    const next=`${url.pathname}${url.search}${url.hash}`;if(next!==`${window.location.pathname}${window.location.search}${window.location.hash}`)window.history[restore?'replaceState':'pushState'](null,'',next);
+  },[paginationReady,overviewContext,source,search,quickFilter,statusFilter,disciplineFilter,sort,page,pageSize]);
 
   useEffect(() => {
     if (!newOrderOpen) return;
@@ -381,7 +410,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [newOrderOpen, newOrderQuery]);
 
-  const metrics = useMemo(() => ({
+  const metrics = useMemo(() => serverPage?.metrics ?? ({
     total: orders.length,
     active: orders.filter(isActiveOrder).length,
     unpaid: orders.filter((order) => isActiveOrder(order) && paid(order) === 0).length,
@@ -390,10 +419,10 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     overdue: orders.filter((order) => isActiveOrder(order) && days(order) < 0).length,
     ready: orders.filter(isReadyToShip).length,
     completed: orders.filter((order) => order.salesStatus === "COMPLETED").length,
-  }), [orders]);
+  }), [orders,serverPage]);
 
-  const disciplines = useMemo(() => [...new Set(orders.map((order) => order.discipline).filter((value): value is string => Boolean(value)))].sort(), [orders]);
-  const filtered = useMemo(() => orders.filter((order) => {
+  const disciplines = useMemo(() => serverPage?.disciplines ?? [...new Set(orders.map((order) => order.discipline).filter((value): value is string => Boolean(value)))].sort(), [orders,serverPage]);
+  const filtered = useMemo(() => serverPage?orders:orders.filter((order) => {
     if (statusFilter === "active" && !isActiveOrder(order)) return false;
     if (statusFilter !== "all" && statusFilter !== "active" && order.salesStatus !== statusFilter) return false;
     if (disciplineFilter !== "all" && order.discipline !== disciplineFilter) return false;
@@ -406,16 +435,17 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if (quickFilter === "completed" && order.salesStatus !== "COMPLETED") return false;
     if (quickFilter === "overdue" && !(isActiveOrder(order) && days(order) < 0)) return false;
     return true;
-  }), [orders, quickFilter, statusFilter, disciplineFilter]);
+  }), [orders, quickFilter, statusFilter, disciplineFilter,serverPage]);
 
-  const sorted = useMemo<Order[]>(() => sortOrders(filtered, sort, (order: Order, column: string) => {
+  const sorted = useMemo<Order[]>(() => serverPage?filtered:sortOrders(filtered, sort, (order: Order, column: string) => {
     if (column === "model") return `${order.items[0]?.name || order.notes || ui.designMissing}|${discipline(order.discipline).label}`;
     if (column === "production") return `${order.productionSlot?.startsAt || ""}|${order.productionStatus}`;
     if (column === "status") return orderLabel("sales", order.salesStatus);
     if (column === "delivery") return `${countryLabel(deliveryCountry(order)) || ui.addressMissing}|${deliveryPlace(order)}|${orderLabel("shipping", order.shippingStatus)}`;
     return undefined;
-  }), [filtered, sort]);
-  const orderPage = paginateOrders(sorted, page, pageSize);
+  }), [filtered, sort,serverPage]);
+  const orderPage = serverPage?{items:orders,page:serverPage.page,totalPages:Math.max(1,Math.ceil(serverPage.total/pageSize))}:paginateOrders(sorted, page, pageSize);
+  const totalRows=serverPage?.total??sorted.length;
   const totalPages = orderPage.totalPages;
   const currentPage = orderPage.page;
   const shown = orderPage.items;
@@ -423,7 +453,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if(!navigationTarget)return;
     const index=sorted.findIndex(order=>order.id===navigationTarget);
     if(index<0)return;
-    const targetPage=Math.floor(index/pageSize)+1;
+    const targetPage=serverPage?serverPage.page:Math.floor(index/pageSize)+1;
     if(page!==targetPage){setPage(targetPage);return;}
     setExpandedId(navigationTarget);
     const frame=requestAnimationFrame(()=>{document.getElementById(`order-details-${navigationTarget}`)?.scrollIntoView({block:"center"});setNavigationTarget(undefined);});
@@ -440,19 +470,19 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   const editDesignOrder = orders.find((order) => order.id === editDesign?.orderId);
   const editDesignItem = editDesignOrder?.items.find((item) => item.id === editDesign?.itemId);
   const visibleColumns = columnOrder.filter((id) => !hiddenColumns.has(id));
-  const filterCount = Number(statusFilter !== "all") + Number(disciplineFilter !== "all");
+  const filterCount = Number(statusFilter !== "all") + Number(disciplineFilter !== "all")+Number(Boolean(source));
   const canArchiveOrders = role === "OWNER" || role === "ADMIN";
 
   useEffect(() => {
-    if (paginationReady && !loading && page !== currentPage) setPage(currentPage);
-  }, [paginationReady, loading, page, currentPage]);
+    if (!serverPage && paginationReady && !loading && page !== currentPage) setPage(currentPage);
+  }, [serverPage,paginationReady, loading, page, currentPage]);
 
   useEffect(() => {
     const contextOrderId = initialOrderId.current;
     if (!paginationReady || loading || !contextOrderId) return;
     const targetIndex = sorted.findIndex((order) => order.id === contextOrderId);
     if (targetIndex < 0) return;
-    const targetPage = Math.floor(targetIndex / pageSize) + 1;
+    const targetPage = serverPage?serverPage.page:Math.floor(targetIndex / pageSize) + 1;
     if (page !== targetPage) { setPage(targetPage); return; }
     setExpandedId(contextOrderId);
     requestAnimationFrame(() => document.getElementById(`order-details-${contextOrderId}`)?.scrollIntoView({ block: "center" }));
@@ -477,8 +507,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     const next = new Set(hiddenColumns); next.has(id) ? next.delete(id) : next.add(id); persistColumns(columnOrder, next);
   }
   function selectQuickFilter(filter: QuickFilter) { cancelPreviousOrderNavigation();setQuickFilter((current) => current === filter && filter !== "all" ? "all" : filter); }
-  function clearFilters() { cancelPreviousOrderNavigation();setQuickFilter("all"); setStatusFilter("all"); setDisciplineFilter("all"); }
-  function changePage(next:number){cancelPreviousOrderNavigation();setPage(next);}
+  function clearFilters() { setSource('');cancelPreviousOrderNavigation();setQuickFilter("all"); setStatusFilter("all"); setDisciplineFilter("all"); }
+  function changePage(next:number){initialOrderId.current=undefined;cancelPreviousOrderNavigation();setPage(next);}
   function persistSort(next: SortState) { cancelPreviousOrderNavigation();setSort(next); localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); }
   function cycleSort(id: SortColumnId) { cancelPreviousOrderNavigation();setSort((current) => { const next = nextOrderSort(current, id) as SortState; localStorage.setItem(SORT_SETTINGS_KEY, JSON.stringify(next)); return next; }); }
   function changePageSize(value: string) {
@@ -542,8 +572,10 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     const image = event.currentTarget, width = Math.min(520, window.innerWidth - 24), left = event.clientX + width + 24 < window.innerWidth ? event.clientX + 16 : Math.max(12, event.clientX - width - 16), top = 12;
     setPreview({ src: image.src, left, top, width });
   }
-  function exportOrders() {
-    const rows = [[...ui.csvHeaders], ...sorted.map((order) => [order.number, order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; ")])];
+  async function exportOrders() {
+    let exported=sorted;
+    try{if(serverPage){exported=[];for(let p=1;;p++){const result=await request(orderListPath(search,overviewContext,source,{page:String(p),pageSize:'100',focusId:''})) as OrderListPage;exported.push(...result.items);if(exported.length>=result.total||!result.items.length)break;}}}catch(reason){setError((reason as Error).message);return;}
+    const rows = [[...ui.csvHeaders,sourceUi.filter], ...exported.map((order) => [order.number, order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; "),sourceLabel(order.orderSource)])];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
@@ -603,23 +635,26 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <Kpi label={ui.kpis.completed} value={loading || error ? null : metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
     </div>
 
+    {serverPage&&<div className="orders-source-summary"><CrmButton tone="secondary" size="compact-sm" leftSection={<CartIcon/>} onClick={()=>{cancelPreviousOrderNavigation();setSource(source==='WEBSITE'?'':'WEBSITE');}}>{sourceUi.onlineOrders}: {loading?'—':serverPage.sources.websiteCount}</CrmButton><small>{sourceUi.ordersScope}</small></div>}
     <div className="orders-command-bar">
       <CrmSearchField className="orders-search" value={search} onValueChange={value=>{cancelPreviousOrderNavigation();setSearch(value);}} placeholder={ui.search} ariaLabel={ui.search} clearLabel={ui.clearSearch} showSearchIcon />
       <div className="orders-filter-wrap">
         <CrmButton tone="secondary" className={`orders-filter-trigger${filterOpen ? " active" : ""}`} onClick={() => setFilterOpen((value) => !value)}><UiIcon name="filter" />{ui.filters}{filterCount > 0 && <b>{filterCount}</b>}</CrmButton>
         {filterOpen && <div className="orders-filter-popover" role="dialog" aria-label={ui.filters}>
+          <Select label={sourceUi.filter} value={source} onChange={value=>{cancelPreviousOrderNavigation();setSource(parseSource(value));}} data={sourceOptions()} allowDeselect={false}/>
           <CrmNativeSelect label={ui.filterStatus} value={statusFilter} onChange={(event) => {cancelPreviousOrderNavigation();setStatusFilter(event.target.value);}} data={[{ value: "all", label: ui.allStatuses }, { value: "active", label: ui.kpis.active }, ...SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))]} />
           <CrmNativeSelect label={ui.discipline} value={disciplineFilter} onChange={(event) => {cancelPreviousOrderNavigation();setDisciplineFilter(event.target.value);}} data={[{ value: "all", label: ui.anyDiscipline }, ...disciplines.map((value) => ({ value, label: discipline(value).label }))]} />
           <CrmButton tone="secondary" onClick={clearFilters}>{ui.clearAll}</CrmButton>
         </div>}
       </div>
-      <div className="orders-quick-filters">{([ ["all", ui.all, orders.length], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
+      <div className="orders-quick-filters">{([ ["all", ui.all, metrics.total], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, (serverPage?.metrics.work??orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length)], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
       <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
     </div>
 
-    {(quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <div className="orders-filter-chips">
+    {(source || quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <div className="orders-filter-chips">
+      {source&&<FilterChip label={`${sourceUi.filter}: ${sourceLabel(source)}`} onRemove={()=>setSource('')}/>}
       {quickFilter !== "all" && <FilterChip label={quickFilterLabel(quickFilter)} onRemove={() => setQuickFilter("all")} />}
       {statusFilter !== "all" && <FilterChip label={statusFilter === "active" ? ui.activeStatus : `${ui.statusPrefix}: ${orderLabel("sales", statusFilter)}`} onRemove={() => {cancelPreviousOrderNavigation();setStatusFilter("all");}} />}
       {disciplineFilter !== "all" && <FilterChip label={`${ui.discipline}: ${discipline(disciplineFilter).label}`} onRemove={() => {cancelPreviousOrderNavigation();setDisciplineFilter("all");}} />}
@@ -634,7 +669,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
         <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => id === "menu" ? <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th> : <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }} aria-sort={sort.column === id ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button className="orders-sort-heading" onClick={() => cycleSort(id)} aria-label={`${ui.sortByColumn}: ${ui.columnsMap[id]}`} title={`${ui.sortByColumn}: ${ui.columnsMap[id]}`}><span>{ui.columnsMap[id]}</span><b aria-hidden="true">{sort.column === id ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</b></button></th>)}</tr></thead>
         <tbody>
           {loading && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><span className="orders-loader" />{ui.loading}</td></tr>}
-          {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}
+          {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(source || quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}
           {!loading && shown.map((order) => <Fragment key={order.id}>
             <tr data-sales-status={order.salesStatus} style={{"--order-status-color":theme.colors[crmStatusPresentation("sales",order.salesStatus).color]![6]} as CSSProperties} className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => void toggleExpanded(order)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
@@ -646,7 +681,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       </table>
     </div>
 
-    {!loading && sorted.length > 0 && <div className="orders-pagination"><span>{ui.shown} {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sorted.length)} {ui.of} {sorted.length}</span><nav aria-label={ui.pagination}><button disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, currentPage - 3), Math.max(5, currentPage + 2)).map((value) => <button key={value} className={currentPage === value ? "active" : ""} aria-current={currentPage === value ? "page" : undefined} onClick={() => changePage(value)}>{value}</button>)}<button disabled={currentPage === totalPages} onClick={() => changePage(currentPage + 1)}><UiIcon name="chevronRight" /></button></nav><CrmNativeSelect className="orders-page-size" aria-label={ui.ordersPerPage} value={String(pageSize)} onChange={(event) => changePageSize(event.target.value)} data={ORDER_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value} / ${ui.rowsPerPage}` }))} /></div>}
+    {!loading && totalRows > 0 && <div className="orders-pagination"><span>{ui.shown} {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalRows)} {ui.of} {totalRows}</span><nav aria-label={ui.pagination}><button disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, currentPage - 3), Math.max(5, currentPage + 2)).map((value) => <button key={value} className={currentPage === value ? "active" : ""} aria-current={currentPage === value ? "page" : undefined} onClick={() => changePage(value)}>{value}</button>)}<button disabled={currentPage === totalPages} onClick={() => changePage(currentPage + 1)}><UiIcon name="chevronRight" /></button></nav><CrmNativeSelect className="orders-page-size" aria-label={ui.ordersPerPage} value={String(pageSize)} onChange={(event) => changePageSize(event.target.value)} data={ORDER_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value} / ${ui.rowsPerPage}` }))} /></div>}
 
     <Modal opened={columnsOpen} onClose={() => setColumnsOpen(false)} title={ui.columns} aria-label={ui.columns} closeButtonProps={{ "aria-label": ui.close }} returnFocus centered size={440} classNames={{ content: "orders-column-settings", header: "orders-column-settings-header", title: "orders-column-settings-title", body: "orders-column-settings-body" }}>
       <p className="orders-columns-hint">{ui.columnsHint}</p>
@@ -691,7 +726,7 @@ function OrderDisciplineMenu({ order, onChange }: { order: Order; onChange: (ord
 
 function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onDelivery }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onDelivery: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
-  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
+  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}{order.orderSource==='WEBSITE'&&<OrderSourceBadge source={order.orderSource}/>}</button><OrderChannelIcon channel={order.client.source} /><button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
   if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${Math.max(1, athleteCount(order))} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
@@ -727,7 +762,7 @@ function ExpandedOrder({ onOpenOrder, expenseActions, financeActions, onVoidPaym
     <section className="orders-order-overview">
       <div className="orders-order-identity">
         {primaryImage ? <img src={primaryImage} alt={ui.orderDesignAlt} /> : <span className="orders-order-identity-placeholder"><UiIcon name="image" /></span>}
-        <div><p>{ui.selectedOrder}</p><h2>{order.number}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small><small><OrderChannelIcon channel={order.client.source} />{orderLabel("source", order.client.source)}</small><em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
+        <div><p>{ui.selectedOrder}</p><h2>{order.number}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><OrderSourceBadge source={order.orderSource}/><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small><small><OrderChannelIcon channel={order.client.source} />{orderLabel("source", order.client.source)}</small><em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
       </div>
       <div ref={flowRef} className="orders-order-flow" aria-label={`${ui.payment} → ${ui.tabs.production} → ${ui.shipping}`}>
         <article className={paidMinor !== null && paidMinor >= order.depositRequiredMinor ? "complete" : "warning"}><i><UiIcon name="check" /></i><div className="orders-flow-caption"><b>{ui.payment}</b><CrmStatusBadge domain="payment" status={order.paymentStatus}/><strong>{money(paidMinor, order.currency)} / {money(order.priceMinor, order.currency)}</strong><small>{paymentPercent === null ? dataEvidenceUi.unavailable : `${paymentPercent}%`} · {ui.balancePrefix} {money(balance(order), order.currency)}</small></div></article>
