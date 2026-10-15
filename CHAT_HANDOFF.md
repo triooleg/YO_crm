@@ -1,5 +1,30 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — CRM 0.3.0 deployed; acceptance complete
+
+User authorized check+deploy. Runtime/tag81a6b62afd0694247c9b768edf88accb9dce7c47 /crm-v0.3.0.
+Canonicalarchivebc27083d46d9aba3b65f4a637723b78a55b16dd635d34da4053094cdbf1c56f8
+(800files, ONLYnewSQL restoredtoexactGitLF; originalCRLFarchive retained). API15e2b4ccd78d150e872fc57429092febfc56c48b9b0cff875b1570ed173585b9;
+WEBb093c5c3462b0df9e8f6a3284b656702557eed49b88c11177ad19a36bba4f61a.
+Quality1549/types/buildPASS, CI38770587970/Release38771153743SUCCESS; draftPR3 notmerged.
+FULL20261015T163120Z-619f944-pre-v030 verifieddump/uploads/manifest/checksums/COMPLETED.
+RealPG16 restore57tables/rawDDLrollback; exactimagePrismatracker35->36/repeatnoop/oldreader
++5actualdomainraces/transactionrollbackPASS. Appwritersstoppedbefore22tablesnapshot;
+newmigrationonly,22tablesexactPASSbeforestartup, onlyapiwebrecreatedPGRedisIDs/volumespreserved.
+FirstCompose-run--no-buildrejectedbeforeSQL; reviewedroutineCLIcorrectionresumedwithpinned
+existingimage/no--build/--pullnever. No seed/backfill/repair/restore/customer/providerwrite.
+FinalpublicHTTPSroot/health200+oktruefromclient;server-selfpublictimeoutretainedtransportlimit.
+Actualsmoke3 final31PASS/44frames/errorsandblockedwrites0;3historicalUNAVAILABLElegit.
+VisualactualPASS44final+46priorframes(surveyoverlapnot90uniquecases). Newandoldphaselogs0errors
+fixeduntilpost-final.log; newsource800/36tracker/health/startonly/uploadsdependencychecksPASS.
+
+Post-startup8Orders changed ONLYsalesStatus/updatedAt,8Activity/8Audit; rigorousREADONLY
+reconstructionmatchesalloriginal22baselinecounts/hashes,other19actualtablesunchanged.
+status-attribution-final.log PASS; actor/causeunattributed. StrictDIFFreceiptsretained,
+no repair/rebaseline/rollback. Oldimagefallbackforbiddenafterbusinesschanges.
+Privateevidence .local/designs-instances/deploy; docs/ui/crm-0.3.0-deployment.md current.
+Independent Release gates 1–9 PASS; no open blockers. Documentation closure only; deployed runtime/tag unchanged.
+
 ## 2026-10-15 — User authorized 0.3.0 verification and deployment
 
 Current request "делай проверку и дпелой" authorizes the scoped release workflow,
