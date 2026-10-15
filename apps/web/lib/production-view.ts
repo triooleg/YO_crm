@@ -117,11 +117,23 @@ export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shipp
 }
 
 /** Adapt the existing Orders projection to the shared presentation; never write a status. */
+export function hasDatedProductionSlot(order: { productionSlot?: { startsAt?: string; endsAt?: string } | null }) {
+  const slot = order.productionSlot;
+  if (!slot?.startsAt || !slot.endsAt) return false;
+  const start = Date.parse(slot.startsAt), end = Date.parse(slot.endsAt);
+  return Number.isFinite(start) && Number.isFinite(end) && start <= end;
+}
+
+export function productionStatusForDisplay(order: { productionStatus: string; productionSlot?: { startsAt?: string; endsAt?: string; tentative?: boolean } | null }) {
+  return order.productionStatus === "NOT_SCHEDULED" && hasDatedProductionSlot(order) ? "SCHEDULED" : order.productionStatus;
+}
+
 export function orderProductionStatusPresentation(order: {
   productionStatus: string;
   shippingStatus: string;
   salesStatus?: string;
   deliveryTrackingCode?: string;
+  productionSlot?: { startsAt?: string; endsAt?: string; tentative?: boolean } | null;
   shipment?: { trackingNumber?: string; shippedAt?: string; deliveredAt?: string };
 }) {
   const shipping = shippingPresentation({
@@ -133,13 +145,44 @@ export function orderProductionStatusPresentation(order: {
   });
   const statuses = { shipped: "SHIPPED", delivered: "DELIVERED", returned: "RETURNED", lost: "LOST" } as const;
   if (shipping.code in statuses) return { domain: "shipping" as const, status: statuses[shipping.code as keyof typeof statuses] };
-  return { domain: "production" as const, status: order.productionStatus };
+  return { domain: "production" as const, status: productionStatusForDisplay(order) };
 }
 
 export function orderReadyToShip(order: Parameters<typeof orderProductionStatusPresentation>[0]) {
   if (["COMPLETED", "CANCELLED"].includes(order.salesStatus ?? "")) return false;
   if (orderProductionStatusPresentation(order).domain === "shipping") return false;
   return order.shippingStatus === "READY" || order.productionStatus === "READY";
+}
+
+/** Read-only timeline facts; parcel tracking is not proof that unassigned items shipped. */
+export function orderTimelinePresentation(order: Parameters<typeof orderProductionStatusPresentation>[0] & {
+  orderShipments?: Array<{ id: string; status: string; trackingNumber?: string | null; shippedAt?: string | null; deliveredAt?: string | null; instances?: Array<{ id: string }> }>;
+  items?: Array<{ quantity?: number; instances?: Array<{ id: string; productionStatus?: string }> }>;
+}) {
+  const factualDate = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? value : null;
+  const legacyTracking = order.shipment?.trackingNumber?.trim() || order.deliveryTrackingCode?.trim() || "";
+  const parcels = (order.orderShipments ?? []).filter(parcel => parcel.status !== "CANCELLED");
+  const sent = parcels.filter(parcel => Boolean(parcel.trackingNumber?.trim() || factualDate(parcel.shippedAt) || factualDate(parcel.deliveredAt)) || ["SHIPPED", "IN_TRANSIT", "DELIVERED", "RETURNED", "LOST"].includes(parcel.status));
+  const covered = new Set(sent.flatMap(parcel => (parcel.instances ?? []).map(instance => instance.id)));
+  const instances = (order.items ?? []).flatMap(item => item.instances ?? []).filter(instance => instance.productionStatus !== "CANCELLED");
+  const knownCohort = Boolean(order.items?.length) && order.items!.every(item => Boolean(item.instances?.length) && (item.quantity === undefined || item.instances!.length === item.quantity))
+    && instances.length > 0 && new Set(instances.map(instance => instance.id)).size === instances.length;
+  const allParcelsSent = knownCohort && parcels.length > 0 && sent.length === parcels.length && instances.every(instance => covered.has(instance.id));
+  const legacy = shippingPresentation({ shippingStatus: order.shippingStatus, salesStatus: order.salesStatus,
+    hasTrackingNumber: Boolean(legacyTracking), shippedAt: factualDate(order.shipment?.shippedAt) ?? undefined,
+    deliveredAt: factualDate(order.shipment?.deliveredAt) ?? undefined });
+  const legacySent = ["shipped", "delivered", "returned", "lost"].includes(legacy.code);
+  const partial = !legacySent && sent.length > 0 && !allParcelsSent;
+  const childException = sent.some(parcel => parcel.status === "LOST") ? "LOST" : sent.some(parcel => parcel.status === "RETURNED") ? "RETURNED" : null;
+  const shippingStatus = ["RETURNED","LOST"].includes(order.shippingStatus) ? order.shippingStatus : childException
+    ?? (legacySent ? ({shipped:"SHIPPED",delivered:"DELIVERED",returned:"RETURNED",lost:"LOST"} as Record<string,string>)[legacy.code]!
+    : allParcelsSent ? (parcels.every(parcel => parcel.status === "DELIVERED" || factualDate(parcel.deliveredAt)) ? "DELIVERED" : "SHIPPED") : order.shippingStatus);
+  const parcelDates = sent.map(parcel => factualDate(parcel.shippedAt));
+  const shippedAt = factualDate(order.shipment?.shippedAt) || (allParcelsSent && parcelDates.every(Boolean) ? [...parcelDates].sort((a,b)=>Date.parse(a!)-Date.parse(b!)).at(-1)! : null);
+  return { shippingStatus, partial, shippedAt,
+    productionStatus: productionStatusForDisplay(order),
+    trackingNumber: legacyTracking || sent.map(parcel => parcel.trackingNumber?.trim()).find(Boolean) || "",
+    productionCompleted: !partial && (legacySent || allParcelsSent) && order.productionStatus !== "CANCELLED" };
 }
 
 export function orderDeadlineDays(order: { requiredDeliveryAt?: string }, today: Date = new Date()) {
@@ -207,7 +250,7 @@ export function orderMatchesProductionFilters(order: ProductionOrderView, filter
   const haystack = [order.number, order.client.displayName, order.client.country, order.notes, ...order.items.map((item) => item.name)].filter(Boolean).join(" ").toLocaleLowerCase();
   const queryMatches = haystack.includes(filters.query.trim().toLocaleLowerCase());
   const paymentMatches = filters.payment === "all" || payment === filters.payment;
-  const productionMatches = filters.production === "all" || order.productionStatus === filters.production;
+  const productionMatches = filters.production === "all" || productionStatusForDisplay(order) === filters.production;
   const shippingMatches = filters.shipping === "all" || (filters.shipping === "tracking" ? order.hasTrackingNumber : shipping === filters.shipping);
   const slotMatches = filters.slot === "all" || slotState === filters.slot;
   const overdue = Boolean(order.requiredDeliveryAt) && productionLocalDate(order.requiredDeliveryAt!) < productionLocalDate(today) && !["shipped", "delivered", "returned", "lost"].includes(shipping);

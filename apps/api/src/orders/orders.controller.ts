@@ -7,7 +7,7 @@ import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
-import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderBuyerCommentDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto, VoidOrderPaymentDto } from "./orders.dto";
+import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderBuyerCommentDto, UpdateOrderManagerCommentDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto, VoidOrderPaymentDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
 import { isOrderImageName } from "./order-image-name";
@@ -31,6 +31,7 @@ export class OrdersController {
   @Patch(":id/currency") @Roles("OWNER", "ADMIN", "MANAGER") updateCurrency(@Param("id") id: string, @Body() dto: UpdateOrderCurrencyDto, @Req() req: Request & { user: User }) { return this.orders.updateCurrency(id, dto, req.user); }
   @Patch(":id/discipline") @Roles("OWNER", "ADMIN", "MANAGER") updateDiscipline(@Param("id") id: string, @Body() dto: UpdateOrderDisciplineDto, @Req() req: Request & { user: User }) { return this.orders.updateDiscipline(id, dto, req.user); }
   @Patch(":id/buyer-comment") @Roles("OWNER", "ADMIN", "MANAGER") updateBuyerComment(@Param("id") id: string, @Body() dto: UpdateOrderBuyerCommentDto, @Req() req: Request & { user: User }) { return this.orders.updateBuyerComment(id, dto, req.user); }
+  @Patch(":id/manager-comment") @Roles("OWNER", "ADMIN", "MANAGER") updateManagerComment(@Param("id") id: string, @Body() dto: UpdateOrderManagerCommentDto, @Req() req: Request & { user: User }) { return this.orders.updateManagerComment(id, dto, req.user); }
   @Patch(":id/delivery-contact") @Roles("OWNER", "ADMIN", "MANAGER") updateDeliveryContact(@Param("id") id: string, @Body() dto: UpdateOrderDeliveryContactDto, @Req() req: Request & { user: User }) { return this.orders.updateDeliveryContact(id, dto, req.user); }
   @Post(":id/files") @Roles("OWNER", "ADMIN", "MANAGER") uploadOrderFile(@Param("id") id: string, @Body() dto: UploadOrderFileDto, @Req() req: Request & { user: User }) { return this.orders.uploadOrderFile(id, dto, req.user); }
   @Patch(":id/model-image") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateModelImage(@Param("id") id: string, @Body() dto: UpdateOrderModelImageDto, @Req() req: Request & { user: User }) { return this.orders.updateModelImage(id, dto, req.user); }

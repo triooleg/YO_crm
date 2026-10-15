@@ -306,6 +306,8 @@ export const productionUi = {
   remainingProduction: "До завершения",
   productionOverdue: "Просрочено",
   productionCompleted: "Производство завершено",
+  productionFulfilled: "Выполнено",
+  shippingConfirmedByTracking: "Подтверждена трек-номером",
   daysShort: "дн.",
   orderNotes: "Заметки",
   orderImages: "Фотографии",
@@ -974,6 +976,12 @@ export const releaseHistoryUi = {
   expandVersion: "Развернуть версию",
   collapseVersion: "Свернуть версию",
   releases: [
+    {
+      version: "0.1.66",
+      date: "15.10.2026",
+      changes: ["Таймлайн заказов учитывает трек-номер: «Выполнено» и «Отправлено», без выдуманной даты.", "Исправлены обрезанные подписи этапов в производстве и длинные финансовые показатели.", "Датированный слот отображается как «Запланирован», сохраняя предварительность до предоплаты.", "Продажи с сайта отмечены корзиной рядом с клиентом; без производственных дат показана подпись «Продажа с сайта».", "Заметка менеджера редактируется в отдельном окне с текущим текстом и защитой от одновременных изменений."],
+      compatibility: "Даты, статусы и финансовые записи не перезаписываются. Сохранение заметки меняет только её текст и записывается в историю; миграций нет. Откат к crm-v0.1.64 совместим.",
+    },
     {
       version: "0.1.65",
       date: "15.10.2026",
@@ -2297,6 +2305,7 @@ export const ordersDashboardUi = {
   balance: "Остаток",
   customerWishes: "Пожелания клиента",
   editCustomerWishes: "Редактирование пожеланий клиента",
+  editManagerComment: "Редактирование заметки менеджера",
   editDeliveryContacts: "Редактирование контактов доставки",
   deliveryContactHint: "Телефон и e-mail сохраняются только для этого заказа.",
   managerNotes: "Заметки менеджера",
@@ -2350,6 +2359,11 @@ export const ordersDashboardUi = {
   notReceived: "Не получены",
   readinessDeadline: "Срок готовности",
   actualShipping: "Фактическая отправка",
+  shippingConfirmedByTracking: "Отправка подтверждена трек-номером",
+  shippingDateUnknown: "Дата отправки не сохранена",
+  shippingSent: "Отправлено",
+  shippingPartial: "Частично отправлено",
+  productionFulfilled: "Выполнено",
   actualDelivery: "Фактическая доставка",
   price: "Цена",
   payment: "Оплата",
@@ -2741,6 +2755,7 @@ export const financeReportUi = {
 } as const;
 
 export const orderSourceUi = {
+ websiteSale:'Продажа с сайта',
  labels:{WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',OTHER:'Другое',UNKNOWN:'Не определён'},
  receiptsKpi:'Получено с сайта',actualReceipts:'Фактические оплаты',months:'мес.',all:'Все источники',rest:'Остальные',filter:'Источник заказа',onlineOrders:'Онлайн-заказы (с сайта)',onlineReceipts:'Поступления по заказам с сайта',shareOrders:'от всех заказов периода',shareReceipts:'от всех поступлений периода',
  bySource:'По источникам',standard:'Основные показатели',chartMode:'Режим диаграмм',trendFilter:'Источник в динамике',statusChart:'Заказы по статусам',orderChart:'Заказы по источнику',receiptsChart:'Поступления по источникам',dynamics:'Динамика по источникам',distribution:'Распределение по источникам',

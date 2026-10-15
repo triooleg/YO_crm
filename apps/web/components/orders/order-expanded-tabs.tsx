@@ -11,6 +11,7 @@ import { ActionIcon, Badge, Menu, Modal, UnstyledButton } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui, overviewContextUi } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
 import { orderInitialTab, shipmentContextId } from "../../lib/order-context";
+import { orderTimelinePresentation } from "../../lib/production-view";
 import { repairMojibake } from "../../lib/text-encoding.mjs";
 import { CrmAlert } from "../crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "../crm/settings-controls";
@@ -141,6 +142,7 @@ type TabCallbacks = {
   onBindMeasurement: (itemId: string, measurementId: string, expectedMeasurementId: string | null) => Promise<void>;
   onCurrency: () => void;
   onCustomerWishes: () => void;
+  onManagerComment: () => void;
   onEdit: () => void;
   onAddDesign: () => void;
   onEditItem: (itemId: string) => void;
@@ -219,6 +221,7 @@ export function OrderExpandedTabs(props: Props) {
 }
 
 function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliveryContact, onCustomerWishes, onUploadFile }: Props & { items: ExpandedOrderItem[] }) {
+  const timeline = orderTimelinePresentation(order);
   const paidMinor = paid(order);
   const recent = order.activities.slice(0, 4);
   return <div className="orders-tab-details-approved">
@@ -265,7 +268,7 @@ function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliver
       <div className="orders-composition-list">{items.map((item, index) => <div key={item.id}><span>{index + 1}</span><ItemThumb item={item} /><strong>{item.name}</strong><small>{item.quantity} {ui.pieces}</small><b>{money(item.priceMinor * item.quantity, order.currency)}</b></div>)}</div>
     </TabCard>
     <TabCard className="orders-tab-span-4" title={ui.stageStatuses}>
-      <div className="orders-stage-list"><Stage icon="finance" label={ui.payment} value={orderLabel("payment", order.paymentStatus)} /><Stage icon="production" label={ui.tabs.production} value={orderLabel("production", order.productionStatus)} /><Stage icon="delivery" label={ui.tabs.delivery} value={orderLabel("shipping", order.shippingStatus)} /></div>
+      <div className="orders-stage-list"><Stage icon="finance" label={ui.payment} value={orderLabel("payment", order.paymentStatus)} /><Stage icon="production" label={ui.tabs.production} value={timeline.productionCompleted ? ui.productionFulfilled : orderLabel("production", timeline.productionStatus)} /><Stage icon="delivery" label={ui.tabs.delivery} value={timeline.partial ? `${ui.shippingPartial}${["LOST","RETURNED"].includes(timeline.shippingStatus) ? ` · ${orderLabel("shipping",timeline.shippingStatus)}` : ""}` : timeline.shippingStatus === "SHIPPED" ? ui.shippingSent : orderLabel("shipping", timeline.shippingStatus)} /></div>
     </TabCard>
     <OrderFilesCard className="orders-tab-span-4" order={order} onUpload={onUploadFile} />
     <TabCard className="orders-tab-span-full" title={ui.latestActions}>
@@ -606,7 +609,7 @@ function OrderShipmentForm({ order, shipment, instances, onCancel, onSubmit }: {
   </form>;
 }
 
-function OrderNotesTab({ order, onCustomerWishes, onEdit, onCreateNote, onUpdateNote, onArchiveNote, onUploadFile }: Props) {
+function OrderNotesTab({ order, onCustomerWishes, onManagerComment, onCreateNote, onUpdateNote, onArchiveNote, onUploadFile }: Props) {
   const notes = order.notesStructured ?? [];
   const [noteEditor, setNoteEditor] = useState<{ note?: StructuredOrderNote }>({});
   const [archiveTarget, setArchiveTarget] = useState<StructuredOrderNote>();
@@ -631,7 +634,7 @@ function OrderNotesTab({ order, onCustomerWishes, onEdit, onCreateNote, onUpdate
   }
   return <div className="orders-tab-notes-approved">
     <aside className="orders-note-categories"><h3>{ui.noteCategories}</h3><span className="active"><b>{ui.allNotes}</b><i>{notes.length}</i></span>{Object.keys(ui.noteCategoryLabels).map((category) => <span key={category}><b>{categoryLabel(category)}</b><i>{notes.filter((note) => note.category === category).length}</i></span>)}</aside>
-    <div className="orders-note-list"><header className="orders-tab-section-header"><div><h3>{ui.tabs.notes} ({notes.length || Number(Boolean(order.buyerComment || order.notes || order.managerComment))})</h3><p>{ui.notesVisibilityHint}</p></div><CrmButton size="compact-sm" onClick={() => { setError(""); setNoteEditor({}); }}>＋ {ui.addNote}</CrmButton></header>{notes.length ? notes.map((note) => <article key={note.id}><span>{categoryLabel(note.category)}</span><div><h4>{note.title}</h4><p>{note.body}</p><small>{note.author?.displayName || ui.systemUser} · {formatDateTime(note.updatedAt)} · {visibilityLabel(note.visibility)}</small><div className="orders-note-actions"><CrmButton tone="secondary" size="compact-xs" onClick={() => { setError(""); setNoteEditor({ note }); }}>{ui.editNote}</CrmButton>{onArchiveNote && <CrmButton tone="secondary" color="red" size="compact-xs" onClick={() => { setError(""); setArchiveTarget(note); }}>{ui.archiveNote}</CrmButton>}</div></div></article>) : <><article><span>{ui.customer}</span><div><h4>{ui.customerWishes}</h4><p>{order.buyerComment || order.notes || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-xs" onClick={onCustomerWishes}>{ui.edit}</CrmButton></div></article><article><span>{ui.internal}</span><div><h4>{ui.managerNotes}</h4><p>{order.managerComment || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-xs" onClick={onEdit}>{ui.editOrder}</CrmButton></div></article></>}</div>
+    <div className="orders-note-list"><header className="orders-tab-section-header"><div><h3>{ui.tabs.notes} ({notes.length || Number(Boolean(order.buyerComment || order.notes || order.managerComment))})</h3><p>{ui.notesVisibilityHint}</p></div><CrmButton size="compact-sm" onClick={() => { setError(""); setNoteEditor({}); }}>＋ {ui.addNote}</CrmButton></header>{notes.length ? notes.map((note) => <article key={note.id}><span>{categoryLabel(note.category)}</span><div><h4>{note.title}</h4><p>{note.body}</p><small>{note.author?.displayName || ui.systemUser} · {formatDateTime(note.updatedAt)} · {visibilityLabel(note.visibility)}</small><div className="orders-note-actions"><CrmButton tone="secondary" size="compact-xs" onClick={() => { setError(""); setNoteEditor({ note }); }}>{ui.editNote}</CrmButton>{onArchiveNote && <CrmButton tone="secondary" color="red" size="compact-xs" onClick={() => { setError(""); setArchiveTarget(note); }}>{ui.archiveNote}</CrmButton>}</div></div></article>) : <><article><span>{ui.customer}</span><div><h4>{ui.customerWishes}</h4><p>{order.buyerComment || order.notes || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-xs" onClick={onCustomerWishes}>{ui.edit}</CrmButton></div></article><article><span>{ui.internal}</span><div><h4>{ui.managerNotes}</h4><p>{order.managerComment || ui.notSpecified}</p><CrmButton tone="secondary" size="compact-xs" onClick={onManagerComment}>{ui.editNote}</CrmButton></div></article></>}</div>
     <TabCard className="orders-note-editor-placeholder" title={editingNote ? ui.editNote : ui.addNote}><OrderNoteForm key={editingNote?.id || "new"} note={editingNote} busy={busy} error={error} onCancel={() => setNoteEditor({})} onSubmit={saveNote} onUploadFile={onUploadFile} /></TabCard>
     <Modal opened={Boolean(archiveTarget)} onClose={() => !busy && setArchiveTarget(undefined)} title={ui.archiveNote} aria-label={ui.archiveNote} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus centered size={440}>{archiveTarget && <div className="orders-note-archive"><p>{ui.archiveNoteConfirm.replace("{title}", archiveTarget.title)}</p>{error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}<footer><CrmButton tone="secondary" disabled={busy} onClick={() => setArchiveTarget(undefined)}>{ui.cancel}</CrmButton><CrmButton color="red" loading={busy} onClick={() => void archiveNote(archiveTarget)}>{ui.archiveNote}</CrmButton></footer></div>}</Modal>
   </div>;

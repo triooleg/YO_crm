@@ -23,7 +23,8 @@ test("статусы заказов отображаются единым CRM-к
 
   const ordersUi = ordersDashboard + orderTabs;
   assert.match(ordersUi, /<CrmStatusBadge domain="payment" status=\{order\.paymentStatus\}/);
-  assert.match(ordersUi, /<CrmStatusBadge domain="shipping" status=\{order\.shippingStatus\}/);
+  assert.match(ordersUi, /<CrmStatusBadge domain="shipping" status=\{timeline\.shippingStatus\}/);
+  assert.match(statusBadge, /label \?\? presentation\.label/);
   assert.match(ordersUi, /<CrmStatusBadge domain="production" status=\{(?:item|instance)\.productionStatus\}/);
   assert.match(ordersDashboard, /crmStatusPresentation\("sales",\s*order\.salesStatus\)\.color/);
   assert.match(statusSelect, /crmStatusPresentation\("sales",value\)/);

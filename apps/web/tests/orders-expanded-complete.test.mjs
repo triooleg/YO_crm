@@ -37,8 +37,9 @@ test("выбранная колонка и направление сортиро
 
 test("обзор сохраняет четыре независимых статуса", () => {
   assert.match(expanded, /domain="payment" status=\{order\.paymentStatus\}/);
-  assert.match(expanded, /domain="production" status=\{order\.productionStatus\}/);
-  assert.match(expanded, /domain="shipping" status=\{order\.shippingStatus\}/);
+  assert.match(expanded, /domain="production" status=\{timeline\.productionStatus\}/);
+  assert.match(expanded, /domain="shipping" status=\{timeline\.shippingStatus\}/);
+  assert.match(expanded, /const timeline = orderTimelinePresentation\(order\)/);
   assert.match(expanded, /domain="sales" status=\{order\.salesStatus\}/);
   assert.doesNotMatch(expanded, /onStatus\("(?:paymentStatus|shippingStatus)"/);
 });

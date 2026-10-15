@@ -339,6 +339,22 @@ export class OrdersService {
       return updated;
     });
   }
+  async updateManagerComment(orderId: string, dto: { managerComment: string | null; expectedManagerComment: string | null }, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      const current = order.managerComment ?? null;
+      if (current !== dto.expectedManagerComment) throw new ConflictException("Заметка менеджера уже изменена. Обновите заказ и повторите действие");
+      const managerComment = dto.managerComment?.trim() || null;
+      if (current === managerComment) return { id: orderId, managerComment };
+      const changed = await tx.order.updateMany({ where: { id: orderId, archivedAt: null, managerComment: current }, data: { managerComment } });
+      if (changed.count !== 1) throw new ConflictException("Заметка менеджера уже изменена. Обновите заказ и повторите действие");
+      await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_MANAGER_COMMENT_UPDATED", summary: "Изменена заметка менеджера" } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { managerComment: current }, after: { managerComment } } });
+      return { id: orderId, managerComment };
+    });
+  }
   async updateBuyerComment(orderId: string, dto: { buyerComment: string | null; expectedBuyerComment: string | null }, actor: User) {
     return this.prisma.$transaction(async tx => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);

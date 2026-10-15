@@ -83,10 +83,12 @@ export function CrmStatusBadge({
   domain,
   status,
   className,
+  label,
 }: {
   domain: StatusDomain;
   status: string;
   className?: string;
+  label?: string;
 }) {
   const presentation = crmStatusPresentation(domain,status);
 
@@ -103,7 +105,7 @@ export function CrmStatusBadge({
       size="sm"
       variant="light"
     >
-      {presentation.label}
+      {label ?? presentation.label}
     </Badge>
   );
 }

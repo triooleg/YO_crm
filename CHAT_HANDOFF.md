@@ -1,5 +1,17 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-15 — CRM0.1.66 combined release preparation, current runtime0.1.64
+
+- Latest addition: legacy managerComment Notes button now opens the existing Mantine text editor with current detail text instead of full OrderPanel. Dedicated OWNER/ADMIN/MANAGER PATCH manager-comment requires expectedManagerComment, atomic CAS in audited transaction, narrow response; buyer comment/payment/status fields untouched. Backend RED then9/9 focusedGREEN; browser cancel/save/conflict draft checks added. No production note changed during verification.
+- Latest user steering included before candidate freeze: NOT_SCHEDULED + valid dated productionSlot displays SCHEDULED in Orders/Production and production read-filter. Raw active/held/cancelled/tentative states preserved; slot.tentative/dashed styling and explicit preliminary caption remain, deposit gates unchanged. User also requests no Orders source column: replace existing client icon with cart only for proven WEBSITE, remove adjacent number badge; nonwebsite channel icons unchanged. WEBSITE without valid dates uses static «Продажа с сайта» instead of assignment CTA; dated website slots retain real dates and source remains available in Details/filter.
+- User added explicit dispatch timeline fixes while0.1.65 was being prepared: track-number orders must show production «Выполнено» and shipping «Отправлено»; selected Production footer labels/dates must not clip. Existing deploy/commit/publication authorization continues; no data/date/status writes authorized or made.
+- Version0.1.65/2e3d966 was published but NOT DEPLOYED; its KPI CSS fix is retained in0.1.66. Production baseline remains76b8a9d/0.1.64. Preserve both immutable tags and artifacts, do not retag.
+- Confirmed real KC617 API READONLY: salesSHIPPED, productionSCHEDULED, shippingNOT_READY, root legacy tracking exists, no stored shipping dates/parcels; one unassigned instance. Actual payload only ignored .local. Timeline and Details previously read raw statuses; new shared read-only orderTimelinePresentation derives display facts without changing stored fields.
+- Child-only dispatch requires complete known item-instance coverage and all active parcels; missing/pending/unassigned instances remain partial. LOST/RETURNED outcomes retained; no delivered-date→shipped-date fabrication. Root authoritative tracking/status/date preserved. Tests22green, corrected browserRED reproduces raw «Запланирован» instead of «Выполнено».
+- Production footer root cause: descendant .production-lifecycle span icon-circle styles applied to Mantine Badge inner labels. Scoped direct-child icon selectors and normal Badge sizing/wrapping fix it. Footer also derives completion from existing dispatch classifier and uses tracking confirmation when actual date absent. No calendar-cell color change, API/schema/provider/payment changes.
+- Added browser regressions for Orders1536/390 timeline+Details/no writes and Production footer full badge text; footerRED reproduced text Range clipping. Version0.1.66 immutable full quality/build, browserGREEN, local actual visual, fresh FULL backup and independent release gates pending.
+
+
 # 2026-10-15 — CRM0.1.65 scoped visual correction in preparation
 
 - Final actual v064 visual reviewer inspected43/43PNGs and found one blockingP2: Finance1536UAH debt1,109,060.06 clips beyond its card. Functional/data/server acceptance remains PASS; do not label v064 final visual PASS.

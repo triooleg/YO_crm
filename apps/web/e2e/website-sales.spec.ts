@@ -10,6 +10,47 @@ const orders=Array.from({length:55},(_,i)=>{
  const origin={sourceSystem:'KEYCRM',sourceAccount:CONFIRMED_WEBSITE_SOURCE.account,sourceLinkMode:'IMPORTED',externalId:String(i),externalData:{source_id:i<31?12:2},activities:[{type:'KEYCRM_ORDER_IMPORTED',metadata:{keycrmOrderId:String(i),sourceName:i<31?'Вебсайт':'Instagram'}}]};
  return {id:`order-${i}`,number:`QA-${String(i).padStart(3,'0')}`,createdAt:new Date(i===0?'2026-09-03':'2026-10-02'),requiredDeliveryAt:new Date('2026-10-30'),type:'CUSTOM_ORDER',discipline:'RHYTHMIC_GYMNASTICS',salesStatus:'NEW_LEAD',productionStatus:'NOT_SCHEDULED',shippingStatus:'NOT_READY',paymentStatus:'PARTIALLY_PAID',currency:'EUR',priceMinor:10000,depositRequiredMinor:5000,clientId:`client-${i}`,client:{id:`client-${i}`,displayName:`Synthetic ${i}`,source:'INSTAGRAM',athletes:[]},items:[{id:`item-${i}`,name:'Synthetic design',quantity:1,priceMinor:10000}],payments:[],activities:[],invoices:[],orderSource:classifyOrderSource(origin)};
 });
+
+test('Manager note opens its current text, saves only that note and preserves drafts on conflict',async({page},info)=>{
+ await fixture(page);
+ let comment='Текущая заметка менеджера\nВторая строка';let conflict=false;
+ const writes:{path:string;body:unknown}[]=[];
+ await page.route('**/api/orders**',async route=>{
+  const req=route.request(),u=new URL(req.url());
+  const target={...orders[0]!,managerComment:comment,buyerComment:'Пожелания клиента',notesStructured:[]};
+  if(req.method()==='PATCH'&&u.pathname==='/api/orders/order-0/manager-comment'){
+   const body=req.postDataJSON();writes.push({path:u.pathname,body});
+   if(conflict)return route.fulfill({status:409,json:{message:'Заметка уже изменена другим сотрудником'}});
+   comment=body.managerComment;return route.fulfill({json:{id:target.id,managerComment:comment}});
+  }
+  if(u.pathname==='/api/orders/order-0')return route.fulfill({json:target});
+  if(u.pathname==='/api/orders')return route.fulfill({json:buildOrderListPage(orders.map(row=>row.id===target.id?target:row),Object.fromEntries(u.searchParams),now)});
+  return route.fallback();
+ });
+ await page.goto('/?section=orders&orderId=order-0');
+ const details=page.locator('#order-details-order-0');
+ await details.getByRole('tab',{name:'Заметки',exact:true}).click();
+ const note=details.locator('article').filter({has:page.getByRole('heading',{name:'Заметки менеджера',exact:true})});
+ await note.getByRole('button',{name:'Изменить заметку',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Редактирование заметки менеджера',exact:true});
+ const input=dialog.getByRole('textbox',{name:'Заметки менеджера',exact:true});
+ await expect(input).toHaveValue(comment);
+ await dialog.screenshot({path:info.outputPath('manager-note-editor.png')});
+ await input.fill('Несохранённый черновик');await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
+ expect(writes).toEqual([]);
+ await note.getByRole('button',{name:'Изменить заметку',exact:true}).click();
+ await expect(input).toHaveValue(comment);
+ await input.fill('Исправленная заметка');await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();
+ await expect(dialog).toHaveCount(0);
+ await details.getByRole('tab',{name:'Заметки',exact:true}).click();
+ await expect(note).toContainText('Исправленная заметка');
+ expect(writes).toEqual([{path:'/api/orders/order-0/manager-comment',body:{managerComment:'Исправленная заметка',expectedManagerComment:'Текущая заметка менеджера\nВторая строка'}}]);
+ await expect(details).toContainText('Пожелания клиента');
+ conflict=true;await note.getByRole('button',{name:'Изменить заметку',exact:true}).click();
+ await input.fill('Не потерять этот текст');await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();
+ await expect(dialog).toContainText('Заметка уже изменена другим сотрудником');await expect(input).toHaveValue('Не потерять этот текст');
+ await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
+});
 const valuation={provider:'NBU',cache:{version:1,provider:'NBU',officialUrl:'https://bank.gov.ua',effectiveDate:'2026-10-15',fetchedAt:now.toISOString(),rates:[{baseCurrency:'EUR',quoteCurrency:'UAH',numerator:'50',denominator:'1',decimal:'50',sourceSeriesOrValcode:'EUR'},{baseCurrency:'USD',quoteCurrency:'UAH',numerator:'40',denominator:'1',decimal:'40',sourceSeriesOrValcode:'USD'}]}};
 const ledger={orders,orderSources:Object.fromEntries(orders.map(row=>[row.id,row.orderSource])),payments:[{id:'first',orderId:'order-0',amountMinor:2500,currency:'EUR',receivedAt:now,method:'PAYPAL'},{id:'second',orderId:'order-0',amountMinor:1500,currency:'EUR',receivedAt:now,method:'PAYPAL'},{id:'void',orderId:'order-0',amountMinor:700,currency:'EUR',receivedAt:now,voidedAt:now},{id:'other',orderId:'order-54',amountMinor:6000,currency:'EUR',receivedAt:now}],expenses:[],invoices:[],categories:[]};
 async function fixture(page:Page,role='OWNER',large=false){
@@ -47,7 +88,8 @@ test('Orders source paging covers the full server cohort, deep links, reload and
  const calls=await fixture(page);await page.goto('/?section=orders&source=WEBSITE&orderId=order-29&sort=created&direction=asc');
  await expect(page.locator('.orders-summary-row')).toHaveCount(11);await expect(page.locator('.orders-pagination')).toContainText('31');
  await expect(page.locator('#order-details-order-29')).toBeVisible();await expect(page.locator('#order-details-order-29')).toBeInViewport();await expect(page.locator('#order-details-order-29')).toContainText('Источник заказа');
- await expect(page.locator('.orders-order-number').first()).toContainText('С сайта');
+ await expect(page.locator('.orders-summary-row .orders-channel.website')).toHaveCount(11);
+ await expect(page.locator('.orders-order-number').first()).not.toContainText('С сайта');
  await page.locator('.orders-source-summary').getByRole('button').click();await expect(page).not.toHaveURL(/source=WEBSITE/);
  await expect.poll(()=>calls.filter(x=>x.path==='/api/orders').at(-1)?.query.get('source')).toBe(null);
  await page.goBack();await expect(page).toHaveURL(/source=WEBSITE/);await page.reload();await expect(page.locator('.orders-pagination')).toContainText('31');
@@ -117,4 +159,117 @@ test('Seven finance KPI cards retain the full million-UAH debt at laptop widths'
   const fit=await amount.evaluate(node=>{const r=document.createRange();r.selectNodeContents(node);const text=r.getBoundingClientRect(),card=node.closest('.finance-report-kpi')!.getBoundingClientRect();return text.left>=card.left&&text.right<=card.right-8;});
   expect(fit,`full debt and currency fit the card at ${width}px`).toBe(true);
  }
+});
+
+test('Order timeline and Details reconcile tracking without changing persisted statuses or inventing dates',async({page},info)=>{
+ const calls=await fixture(page);
+ const tracked={...orders[0]!,deliveryTrackingCode:'TRACK-617',salesStatus:'SHIPPED',productionStatus:'SCHEDULED',shippingStatus:'NOT_READY',shipment:null,orderShipments:[]};
+ await page.route('**/api/orders**',async route=>{
+  const u=new URL(route.request().url());
+  if(u.pathname==='/api/orders')return route.fulfill({json:buildOrderListPage(orders.map(row=>row.id===tracked.id?tracked:row),Object.fromEntries(u.searchParams),now)});
+  if(u.pathname==='/api/orders/'+tracked.id)return route.fulfill({json:tracked});
+  return route.fallback();
+ });
+ for(const width of [1536,390]){
+  await page.setViewportSize({width,height:1024});await page.goto('/?section=orders&orderId=order-0');
+  const details=page.locator('#order-details-order-0');await expect(details).toBeVisible();
+  const flow=details.locator('.orders-order-flow');
+  await expect(flow.locator('[data-domain=production]')).toHaveText('Выполнено');
+  await expect(flow.locator('[data-domain=shipping]')).toHaveText('Отправлено');
+  await expect(flow).toContainText('Отправка подтверждена трек-номером: TRACK-617');
+  await expect(flow).not.toContainText('Не готов к отправке');
+  await expect(flow).not.toContainText('Фактическая отправка: Не указана');
+  await expect(details.locator('.orders-stage-list')).toContainText('Выполнено');
+  await expect(details.locator('.orders-stage-list')).toContainText('Отправлено');
+  await flow.scrollIntoViewIfNeeded();await flow.screenshot({path:info.outputPath(`tracking-timeline-${width}.png`)});
+ }
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+ expect(tracked.productionStatus).toBe('SCHEDULED');expect(tracked.shippingStatus).toBe('NOT_READY');
+});
+
+test('Production selected timeline keeps full badge labels and dispatched facts',async({page},info)=>{
+ const calls=await fixture(page);
+ const tracked={...orders[0]!,hasTrackingNumber:true,paidMinor:60000,priceMinor:120000,depositRequiredMinor:60000,salesStatus:'SHIPPED',productionStatus:'SCHEDULED',shippingStatus:'NOT_READY',productionSlot:{id:'slot',startsAt:'2026-10-02',endsAt:'2026-10-12',tentative:false,locked:false,capacity:1}};
+ await page.route('**/api/orders/production?*',route=>route.fulfill({json:[tracked]}));
+ await page.route('**/api/orders/defaults',route=>route.fulfill({json:{defaultDurationDays:7,shippingLeadDays:3}}));
+ for(const width of [1536,390]){
+  await page.setViewportSize({width,height:1080});await page.goto('/?section=production&orderId=order-0');
+  const details=page.locator('.production-order-details');await expect(details).toBeVisible();
+  const flow=details.locator('.production-lifecycle');
+  await expect(flow.locator('.mantine-Badge-label')).toHaveCount(3);
+  const labels=await flow.locator('.mantine-Badge-label').evaluateAll(nodes=>nodes.map(node=>{const r=document.createRange();r.selectNodeContents(node);const text=r.getBoundingClientRect(),badge=node.closest('.mantine-Badge-root')!.getBoundingClientRect();return text.left>=badge.left&&text.right<=badge.right&&text.top>=badge.top&&text.bottom<=badge.bottom;}));
+  expect(labels.every(Boolean),'all status text fits inside its badge').toBe(true);
+  await expect(flow).toContainText('Выполнено');await expect(flow).toContainText('Отправлено');
+  await expect(details.locator('.production-details-dates')).toContainText('Подтверждена трек-номером');
+  await flow.scrollIntoViewIfNeeded();await flow.screenshot({path:info.outputPath(`production-selected-timeline-${width}.png`)});
+ }
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('Partial child transport exceptions remain visible in timeline and Details',async({page})=>{
+ const calls=await fixture(page);let exception='LOST';
+ await page.route('**/api/orders**',async route=>{
+  const target={...orders[0]!,productionStatus:'SCHEDULED',items:[{...orders[0]!.items[0]!,quantity:2,instances:[{id:'a',productionStatus:'READY'},{id:'b',productionStatus:'SEWING'}]}],orderShipments:[{id:'p',status:exception,trackingNumber:'PARTIAL',instances:[{id:'a'}]},{id:'q',status:'DRAFT',instances:[{id:'b'}]}]};
+  const u=new URL(route.request().url());
+  if(u.pathname==='/api/orders')return route.fulfill({json:buildOrderListPage(orders.map(row=>row.id===target.id?target:row),Object.fromEntries(u.searchParams),now)});
+  if(u.pathname==='/api/orders/'+target.id)return route.fulfill({json:target});
+  return route.fallback();
+ });
+ for(const [status,label] of [['LOST','Утерян'],['RETURNED','Возвращён']]){
+  exception=status!;await page.goto('/?section=orders&orderId=order-0');
+  const details=page.locator('#order-details-order-0'),flow=details.locator('.orders-order-flow');
+  await expect(flow.locator('[data-domain=shipping]')).toHaveText(`Частично отправлено · ${label}`);
+  const colors=await flow.locator('[data-domain=shipping]').evaluate((node,status)=>{
+   const probe=document.createElement('span');probe.style.backgroundColor=`var(--mantine-color-${status==='LOST'?'red':'orange'}-6)`;document.body.append(probe);
+   const expected=getComputedStyle(probe).backgroundColor;probe.remove();
+   return {expected,actual:getComputedStyle(node).backgroundColor,icon:getComputedStyle(node.closest('article')!.querySelector('i')!).backgroundColor};
+  },status);
+  expect(colors.actual).toBe(colors.expected);expect(colors.icon).toBe(colors.expected);
+  await expect(flow.locator('[data-domain=production]')).toHaveText('Запланирован');
+  await expect(details.locator('.orders-stage-list')).toContainText(`Частично отправлено · ${label}`);
+ }
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('Website order uses the existing client icon position and sale caption without a source column',async({page})=>{
+ const calls=await fixture(page);
+ await page.goto('/?section=orders&source=WEBSITE&pageSize=100');
+ await expect(page.locator('.orders-summary-row')).toHaveCount(31);
+ await expect(page.locator('.orders-summary-row .orders-channel.website[aria-label="С сайта"]')).toHaveCount(31);
+ await expect(page.locator('.orders-summary-row .orders-assign-production')).toHaveCount(0);
+ await expect(page.locator('.orders-summary-row .orders-website-sale')).toHaveCount(31);
+ await expect(page.locator('.orders-dashboard-table thead')).not.toContainText('Источник');
+ await expect(page.locator('.orders-order-number').first()).not.toContainText('С сайта');
+ await page.goto('/?section=orders&source=INSTAGRAM&pageSize=100');
+ await expect(page.locator('.orders-summary-row')).toHaveCount(24);
+ await expect(page.locator('.orders-summary-row .orders-channel.instagram')).toHaveCount(24);
+ await expect(page.locator('.orders-summary-row .orders-channel.website')).toHaveCount(0);
+ await expect(page.locator('.orders-summary-row .orders-assign-production')).toHaveCount(24);
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('A dated tentative slot is Scheduled in Orders and Production without confirming it',async({page},info)=>{
+ const calls=await fixture(page);
+ const target={...orders[0]!,productionStatus:'NOT_SCHEDULED',paidMinor:0,hasTrackingNumber:false,productionSlot:{id:'slot',startsAt:'2026-10-02',endsAt:'2026-10-12',tentative:true,locked:false,capacity:1}};
+ await page.route('**/api/orders**',async route=>{
+  const u=new URL(route.request().url());
+  if(u.pathname==='/api/orders')return route.fulfill({json:buildOrderListPage(orders.map(row=>row.id===target.id?target:row),Object.fromEntries(u.searchParams),now)});
+  if(u.pathname==='/api/orders/'+target.id)return route.fulfill({json:target});
+  if(u.pathname==='/api/orders/production')return route.fulfill({json:[target]});
+  if(u.pathname==='/api/orders/defaults')return route.fulfill({json:{defaultDurationDays:7,shippingLeadDays:3}});
+  return route.fallback();
+ });
+ await page.goto('/?section=orders&orderId=order-0');
+ await expect(page.locator('#order-details-order-0 .orders-order-flow [data-domain=production]')).toHaveText('Запланирован');
+ await expect(page.locator('#order-details-order-0 .orders-stage-list')).toContainText('Запланирован');
+ const row=page.locator('.orders-summary-row').filter({has:page.getByRole('button',{name:'QA-000',exact:true})});
+ await expect(row.locator('.orders-col-production [data-status=SCHEDULED]')).toBeVisible();
+ await expect(row.locator('.orders-website-sale')).toHaveCount(0);
+ await page.goto('/?section=production&orderId=order-0');
+ await expect(page.locator('.timeline-production-segment[data-status=SCHEDULED]')).toContainText('Запланировано');
+ await expect(page.locator('.production-flow-bar.tentative')).toHaveCount(1);
+ await expect(page.locator('.production-order-details .production-lifecycle .is-scheduled')).toContainText('Запланировано');
+ await page.locator('.production-order-details').screenshot({path:info.outputPath('dated-tentative-slot.png')});
+ expect(target.productionStatus).toBe('NOT_SCHEDULED');expect(target.productionSlot.tentative).toBe(true);expect(target.paidMinor).toBe(0);
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
 });

@@ -155,6 +155,10 @@ export class UpdateOrderBuyerCommentDto {
  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) buyerComment!: string | null;
  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) expectedBuyerComment!: string | null;
 }
+export class UpdateOrderManagerCommentDto {
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) managerComment!: string | null;
+ @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) expectedManagerComment!: string | null;
+}
 export class UpdateOrderDeliveryContactDto {
  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(80) recipientPhone!: string | null;
  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsEmail({}, { message: "Введите корректный e-mail" }) @MaxLength(320) email!: string | null;

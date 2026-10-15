@@ -92,3 +92,37 @@ test("устаревшее ожидаемое значение не переза
   assert.equal(writes.activities.length, 0);
   assert.equal(writes.audits.length, 0);
 });
+
+function managerHarness(current = "Текущая заметка", options = {}) {
+  const writes={updates:[],activities:[],audits:[]};
+  const order={id:'order-1',clientId:'client-1',managerComment:current,buyerComment:'Пожелания клиента',notes:'Описание модели',priceMinor:12345,archivedAt:null};
+  const tx={$executeRawUnsafe:async()=>1,order:{findFirst:async()=>options.missing?null:order,updateMany:async({where,data})=>{writes.updates.push({where,data});return {count:options.conflict?0:1};}},activity:{create:async({data})=>writes.activities.push(data)},auditLog:{create:async({data})=>writes.audits.push(data)}};
+  return {service:new OrdersService({$transaction:callback=>callback(tx)},{}),order,writes};
+}
+test('manager-note route uses existing CRM roles and a required expected-value DTO',()=>{
+ assert.match(controller,/@Patch\(":id\/manager-comment"\)\s+@Roles\("OWNER", "ADMIN", "MANAGER"\)/);
+ assert.match(dto,/class UpdateOrderManagerCommentDto/);assert.match(dto,/expectedManagerComment/);
+});
+test('manager note writes only its field with atomic expectation and audited history',async()=>{
+ const {service,order,writes}=managerHarness();const before=JSON.stringify(order);
+ const result=await service.updateManagerComment('order-1',{managerComment:' Новая заметка\nЮнікод ',expectedManagerComment:'Текущая заметка'},{id:'manager-1'});
+ assert.deepEqual(JSON.parse(JSON.stringify(writes.updates)),[{where:{id:'order-1',archivedAt:null,managerComment:'Текущая заметка'},data:{managerComment:'Новая заметка\nЮнікод'}}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(result)),{id:'order-1',managerComment:'Новая заметка\nЮнікод'});
+ assert.equal(JSON.stringify(order),before);assert.equal(writes.activities[0].type,'ORDER_MANAGER_COMMENT_UPDATED');
+ assert.equal(writes.audits[0].actorId,'manager-1');assert.deepEqual(JSON.parse(JSON.stringify(writes.audits[0].before)),{managerComment:'Текущая заметка'});
+ assert.deepEqual(JSON.parse(JSON.stringify(writes.audits[0].after)),{managerComment:'Новая заметка\nЮнікод'});
+});
+test('manager note empty clear and no-op retain customer wishes and avoid false history',async()=>{
+ const clear=managerHarness();await clear.service.updateManagerComment('order-1',{managerComment:' ',expectedManagerComment:'Текущая заметка'},{id:'m'});
+ assert.equal(clear.writes.updates[0].data.managerComment,null);
+ const same=managerHarness();await same.service.updateManagerComment('order-1',{managerComment:'Текущая заметка',expectedManagerComment:'Текущая заметка'},{id:'m'});
+ assert.equal(same.writes.updates.length,0);assert.equal(same.writes.audits.length,0);assert.equal(same.writes.activities.length,0);
+});
+test('manager note rejects stale expected text without history or writes',async()=>{
+ const {service,writes}=managerHarness('Новее');await assert.rejects(()=>service.updateManagerComment('order-1',{managerComment:'Моё',expectedManagerComment:'Старое'},{id:'m'}),HttpError);
+ assert.equal(writes.updates.length,0);assert.equal(writes.activities.length,0);assert.equal(writes.audits.length,0);
+});
+test('manager note rejects missing/archived orders and a lost atomic comparison',async()=>{
+ const missing=managerHarness(null,{missing:true});await assert.rejects(()=>missing.service.updateManagerComment('order-1',{managerComment:'Новое',expectedManagerComment:null},{id:'m'}),HttpError);assert.equal(missing.writes.updates.length,0);
+ const conflict=managerHarness('Текущая заметка',{conflict:true});await assert.rejects(()=>conflict.service.updateManagerComment('order-1',{managerComment:'Новое',expectedManagerComment:'Текущая заметка'},{id:'m'}),HttpError);assert.equal(conflict.writes.audits.length,0);assert.equal(conflict.writes.activities.length,0);
+});
