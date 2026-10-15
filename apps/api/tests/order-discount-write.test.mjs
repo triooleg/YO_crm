@@ -6,7 +6,7 @@ const {compositionToken}=loadTargetModule('orders/order-composition.ts');
 
 // Only persistence is simulated. The real service, planner, lock protocol and writer run.
 function fixture(){
- let state={order:{id:'o',clientId:'c',client:{id:'c',archivedAt:null},archivedAt:null,type:'CUSTOM_ORDER',currency:'EUR',priceMinor:9000,discountMinor:1000,depositRequiredMinor:4500,paymentStatus:'PARTIALLY_PAID',productionStatus:'NOT_SCHEDULED',salesStatus:'NEW_LEAD',shippingStatus:'NOT_READY',productionSlot:null,invoices:[{id:'invoice',status:'ISSUED'}],payments:[{id:'p',amountMinor:2000,currency:'EUR'}],items:[{id:'i',quantity:1,priceMinor:10000,productionStatus:'SEWING',instances:[{id:'x',ordinal:1,productionStatus:'SEWING',measurementId:'immutable'}]}]},operations:[],activities:[],audits:[],writes:[],failAudit:false};
+ let state={order:{id:'o',clientId:'c',client:{id:'c',archivedAt:null},archivedAt:null,updatedAt:new Date('2026-10-01'),type:'CUSTOM_ORDER',currency:'EUR',priceMinor:9000,discountMinor:1000,depositRequiredMinor:4500,paymentStatus:'PARTIALLY_PAID',productionStatus:'NOT_SCHEDULED',salesStatus:'NEW_LEAD',shippingStatus:'NOT_READY',productionSlot:null,invoices:[{id:'invoice',status:'ISSUED'}],payments:[{id:'p',amountMinor:2000,currency:'EUR'}],items:[{id:'i',quantity:1,priceMinor:10000,productionStatus:'SEWING',instances:[{id:'x',ordinal:1,productionStatus:'SEWING',measurementId:'immutable'}]}]},operations:[],activities:[],audits:[],writes:[],failAudit:false};
  const clone=()=>structuredClone(state),locks=[];
  const tx={
   $executeRaw:async()=>{locks.push('global')},$executeRawUnsafe:async()=>{locks.push('order')},$queryRaw:async()=>{locks.push('row');return []},
@@ -57,7 +57,7 @@ test('audit failure rolls back totals, marker and operation; blocked preview can
 
 test('explicit same-value discount records manual intent once without financial writes',async()=>{
  const f=fixture(),token=f.token(),command={mode:'FIXED',value:1000};await f.apply(command,'same-value-key-12345',token);await f.apply(command,'same-value-key-12345',token);
- assert.equal(f.state.writes.length,0);assert.equal(f.state.activities.filter(a=>a.type==='ORDER_DISCOUNT_UPDATED'&&a.metadata.manualDiscount===true).length,1);assert.equal(f.state.audits.length,1);assert.deepEqual(f.state.audits[0].before,f.state.audits[0].after);
+ assert.deepEqual(f.state.writes,[['updatedAt']]);assert.equal(f.state.activities.filter(a=>a.type==='ORDER_DISCOUNT_UPDATED'&&a.metadata.manualDiscount===true).length,1);assert.equal(f.state.audits.length,1);const {updatedAt:beforeTime,...before}=f.state.audits[0].before,{updatedAt:afterTime,...after}=f.state.audits[0].after;assert.deepEqual(before,after);assert.ok(afterTime>beforeTime);
 });
 
 test('discount can confirm an already scheduled tentative slot without touching its dates or production progress',async()=>{

@@ -14,7 +14,7 @@ export async function applyOrderDiscount(tx:Prisma.TransactionClient,orderId:str
   if(compositionToken(order)!==expectedToken)throw new CompositionError('Заказ изменён другим пользователем. Проверьте новый предварительный расчёт.');
   const plan=planOrderDiscount(order,command);
   if(plan.blockers.length)throw new CompositionError(plan.blockers.join(' '));
-  const before={discountMinor:order.discountMinor,priceMinor:order.priceMinor,depositRequiredMinor:order.depositRequiredMinor,paymentStatus:order.paymentStatus,productionStatus:order.productionStatus};
+  const before={discountMinor:order.discountMinor,priceMinor:order.priceMinor,depositRequiredMinor:order.depositRequiredMinor,paymentStatus:order.paymentStatus,productionStatus:order.productionStatus,updatedAt:order.updatedAt};
   let after=before;
   if(plan.discountMinor!==order.discountMinor){
     const paid=plan.after.paidMinor!;
@@ -23,12 +23,19 @@ export async function applyOrderDiscount(tx:Prisma.TransactionClient,orderId:str
     const updated=plan.confirmsProductionSlot&&order.productionStatus==='NOT_SCHEDULED'
       ?await updateProductionStatusGraph(tx,orderId,'SCHEDULED',data,{preserveProgress:true})
       :await tx.order.update({where:{id:orderId},data});
-    after={discountMinor:updated.discountMinor,priceMinor:updated.priceMinor,depositRequiredMinor:updated.depositRequiredMinor,paymentStatus:updated.paymentStatus,productionStatus:updated.productionStatus};
+    after={discountMinor:updated.discountMinor,priceMinor:updated.priceMinor,depositRequiredMinor:updated.depositRequiredMinor,paymentStatus:updated.paymentStatus,productionStatus:updated.productionStatus,updatedAt:updated.updatedAt};
     if(plan.confirmsProductionSlot){
       const slot=await tx.productionSlot.update({where:{orderId},data:{tentative:false}});
       await tx.auditLog.create({data:{actorId,action:'UPDATE',entityType:'ProductionSlot',entityId:slot.id,before:json(order.productionSlot),after:json(slot)}});
       await tx.activity.create({data:{actorId,clientId:order.clientId,orderId,type:'PRODUCTION_SLOT_CONFIRMED',summary:'Производственный слот подтверждён после изменения скидки',metadata:{depositRequiredMinor:plan.after.depositRequiredMinor,paidMinor:paid,currency:order.currency}}});
     }
+  }else{
+    // Rollback snapshots include Order.updatedAt, not discount intent history.
+    // Advance it even within the same millisecond so an older import cannot
+    // restore a different discount (or archive this explicitly confirmed order).
+    const updatedAt=new Date(Math.max(Date.now(),order.updatedAt.getTime()+1));
+    await tx.order.update({where:{id:orderId},data:{updatedAt}});
+    after={...before,updatedAt};
   }
   // An explicit same-value save is still manual intent; retries return before history creation.
   await tx.activity.create({data:{actorId,clientId:order.clientId,orderId,type:'ORDER_DISCOUNT_UPDATED',summary:'Сохранена скидка заказа',metadata:json({manualDiscount:true,command,baseMinor:plan.baseMinor,before:{...plan.before,discountMinor:order.discountMinor},after:{...plan.after,discountMinor:plan.discountMinor},currency:order.currency})}});

@@ -1484,3 +1484,26 @@ for(const priceMinor of [500,2147483647])test('manual discount rejects invalid p
  const discountMinor=priceMinor===500?0:10000;
  await assert.rejects(f.service.importOrder(normalizedOrder({priceMinor,discountMinor}),'owner','run-1'),e=>e.getStatus()===409);assert.deepEqual(f.state,before);assert.equal(f.businessWrites,0);
 });
+
+for(const changedValue of [false,true])for(const importedNew of [false,true])test((changedValue?'changed-value':'same-value')+' discount intent blocks prior import rollback '+(importedNew?'archive':'restore'),async()=>{
+ const {applyOrderDiscount}=loadTargetModule('orders/order-discount-write.ts'),{compositionToken}=loadTargetModule('orders/order-composition.ts');
+ const root={id:'discount-order',clientId:'c',number:'KC-test',currency:'EUR',type:'CUSTOM_ORDER',priceMinor:9000,discountMinor:1000,depositRequiredMinor:4500,paymentStatus:'UNPAID',salesStatus:'NEW_LEAD',productionStatus:'NOT_SCHEDULED',shippingStatus:'NOT_READY',updatedAt:new Date(Date.now()+60000),items:[],payments:[],invoices:[],expenses:[],agreements:[],productionSlot:null,shipment:null};
+ const scope={orderId:root.id,clientIds:[],connectionKey:'connection',keycrmBuyerId:null},activities=[],operations=[];let mutation,run,rollbackWrites=0;
+ const tx={$executeRaw:async()=>0,$executeRawUnsafe:async()=>0,$queryRaw:async()=>[],
+  order:{findFirst:async()=>({...structuredClone(root),client:{id:'c',archivedAt:null}}),findUnique:async()=>structuredClone(root),update:async({data})=>{if(data.archivedAt||data.priceMinor!==undefined)rollbackWrites++;Object.assign(root,data);return structuredClone(root)}},
+  orderCompositionOperation:{findUnique:async()=>operations[0]??null,create:async({data})=>{const op={id:'discount-operation',...data};operations.push(op);return op}},
+  activity:{create:async({data})=>{activities.push(data);return data}},auditLog:{create:async()=>({})},
+  orderItemInstance:{findMany:async()=>[],updateMany:async()=>({count:0})},orderItem:{updateMany:async()=>({count:0})},payment:{updateMany:async()=>({count:0})},
+  keycrmSyncRun:{findUnique:async()=>run,update:async({data})=>Object.assign(run,data)},keycrmSyncMutation:{update:async({data})=>Object.assign(mutation,data)}};
+ const KeycrmService=loadKeycrmService(),service=new KeycrmService({$transaction:fn=>fn(tx),keycrmSyncRun:{findUnique:async()=>({...run,_count:{issues:0}})}});
+ const after=await service.rollbackSnapshot(tx,scope),before=structuredClone(after);
+ if(importedNew){before.scope.orderId=null;before.order=null}else{before.order.discountMinor=0;before.order.priceMinor=10000;before.order.depositRequiredMinor=5000}
+ mutation={id:'mutation',orderId:root.id,externalOrderId:'test',kind:'IMPORTED_ORDER',beforeSnapshot:before,afterSnapshot:after,rollbackEligible:true,rolledBackAt:null};run={id:'run',mode:'APPLY',status:'FAILED',mutations:[mutation],rolledBackAt:null};
+ const discountMinor=changedValue?2000:1000,priceMinor=changedValue?8000:9000;
+ const command={mode:'FIXED',value:discountMinor},token=compositionToken(await tx.order.findFirst()),previousVersion=root.updatedAt.getTime();
+ await applyOrderDiscount(tx,root.id,command,token,'discount-same-key-123','owner');
+ rollbackWrites=0;
+ await assert.rejects(service.rollback('run',{id:'owner'}),/изменён после импорта/);
+ assert.equal(root.discountMinor,discountMinor);assert.equal(root.priceMinor,priceMinor);assert.equal(rollbackWrites,0);if(!changedValue)assert.ok(root.updatedAt.getTime()>previousVersion);assert.equal(activities.filter(a=>a.type==='ORDER_DISCOUNT_UPDATED').length,1);
+ const savedVersion=root.updatedAt.getTime();await applyOrderDiscount(tx,root.id,command,token,'discount-same-key-123','owner');assert.equal(root.updatedAt.getTime(),savedVersion);assert.equal(activities.length,1);
+});
