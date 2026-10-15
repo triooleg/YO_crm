@@ -1,5 +1,37 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — CRM 0.4.1 WEB deployed, installed verification
+
+User explicitly authorized deploy. Runtime/source/tag
+5c9a8d893c80c78f0005daa9cf7fb6f44063eb29 / crm-v0.4.1. Only WEB recreated,
+image63e1e333d2a78151f3306206c553e0c59791944047cae485662880081fa24846.
+Existing0.4.0 APIffbbb539.../image40e3cb2e..., PG and Redis exact identities,
+start/restarts/mounts and private config preserved. No migration/seed/backfill,
+provider/customer write or replay of completed319 profile confirmations.
+
+Visible Inbox AI reply switch defaults off. ON does not generate; poll cannot
+insert old saved DRAFT into empty composer. Initial/channel draft restoration and
+provenance/manual send preserved; OFF invalidates late result. Global AI policy,
+analysis, translation and summaries unchanged. Local9synthetic browser PASS;
+release1594tests/types/API+Nextbuild/restoredwebtscPASS with pinnedpnpm11.16.
+Exact CI Quality38802965264 and Release38802956353 both SUCCESS.
+
+Fresh FULL20261015T202841Z-c187304-pre-v041 verified. Archive601fd7594c62ac25...
+821files/manifestc8ecfcd82fbca5f9..., all36historicalSQL exactbytes preserved.
+Independent exact helper/prepare/switch reviewed; WEB-only build/switch PASS.
+Actual authenticated smoke12checks/4screens1366/390 PASS_WITH_UNAVAILABLE:
+ON/OFF/naturalpoll/composer/version pass,0AIattempts/0customerwrites/0errors.
+Two natural inbound-plus-DRAFT cases unavailable, no event fabricated; causal
+path remains local proof. First harness FAIL from excluding existing channel GET
+retained; separately reviewed narrow harness correction passed, no app change.
+Root+health200. Final post20:38:28.247257Z–20:44:19.957471Z strict22business
+fingerprints+operationhistory/fulltracker36 unchanged, full old/new stdout+stderr
+clean, source/image/dependency/privatepins verified. API stayed active; sampled
+equality is not quiescence. Evidence .local/inbox-ai-deploy; report
+docs/ui/crm-0.4.1-deployment.md. Actual live visual PASS and independent FINAL
+RELEASE ACCEPT recorded; no blockers. Published tag immutable. Future docs-only commits do not
+change installed source/image. Never rerun older deployment helpers blindly.
+
 ## 2026-10-15 — Inbox 0.4.1 release authorized, preparation
 
 User explicitly requested deployment after local acceptance. Release candidate
