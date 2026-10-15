@@ -16,5 +16,19 @@
 .overview-kpi strong.overview-long-money{font-size:16px;letter-spacing:-.4px}.overview-shipment-open small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .overview-kpi h2{min-height:30px}.overview-kpi-action{gap:9px}.overview-kpi-link{margin-top:0;white-space:nowrap}.overview-kpi-action>div{gap:4px}
 .overview-page{--text-page-title:24px}.overview-card>header{flex-direction:row}.overview-lists>.overview-card>header{margin:0 0 2px}.overview-bar-chart{height:190px}.overview-finance-card .overview-bar-chart,.overview-finance-card .overview-chart-plot svg{height:166px}.overview-ring svg{height:190px}.overview-kpi .overview-verification{font-weight:600;color:#a65c00}.overview-attention .overview-note{margin-top:5px}@media(max-width:800px){.overview-page{--text-page-title:23px}}
+.overview-charts{grid-template-rows:auto auto minmax(235px,auto) auto;grid-auto-rows:auto auto minmax(235px,auto) auto}
+.overview-charts>.overview-card{display:grid;grid-row:span 4;grid-template-rows:subgrid;row-gap:10px;min-height:0}
+.overview-charts>.overview-card>header{margin:0;min-height:24px}
+.overview-chart-controls{display:flex;align-items:center;min-height:30px;min-width:0}
+.overview-chart-controls .overview-chart-legend{margin:0}
+.overview-chart-body{display:flex;align-items:stretch;position:relative;min-width:0;min-height:235px}
+.overview-chart-body>.overview-chart-plot,.overview-chart-body>.order-source-trend{flex:1;min-width:0;min-height:235px}
+.overview-chart-body .overview-chart-plot,.overview-chart-body .order-source-plot{position:relative;min-width:0;min-height:235px}
+.overview-chart-body>.order-source-trend{display:flex;flex-direction:column}
+.overview-chart-body .order-source-plot{flex:1}
+.overview-chart-body .overview-chart-plot>svg,.overview-chart-body .order-source-plot>svg{position:absolute;inset:0;width:100%;height:100%}
+.overview-chart-body>.order-source-breakdown,.overview-chart-body>.overview-ring-content{flex:1;min-width:0}
+.overview-chart-footer{min-width:0;align-self:start}
+.overview-chart-footer .order-source-scope{margin-bottom:0!important}
 .overview-page{padding-top:15px}.overview-header{margin-bottom:16px}.overview-message-copy{gap:2px;line-height:1.15}.overview-shipment-open>span:last-child{gap:2px;line-height:1.15}.overview-kpi .overview-verification{line-height:1.15}@media(min-width:1700px){.overview-page{padding-top:18px}}
 .overview-kpi strong.overview-long-money{max-width:100%;white-space:normal;overflow-wrap:anywhere}

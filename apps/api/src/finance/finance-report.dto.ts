@@ -1,9 +1,10 @@
 import { Type } from "class-transformer";
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { ORDER_SOURCES } from "../orders/order-source";
 
 /** Additive read contract. Mutations continue using the existing finance/order DTOs. */
 export class FinanceReportQueryDto {
-  @IsOptional() @IsIn(['ALL','WEBSITE','MANUAL','INSTAGRAM','OTHER','UNKNOWN','NON_WEBSITE']) source?:string;
+  @IsOptional() @IsIn(['ALL',...ORDER_SOURCES,'NON_WEBSITE']) source?:string;
   @IsOptional() @IsString() @MaxLength(7) month?: string;
   @IsOptional() @IsIn(["EUR", "USD", "UAH"]) currency?: string;
   @IsOptional() @Type(() => Number) @IsIn([3, 6, 12]) range?: number;

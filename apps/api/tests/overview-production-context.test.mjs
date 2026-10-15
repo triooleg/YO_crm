@@ -4,10 +4,11 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import {loadTargetModule} from './overview-target-loader.mjs';
 const nativeRequire=createRequire(import.meta.url);
 const source=readFileSync(new URL('../src/orders/production-context.ts',import.meta.url),'utf8');
 const module={exports:{}};
-vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module,exports:module.exports,require:id=>id==='../finance/exchange-rates'?{appliedPaymentMinor:()=>0}:nativeRequire(id),Date});
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module,exports:module.exports,require:id=>id==='../finance/exchange-rates'?{appliedPaymentMinor:()=>0}:id==='./order-shipping-evidence'?loadTargetModule('orders/order-shipping-evidence.ts'):nativeRequire(id),Date});
 const {loadProductionOrders}=module.exports;
 const plain=value=>JSON.parse(JSON.stringify(value));
 test('Overview operational cohort is not clipped by calendar dates or widened by an unrelated orderId',async()=>{

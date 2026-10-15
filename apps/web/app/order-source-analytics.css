@@ -3,3 +3,6 @@
 .overview-source-kpi .overview-kpi-link{white-space:normal;overflow:visible}.finance-source-kpi{display:block;height:100%}.finance-source-kpi .finance-report-kpi{height:100%;width:100%;text-align:left}.finance-source-kpi .finance-report-kpi h2{font-size:12px}.finance-source-kpi .finance-report-kpi span{white-space:normal}
 
 @media(min-width:701px) and (max-width:1700px){.finance-report-kpis:has(.finance-source-kpi){grid-template-columns:repeat(4,minmax(0,1fr))}}
+.order-source-filter{width:220px;max-width:100%}
+.orders-kpi-grid:has(>.orders-kpi:nth-child(7)){grid-template-columns:repeat(7,minmax(0,1fr))}@media(max-width:1550px){.orders-kpi-grid:has(>.orders-kpi:nth-child(7)){grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.orders-kpi-grid:has(>.orders-kpi:nth-child(7)){grid-template-columns:repeat(2,minmax(0,1fr))}}
+.order-source-trend{position:relative}.order-source-empty{position:absolute;inset:40% 0 auto;text-align:center;color:var(--mantine-color-dimmed);font-size:12px}

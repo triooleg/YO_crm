@@ -3,6 +3,24 @@ import assert from 'node:assert/strict';
 import {loadTargetModule} from './overview-target-loader.mjs';
 const {classifyOrderSource,matchesOrderSource,normalizeOrderSourceFilter,CONFIRMED_WEBSITE_SOURCE,countOrderSources}=loadTargetModule('orders/order-source.ts');
 const imported=(name,extra={})=>({sourceSystem:'KEYCRM',sourceAccount:'account',externalId:'42',activities:[{type:'KEYCRM_ORDER_IMPORTED',createdAt:new Date('2026-09-01'),metadata:{keycrmOrderId:'42',sourceName:name}}],...extra});
+
+test('every requested origin has a separate proven category while manual and unknown stay independent',()=>{
+ const cases={Instagram:'INSTAGRAM',Facebook:'FACEBOOK',WhatsApp:'WHATSAPP',Viber:'VIBER',Gmail:'EMAIL','E-mail':'EMAIL',Chatwoot:'CHAT','Chat KeyCRM':'CHAT',Chatway:'CHAT',Manual:'MANUAL'};
+ for(const [name,expected] of Object.entries(cases)){
+  assert.equal(classifyOrderSource(imported(name)),expected,name);
+  assert.equal(normalizeOrderSourceFilter(expected),expected);
+  assert.equal(matchesOrderSource(expected,expected),true);
+ }
+ assert.equal(classifyOrderSource(imported('Telegram')),'OTHER');
+ assert.equal(classifyOrderSource(imported('Unverified social network')),'UNKNOWN');
+ assert.equal(classifyOrderSource({activities:[{type:'ORDER_CREATED'}],client:{source:'FACEBOOK'}}),'MANUAL');
+ assert.equal(classifyOrderSource({client:{source:'WHATSAPP'}}),'UNKNOWN');
+ const rows=Object.entries(cases).map(([name],i)=>({id:String(i),createdAt:new Date('2026-10-02')}));
+ const origins=Object.fromEntries(Object.entries(cases).map(([name],i)=>[String(i),classifyOrderSource(imported(name))]));
+ const counts=countOrderSources(rows,origins,new Date('2026-10-01'),new Date('2026-11-01'));
+ assert.equal(counts.length,10);assert.equal(counts.reduce((n,r)=>n+r.count,0),rows.length);
+ for(const source of ['FACEBOOK','WHATSAPP','VIBER','EMAIL','CHAT','MANUAL'])assert.ok(counts.find(r=>r.source===source)?.count>0);
+});
 test('only persisted order provenance establishes website origin, independently of client/payment/type',()=>{
  assert.equal(classifyOrderSource(imported('yoleotard.com')),'WEBSITE');
  assert.equal(classifyOrderSource(imported('https://www.yoleotard.com/shop')),'WEBSITE');

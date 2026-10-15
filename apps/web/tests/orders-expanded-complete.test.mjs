@@ -78,7 +78,7 @@ test("вкладки показывают реальные финансы дос
 test("быстрые продажи не получают производственные действия, а статусы остаются раздельными", () => {
   assert.match(expanded, /const requiresProduction = !NON_PRODUCTION_ORDER_TYPES\.has\(order\.type\)/);
   assert.match(expanded, /requiresProduction \? <div className="orders-production-current"/);
-  assert.match(expanded, /requiresProduction \? <CrmButton[^>]*onClick=\{onProduction\}/);
+  assert.match(expanded, /canSchedule \? <CrmButton[^>]*onClick=\{onProduction\}/);
   const statusCell = dashboard.match(/if \(id === "status"\)[\s\S]*?if \(id === "delivery"\)/)?.[0] ?? "";
   assert.match(statusCell, /order\.salesStatus/);
   assert.doesNotMatch(statusCell, /order\.productionStatus/);

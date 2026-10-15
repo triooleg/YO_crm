@@ -72,7 +72,7 @@ test("существующие действия остаются колбэка�
 });
 
 test("производство меняется по физическим экземплярам и показывает только укрупнённые статусы", () => {
-  assert.match(tabs, /INSTANCE_PRODUCTION_STATUSES = \["NOT_SCHEDULED", "SCHEDULED", "SEWING", "READY"\]/);
+  assert.match(tabs, /INSTANCE_PRODUCTION_STATUSES = \["NOT_SCHEDULED", "SCHEDULED", "SEWING", "READY", "ON_HOLD", "CANCELLED"\]/);
   assert.match(tabs, /onUpdateInstance\(instance\.id,\{productionStatus:event\.currentTarget\.value,expectedUpdatedAt:instance\.updatedAt\}\)/);
   assert.match(tabs, /value=\{coarseProductionCode\(instance\.productionStatus\)\}/);
   assert.match(tabs, /label:coarseProductionLabel\(status\)/);

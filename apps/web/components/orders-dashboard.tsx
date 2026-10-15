@@ -35,7 +35,7 @@ import { type Order } from "./orders-workspace";
 import { expandedOrderItems, OrderExpandedTabs, type ExpandedOrderView, type OrderItemInstanceInput, type OrderNoteInput, type OrderShipmentInput } from "./orders/order-expanded-tabs";
 
 type ColumnId = "client" | "model" | "quantity" | "deadline" | "payment" | "production" | "delivery" | "status" | "created" | "menu";
-type SortColumnId = Exclude<ColumnId, "menu">;
+type SortColumnId = Exclude<ColumnId, "menu"> | "source";
 type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "depositShortfall" | "work" | "ready" | "completed" | "overdue";
 type OrderListPage = {items:Order[];total:number;page:number;pageSize:number;focusFound:boolean;metrics:{total:number;active:number;unpaid:number;deposit:number;urgent:number;overdue:number;ready:number;completed:number;work:number};sources:{total:number;websiteCount:number};disciplines:string[]};
@@ -53,7 +53,7 @@ const COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v3";
 const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
 const SORT_SETTINGS_KEY = "orders-dashboard-sort-v1";
 const DEFAULT_COLUMNS: ColumnId[] = ["client", "model", "quantity", "deadline", "payment", "production", "delivery", "status", "created", "menu"];
-const SORTABLE_ORDER_COLUMNS: SortColumnId[] = DEFAULT_COLUMNS.filter((id): id is SortColumnId => id !== "menu");
+const SORTABLE_ORDER_COLUMNS: SortColumnId[] = [...DEFAULT_COLUMNS.filter((id): id is Exclude<ColumnId,"menu"> => id !== "menu"),"source"];
 const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
 const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
 const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
@@ -416,8 +416,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     active: orders.filter(isActiveOrder).length,
     unpaid: orders.filter((order) => isActiveOrder(order) && paid(order) === 0).length,
     deposit: orders.filter((order) => isActiveOrder(order) && depositShortfall(order)).length,
-    urgent: orders.filter((order) => isActiveOrder(order) && days(order) >= 0 && days(order) <= 7).length,
-    overdue: orders.filter((order) => isActiveOrder(order) && days(order) < 0).length,
+    urgent: orders.filter((order) => isOperationalOrder(order) && days(order) >= 0 && days(order) <= 7).length,
+    overdue: orders.filter((order) => isOperationalOrder(order) && days(order) < 0).length,
     ready: orders.filter(isReadyToShip).length,
     completed: orders.filter((order) => order.salesStatus === "COMPLETED").length,
   }), [orders,serverPage]);
@@ -428,13 +428,13 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     if (statusFilter !== "all" && statusFilter !== "active" && order.salesStatus !== statusFilter) return false;
     if (disciplineFilter !== "all" && order.discipline !== disciplineFilter) return false;
     if (quickFilter === "active" && !isActiveOrder(order)) return false;
-    if (quickFilter === "urgent" && !(isActiveOrder(order) && days(order) >= 0 && days(order) <= 7)) return false;
+    if (quickFilter === "urgent" && !(isOperationalOrder(order) && days(order) >= 0 && days(order) <= 7)) return false;
     if (quickFilter === "deposit" && !(isActiveOrder(order) && paid(order) === 0)) return false;
     if (quickFilter === "depositShortfall" && !(isActiveOrder(order) && depositShortfall(order))) return false;
-    if (quickFilter === "work" && !["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)) return false;
+    if (quickFilter === "work" && !(isOperationalOrder(order) && ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus))) return false;
     if (quickFilter === "ready" && !isReadyToShip(order)) return false;
     if (quickFilter === "completed" && order.salesStatus !== "COMPLETED") return false;
-    if (quickFilter === "overdue" && !(isActiveOrder(order) && days(order) < 0)) return false;
+    if (quickFilter === "overdue" && !(isOperationalOrder(order) && days(order) < 0)) return false;
     return true;
   }), [orders, quickFilter, statusFilter, disciplineFilter,serverPage]);
 
@@ -630,6 +630,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
 
     <div className="orders-kpi-grid">
       <Kpi label={ui.kpis.all} value={loading || error ? null : metrics.total} icon="bag" active={quickFilter === "all"} onClick={() => selectQuickFilter("all")} />
+      {serverPage&&<button className={`orders-kpi tone-green${source==='WEBSITE'?' active':''}`} aria-pressed={source==='WEBSITE'} title={sourceUi.ordersScope} onClick={()=>{cancelPreviousOrderNavigation();setSource(source==='WEBSITE'?'':'WEBSITE');}}><i><CartIcon/></i><span><small>{sourceUi.onlineOrders}</small><strong>{loading||error?'—':serverPage.sources.websiteCount}</strong></span></button>}
       <Kpi label={ui.kpis.deposit} value={loading || error ? null : metrics.deposit} icon="payment" tone="amber" active={quickFilter === "depositShortfall"} onClick={() => selectQuickFilter("depositShortfall")} />
       <Kpi label={ui.kpis.urgent} value={loading || error ? null : metrics.urgent} icon="calendar" tone="red" active={quickFilter === "urgent"} onClick={() => selectQuickFilter("urgent")} />
       <Kpi label={ui.kpis.overdue} value={loading || error ? null : metrics.overdue} icon="clock" tone="red" active={quickFilter === "overdue"} onClick={() => selectQuickFilter("overdue")} />
@@ -637,7 +638,6 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <Kpi label={ui.kpis.completed} value={loading || error ? null : metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
     </div>
 
-    {serverPage&&<div className="orders-source-summary"><CrmButton tone="secondary" size="compact-sm" leftSection={<CartIcon/>} onClick={()=>{cancelPreviousOrderNavigation();setSource(source==='WEBSITE'?'':'WEBSITE');}}>{sourceUi.onlineOrders}: {loading?'—':serverPage.sources.websiteCount}</CrmButton><small>{sourceUi.ordersScope}</small></div>}
     <div className="orders-command-bar">
       <CrmSearchField className="orders-search" value={search} onValueChange={value=>{cancelPreviousOrderNavigation();setSearch(value);}} placeholder={ui.search} ariaLabel={ui.search} clearLabel={ui.clearSearch} showSearchIcon />
       <div className="orders-filter-wrap">
@@ -649,8 +649,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
           <CrmButton tone="secondary" onClick={clearFilters}>{ui.clearAll}</CrmButton>
         </div>}
       </div>
-      <div className="orders-quick-filters">{([ ["all", ui.all, metrics.total], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, (serverPage?.metrics.work??orders.filter((order) => ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length)], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
-      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: ui.columnsMap[id as SortColumnId] }))} />
+      <div className="orders-quick-filters">{([ ["all", ui.all, metrics.total], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, (serverPage?.metrics.work??orders.filter((order) => isOperationalOrder(order) && ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length)], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
+      <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: id === "source" ? sourceUi.filter : ui.columnsMap[id] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
     </div>
@@ -735,6 +735,7 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") { const received = paid(order), percent = received === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={percent === null ? dataEvidenceUi.unavailable : `${percent}%`}><i style={{ width: `${percent ?? 0}%` }} /></div><small className={hasBalance(order) ? "orders-balance-line" : "orders-paid-line"}>{balance(order) === null ? dataEvidenceUi.unavailable : hasBalance(order) ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent === null ? dataEvidenceUi.unavailable : `${percent}%`}</em></td>; }
   if (id === "production") {
+    if(order.salesStatus==='COMPLETED') return <td className="orders-col orders-col-production" style={style}>{hasDatedProductionSlot(order)&&<strong>{slotDateRange(order)}</strong>}<Badge component="span" color="green" variant="light" radius="xl" size="sm">{productionUi.productionFulfilled}</Badge></td>;
     const presentation = orderProductionStatusPresentation(order);
     const shippingLabels: Record<string, string> = { SHIPPED: productionUi.shippingShipped, DELIVERED: productionUi.shippingDelivered, RETURNED: productionUi.shippingReturned, LOST: productionUi.shippingLost };
     const badge = presentation.domain === "shipping" ? <Badge component="span" className="crm-status-badge" color={crmStatusPresentation("shipping", presentation.status).color} data-domain="shipping" data-status={presentation.status} radius="xl" size="sm" variant="light">{shippingLabels[presentation.status]}</Badge> : <CrmStatusBadge {...presentation}/>;
@@ -760,7 +761,7 @@ function ExpandedOrder({ onOpenOrder, expenseActions, financeActions, onVoidPaym
   const problems = orderProblems(order);
   const paidMinor = paid(order);
   const paymentPercent = paidMinor === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
-  const requiresProduction = !NON_PRODUCTION_ORDER_TYPES.has(order.type);
+  const requiresProduction = order.salesStatus !== 'COMPLETED' && !NON_PRODUCTION_ORDER_TYPES.has(order.type);
   const timeline = orderTimelinePresentation(order);
   const shippingLabel = timeline.partial ? `${ui.shippingPartial}${["LOST","RETURNED"].includes(timeline.shippingStatus) ? ` · ${orderLabel("shipping",timeline.shippingStatus)}` : ""}` : timeline.shippingStatus === "SHIPPED" ? ui.shippingSent : orderLabel("shipping", timeline.shippingStatus);
   return <div className="orders-approved-expanded">
@@ -954,6 +955,7 @@ function UiIcon({ name }: { name: string }) { const paths: Record<string, React.
 function OrderChannelIcon({ channel }: { channel: string }) { const key = channel.toUpperCase(); if (key === "FACEBOOK") return <span className="orders-channel facebook" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4.3c-.5-.1-2-.3-3.8-.3C9.7 4 7.3 6.1 7.3 10v2H4v4h3.3v8h4V16h3.3l.5-4h-3.8v-1.6C11.3 8.8 11.7 8 14 8Z" /></svg></span>; if (key === "INSTAGRAM") return <span className="orders-channel instagram" title="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="5" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="17" cy="7" r="1" /></svg></span>; if (key === "WHATSAPP") return <span className="orders-channel whatsapp" title="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.7a8 8 0 0 1-11.8 7L4 20l1.3-4A8 8 0 1 1 20 11.7Z" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M9 8c.5 3 2 4.5 5 5l1-1 2 1.5c-1 2-3 2-5.5.7A8 8 0 0 1 7.8 10C7.5 8.5 8 7.5 9 8Z" /></svg></span>; if (key === "EMAIL") return <span className="orders-channel email" title="Email"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="2" /><path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></span>; if (key === "CHATWOOT") return <span className="orders-channel chatwoot" title="Chatwoot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z" /></svg></span>; return <span className="orders-channel manual" title={ui.manualChannel}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17-1 4 4-1L19 8l-3-3L4 17Z" /></svg></span>; }
 
 function isActiveOrder(order: Order) { return !["COMPLETED", "CANCELLED"].includes(order.salesStatus); }
+function isOperationalOrder(order: Order) { return isActiveOrder(order) && !["RETURNED","LOST"].includes(order.shippingStatus) && !["DELIVERED","REVIEW_REQUESTED"].includes(order.salesStatus) && !orderTimelinePresentation(order).dispatched; }
 function isReadyToShip(order: Order) { return orderReadyToShip(order); }
 function paid(order: Order) { return orderSettlement(order).paidMinor; }
 function depositShortfall(order: Order) { const value = paid(order); return value !== null && value < order.depositRequiredMinor; }

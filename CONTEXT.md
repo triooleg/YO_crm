@@ -319,10 +319,25 @@ content are separate. `MessageTemplate` stores reusable communication text.
 
 The proven origin of an Order, independently of Client.source, conversation channel,
 payment method, import transport and fulfillment OrderType. One server classifier
-(`apps/api/src/orders/order-source.ts`) provides WEBSITE/MANUAL/INSTAGRAM/OTHER/UNKNOWN
+(`apps/api/src/orders/order-source.ts`) provides WEBSITE/MANUAL/INSTAGRAM/FACEBOOK/CHAT/
+WHATSAPP/VIBER/EMAIL/OTHER/UNKNOWN
 for Orders, Overview and Finance. The owner-confirmed KeyCRM source12 alias is pinned
 to the existing account and persisted order provenance; uncertain/conflicting history
 remains UNKNOWN. Counts use unique Order.id and creation month. Cash uses unique valid
 Payment.id and receivedAt, valued through the existing reporting FX policy; it never
 substitutes order price. See [source policy](docs/website-sales-source-policy.md) and
 [ADR0006](docs/decisions/0006-proven-order-origin-for-analytics.md).
+
+### Operational status presentation
+
+Stored sales, production, payment and shipping dimensions remain independent.
+Read projections distinguish tracking existence from complete dispatch. Explicit
+root tracking/factual dispatch retains the approved legacy whole-order meaning;
+otherwise active child parcels require known unique item-instance coverage before
+an entire order is displayed as dispatched. A sent child alone leaves unfinished
+production visible; LOST/RETURNED remain explicit. No factual date is invented.
+COMPLETED sales are historical, excluded from the production working list, and
+cannot create/edit a slot or restart planning/work through status/instance writes.
+An explicit unsent READY_TO_SHIP sale belongs to the ready KPI/filter. Refunded or
+cancelled payments are not operationally awaiting payment. Display normalization
+never changes stored statuses, historical slots, payments or audit records.

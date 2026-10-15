@@ -565,7 +565,10 @@ export function metaConversationInboxUrl(channel: string | undefined, externalId
   const username = typeof settings.instagramClientUsername === "string"
     ? settings.instagramClientUsername.trim().replace(/^@/, "")
     : "";
-  return /^[A-Za-z0-9._]+$/.test(username) ? `https://ig.me/m/${username}` : "";
+  // An Instagram-scoped participant ID is not a browser Direct thread ID.
+  // Username ig.me links can redirect to an unavailable /m page for personal
+  // accounts. Expose the real profile fallback and label it honestly in Inbox.
+  return /^[A-Za-z0-9._]{1,30}$/.test(username) ? `https://www.instagram.com/${username}/` : "";
 }
 
 export function legacyConversationMatchesReceiver(metadata: unknown, receiverId: string | undefined) {

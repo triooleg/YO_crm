@@ -25,3 +25,5 @@
 @media(max-width:800px){.production-filter-grid{grid-template-columns:1fr}}
 
 .production-lifecycle>div{min-width:0}.production-lifecycle .mantine-Badge-root{height:auto;min-height:22px;white-space:normal;line-height:1.25;padding:3px 8px}.production-lifecycle .mantine-Badge-label{white-space:normal;overflow:visible;text-overflow:clip}.production-lifecycle em{max-width:100%;overflow-wrap:anywhere}.production-lifecycle .is-completed>span,.production-lifecycle .is-shipped>span,.production-lifecycle .is-delivered>span{background:#21ad77;color:#fff}
+.production-load-heading{position:sticky;left:0;z-index:24;display:flex;align-items:center;padding:0 10px;border-right:1px solid #ded9ea;background:#fff;color:#656e88;font-size:10px}.production-lifecycle>.is-partial>span{background:var(--mantine-color-yellow-light);color:var(--mantine-color-yellow-light-color)}
+.production-load-row>.production-order-columns-head{padding:0 10px;height:28px;box-sizing:border-box}

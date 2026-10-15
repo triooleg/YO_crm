@@ -2,17 +2,18 @@ import { BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { financeBusinessDay, financePeriod } from '../finance/finance-report-model';
 import { requiresProduction } from '../orders/production-rules';
+import { shippingEvidence } from '../orders/order-shipping-evidence';
 
 export const OVERVIEW_BUCKETS = ['new', 'work', 'ready', 'awaiting', 'completed'] as const;
 export type OverviewBucket = typeof OVERVIEW_BUCKETS[number];
 export type OverviewOrderFilter = OverviewBucket | 'period' | 'overdue' | 'unpaid';
 type Payment = {amountMinor:number;currency:string;appliedAmountMinor:number|null;appliedCurrency:string|null};
-type Parcel = {id:string;status:string;carrier:string;trackingNumber:string|null;shippedAt:Date|null;deliveredAt:Date|null};
+type Parcel = {id:string;status:string;carrier:string;trackingNumber:string|null;shippedAt:Date|null;deliveredAt:Date|null;instances?:{id:string}[]};
 export type OverviewOrderSource = {
   id:string;type:Parameters<typeof requiresProduction>[0];createdAt:Date;sourceSystem:string|null;
   salesStatus:string;productionStatus:string;paymentStatus:string;shippingStatus:string;
   requiredDeliveryAt:Date|null;deliveryTrackingCode:string|null;priceMinor:number;depositRequiredMinor:number;currency:string;
-  items:{productionStatus:string;instances:{productionStatus:string}[]}[];payments:Payment[];
+  items:{quantity?:number;productionStatus:string;instances:{id?:string;productionStatus:string}[]}[];payments:Payment[];
   orderShipments:Parcel[];shipment:{trackingNumber:string|null;shippedAt:Date|null;deliveredAt:Date|null;carrier?:string}|null;
   deadlineEvidence:{metadata:unknown}[];archivedAt?:Date|null;
 };
@@ -21,9 +22,9 @@ export type OverviewOrderSource = {
 export const overviewOrderSourceSelect = {
   id:true,type:true,createdAt:true,sourceSystem:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,
   requiredDeliveryAt:true,deliveryTrackingCode:true,priceMinor:true,depositRequiredMinor:true,currency:true,
-  items:{select:{productionStatus:true,instances:{where:{archivedAt:null},select:{productionStatus:true}}}},
+  items:{select:{quantity:true,productionStatus:true,instances:{where:{archivedAt:null},select:{id:true,productionStatus:true}}}},
   payments:{where:{voidedAt:null},select:{amountMinor:true,currency:true,appliedAmountMinor:true,appliedCurrency:true}},
-  orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:'desc' as const},{id:'asc' as const}],select:{id:true,status:true,carrier:true,trackingNumber:true,shippedAt:true,deliveredAt:true}},
+  orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:'desc' as const},{id:'asc' as const}],select:{id:true,status:true,carrier:true,trackingNumber:true,shippedAt:true,deliveredAt:true,instances:{select:{id:true}}}},
   shipment:{select:{carrier:true,trackingNumber:true,shippedAt:true,deliveredAt:true}},
   activities:{where:{type:'ORDER_DEADLINE_UPDATED'},orderBy:[{createdAt:'desc' as const},{id:'desc' as const}],take:1,select:{metadata:true}},
 } satisfies Prisma.OrderSelect;
@@ -74,18 +75,18 @@ export function classifyOverviewOrder(order:OverviewOrderSource,now=new Date()) 
   const exceptionalParent=['RETURNED','LOST'].includes(order.shippingStatus);
   const exceptionalParcel=parcels.some(parcel=>['RETURNED','LOST'].includes(parcel.status));
   const cancelled=order.salesStatus==='CANCELLED'||order.productionStatus==='CANCELLED'||order.paymentStatus==='REFUNDED'||order.paymentStatus==='CANCELLED';
-  const allParcelsDelivered=parcels.length>0&&parcels.every(parcel=>parcel.status==='DELIVERED'||Boolean(parcel.deliveredAt));
+  const allParcelsDelivered=shippingEvidence(order).complete&&parcels.length>0&&parcels.every(parcel=>parcel.status==='DELIVERED'||Boolean(parcel.deliveredAt));
   const completed=!exceptionalParent&&!exceptionalParcel&&!cancelled&&(['COMPLETED','REVIEW_REQUESTED'].includes(order.salesStatus)||allParcelsDelivered||(!parcels.length&&(order.salesStatus==='DELIVERED'||order.shippingStatus==='DELIVERED'||Boolean(order.shipment?.deliveredAt))));
-  // Active parcels are authoritative over a legacy aggregate or tracking code.
-  // One sent parcel must not suppress unfinished work on the rest of the order.
-  const dispatched=parcels.length>0?parcels.every(parcelSent):Boolean(['SHIPPED','DELIVERED'].includes(order.salesStatus)||SENT.has(order.shippingStatus)||order.deliveryTrackingCode?.trim()||(order.shipment&&parcelSent(order.shipment)));
+  // Child-only dispatch requires full item coverage; explicit root tracking/dates
+  // retain the approved legacy whole-order meaning across all status consumers.
+  const dispatched=shippingEvidence(order).complete;
   const partiallyDispatched=parcels.length>0&&parcels.some(parcelSent)&&!dispatched;
   // A terminal child does not close the other active parcels or their production.
   const open=!order.archivedAt&&!cancelled&&!completed&&!exceptionalParent&&!(exceptionalParcel&&CLOSED_SALES.has(order.salesStatus));
   const leaves=order.items.flatMap(item=>item.instances.length?item.instances.map(instance=>instance.productionStatus):[item.productionStatus]).filter(status=>status!=='CANCELLED');
   const fullReady=leaves.length>0?leaves.every(status=>status==='READY'):order.productionStatus==='READY';
   const work=open&&!dispatched&&requiresProduction(order.type)&&!fullReady&&(WORK.has(order.productionStatus)||leaves.some(status=>WORK.has(status)||status==='READY'));
-  const ready=open&&!dispatched&&!partiallyDispatched&&(requiresProduction(order.type)?fullReady:order.shippingStatus==='READY'||order.salesStatus==='READY_TO_SHIP');
+  const ready=open&&!dispatched&&!partiallyDispatched&&(order.salesStatus==='READY_TO_SHIP'||(requiresProduction(order.type)?fullReady:order.shippingStatus==='READY'));
   const trusted=order.sourceSystem!=='KEYCRM'||order.salesStatus!=='NEW_LEAD'||work||ready||hasTrustedOverviewDeadline(order);
   const paid=settlement(order);
   const unpaid=open&&!dispatched&&trusted&&paid!==null&&((order.depositRequiredMinor>0&&paid<order.depositRequiredMinor)||(order.salesStatus==='WAITING_FINAL_PAYMENT'&&paid<order.priceMinor));

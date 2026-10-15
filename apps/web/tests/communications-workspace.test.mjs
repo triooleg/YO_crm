@@ -279,7 +279,7 @@ test("ссылка на соцсеть содержит только видим�
   assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><\/a>/);
   assert.doesNotMatch(component,/<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
   assert.doesNotMatch(component,/function connectedAccountLabel/);
-  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram",\s*CHATWOOT:\s*"Открыть переписку в Chatwoot"/);
+  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть профиль в Instagram",\s*CHATWOOT:\s*"Открыть переписку в Chatwoot"/);
 });
 test("composer toolbar wraps without clipping and template menu remains usable",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*flex-wrap:wrap/);assert.match(menuCss,/\.communications-ai\{[^}]*overflow:visible/);assert.match(menuCss,/\.communications-chat>footer\{[^}]*position:relative[^}]*overflow:visible/);assert.match(menuCss,/\.communications-template-menu>div\{[^}]*z-index:40/);assert.doesNotMatch(component,/templates\.filter\(t=>!t\.channel/);assert.match(component,/onClick=\{\(\)\s*=>\s*chooseTemplate\(template\)\}/);assert.match(component,/setTemplatesOpen\(false\)/)});
 test("mobile template menu anchors to the full toolbar inside the chat panel",()=>{assert.match(menuCss,/\.communications-ai\{[^}]*position:relative/);assert.match(menuCss,/@media\(max-width:650px\)\{\.communications-template-menu\{position:static\}\.communications-template-menu>div\{[^}]*right:0[^}]*left:0[^}]*width:auto[^}]*max-width:100%[^}]*overflow-x:hidden/)});
@@ -408,7 +408,7 @@ test("заголовок чата показывает только ссылку
 
 test("ссылка на социальную переписку названа по активному каналу и шапка вмещает данные",()=>{
   assert.match(component,/ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\]/);
-  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть переписку в Instagram"/);
+  assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть профиль в Instagram"/);
   assert.match(css,/\.communications-chat\{[^}]*grid-template-rows:minmax\(64px,auto\) minmax\(0,1fr\) auto/);
   assert.match(css,/\.communications-chat>header[^}]*box-sizing:border-box/);
 });

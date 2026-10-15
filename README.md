@@ -1,5 +1,7 @@
 # Yoleotard CRM
 
+Application releases follow [Semantic Versioning and the project release policy](docs/versioning.md).
+
 Production CRM/ERP for Yoleotard. It unifies clients, athletes, orders,
 production, payments, shipping, communication, files and audit history.
 

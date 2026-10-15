@@ -1,5 +1,36 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-15 — 0.2.0 candidate, final feature gates
+
+User explicitly requested SemVer policy; unpublished0.1.68 superseded by0.2.0.
+Published0.1.x/tags/runtime67 unchanged. See docs/versioning.md and
+docs/ui/crm-0.2.0-validation.md. Current source adds ten origin categories,
+source filter/sort, website KPI in seven-card row, aligned Overview chart zones,
+completed planning guards/history preservation, shared dispatch/delivery evidence,
+ready-sales KPI parity, partial icon/total-paid caption/header layout fixes.
+Instagram fallback profile+Write confirmed by user; no provider/send/readmark flow
+changed. Root tracking proves SENT, not delivery of pending new child parcels.
+Canonical partial-delivery regression retained unchanged.
+Frozenquality-v020-frozen2.log PASS1399tests/types/build. Fresh0.2browser website
+23PASS; separate corrected mobile Instagram case1PASS. Earlier failed fixture
+logs retained. Business/Compatibility/Standards-Spec final sourcePASS; final
+regression/visual/release gates pending. NewFULLbackup20261015T140235Z-745dd88-pre-v020
+sumseda795f20ad9310b62e3db0695f8b3068ab5434d845a00d8005ebc4ce1d3c08b.
+No production app switch, migration/seed/import, financial/history mutation yet.
+
+## 2026-10-15 — 0.1.68 implementation, not yet released
+
+Global ten-category origin classifier and selectors, Overview aligned plot zones, debt KPI regression (no calculation change). Production: full order total / actual paid caption; partial icon uses badge theme; list headers moved immediately above first row without shifting calendar bars. Completed sales show Fulfilled and cannot edit/create production slots; existing query already excludes completed/cancelled, frontend also rejects stale completed context. No stored statuses, historical slots or payments rewritten. Root quality2 passed before latest completed delta; final checks/reviews pending. Exact67 runtime remains745dd88314d3485d71c573aa7adbda761e19f646, independent final release gates1–9 PASS (public receipt closure in deploy-v067-final-review.md).
+
+# 2026-10-15 — CRM0.1.67 deployed and verified; follow-up source/Overview work active
+
+- Runtime745dd88314d3485d71c573aa7adbda761e19f646, tagcrm-v0.1.67/originmain/Release published. Quality38736787557 and Release38736794836SUCCESS. Local frozen1386tests/types/buildPASS,6focusedbrowserPASS, independent source/localvisualPASS.
+- FreshFULLbackup20261015T124000Z-5374af9-pre-v067 sums812b6acf9a32f51ddcf8b1fde150994c34ef34b6b4fe242b4583c45e63539d67. Message3051 includes separately attributed traffic after66; other12counts/eightprotectedhashes unchanged. Reviewed archiveb8243bc00f45b9b032afb70be0cc8f8e56906f1600872f77d85e067315507610/source301/preparedimages/receipt/switch; no API/business/schema change67, start-only app recreation, no migration/seed/import/repair/send.
+- APIcontainer948ad5db70653af88cee385806cf7f873654f1360ca555f432feb694881a2a37 image56f962aef3918513b811a3075b10aab915b0c194d050f0f764e3f308965c84a5; web56bd1d2351a9cb38f6f11387889ce6077c8b7218f80e7df0f56b88c041497b10 imagede9913f3c19fd321c7bbaa614259d22daa018ab40ab3a448bbcdc7855039a391. PG/Redis unchanged,4healthy/restarts0. Initial/finalpost67exit0; full12:48:43Z–12:52:37.691341Z logsAPI/web errors0, source/history/business/identitychecksPASS.
+- Actualread-only67smokeexit0:57checks73PNGs, no writes/GET blocks/runtime/console/network/external-imageerrors, logoutPASS. Existing Orders/Overview/Finance currencies/export and KC617/KC687/KC663flowsPASS. NewlongactualtrackingRangecaptionsbounds/font11/iconcentersPASS at1536/390. Independent actualvisualPASS closes B4; retained historical66BLOCK andfailedpost evidence. Private live-v067-* and live-v067-visual-review.md; 67finalreleasegate handoff closure pending.
+- User added new scope while67releasefinished: global proven order sources Instagram/Facebook/Chat/Website/WhatsApp/Viber/E-mail/Manual, retainingOther/Unknown; allpages/filters/charts/export. Selfimplementation active uncommitted after67archive: canonical10buckets/classifier/DTO/UIlabels/colors/searchablechartSelect/CSV labels; APIclassificationRED thenGREEN17focusedtests. Do not confuse orderorigin with clientchannel. Separate user Overviewrequest: align chart plot heights across allmodes/switches and removebottomblank; implementation pending, read-onlylayoutproposalreceived. User explicitly KPI-only debt activepositiveunpaidbalance/excludeCANCELLED; currentcalculationalreadycorrect, regressionadded, no ledgerchanges.
+- IndependentREADONLYSQL debt audit12:57:34Z:44positiveactiveEUR balances sum2176286minor,1eligibleUSDorderbalance0, unknownsettlement0;9cancelledEUR orders with285056minor positive balances EXCLUDED. Mixedcurrencyhelper conservatively left directEURcomparisonnull becauseUSDzero; mathematicallyforeigncontribution0. ExistingAPIobserved debt2176286. Preserveactualreceipts/history. No change to raw table settlement semantics authorized by KPI clarification.
+
 # 2026-10-15 — CRM0.1.67 narrow mobile caption correction in preparation
 
 - Actual66functional smoke PASS55checks73PNGs; independent73-frame visual survey found B4P2: long tracking caption escapes Orders mobile stage/card. B3Finance KPI, actual production footer/planned/cart/notes scopes PASS. Version66 remains deployed; its final visual completion is BLOCK, not passed.

@@ -1,5 +1,6 @@
 import { orderSettlement } from "./order-settlement.mjs";
 export const SORTABLE_ORDER_COLUMNS = [
+  "source",
   "client",
   "model",
   "quantity",
@@ -16,6 +17,7 @@ export const SORTABLE_ORDER_COLUMNS = [
 ];
 
 const defaultDirections = {
+  source: "asc",
   client: "asc",
   model: "asc",
   quantity: "desc",
@@ -42,6 +44,7 @@ export function nextOrderSort(current, column) {
 }
 
 function value(order, column) {
+  if (column === "source") return order.orderSource ?? "UNKNOWN";
   if (column === "client") return order.client?.displayName ?? "";
   if (column === "model") return `${order.items?.[0]?.name ?? order.notes ?? ""}|${order.discipline ?? ""}`;
   if (column === "quantity") return (order.items ?? []).reduce((sum, item) => sum + (item.quantity ?? 0), 0);

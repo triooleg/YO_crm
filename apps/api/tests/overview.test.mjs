@@ -71,7 +71,7 @@ test('partial dispatch retains unfinished production and debt/deadline flags, wh
  assert.equal(model.classifyOverviewOrder({...mixed,shippingStatus:'DELIVERED',salesStatus:'DELIVERED'},NOW).completed,false);
  const partialReady=model.classifyOverviewOrder({...mixed,items:[{productionStatus:'READY',instances:[]}],payments:[{currency:'EUR',amountMinor:10000}]},NOW);
  assert.equal(partialReady.ready,false);assert.notEqual(partialReady.bucket,'new');
- const allSent=model.classifyOverviewOrder({...mixed,orderShipments:[parcel('sent','SHIPPED'),parcel('remaining','IN_TRANSIT')]},NOW);
+ const allSent=model.classifyOverviewOrder({...mixed,items:[{quantity:2,productionStatus:'SEWING',instances:[{id:'a',productionStatus:'READY'},{id:'b',productionStatus:'SEWING'}]}],orderShipments:[{...parcel('sent','SHIPPED'),instances:[{id:'a'}]},{...parcel('remaining','IN_TRANSIT'),instances:[{id:'b'}]}]},NOW);
  assert.equal(allSent.dispatched,true);assert.equal(allSent.work,false);assert.equal(allSent.unpaid,false);assert.equal(allSent.overdue,false);
  const tracked=model.classifyOverviewOrder(order({deliveryTrackingCode:' IMPORT-TRACK ',productionStatus:'SEWING'}),NOW);
  assert.equal(tracked.dispatched,true);assert.equal(tracked.work,false);assert.equal(tracked.bucket,null);

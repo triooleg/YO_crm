@@ -52,10 +52,11 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
       const [loadedOrders, defaults] = await Promise.all([ordersResponse.json() as Promise<ProductionOrderView[]>, defaultsResponse.json() as Promise<ProductionSettings>]);
       if (signal?.aborted || sequence !== loadSequence.current) return;
       if (!Number.isInteger(defaults.defaultDurationDays) || !Number.isInteger(defaults.shippingLeadDays)) { setProductionSettings(null); setError(productionUi.loadError); return; }
-      setOrders(loadedOrders); setProductionSettings(defaults);
+      const workingOrders=loadedOrders.filter(order=>order.salesStatus!=="COMPLETED");
+      setOrders(workingOrders); setProductionSettings(defaults);
       let contextError = "";
       if (!contextOrderHandled.current) {
-        const resolved = resolveOrderContext(loadedOrders, window.location.search);
+        const resolved = resolveOrderContext(workingOrders, window.location.search);
         if (resolved.requested) {
           contextOrderHandled.current = true;
           if (resolved.order) {

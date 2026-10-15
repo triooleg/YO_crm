@@ -115,7 +115,7 @@ test("KPI имеют явный знаменатель и считают заг�
   assert.equal(result.total, 5);
   assert.equal(result.scheduled, 2);
   assert.equal(result.depositReceived, 2);
-  assert.equal(result.awaitingPayment, 3);
+  assert.equal(result.awaitingPayment, 2);
   assert.deepEqual(result.dailyLoad, [1, 2, 2, 1, 1, 1, 1]);
   assert.equal(result.averagePercent, 64);
   assert.equal(result.peakPercent, 100);
@@ -188,6 +188,7 @@ test('unknown settlement is not counted as unpaid or deposit covered',()=>{
 test('ready to ship excludes terminal orders and dispatched parcels',()=>{
  for(const overrides of [{salesStatus:'CANCELLED'},{salesStatus:'COMPLETED'},{shippingStatus:'LOST'},{shippingStatus:'RETURNED'},{deliveryTrackingCode:'TRACK'},{shippingStatus:'SHIPPED'}]) assert.equal(orderReadyToShip({...order({productionStatus:'READY',shippingStatus:'READY'}),...overrides}),false);
  assert.equal(orderReadyToShip(order({productionStatus:'READY',shippingStatus:'READY'})),true);
+ assert.equal(orderReadyToShip(order({salesStatus:'READY_TO_SHIP',productionStatus:'SCHEDULED',shippingStatus:'NOT_READY'})),true);
 });
 test('order deadline labels count calendar days rather than remaining 24 hour blocks',()=>{
  const today=new Date(2026,9,15,10);

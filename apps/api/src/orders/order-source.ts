@@ -1,7 +1,7 @@
 import {BadRequestException} from '@nestjs/common';
 import type {Prisma} from '@prisma/client';
 
-export const ORDER_SOURCES=['WEBSITE','MANUAL','INSTAGRAM','OTHER','UNKNOWN'] as const;
+export const ORDER_SOURCES=['WEBSITE','MANUAL','INSTAGRAM','FACEBOOK','CHAT','WHATSAPP','VIBER','EMAIL','OTHER','UNKNOWN'] as const;
 export type OrderSource=typeof ORDER_SOURCES[number];
 export type OrderSourceFilter=OrderSource|'NON_WEBSITE'|'';
 type Evidence={type:string;metadata?:unknown};
@@ -25,7 +25,12 @@ export function classifyOrderSource(order:OriginRecord):OrderSource {
   if(order.sourceAccount===CONFIRMED_WEBSITE_SOURCE.account&&String(object(order.externalData).source_id??'')===CONFIRMED_WEBSITE_SOURCE.sourceId&&name===CONFIRMED_WEBSITE_SOURCE.name.toLocaleLowerCase('en'))return 'WEBSITE';
   if(/^(?:instagram|инстаграм)$/.test(name))return 'INSTAGRAM';
   if(/^(?:manual|crm|ручной(?: заказ)?|вручную)$/.test(name))return 'MANUAL';
-  if(['facebook','whatsapp','viber','telegram','gmail','chat keycrm','chatway','chatwoot'].includes(name))return 'OTHER';
+  if(['facebook','фейсбук'].includes(name))return 'FACEBOOK';
+  if(['whatsapp','whats app','вотсап'].includes(name))return 'WHATSAPP';
+  if(['viber','вайбер'].includes(name))return 'VIBER';
+  if(['gmail','email','e-mail','e mail','электронная почта'].includes(name))return 'EMAIL';
+  if(['chat keycrm','chatway','chatwoot','chat','чат'].includes(name))return 'CHAT';
+  if(name==='telegram')return 'OTHER';
   return 'UNKNOWN';
  }
  if(!order.sourceSystem&&!order.sourceAccount&&!order.externalId&&order.activities?.some(event=>event.type==='ORDER_CREATED'))return 'MANUAL';

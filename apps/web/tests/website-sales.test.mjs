@@ -9,6 +9,15 @@ test('source display never classifies channels or guesses unsupported origin; ex
  assert.equal(parseSource('INSTAGRAM'),'INSTAGRAM');assert.equal(parseSource('KEYCRM'),'');assert.equal(parseSource('NON_WEBSITE'),'NON_WEBSITE');
  assert.deepEqual(sourcePercentages([1,1,1]),[34,33,33]);assert.deepEqual(sourcePercentages([0,0,0]),[0,0,0]);assert.equal(sourcePercentages([21,0,155,324,0]).reduce((a,b)=>a+b,0),100);
 });
+
+test('all requested source filters survive navigation and finance export queries',()=>{
+ for(const source of ['WEBSITE','MANUAL','INSTAGRAM','FACEBOOK','CHAT','WHATSAPP','VIBER','EMAIL','OTHER','UNKNOWN']){
+  assert.equal(parseSource(source),source);
+  const before={...base,source};const path=writeFinanceRoute(before,new URL('https://example.test/?section=finance'));
+  assert.equal(readFinanceRoute(base,path.split('?')[1]).source,source);assert.equal(financeReportQuery(before,'v1').get('source'),source);
+  assert.equal(overviewTargets.ordersSource(source,'2026-10').context.source,source);
+ }
+});
 test('finance route round trips source, period, currency and compatible table state on reload/back and export',()=>{
  const before={...base,source:'WEBSITE',currency:'UAH',month:'2026-09',page:3,search:'KC-1',status:'PARTIAL',sort:'balance',clientId:'client-1'};
  const path=writeFinanceRoute(before,new URL('https://example.test/?section=finance&sourceChart=sources'));

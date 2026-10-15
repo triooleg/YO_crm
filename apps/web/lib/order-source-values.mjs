@@ -1,4 +1,4 @@
-const orderSources=['WEBSITE','MANUAL','INSTAGRAM','OTHER','UNKNOWN'];
+const orderSources=['WEBSITE','MANUAL','INSTAGRAM','FACEBOOK','CHAT','WHATSAPP','VIBER','EMAIL','OTHER','UNKNOWN'];
 export function parseSource(value){return value==='NON_WEBSITE'||orderSources.includes(value)?value:'';}
 /** Largest remainders: nonempty distributions total exactly 100%, with stable ties. */
 export function sourcePercentages(values){

@@ -158,7 +158,7 @@ export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, 
   const methods: Record<string, string> = { BANK_TRANSFER: "Банковский перевод", CARD: "Карта", PAYPAL: "PayPal", CASH: "Наличные", OTHER: "Другое" };
   const lines = report.table.rows.map(row => tab === "expenses" ? [row.date, row.categoryName, row.notes, row.number, row.shipmentId, amounts(row.originalAmountMinor), row.originalCurrency, amounts(row.amountMinor), report.currency] : tab === "invoices" ? [row.date, row.number, row.orderNumber, row.clientName, row.dueDate, amounts(row.amountMinor), amounts(row.paidMinor), amounts(row.balanceMinor), statuses[String(row.status)], report.currency, amounts(row.originalAmountMinor), row.originalCurrency] : [row.date, row.number, row.clientName, amounts(row.amountMinor), amounts(row.paidMinor), amounts(row.balanceMinor), statuses[String(row.status)], methods[String(row.method)] || row.method, row.notes, report.currency, amounts(row.originalAmountMinor), row.originalCurrency, amounts(row.roundingDifferenceMinor)]);
   headers.push("Источник заказа");
-  const sourceLabels:Record<string,string>={WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',OTHER:'Другое',UNKNOWN:'Не определён'};
+  const sourceLabels:Record<string,string>={WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',FACEBOOK:'Facebook',CHAT:'Чат',WHATSAPP:'WhatsApp',VIBER:'Viber',EMAIL:'E-mail',OTHER:'Другое',UNKNOWN:'Не определён'};
   lines.forEach((line,index)=>line.push(sourceLabels[String(report.table.rows[index]!.orderSource)]||sourceLabels.UNKNOWN));
   return "\uFEFF" + [headers, ...lines].map(row => row.map(csvCell).join(";")).join("\r\n");
 }

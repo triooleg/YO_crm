@@ -50,6 +50,16 @@ const ordersModule = { exports: {} };
 vm.runInNewContext(javascript, { module: ordersModule, exports: ordersModule.exports, require: requireForOrders, Buffer, console, process, setTimeout, clearTimeout });
 const { OrdersService } = ordersModule.exports;
 
+test('completed orders cannot create or edit production slots and keep history intact',async()=>{
+ for(const productionSlot of [null,{id:'historical-slot'}]){
+  const writes=[];
+  const tx={$executeRawUnsafe:async()=>undefined,order:{findFirst:async()=>({id:'closed',type:'CUSTOM_ORDER',salesStatus:'COMPLETED',productionSlot,payments:[]})},appSetting:{findUnique:async()=>({value:2})},productionSlot:{upsert:async()=>{writes.push('slot');return {id:'new'}}},activity:{create:async()=>writes.push('activity')},auditLog:{create:async()=>writes.push('audit')}};
+  const service=new OrdersService({$transaction:callback=>callback(tx)},{});
+  await assert.rejects(()=>service.updateProductionSlot('closed',{startsAt:'2026-10-01',endsAt:'2026-10-05'},{id:'owner'}),error=>error instanceof BadRequestException&&/завершён/i.test(error.message));
+  assert.deepEqual(writes,[]);
+ }
+});
+
 test("некорректный или чрезмерный период производства возвращает HTTP 400", async () => {
   const service = new OrdersService({}, {});
   for (const code of ["INVALID_PRODUCTION_RANGE", "PRODUCTION_RESULT_LIMIT_EXCEEDED"]) {

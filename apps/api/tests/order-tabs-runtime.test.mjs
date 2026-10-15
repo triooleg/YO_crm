@@ -28,10 +28,10 @@ function loadOrderTabsService() {
   return module.exports.OrderTabsService;
 }
 
-function fixture({ athleteOwned = true, measurementOwned = true, orderType = "INDIVIDUAL", paidMinor = 22500, depositRequiredMinor = 22500 } = {}) {
+function fixture({ athleteOwned = true, measurementOwned = true, orderType = "INDIVIDUAL", paidMinor = 22500, depositRequiredMinor = 22500, salesStatus='NEW_LEAD' } = {}) {
   let updates = 0;
   const aggregateWrites = [];
-  const current = { id: "instance-1", orderItemId: "item-1", ordinal: 1, athleteId: "athlete-1", measurementId: "measurement-1", productionStatus: "SCHEDULED", startedAt: null, completedAt: null, updatedAt: new Date("2026-10-13T10:00:00.000Z"), orderItem: { name: "Design", order: { clientId: "client-1", type: orderType, currency: "EUR", depositRequiredMinor, payments: paidMinor ? [{ amountMinor: paidMinor, currency: "EUR" }] : [] } } };
+  const current = { id: "instance-1", orderItemId: "item-1", ordinal: 1, athleteId: "athlete-1", measurementId: "measurement-1", productionStatus: "SCHEDULED", startedAt: null, completedAt: null, updatedAt: new Date("2026-10-13T10:00:00.000Z"), orderItem: { name: "Design", order: { clientId: "client-1", salesStatus, type: orderType, currency: "EUR", depositRequiredMinor, payments: paidMinor ? [{ amountMinor: paidMinor, currency: "EUR" }] : [] } } };
   const tx = {
     $executeRawUnsafe: async () => 1,
     orderItemInstance: {
@@ -54,6 +54,12 @@ test("foreign athlete is rejected without changing the physical order instance",
   const target = fixture({ athleteOwned: false });
   await assert.rejects(() => target.service.updateInstance("order-1", "instance-1", { athleteId: "athlete-2", measurementId: null, expectedUpdatedAt: "2026-10-13T10:00:00.000Z" }, { id: "owner-1" }), /не принадлежит клиенту заказа/);
   assert.equal(target.updates(), 0);
+});
+
+test('completed orders cannot reenter production through an instance',async()=>{
+ const target=fixture({salesStatus:'COMPLETED'});
+ await assert.rejects(()=>target.service.updateInstance('order-1','instance-1',{productionStatus:'SCHEDULED',expectedUpdatedAt:'2026-10-13T10:00:00.000Z'},{id:'owner'}),/завершён/i);
+ assert.equal(target.updates(),0);assert.deepEqual(target.aggregateWrites(),[]);
 });
 
 test("measurement owned by another athlete is rejected without writes", async () => {

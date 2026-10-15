@@ -307,6 +307,7 @@ export const productionUi = {
   productionOverdue: "Просрочено",
   productionCompleted: "Производство завершено",
   productionFulfilled: "Выполнено",
+  shippingPartial: "Частично отправлено",
   shippingConfirmedByTracking: "Подтверждена трек-номером",
   daysShort: "дн.",
   orderNotes: "Заметки",
@@ -976,6 +977,12 @@ export const releaseHistoryUi = {
   expandVersion: "Развернуть версию",
   collapseVersion: "Свернуть версию",
   releases: [
+    {
+      version: "0.2.0",
+      date: "15.10.2026",
+      changes: ["Источники заказов разделены на сайт, ручные заказы, Instagram, Facebook, чат, WhatsApp, Viber и E-mail во всех отчётах, фильтрах и экспорте.", "В обзоре области диаграмм выровнены при переключении режимов, показателей и периода."],
+      compatibility: "Источник определяется по сохранённому происхождению заказа, без изменения истории и интеграций. Отменённые заказы и нулевые остатки по-прежнему исключены из долгов клиентов. Миграций нет.",
+    },
     {
       version: "0.1.67",
       date: "15.10.2026",
@@ -1777,7 +1784,8 @@ export const communicationsUi = {
     replyChannel: "Канал ответа",
     connectedAccount: "Аккаунт",
     openInSocialNetwork: "Открыть этот диалог в социальной сети",
-    openConversationByChannel: { FACEBOOK: "Открыть переписку в Facebook", INSTAGRAM: "Открыть переписку в Instagram", CHATWOOT: "Открыть переписку в Chatwoot", EMAIL: "Открыть переписку в Gmail" },
+    instagramProfileHint: "Instagram не предоставил ссылку на конкретную переписку. Откройте профиль клиента и нажмите «Написать».",
+    openConversationByChannel: { FACEBOOK: "Открыть переписку в Facebook", INSTAGRAM: "Открыть профиль в Instagram", CHATWOOT: "Открыть переписку в Chatwoot", EMAIL: "Открыть переписку в Gmail" },
     externalReplyByChannel: { FACEBOOK: "Ответ отправлен через Facebook", INSTAGRAM: "Ответ отправлен через Instagram", WHATSAPP: "Ответ отправлен через WhatsApp", CHATWOOT: "Ответ отправлен через Chatwoot", EMAIL: "Ответ отправлен через Gmail" },
     externalReplyOutsideCrm: "Ответ отправлен вне CRM",
     replyToEmail: "Ответить на это письмо",
@@ -2251,7 +2259,7 @@ export const ordersDashboardUi = {
   paymentStatus: "Статус оплаты",
   productionStatus: "Статус производства",
   productionOverdue: "Просрочено",
-  instanceProductionStatusLabels: { NOT_SCHEDULED: "Не запланирован", SCHEDULED: "Запланировано", SEWING: "В работе", READY: "Готово" },
+  instanceProductionStatusLabels: { ON_HOLD: "Приостановлено", CANCELLED: "Отменено", NOT_SCHEDULED: "Не запланирован", SCHEDULED: "Запланировано", SEWING: "В работе", READY: "Готово" },
   productionNotRequired: "Производство не требуется для этого типа заказа",
   shippingStatus: "Статус доставки",
   automaticPaymentStatus: "Рассчитывается по оплатам",
@@ -2762,7 +2770,7 @@ export const financeReportUi = {
 
 export const orderSourceUi = {
  websiteSale:'Продажа с сайта',
- labels:{WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',OTHER:'Другое',UNKNOWN:'Не определён'},
+ labels:{WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',FACEBOOK:'Facebook',CHAT:'Чат',WHATSAPP:'WhatsApp',VIBER:'Viber',EMAIL:'E-mail',OTHER:'Другое',UNKNOWN:'Не определён'},
  receiptsKpi:'Получено с сайта',actualReceipts:'Фактические оплаты',months:'мес.',all:'Все источники',rest:'Остальные',filter:'Источник заказа',onlineOrders:'Онлайн-заказы (с сайта)',onlineReceipts:'Поступления по заказам с сайта',shareOrders:'от всех заказов периода',shareReceipts:'от всех поступлений периода',
  bySource:'По источникам',standard:'Основные показатели',chartMode:'Режим диаграмм',trendFilter:'Источник в динамике',statusChart:'Заказы по статусам',orderChart:'Заказы по источнику',receiptsChart:'Поступления по источникам',dynamics:'Динамика по источникам',distribution:'Распределение по источникам',
  totalOrders:'всего заказов',receipts:'Поступления',empty:'Нет данных за выбранный период',ordersScope:'По дате создания заказа. Неархивные заказы, включая отменённые.',receiptsScope:'По дате получения действительных оплат, включая оплаты архивных заказов. Источник относится к заказу.',

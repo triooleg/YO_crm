@@ -21,6 +21,9 @@ export type ProductionOrderView = {
   deliveredAt?: string | null;
   latestPaymentAt?: string | null;
   hasTrackingNumber: boolean;
+  dispatchComplete?: boolean;
+  deliveryComplete?: boolean;
+  partiallyShipped?: boolean;
   productionStatus: string;
   salesStatus?: string;
   shippingStatus: string;
@@ -101,19 +104,19 @@ export function paymentPresentation(order: Pick<ProductionOrderView, "paidMinor"
   return { code: "unpaid" as const };
 }
 
-export function shippingPresentation(order: Pick<ProductionOrderView, "requiredDeliveryAt" | "shippedAt" | "deliveredAt" | "hasTrackingNumber" | "shippingStatus" | "salesStatus">) {
+export function shippingPresentation(order: Pick<ProductionOrderView, "requiredDeliveryAt" | "shippedAt" | "deliveredAt" | "hasTrackingNumber" | "shippingStatus" | "salesStatus" | "dispatchComplete" | "deliveryComplete">) {
   if (order.shippingStatus === "RETURNED") return { code: "returned" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : order.shippedAt ? productionIso(order.shippedAt) : null };
   if (order.shippingStatus === "LOST") return { code: "lost" as const, date: order.shippedAt ? productionIso(order.shippedAt) : null };
-  if (order.deliveredAt || order.shippingStatus === "DELIVERED" || order.salesStatus === "DELIVERED") return { code: "delivered" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : null };
+  if (order.dispatchComplete !== false && order.deliveryComplete !== false && (order.deliveredAt || order.shippingStatus === "DELIVERED" || order.salesStatus === "DELIVERED")) return { code: "delivered" as const, date: order.deliveredAt ? productionIso(order.deliveredAt) : null };
   // Approved production presentation: a tracking number also means dispatched.
   // Stored statuses and factual timestamps remain independent and unchanged.
-  if (order.shippedAt || ["SHIPPED", "IN_TRANSIT"].includes(order.shippingStatus) || order.salesStatus === "SHIPPED" || order.hasTrackingNumber) return { code: "shipped" as const, date: order.shippedAt ? productionIso(order.shippedAt) : null };
+  if (order.dispatchComplete !== false && (order.dispatchComplete || order.shippedAt || ["SHIPPED", "IN_TRANSIT"].includes(order.shippingStatus) || order.salesStatus === "SHIPPED" || order.hasTrackingNumber)) return { code: "shipped" as const, date: order.shippedAt ? productionIso(order.shippedAt) : null };
   if (order.requiredDeliveryAt) return { code: "planned" as const, date: productionIso(order.requiredDeliveryAt) };
   return { code: "none" as const, date: null };
 }
 
-export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shippedAt" | "deliveredAt" | "shippingStatus" | "salesStatus" | "hasTrackingNumber">) {
-  return ["shipped", "delivered", "returned", "lost"].includes(shippingPresentation(order).code);
+export function productionOrderIsShipped(order: Pick<ProductionOrderView, "shippedAt" | "deliveredAt" | "shippingStatus" | "salesStatus" | "hasTrackingNumber" | "dispatchComplete">) {
+  return order.dispatchComplete !== false && ["shipped", "delivered", "returned", "lost"].includes(shippingPresentation(order).code);
 }
 
 /** Adapt the existing Orders projection to the shared presentation; never write a status. */
@@ -135,13 +138,18 @@ export function orderProductionStatusPresentation(order: {
   deliveryTrackingCode?: string;
   productionSlot?: { startsAt?: string; endsAt?: string; tentative?: boolean } | null;
   shipment?: { trackingNumber?: string; shippedAt?: string; deliveredAt?: string };
+  orderShipments?: Array<{id:string;status:string;trackingNumber?:string|null;shippedAt?:string|null;deliveredAt?:string|null;instances?:Array<{id:string}>}>;
+  items?:Array<{quantity?:number;instances?:Array<{id:string;productionStatus?:string}>}>;
 }) {
+  const childFacts=order.orderShipments?.length?orderTimelinePresentation(order):null;
+  if(childFacts?.partial)return {domain:"production" as const,status:productionStatusForDisplay(order)};
   const shipping = shippingPresentation({
-    shippingStatus: order.shippingStatus,
+    shippingStatus: childFacts?.shippingStatus??order.shippingStatus,
     salesStatus: order.salesStatus,
     hasTrackingNumber: Boolean(order.shipment?.trackingNumber?.trim() || order.deliveryTrackingCode?.trim()),
     shippedAt: order.shipment?.shippedAt,
-    deliveredAt: order.shipment?.deliveredAt,
+    deliveredAt: childFacts&&childFacts.shippingStatus!=='DELIVERED'?undefined:order.shipment?.deliveredAt,
+    ...(childFacts?{dispatchComplete:childFacts.dispatched,deliveryComplete:childFacts.shippingStatus==='DELIVERED'}:{}),
   });
   const statuses = { shipped: "SHIPPED", delivered: "DELIVERED", returned: "RETURNED", lost: "LOST" } as const;
   if (shipping.code in statuses) return { domain: "shipping" as const, status: statuses[shipping.code as keyof typeof statuses] };
@@ -151,7 +159,8 @@ export function orderProductionStatusPresentation(order: {
 export function orderReadyToShip(order: Parameters<typeof orderProductionStatusPresentation>[0]) {
   if (["COMPLETED", "CANCELLED"].includes(order.salesStatus ?? "")) return false;
   if (orderProductionStatusPresentation(order).domain === "shipping") return false;
-  return order.shippingStatus === "READY" || order.productionStatus === "READY";
+  if (order.orderShipments?.some(parcel=>parcel.status!=='CANCELLED'&&(['SHIPPED','IN_TRANSIT','DELIVERED','LOST','RETURNED'].includes(parcel.status)||parcel.trackingNumber?.trim()||parcel.shippedAt||parcel.deliveredAt))) return false;
+  return order.salesStatus === "READY_TO_SHIP" || order.shippingStatus === "READY" || order.productionStatus === "READY";
 }
 
 /** Read-only timeline facts; parcel tracking is not proof that unassigned items shipped. */
@@ -171,18 +180,18 @@ export function orderTimelinePresentation(order: Parameters<typeof orderProducti
   const legacy = shippingPresentation({ shippingStatus: order.shippingStatus, salesStatus: order.salesStatus,
     hasTrackingNumber: Boolean(legacyTracking), shippedAt: factualDate(order.shipment?.shippedAt) ?? undefined,
     deliveredAt: factualDate(order.shipment?.deliveredAt) ?? undefined });
-  const legacySent = ["shipped", "delivered", "returned", "lost"].includes(legacy.code);
+  const legacySent = Boolean(legacyTracking || factualDate(order.shipment?.shippedAt) || factualDate(order.shipment?.deliveredAt) || !parcels.length && ["shipped", "delivered", "returned", "lost"].includes(legacy.code));
   const partial = !legacySent && sent.length > 0 && !allParcelsSent;
   const childException = sent.some(parcel => parcel.status === "LOST") ? "LOST" : sent.some(parcel => parcel.status === "RETURNED") ? "RETURNED" : null;
   const shippingStatus = ["RETURNED","LOST"].includes(order.shippingStatus) ? order.shippingStatus : childException
-    ?? (legacySent ? ({shipped:"SHIPPED",delivered:"DELIVERED",returned:"RETURNED",lost:"LOST"} as Record<string,string>)[legacy.code]!
+    ?? (legacySent ? (legacy.code==="delivered"&&parcels.length>0&&!parcels.every(parcel=>parcel.status==="DELIVERED"||factualDate(parcel.deliveredAt))?"SHIPPED":({shipped:"SHIPPED",delivered:"DELIVERED",returned:"RETURNED",lost:"LOST"} as Record<string,string>)[legacy.code]!)
     : allParcelsSent ? (parcels.every(parcel => parcel.status === "DELIVERED" || factualDate(parcel.deliveredAt)) ? "DELIVERED" : "SHIPPED") : order.shippingStatus);
   const parcelDates = sent.map(parcel => factualDate(parcel.shippedAt));
   const shippedAt = factualDate(order.shipment?.shippedAt) || (allParcelsSent && parcelDates.every(Boolean) ? [...parcelDates].sort((a,b)=>Date.parse(a!)-Date.parse(b!)).at(-1)! : null);
-  return { shippingStatus, partial, shippedAt,
+  return { shippingStatus, partial, shippedAt, dispatched:legacySent||allParcelsSent,
     productionStatus: productionStatusForDisplay(order),
     trackingNumber: legacyTracking || sent.map(parcel => parcel.trackingNumber?.trim()).find(Boolean) || "",
-    productionCompleted: !partial && (legacySent || allParcelsSent) && order.productionStatus !== "CANCELLED" };
+    productionCompleted: !partial && (order.salesStatus === "COMPLETED" || legacySent || allParcelsSent) && order.productionStatus !== "CANCELLED" };
 }
 
 export function orderDeadlineDays(order: { requiredDeliveryAt?: string }, today: Date = new Date()) {
@@ -230,7 +239,7 @@ export function buildProductionMetrics(orders: ProductionOrderView[], base: Date
     return payment === "deposit" || payment === "paid";
   }).length;
   const paymentUnknown = orders.filter(order => paymentPresentation(order).code === "unknown").length;
-  const awaitingPayment = orders.length - depositReceived - paymentUnknown;
+  const awaitingPayment = orders.filter(order=>['unpaid','partial'].includes(paymentPresentation(order).code)).length;
   const averagePercent = days ? Math.round(dailyLoad.reduce((sum, value) => sum + value, 0) / days / capacityPerDay * 100) : 0;
   const peakPercent = Math.round(Math.max(0, ...dailyLoad) / capacityPerDay * 100);
   let nextWindow: string | null = null;

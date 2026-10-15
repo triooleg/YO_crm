@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import {loadTargetModule} from './overview-target-loader.mjs';
 
 const nativeRequire = createRequire(import.meta.url);
 const source = readFileSync(new URL("../src/orders/production-context.ts", import.meta.url), "utf8");
@@ -11,7 +12,7 @@ const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.Mo
 const module = { exports: {} };
 const localRequire = (specifier) => specifier === "../finance/exchange-rates"
   ? { appliedPaymentMinor: (payment, orderCurrency) => payment.currency === orderCurrency ? payment.amountMinor : payment.appliedCurrency === orderCurrency && Number.isSafeInteger(payment.appliedAmountMinor) && (payment.appliedAmountMinor ?? -1) >= 0 ? payment.appliedAmountMinor : 0 }
-  : nativeRequire(specifier);
+  : specifier==='./order-shipping-evidence'?loadTargetModule('orders/order-shipping-evidence.ts'):nativeRequire(specifier);
 vm.runInNewContext(javascript, { module, exports: module.exports, require: localRequire, console, Date });
 const { includeRequestedProductionOrder, loadProductionOrders, productionOrderSelect } = module.exports;
 const plain = (value) => JSON.parse(JSON.stringify(value));

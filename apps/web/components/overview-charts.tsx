@@ -26,7 +26,7 @@ function displayShares(segments:OverviewOrders['ring']['segments'],total:number)
  return shares.map(share=>share.whole);
 }
 
-export function OverviewStatusChart({ring,month,go}:{ring:OverviewOrders['ring'];month:string;go:Go}){
+export function OverviewStatusChart({ring,month,go,showNote=true}:{ring:OverviewOrders['ring'];month:string;go:Go;showNote?:boolean}){
  let offset=0;
  const percentages=displayShares(ring.segments,ring.total);
  return <><div className="overview-ring-content"><div className="overview-ring"><svg viewBox="0 0 220 220" role="group" aria-label={`${ui.statusChart}: ${ring.total}`}>
@@ -36,12 +36,14 @@ export function OverviewStatusChart({ring,month,go}:{ring:OverviewOrders['ring']
     return share>0?<g key={segment.key} role="button" aria-label={label} tabIndex={0} onClick={action} onKeyDown={event=>activate(event,action)}><title>{label}</title><circle cx="110" cy="110" r="87" fill="none" stroke={bucketColors[segment.key]} strokeWidth="38" pathLength="100" strokeDasharray={`${share*100} ${100-share*100}`} strokeDashoffset={-start*100} transform="rotate(-90 110 110)"/></g>:null;
    }):<circle cx="110" cy="110" r="87" fill="none" stroke="#efebff" strokeWidth="38"/>}
    <text x="110" y="107" textAnchor="middle" className="overview-ring-total">{ring.total}</text><text x="110" y="128" textAnchor="middle" className="overview-ring-caption">{ui.ringTotal}</text>
-  </svg></div><div className="overview-ring-legend">{ring.segments.map((segment,index)=><UnstyledButton key={segment.key} onClick={()=>go(overviewTargets.orders(segment.key,month))} aria-label={`${ui.buckets[segment.key]}: ${segment.count}`}><i style={{background:bucketColors[segment.key]}}/><span>{ui.buckets[segment.key]}</span><b>{segment.count}</b><small>{percentages[index]}%</small></UnstyledButton>)}</div></div>{ring.excluded>0&&<Tooltip label={ui.excludedHint} multiline w={320}><p className="overview-note" tabIndex={0}>{ui.excluded}: {ring.excluded}</p></Tooltip>}</>;
+  </svg></div><div className="overview-ring-legend">{ring.segments.map((segment,index)=><UnstyledButton key={segment.key} onClick={()=>go(overviewTargets.orders(segment.key,month))} aria-label={`${ui.buckets[segment.key]}: ${segment.count}`}><i style={{background:bucketColors[segment.key]}}/><span>{ui.buckets[segment.key]}</span><b>{segment.count}</b><small>{percentages[index]}%</small></UnstyledButton>)}</div></div>{showNote&&<OverviewStatusNote ring={ring}/>}</>;
 }
+export function OverviewStatusNote({ring}:{ring:OverviewOrders['ring']}){return ring.excluded>0?<Tooltip label={ui.excludedHint} multiline w={320}><p className="overview-note" tabIndex={0}>{ui.excluded}: {ring.excluded}</p></Tooltip>:null;}
 
 export type OverviewBarSeries={key:string;label:string;color:string;values:{month:string;value:number}[];target:(month:string)=>OverviewTarget};
-export function OverviewBarChart({series,currency,go,label,height=190}:{series:OverviewBarSeries[];currency?:string;go:Go;label:string;height?:number}){
+export function OverviewBarChart({series,currency,go,label,height:minimumHeight=190}:{series:OverviewBarSeries[];currency?:string;go:Go;label:string;height?:number}){
  const [ref,bounds]=useResizeObserver();
+ const height=Math.max(minimumHeight,Math.round(bounds.height||minimumHeight));
  const width=Math.max(280,bounds.width||400),right=12,top=25,bottom=height-30;
  const months=series[0]?.values.map(row=>row.month)||[],values=series.flatMap(item=>item.values.map(row=>row.value));
  const rawMin=Math.min(0,...values),rawMax=Math.max(1,...values),roughStep=(rawMax-rawMin)*1.15/4,magnitude=10**Math.floor(Math.log10(roughStep));
@@ -54,7 +56,7 @@ export function OverviewBarChart({series,currency,go,label,height=190}:{series:O
  return <div className="overview-chart-plot" ref={ref}>{months.length?<svg className="overview-bar-chart" width="100%" height={height} viewBox={`0 0 ${width} ${height}`} role="group" aria-label={label}>
   {Array.from({length:Math.round(span/axisStep)+1},(_,tick)=>{const value=Math.round(min+axisStep*tick),position=y(value);return <g key={tick}><line x1={left} x2={width-right} y1={position} y2={position} stroke="#efedfa"/><text x={left-8} y={position+4} textAnchor="end" className="overview-axis">{currency?valueLabel(value).replace(',00',''):valueLabel(value)}</text></g>})}
   {months.map((month,index)=><g key={month}>
-   <text x={left+step*(index+.5)} y={height-7} textAnchor="middle" className="overview-axis">{monthLabel(month)}</text>
+   {index%Math.max(1,Math.ceil(42/step))===0&&<text x={left+step*(index+.5)} y={height-7} textAnchor="middle" className="overview-axis">{monthLabel(month)}</text>}
    {series.map((item,seriesIndex)=>{
     const value=item.values.find(row=>row.month===month)?.value;
     if(value===undefined)return null;

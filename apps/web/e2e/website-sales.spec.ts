@@ -5,6 +5,57 @@ const {buildOrderListPage}=loadTargetModule('orders/order-list-read-model.ts');
 const {buildFinanceReport,financeReportCsv}=loadTargetModule('finance/finance-report-model.ts');
 const {classifyOrderSource,countOrderSources,CONFIRMED_WEBSITE_SOURCE}=loadTargetModule('orders/order-source.ts');
 const now=new Date('2026-10-15T12:00:00Z');
+
+test('Every named source is available across Overview, Finance and Orders',async({page})=>{
+ await fixture(page);
+ const names=['С сайта','Ручной / CRM','Instagram','Facebook','Чат','WhatsApp','Viber','E-mail','Другое','Не определён'];
+ for(const section of ['overview','finance']){
+  await page.goto(`/?section=${section}&period=2026-10`);
+  const card=page.locator(section==='overview'?'.overview-status-card':'.finance-report-charts');
+  await expect(card.locator('.order-source-legend button')).toHaveCount(10);
+  for(const name of names)await expect(card.locator('.order-source-legend')).toContainText(name);
+  const filter=page.getByRole('combobox',{name:'Источник в динамике',exact:true});await filter.click();
+  for(const name of names)await expect(page.getByRole('option',{name,exact:true})).toBeVisible();
+  await page.getByRole('option',{name:'Facebook',exact:true}).click();
+  await expect(page).toHaveURL(section==='overview'?/sourceTrend=FACEBOOK/:/source=FACEBOOK/);
+  await expect(page.locator('.order-source-trend-legend')).toContainText('Facebook');
+  if(section==='overview')await expect(page.locator('.overview-trend-card .order-source-empty')).toBeVisible();
+ }
+ await page.goto('/?section=orders&source=VIBER');
+ await expect(page.locator('.orders-filter-chips')).toContainText('Viber');
+ await expect(page.locator('.orders-summary-row')).toHaveCount(0);
+});
+
+test('Overview plot regions align in every chart mode without stretching SVG text',async({page},info)=>{
+ test.setTimeout(120000);await fixture(page);
+ for(const [index,width] of [1920,1366,820,390].entries()){
+  await page.setViewportSize({width,height:1080});await page.goto(`/?section=overview&period=2026-10&currency=${['EUR','USD','UAH','EUR'][index]}`);
+  await expect(page.locator('.overview-page')).toHaveAttribute('data-overview-ready','true');
+  for(const mode of ['Основные показатели','По источникам']){
+   await page.locator('.overview-status-card').getByText(mode,{exact:true}).click();
+   for(const [metricIndex,metric] of ['Заказы','Доходы','Клиенты'].entries()){
+    await page.locator('.overview-trend-card').getByText(metric,{exact:true}).click();
+    const range=page.locator('.overview-trend-card header').getByRole('combobox');await range.click();await page.getByRole('option',{name:`${[3,6,12][metricIndex]} месяцев`,exact:true}).click();
+    const plots=page.locator('.overview-chart-body');await expect(plots).toHaveCount(3);
+    await expect.poll(async()=>plots.evaluateAll(nodes=>{
+     const rows=new Map<number,DOMRect[]>();for(const n of nodes){const r=n.getBoundingClientRect(),top=Math.round(n.closest('article')!.getBoundingClientRect().top);rows.set(top,[...(rows.get(top)||[]),r]);}
+     return [...rows.values()].every(row=>Math.max(...row.map(r=>r.top))-Math.min(...row.map(r=>r.top))<2&&Math.max(...row.map(r=>r.bottom))-Math.min(...row.map(r=>r.bottom))<2);
+    })).toBe(true);
+    const scales=await page.locator('.overview-chart-body .overview-chart-plot svg,.overview-chart-body .order-source-plot svg').evaluateAll(nodes=>nodes.map(n=>{const svg=n as SVGSVGElement,r=svg.getBoundingClientRect();return Math.abs(svg.viewBox.baseVal.width-r.width)<2&&Math.abs(svg.viewBox.baseVal.height-r.height)<2;}));
+    expect(scales.every(Boolean),'SVG uses physical plot coordinates').toBe(true);
+    const monthLabels=await page.locator('.overview-chart-plot svg').evaluateAll(nodes=>nodes.every(node=>{
+     const svg=node as SVGSVGElement,labels=[...svg.querySelectorAll('text.overview-axis')].filter(text=>Number(text.getAttribute('y'))>svg.viewBox.baseVal.height-10).map(text=>text.getBoundingClientRect());
+     return labels.every((r,index)=>index===0||r.left>=labels[index-1]!.right+2);
+    }));expect(monthLabels,'month labels remain separate on narrow twelve-month plots').toBe(true);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+   }
+   await page.locator('.overview-charts').screenshot({path:info.outputPath(`overview-aligned-${width}-${mode==='По источникам'?'sources':'standard'}.png`)});
+   if(width===390)for(const [cardIndex,card] of (await page.locator('.overview-charts>.overview-card').all()).entries()){
+    await card.scrollIntoViewIfNeeded();await card.screenshot({path:info.outputPath(`overview-mobile-card-${mode==='По источникам'?'sources':'standard'}-${cardIndex}.png`)});
+   }
+  }
+ }
+});
 // Synthetic acceptance records only. They run through the real reporting models.
 const orders=Array.from({length:55},(_,i)=>{
  const origin={sourceSystem:'KEYCRM',sourceAccount:CONFIRMED_WEBSITE_SOURCE.account,sourceLinkMode:'IMPORTED',externalId:String(i),externalData:{source_id:i<31?12:2},activities:[{type:'KEYCRM_ORDER_IMPORTED',metadata:{keycrmOrderId:String(i),sourceName:i<31?'Вебсайт':'Instagram'}}]};
@@ -76,7 +127,7 @@ async function fixture(page:Page,role='OWNER',large=false){
   if(p==='/api/overview/orders'){
    const month=q.get('month')!,from=new Date(month+'-01'),to=new Date(moveFinanceMonth(month,1)+'-01'),origin=ledger.orderSources;
    const breakdown=countOrderSources(orders,origin,from,to),total=breakdown.reduce((n:number,row:any)=>n+row.count,0);
-   return output({month,currency:q.get('currency'),today:'2026-10-15',counts:{total,previousTotal:1,work:0,ready:0,overdue:0,requiresVerification:0,awaitingPayment:55},ring:{total,excluded:0,segments:[{key:'new',count:total},{key:'work',count:0},{key:'ready',count:0},{key:'awaiting',count:0},{key:'completed',count:0}]},trend:[],recent:[],valuationError:null,sourceAnalytics:{total,websiteCount:breakdown.find((x:any)=>x.source==='WEBSITE').count,breakdown,trend:Array.from({length:Number(q.get('range')||6)},(_,i)=>{const period=moveFinanceMonth(month,i-Number(q.get('range')||6)+1);return {month:period,breakdown:countOrderSources(orders,origin,new Date(period+'-01'),new Date(moveFinanceMonth(period,1)+'-01'))}})}});
+   return output({month,currency:q.get('currency'),today:'2026-10-15',counts:{total,previousTotal:1,work:0,ready:0,overdue:0,requiresVerification:0,awaitingPayment:55},ring:{total,excluded:0,segments:[{key:'new',count:total},{key:'work',count:0},{key:'ready',count:0},{key:'awaiting',count:0},{key:'completed',count:0}]},trend:Array.from({length:Number(q.get('range')||6)},(_,i)=>{const month=moveFinanceMonth(q.get('month')!,i-Number(q.get('range')||6)+1),inMonth=orders.filter(row=>row.createdAt.toISOString().startsWith(month));return {month,orders:inMonth.length,clients:new Set(inMonth.map(row=>row.clientId)).size}}),recent:[],valuationError:null,sourceAnalytics:{total,websiteCount:breakdown.find((x:any)=>x.source==='WEBSITE').count,breakdown,trend:Array.from({length:Number(q.get('range')||6)},(_,i)=>{const period=moveFinanceMonth(month,i-Number(q.get('range')||6)+1);return {month:period,breakdown:countOrderSources(orders,origin,new Date(period+'-01'),new Date(moveFinanceMonth(period,1)+'-01'))}})}});
   }
   if(p==='/api/overview/tasks')return output({rows:[],doneColumnId:null});
   if(p==='/api/overview/messages')return output({rows:[],unreadCount:0});
@@ -90,7 +141,7 @@ test('Orders source paging covers the full server cohort, deep links, reload and
  await expect(page.locator('#order-details-order-29')).toBeVisible();await expect(page.locator('#order-details-order-29')).toBeInViewport();await expect(page.locator('#order-details-order-29')).toContainText('Источник заказа');
  await expect(page.locator('.orders-summary-row .orders-channel.website')).toHaveCount(11);
  await expect(page.locator('.orders-order-number').first()).not.toContainText('С сайта');
- await page.locator('.orders-source-summary').getByRole('button').click();await expect(page).not.toHaveURL(/source=WEBSITE/);
+ await page.locator('.orders-kpi-grid .orders-kpi').filter({hasText:'Онлайн-заказы'}).click();await expect(page).not.toHaveURL(/source=WEBSITE/);
  await expect.poll(()=>calls.filter(x=>x.path==='/api/orders').at(-1)?.query.get('source')).toBe(null);
  await page.goBack();await expect(page).toHaveURL(/source=WEBSITE/);await page.reload();await expect(page.locator('.orders-pagination')).toContainText('31');
  expect(calls.filter(x=>x.method!=='GET')).toEqual([]);
@@ -118,7 +169,7 @@ test('Finance actual partial receipts, source filter, all currencies and matchin
 });
 for(const width of [1536,1366,820,390])test(`Source additions stay responsive ${width}`,async({page},info)=>{
  await page.setViewportSize({width,height:1024});await fixture(page);
- for(const section of ['overview','finance','orders']){await page.goto(`/?section=${section}&period=2026-10&currency=EUR`);await expect(page.locator(section==='overview'?'.overview-source-kpi':section==='finance'?'.finance-source-kpi':'.orders-source-summary')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:info.outputPath(`${section}-${width}.png`),fullPage:true});}
+ for(const section of ['overview','finance','orders']){await page.goto(`/?section=${section}&period=2026-10&currency=EUR`);await expect(page.locator(section==='overview'?'.overview-source-kpi':section==='finance'?'.finance-source-kpi':'.orders-kpi-grid .orders-kpi:nth-child(2)')).toBeVisible();if(section==='orders'){await expect(page.locator('.orders-kpi-grid .orders-kpi')).toHaveCount(7);await expect(page.locator('.orders-summary-row')).toHaveCount(20);await expect(page.locator('.orders-kpi-grid')).not.toContainText('—');}expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:info.outputPath(`${section}-${width}.png`),fullPage:true});}
 });
 test('Manager overview receives no finance source data or finance chart requests',async({page})=>{
  const calls=await fixture(page,'MANAGER');await page.goto('/?section=overview&period=2026-10');await expect(page.locator('.overview-kpi')).toHaveCount(5);expect(calls.some(x=>x.path==='/api/finance/report')).toBe(false);await expect(page.locator('.overview-finance-card')).toHaveCount(0);
@@ -128,7 +179,7 @@ test('Settled manual Orders pages and source change restore the canonical initia
  const calls=await fixture(page);await page.goto('/?section=orders');await expect(page.locator('.orders-summary-row')).toHaveCount(20);
  const nav=page.locator('.orders-pagination nav');await nav.getByRole('button',{name:'2',exact:true}).click();await expect.poll(()=>calls.filter(x=>x.path==='/api/orders').at(-1)?.query.get('page')).toBe('2');await expect(page.locator('.orders-pagination')).toContainText('21–40');
  await page.goBack();await expect(page.locator('.orders-pagination')).toContainText('1–20');await page.goForward();await expect(page.locator('.orders-pagination')).toContainText('21–40');
- await nav.getByRole('button',{name:'3',exact:true}).click();await expect(page.locator('.orders-summary-row')).toHaveCount(15);await page.locator('.orders-source-summary').getByRole('button').click();await expect(page).toHaveURL(/source=WEBSITE/);await expect(page.locator('.orders-pagination')).toContainText('1–20');
+ await nav.getByRole('button',{name:'3',exact:true}).click();await expect(page.locator('.orders-summary-row')).toHaveCount(15);await page.locator('.orders-kpi-grid .orders-kpi').filter({hasText:'Онлайн-заказы'}).click();await expect(page).toHaveURL(/source=WEBSITE/);await expect(page.locator('.orders-pagination')).toContainText('1–20');
  await page.goBack();await expect(page).not.toHaveURL(/source=WEBSITE/);await expect(page.locator('.orders-pagination')).toContainText('41–55');
  await page.locator('.orders-page-size select').selectOption('100');await expect(page.locator('.orders-summary-row')).toHaveCount(55);await expect(page.locator('.orders-pagination')).toContainText('1–55');
 });
@@ -218,6 +269,7 @@ test('Production selected timeline keeps full badge labels and dispatched facts'
   await page.setViewportSize({width,height:1080});await page.goto('/?section=production&orderId=order-0');
   const details=page.locator('.production-order-details');await expect(details).toBeVisible();
   const flow=details.locator('.production-lifecycle');
+  await expect(flow.locator('> div').first().locator('em')).toHaveText(/1\s*200,00\s*€\s*\/\s*600,00\s*€/);
   await expect(flow.locator('.mantine-Badge-label')).toHaveCount(3);
   const labels=await flow.locator('.mantine-Badge-label').evaluateAll(nodes=>nodes.map(node=>{const r=document.createRange();r.selectNodeContents(node);const text=r.getBoundingClientRect(),badge=node.closest('.mantine-Badge-root')!.getBoundingClientRect();return text.left>=badge.left&&text.right<=badge.right&&text.top>=badge.top&&text.bottom<=badge.bottom;}));
   expect(labels.every(Boolean),'all status text fits inside its badge').toBe(true);
@@ -225,6 +277,65 @@ test('Production selected timeline keeps full badge labels and dispatched facts'
   await expect(details.locator('.production-details-dates')).toContainText('Подтверждена трек-номером');
   await flow.scrollIntoViewIfNeeded();await flow.screenshot({path:info.outputPath(`production-selected-timeline-${width}.png`)});
  }
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('Production headers meet the first order and partial payment icon matches its badge',async({page},info)=>{
+ const calls=await fixture(page);
+ const partial={...orders[0]!,hasTrackingNumber:false,paidMinor:10000,priceMinor:40000,depositRequiredMinor:20000,paymentStatus:'PARTIALLY_PAID',productionStatus:'SCHEDULED',productionSlot:{id:'slot',startsAt:'2026-10-02',endsAt:'2026-10-12',tentative:true,locked:false,capacity:1}};
+ await page.route('**/api/orders/production?*',route=>route.fulfill({json:[partial]}));
+ await page.route('**/api/orders/defaults',route=>route.fulfill({json:{defaultDurationDays:7,shippingLeadDays:3}}));
+ for(const width of [1536,390]){
+  await page.setViewportSize({width,height:1080});await page.goto('/?section=production&orderId=order-0');
+  const flow=page.locator('.production-lifecycle');await expect(flow.locator('.is-partial')).toBeVisible();
+  await expect(flow.locator('.is-partial em')).toHaveText(/400,00\s*€\s*\/\s*100,00\s*€/);
+  const colors=await flow.locator('.is-partial').evaluate(node=>({icon:getComputedStyle(node.querySelector(':scope > span')!).backgroundColor,badge:getComputedStyle(node.querySelector('.mantine-Badge-root')!).backgroundColor}));
+  expect(colors.icon).toBe(colors.badge);
+  const geometry=await page.locator('.production-board-canvas').evaluate(node=>({header:node.querySelector('.production-order-columns-head')!.getBoundingClientRect().bottom,row:node.querySelector('.production-order-row')!.getBoundingClientRect().top}));
+  expect(Math.abs(geometry.header-geometry.row)).toBeLessThan(2);
+  await page.locator('.production-board').screenshot({path:info.outputPath(`production-header-orders-${width}.png`)});
+  await flow.scrollIntoViewIfNeeded();await flow.screenshot({path:info.outputPath(`partial-payment-${width}.png`)});
+ }
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('Completed orders show fulfilled and cannot reappear through Production context',async({page})=>{
+ const calls=await fixture(page);let completed={...orders[0]!,salesStatus:'COMPLETED',productionSlot:null as null|{id:string;startsAt:string;endsAt:string;tentative:boolean;locked:boolean;capacity:number}};
+ await page.route('**/api/orders**',async route=>{
+  const u=new URL(route.request().url());
+  if(u.pathname==='/api/orders')return route.fulfill({json:buildOrderListPage([completed],Object.fromEntries(u.searchParams),now)});
+  if(u.pathname==='/api/orders/'+completed.id)return route.fulfill({json:completed});
+  if(u.pathname==='/api/orders/production')return route.fulfill({json:[completed]});
+  if(u.pathname==='/api/orders/defaults')return route.fulfill({json:{defaultDurationDays:7,shippingLeadDays:3}});
+  return route.fallback();
+ });
+ for(const slot of [null,{id:'history',startsAt:'2026-10-02',endsAt:'2026-10-12',tentative:false,locked:false,capacity:1}]){
+ completed={...completed,productionSlot:slot};
+ await page.goto('/?section=orders&orderId=order-0');
+ await expect(page.locator('.orders-summary-row .orders-col-production')).toContainText('Выполнено');
+ await expect(page.locator('.orders-assign-production')).toHaveCount(0);
+ const details=page.locator('#order-details-order-0');
+ await details.getByRole('tab',{name:'Производство',exact:true}).click();
+ await expect(details.locator('.orders-production-plan button,.orders-production-schedule button')).toHaveCount(0);
+ if(slot)await expect(details.locator('.orders-production-calendar')).toContainText('2026');
+ }
+ await page.goto('/?section=production&orderId=order-0');
+ await expect(page.locator('.production-empty-state')).toBeVisible();
+ await expect(page.locator('.production-order-row')).toHaveCount(0);
+ await expect(page.locator('.production-order-details')).toHaveCount(0);
+ expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+test('Orders ready KPI and website KPI use their actual filtered cohorts',async({page})=>{
+ const calls=await fixture(page);const target={...orders[0]!,salesStatus:'READY_TO_SHIP',shippingStatus:'NOT_READY',productionStatus:'SCHEDULED'};
+ await page.route('**/api/orders?*',route=>{const u=new URL(route.request().url());return route.fulfill({json:buildOrderListPage([target],Object.fromEntries(u.searchParams),now)});});
+ await page.goto('/?section=orders');
+ const cards=page.locator('.orders-kpi-grid .orders-kpi');await expect(cards).toHaveCount(7);
+ const ready=cards.filter({hasText:'Готовы к отправке'});await expect(ready.locator('strong')).toHaveText('1');await ready.click();
+ await expect(page.locator('.orders-summary-row')).toHaveCount(1);
+ await expect(page).toHaveURL(/quick=ready/);
+ await page.locator('.orders-sort select').selectOption('source');await expect(page).toHaveURL(/sort=source/);
+ const website=cards.filter({hasText:'Онлайн-заказы'});await expect(website).toBeVisible();await website.click();await expect(page).toHaveURL(/source=WEBSITE/);
  expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
 });
 

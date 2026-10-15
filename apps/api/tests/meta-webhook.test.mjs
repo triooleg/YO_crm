@@ -299,7 +299,7 @@ test("connected account labels expose no credentials", () => {
 
 test("Meta conversation links are scoped and reject unsafe identifiers", () => {
   assert.equal(metaConversationInboxUrl("FACEBOOK", "261203841288993:27352420207764662", { pageId: "261203841288993" }), "https://business.facebook.com/latest/inbox/messenger?asset_id=261203841288993&selected_item_id=27352420207764662");
-  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { instagramClientUsername: "client.name" }), "https://ig.me/m/client.name");
+  assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { instagramClientUsername: "client.name" }), "https://www.instagram.com/client.name/");
   assert.equal(metaConversationInboxUrl("FACEBOOK", "999:2", { pageId: "1" }), "");
   assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993" }), "");
   assert.equal(metaConversationInboxUrl("INSTAGRAM", "17841407931852361:708610235356092", { pageId: "261203841288993", instagramClientUsername: "bad/name" }), "");

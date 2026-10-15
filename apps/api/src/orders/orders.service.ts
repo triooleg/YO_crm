@@ -288,6 +288,7 @@ export class OrdersService {
         throw new BadRequestException("Быстрые продажи и готовые изделия не планируются в производство");
       }
       const committedProductionStatuses = new Set(["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL", "READY"]);
+      if (order.salesStatus === "COMPLETED" && dto.productionStatus && dto.productionStatus !== "READY" && committedProductionStatuses.has(dto.productionStatus)) throw new BadRequestException("Завершённый заказ нельзя повторно назначить в производство");
       if (dto.productionStatus && committedProductionStatuses.has(dto.productionStatus)) {
         const paidMinor = order.payments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
         if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
@@ -540,6 +541,7 @@ export class OrdersService {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
       if (!order) throw new NotFoundException("Заказ не найден");
+      if (order.salesStatus === "COMPLETED") throw new BadRequestException("Завершённый заказ нельзя повторно назначить в производство");
       if (!requiresProduction(order.type)) throw new BadRequestException("Быстрые продажи и готовые изделия не планируются в производство");
       const leadSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "production", key: "shippingLeadDays" } } });
       const shippingLeadDays = productionSetting(leadSetting?.value, DEFAULT_SHIPPING_LEAD_DAYS, 0, 30);
