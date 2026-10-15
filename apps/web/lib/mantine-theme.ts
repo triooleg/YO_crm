@@ -23,7 +23,7 @@ export const overviewTheme = createTheme({
     Input:{styles:{input:{fontSize:12,borderRadius:6,borderColor:'#e5e0ff'}}},
     Select:{styles:(_theme:MantineTheme,props:SelectProps)=>({input:{fontSize:12,...(props.size==='xs'?{height:27,minHeight:27,paddingLeft:8,paddingRight:25}:{height:40})}})},
     Badge:{styles:{root:{maxWidth:'100%',height:'auto',minHeight:22,lineHeight:1.25,padding:'3px 8px',fontSize:12,fontWeight:500,textTransform:'none'},label:{whiteSpace:'normal',overflow:'visible',textOverflow:'clip'}}},
-    Tooltip:{styles:{tooltip:{fontSize:12}}},
+    Tooltip:{styles:{tooltip:{fontSize:12,maxWidth:'calc(100vw - 24px)',overflowWrap:'anywhere'}}},
     Checkbox:{styles:{input:{cursor:'pointer'}}},
     SegmentedControl:{styles:{root:{background:'#fff',border:'1px solid #e5e0ff',borderRadius:5,padding:1},label:{fontSize:12,fontWeight:400,padding:'3px 6px',lineHeight:1.4},indicator:{background:'linear-gradient(120deg,#7841ff,#6332f2)',borderRadius:4}}},
   },

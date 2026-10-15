@@ -1,5 +1,13 @@
 # Yoleotard CRM — передача контекста
 
+# 2026-10-15 — deployed Overview0.1.60; tooltip patch0.1.61 in acceptance
+
+- User explicitly requested deployment. Runtime exact71f7b6aaa0415c03ede2916f0afe4782e3fe173a deployed and published origin/main +crm-v0.1.60; GitHub Quality38661032993 and Release38661036438 SUCCESS. Full quality1337tests/typecheck/buildPASS;131 browser baseline retained.
+- FULL backup20261015T003311Z-85c50ec-pre-v060 verified dump/uploads/checksums/exactmanifest andCOMPLETED332785342. Source archiveSHA256670a3f0c9a18e5b87d8ed8abf21b52bebb89450de88be250a0212d7fbda3d7d5; exact292source-file manifest passed before/afterLinuxbuild and before switch. Rollback previous-v059-20261015T003946Z plus source archive and both rollback images retained.
+- New API/web images0793d76b/d36af66f healthy0restarts; PG0bafd77d/Redis17013ec6 unchanged. Counts before/after identical599clients/270conversations/3029messages/504orders/579items/827payments/407shipments/4athletes/13measurements/780instances. No migration/seed; start-only API command verified;35migrations current; internalHTTP200 and startup error scans0.
+- Actual live Finance1920/1366/390 xEUR/USD/UAH KPI/chart/three-tabs/CSV and manual month/Russian datesPASS, businesswrites0/runtimeerrors0. Production+Orders threeviewportsPASS, writes0. Real OverviewEUR/USD/APIintegers/periodcontrolsPASS; UAH live smoke exposed long NBUofficialURL tooltip overflow. This is a real UI defect, not financial calculation error; do not call full live Overview accepted yet.
+-0.1.61patch narrows scoped overviewTheme.Tooltip wrapping/maxWidth only; red2/2failed1536/390, green2/2PASS. Existing calculations/API/businesslogic unchanged. Fresh FULL backup20261015T004744Z-71f7b6a-pre-v061 COMPLETED332785463, exactmanifest/metadata verified. quality-v061.log exit0:1337tests/typecheck/Nest+NextbuildPASS. Compiled focused tooltip2/2PASS with1536/390screenshots; complete133browser acceptance and final deployed61smoke pending. Independent business/compatibility/Standards and regression/spec scopedsourcePASS.
+
 # 2026-10-15 — Overview CRM0.1.60 release authorized, preparing deployment
 
 - Release preparation: user explicitly requested deployment. CRM0.1.60 version/history prepared; quality-v060-verified.log passed1337 tests/typecheck/build. Fresh FULL backup20261015T003311Z-85c50ec-pre-v060 COMPLETED332785342; checksums/pg_restore/uploads and exact baseline manifest85c50ec + metadata verified. Baseline api/web/postgres/redis healthy0restarts. No application switch yet.

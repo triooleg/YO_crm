@@ -175,3 +175,14 @@ for(const width of [1440,1366])test(`large UAH finance values keep six readable 
  for(const label of await labels.all()){const box=await label.boundingBox();expect(box!.x).toBeGreaterThanOrEqual(bounds!.x-1);expect(box!.x+box!.width).toBeLessThanOrEqual(bounds!.x+bounds!.width+1);expect(await label.evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12)}
  await expect(page.locator('.overview-finance-card svg').getByRole('button').first()).toHaveAttribute('aria-label',/124.?947,20/);
 });
+
+for(const width of [1536,390])test(`overview valuation tooltip contains long official URL ${width}`,async({page})=>{
+ await page.setViewportSize({width,height:1024});
+ await overviewFixture(page,'OWNER',{transform:(path,json)=>path==='/api/finance/report'?{...json,valuation:{provider:'NBU',effectiveDate:'2026-10-12',fetchedAt:'2026-10-11',officialUrl:'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=EUR&date=20261012&json&reference='+ 'x'.repeat(160)}}:json});
+ await page.goto('/?section=overview&period=2026-10&currency=UAH');await expect(page.locator('.overview-page')).toHaveAttribute('data-overview-ready','true');
+ const amount=page.locator('.overview-kpi-action').filter({has:page.getByRole('heading',{name:'Финансовый результат',exact:true})}).locator('strong');
+ await amount.hover();const tooltip=page.getByRole('tooltip').filter({hasText:'NBU'});await expect(tooltip).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ expect(await tooltip.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
+ await page.screenshot({path:test.info().outputPath(`overview-valuation-tooltip-${width}.png`)});
+});
