@@ -1307,7 +1307,7 @@ test('local add or duplicate on imported order preserves its commercial total on
  assert.equal(slotSyncs,0);assert.ok(updates.length);assert.equal(updates[0].priceMinor,25000);assert.equal(updates[0].depositRequiredMinor,12500);
 });
 
-function localCompositionImportFixture({ manualItemOverride = false, compositionEvent = false } = {}) {
+function localCompositionImportFixture({ manualItemOverride = false, compositionEvent = false, manualDiscount = false, manualPrice = false } = {}) {
   const state = {
     order: { id: 'order-1', number: 'K-1', clientId: 'client-1', sourceLinkMode: 'IMPORTED', sourceSystem: 'KEYCRM', sourceAccount: 'connection-1', externalId: 'order-1', currency: 'EUR', externalUpdatedAt: new Date('2026-10-01'), depositRequiredMinor: 12500, priceMinor: 25000, type: OrderType.CUSTOM_ORDER, paymentStatus: 'PARTIALLY_PAID', productionStatus: 'NOT_SCHEDULED' },
     items: [
@@ -1346,12 +1346,15 @@ function localCompositionImportFixture({ manualItemOverride = false, composition
     },
     payment: { findMany: async () => structuredClone(state.payments), findUnique: async () => null },
     productionSlot: { findUnique: async () => null }, shipment: { findUnique: async () => null },
-    activity: { findFirst: async ({ where }) => where.AND ? manualItemOverride ? { id: 'item-override' } : null : compositionEvent && where.metadata?.path?.[0] === 'composition' ? { id: 'composition-event' } : null, create: async ({ data }) => { businessWrites++; state.activities.push(data); } },
+    activity: { findFirst: async ({ where }) => where.type === 'ORDER_DISCOUNT_UPDATED' ? manualDiscount ? { id: 'discount-override' } : null : where.OR ? manualPrice ? {id:'manual-price'} : null : where.AND ? manualItemOverride ? { id: 'item-override' } : null : compositionEvent && where.metadata?.path?.[0] === 'composition' ? { id: 'composition-event' } : null, create: async ({ data }) => { businessWrites++; state.activities.push(data); } },
     auditLog: { create: async ({ data }) => { businessWrites++; state.audits.push(data); } },
     keycrmSyncIssue: { findFirst: async () => null, create: async ({ data }) => { issues.push(data); return data; } },
   };
   const KeycrmService = loadKeycrmService({ reconcileOrderItemInstances: loadTargetModule('orders/order-item-details.ts').reconcileOrderItemInstances });
-  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  const service = new KeycrmService({ $transaction: async callback => {
+    const before=structuredClone(state),beforeWrites=businessWrites;
+    try{return await callback(tx)}catch(error){Object.assign(state,before);businessWrites=beforeWrites;throw error}
+  } });
   return { state, issues, service, get businessWrites() { return businessWrites; } };
 }
 
@@ -1434,4 +1437,50 @@ test('local composition keeps matched-existing manual items on their original pr
   assert.deepEqual(f.state.items, expectedItems); assert.deepEqual(f.state.instances, pieces);
   assert.equal(f.issues.some(issue => issue.code === 'LOCAL_COMPOSITION_IMPORT_CONFLICT'), false);
   assert.ok(f.issues.some(issue => issue.code === 'MATCHED_ORDER_ITEMS_PRESERVED'));
+});
+
+
+test('manual discount survives import while unrelated provider quantities and authoritative base continue updating', async () => {
+ const f=localCompositionImportFixture({manualDiscount:true});f.state.items.splice(1);
+ Object.assign(f.state.order,{priceMinor:8000,discountMinor:2000,depositRequiredMinor:4000});
+ const receipts=structuredClone(f.state.payments),invoices=structuredClone(f.state.invoices);
+ const incoming=normalizedOrder({priceMinor:19000,discountMinor:1000,items:[{externalId:'product-1',name:'Provider',quantity:2,priceMinor:10000}]});
+ assert.equal(await f.service.importOrder(incoming,'owner','run-1'),'UPDATED');
+ assert.equal(f.state.order.discountMinor,2000);assert.equal(f.state.order.priceMinor,18000);
+ assert.equal(f.state.items[0].quantity,2);assert.equal(f.state.instances.length,2);
+ assert.deepEqual(f.state.payments,receipts);assert.deepEqual(f.state.invoices,invoices);
+});
+
+test('100 percent manual discount with existing receipt keeps PAID after import; legacy zero policy is unchanged',async()=>{
+ for(const manualDiscount of [true,false]){
+  const f=localCompositionImportFixture({manualDiscount});f.state.items.splice(1);Object.assign(f.state.order,{priceMinor:0,discountMinor:10000,depositRequiredMinor:0,paymentStatus:'PAID'});
+  await f.service.importOrder(normalizedOrder({priceMinor:0,discountMinor:10000,items:[{externalId:'product-1',name:'Provider',quantity:1,priceMinor:10000}]}),'owner','run-1');
+  assert.equal(f.state.order.paymentStatus,manualDiscount?'PAID':'DEPOSIT_PAID');assert.equal(f.state.order.priceMinor,0);
+ }
+});
+
+test('manual fixed amount survives independent provider decrease while lines still update',async()=>{
+ const f=localCompositionImportFixture({manualDiscount:true});f.state.items.splice(1);Object.assign(f.state.order,{priceMinor:18000,discountMinor:2000,depositRequiredMinor:9000});f.state.items[0].priceMinor=20000;
+ await f.service.importOrder(normalizedOrder({priceMinor:8000,discountMinor:1000,items:[{externalId:'product-1',name:'Provider',quantity:1,priceMinor:9000}]}),'owner','run-1');
+ assert.equal(f.state.order.priceMinor,7000);assert.equal(f.state.order.discountMinor,2000);assert.equal(f.state.items[0].priceMinor,9000);
+});
+
+test('manual price remains authoritative together with discount; no marker retains ordinary provider pricing',async()=>{
+ for(const manualDiscount of [true,false]){
+  const f=localCompositionImportFixture({manualDiscount,manualPrice:manualDiscount});f.state.items.splice(1);Object.assign(f.state.order,{priceMinor:8000,discountMinor:2000,depositRequiredMinor:2400});
+  await f.service.importOrder(normalizedOrder({priceMinor:19000,discountMinor:1000,items:[{externalId:'product-1',name:'Provider',quantity:1,priceMinor:20000}]}),'owner','run-1');
+  assert.equal(f.state.order.priceMinor,manualDiscount?8000:19000);assert.equal(f.state.order.discountMinor,manualDiscount?2000:1000);assert.equal(f.state.items[0].priceMinor,20000);
+ }
+});
+
+test('explicit zero manual discount removes provider discount, and currency mismatch writes nothing',async()=>{
+ const f=localCompositionImportFixture({manualDiscount:true});f.state.items.splice(1);Object.assign(f.state.order,{priceMinor:10000,discountMinor:0,depositRequiredMinor:5000});
+ const before=structuredClone(f.state);assert.equal(await f.service.importOrder(normalizedOrder({currency:'USD'}),'owner','run-1'),'SKIPPED');assert.deepEqual(f.state,before);assert.equal(f.businessWrites,0);assert.equal(f.issues[0].code,'ORDER_CURRENCY_CHANGED');
+ await f.service.importOrder(normalizedOrder({priceMinor:9000,discountMinor:1000,items:[{externalId:'product-1',name:'Provider',quantity:1,priceMinor:10000}]}),'owner','run-1');assert.equal(f.state.order.priceMinor,10000);assert.equal(f.state.order.discountMinor,0);
+});
+
+for(const priceMinor of [500,2147483647])test('manual discount rejects invalid provider replacement atomically '+priceMinor,async()=>{
+ const f=localCompositionImportFixture({manualDiscount:true});f.state.items.splice(1);Object.assign(f.state.order,{priceMinor:8000,discountMinor:2000});const before=structuredClone(f.state);
+ const discountMinor=priceMinor===500?0:10000;
+ await assert.rejects(f.service.importOrder(normalizedOrder({priceMinor,discountMinor}),'owner','run-1'),e=>e.getStatus()===409);assert.deepEqual(f.state,before);assert.equal(f.businessWrites,0);
 });

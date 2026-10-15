@@ -493,6 +493,7 @@ export class KeycrmService {
       await this.recordClientMergeSuggestion(tx, order, runId, clientId);
       const common = orderProviderWrite(order, clientId);
       let persisted;
+      let manualDiscountOverride = false;
       if (!existing) {
         const numberCollision = await tx.order.findUnique({ where: { number: order.number }, select: { id: true } });
         if (numberCollision) throw new Error(`Номер ${order.number} уже занят заказом без связи KeyCRM`);
@@ -500,17 +501,23 @@ export class KeycrmService {
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {
         const manualPriceOverride = preserveComposition || Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, OR: [{ type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, { type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
+        manualDiscountOverride = Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, type: "ORDER_DISCOUNT_UPDATED", metadata: { path: ["manualDiscount"], equals: true } }, select: { id: true } }));
+        // Fixed snapshot discount belongs to CRM; provider items retain their owner.
+        // Provider grand_total already includes its discount, so replace that amount
+        // rather than subtracting our discount twice or freezing unrelated lines.
+        const pricedOrder = manualDiscountOverride ? { ...order, discountMinor: existing.discountMinor, priceMinor: manualPriceOverride ? order.priceMinor : order.priceMinor + order.discountMinor - existing.discountMinor } : order;
+        if (manualDiscountOverride && (!Number.isSafeInteger(pricedOrder.priceMinor) || pricedOrder.priceMinor < 0 || pricedOrder.priceMinor > 2_147_483_647)) throw new ConflictException("Ручная скидка не согласуется с новой стоимостью KeyCRM; требуется проверка");
         const depositRequiredMinor = manualPriceOverride
           ? existing.depositRequiredMinor
-          : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(order.priceMinor, existing.type));
+          : nextDepositRequired(existing.depositRequiredMinor, existing.priceMinor, existing.type, defaultDepositRequired(pricedOrder.priceMinor, existing.type));
         const replaceOrderImage = shouldReplaceImportedImage(existing.modelImagePath, importedModelImagePath);
         if (replaceOrderImage && existing.modelImagePath && IMPORTED_IMAGE_NAME.test(existing.modelImagePath)) replacedImagePaths.add(existing.modelImagePath);
         const shippingFinance = keycrmShippingFinanceWrite(
           { priceMinor: existing.priceMinor, deliveryMinor: existing.deliveryMinor, depositRequiredMinor: existing.depositRequiredMinor },
-          { priceMinor: manualPriceOverride ? existing.priceMinor : order.priceMinor, deliveryMinor: order.deliveryMinor, depositRequiredMinor },
+          { priceMinor: manualPriceOverride ? existing.priceMinor : pricedOrder.priceMinor, deliveryMinor: order.deliveryMinor, depositRequiredMinor },
           preserveManualShipmentFinance ? "AMBIGUOUS" : shipmentWriteModeBeforeWrite,
         );
-        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(order, clientId, manualPriceOverride), priceMinor: shippingFinance.priceMinor, deliveryMinor: shippingFinance.deliveryMinor, ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor: shippingFinance.depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
+        persisted = await tx.order.update({ where: { id: existing.id }, data: { ...existingOrderProviderUpdate(pricedOrder, clientId, manualPriceOverride), priceMinor: shippingFinance.priceMinor, deliveryMinor: shippingFinance.deliveryMinor, ...(replaceOrderImage ? { modelImagePath: importedModelImagePath } : {}), depositRequiredMinor: shippingFinance.depositRequiredMinor, ...(externallyLinked?.archivedAt ? { archivedAt: null } : {}), ...(!externallyLinked ? { sourceLinkMode: "MATCHED_EXISTING" } : {}) } });
         if (!externallyLinked) await tx.auditLog.create({ data: { actorId, action: "LINK", entityType: "Order", entityId: persisted.id, before: existing, after: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       }
       const items = order.items.length ? order.items : [{ sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: null, name: `Заказ KeyCRM #${order.externalId}`, sku: null, quantity: 1, priceMinor: order.priceMinor, notes: order.buyerComment, externalImageUrl: null, properties: [] }];
@@ -594,7 +601,9 @@ export class KeycrmService {
       }
       const activePayments = await tx.payment.findMany({ where: { orderId: persisted.id, voidedAt: null }, select: { amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true } });
       const paidMinor = activePayments.reduce((sum, payment) => sum + appliedPaymentMinor(payment, order.currency), 0);
-      const derivedPaymentStatus = paidMinor >= persisted.priceMinor && persisted.priceMinor > 0 ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
+      // A fully discounted CRM order follows the same receipt/overpayment policy
+      // as the discount writer. Imports without that new marker retain their policy.
+      const derivedPaymentStatus = paidMinor >= persisted.priceMinor && (persisted.priceMinor > 0 || (manualDiscountOverride && paidMinor > 0)) ? "PAID" : paidMinor > 0 && paidMinor >= persisted.depositRequiredMinor ? "DEPOSIT_PAID" : paidMinor > 0 ? "PARTIALLY_PAID" : "UNPAID";
       if (persisted.paymentStatus !== derivedPaymentStatus) persisted = await tx.order.update({ where: { id: persisted.id }, data: { paymentStatus: derivedPaymentStatus } });
       // A local composition change must not silently move promised production dates
       // using the stale provider quantity. Existing receipt/deposit confirmation below remains owned by its gate.
