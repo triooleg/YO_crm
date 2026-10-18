@@ -1,5 +1,32 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-18 — CRM 0.6.0 installed and published
+
+Explicit user-authorized WEB-only deployment installed source036b95e2203b0cb0cefe0608b91a729df2dd5c71.
+WEB imageeb56bf6710b51f9d1ab3b9abdd590e916e1992ad9c24f30f19c8c807b720baad.
+API image9a1c3904 unchanged; API/PG/Redis complete container identities/start/config
+remain exact. No schema/API restart/seed/backfill/business write.37migration bytes
+and tracker preserved. FULL20261018T124820Z-v050-pre-v060 verified.
+Initial dependency-drift image rejected, original cached WEB lock recovered and
+frozen rebuild has exact old Node22.23.3/13traced packages. Archive834files,
+498protected files unchanged, SHA602eb0cf8392300d00762b0b35264765c4f538bda96ccd254a5b58406d7367e1.
+Final version-bearing quality1659PASS/types/build, ambient restored/webtscPASS;
+local25browserPASS. Actual installed123checks/18frames1366+390, realparcel6toggles
+each restored/Cancel/reopen and taskcreate/edit/orderpopups/textretention PASS.
+Final actualrun zero page/console/HTTP errors or business writes. Inbox popup
+load UNAVAILABLE under strict readonly bootstrap/media policy; href+actual client
+API reads verified, not live Inboxload/persistence. Earlier harness failures retained.
+Post3 root/health200,26business fingerprints unchanged; allservice/private/tracker
+guards PASS. Full operation API/newWEB logs plus oldfollow EXIT0/no timeout.
+Exact GitHub Quality39128737959 and CRMrelease39130749261 SUCCESS; immutable tag
+crm-v0.6.0 points to runtime036b95e. Independent visual scopedPASS both features,
+including loaded order destinations1366/390 and scrolled editfooter; createbottom
+crop remains a pixel limit. Independent operational/installed axes and TAG PASS;
+publication receipts now recorded for final release closure. No feature blocker.
+Report docs/ui/task-shipment-web-release-0.6.0-2026-10-18.md; private operational
+evidence .local/task-shipment-web-deploy/ incl actualruns/2026-10-18T13-14-03-780Z.
+Oldsource /home/trio/yoleotard-crm-v050-evidence-036b95e retained; no data restore.
+
 ## 2026-10-18 — CRM 0.6.0 release preparation, deployment authorized
 
 User explicitly requested deployment of task destinations and shipment checkbox fix.
