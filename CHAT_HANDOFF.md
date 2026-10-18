@@ -1,5 +1,45 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-18 — CRM 0.6.0 release preparation, deployment authorized
+
+User explicitly requested deployment of task destinations and shipment checkbox fix.
+Release version 0.6.0: compatible task navigation feature plus UI bug fix. Final
+version-bearing quality EXIT0 (1659 tests/types/build), restored ambient web tsc
+EXIT0. WEB-only release: existing 0.5.0 API/DB/Redis remain running; no migrations.
+Fresh FULL backup, exact source/image binding, independent operational gate and
+read-only installed smoke are required before reporting success. Preparation
+receipts: .local/task-shipment-web-deploy/. No new installed success claimed yet.
+
+## 2026-10-18 — task client destinations + shipment checkbox, local acceptance
+
+New user request clarified BOTH client conversation and existing client order links
+from create/edit task. Added TaskClientLinks via existing GETclients/:id; response
+client/ownership/archive validation, abort stale requests, empty/error/retry states,
+explicit multi-order number choice. Same-origin noopener new-tab links preserve
+unsaved task/Inbox form, no implicit save/send. Inbox deep link client-only, not
+invalid channel-only context. Tasks role OWNER/ADMIN/MANAGER; production no full
+client lookup/links. Existing API guards retained, no route/schema/permission change.
+
+User then reported click on parcel item checkbox crashes edit shipment. Actual
+RED on unchanged0.5.0: first real check => TypeError nullreadingchecked, React
+OrderShipmentForm/basicStateReducer,0writes. Narrow fix reads checked synchronously
+before functional Set updater; selected IDs, CAS, save DTO, money/status unchanged.
+Actual originalGREEN1 andresponsiveGREEN2; MAIN frozen browser25PASS:
+14tasknavigation+legacybusy and11shipmentcurrency+instance selection. ExactPUTIDs
+andexpectedUpdatedAt/reopen tested1366/390, synthetic HTTP boundary. Task popup
+URLs/docs stubs verify destinations/formretention, not installed Inbox/Orders E2E.
+Four task dialog frames include scrolled lower controls, independent visualPASS;
+compatibility/Standards+business+regression combinedPASS. Supplemental Spec PASS, no findings.
+
+Final pnpm11.16quality EXIT0:1659PASS(1145API+488WEB+26DB), alltypes,Nest/NextbuildPASS.
+Generated next-env restored; postrestorewebtsc EXIT0, gitdiffcheck EXIT0.
+Independent FINAL LOCAL RELEASE/QUALITY PASS for BOTH scopes; all mandatory roles
+and supplementalStandards/Spec PASS, no blockers. Changes remain uncommitted/local.
+Report docs/ui/task-links-shipment-selection-2026-10-18.md; private evidence
+.local/task-context-navigation/ incl shipment-bug/RED+GREEN and source hashes.
+Base aca3a4b. NO new commit/push/deploy/migration or production data change;
+installed CRM0.5.0/93ccb2f still lacks this local fix. Do not reuse older deploy
+helpers or treat completed0.5.0 deployment authorization as current new scope.
 ## 2026-10-18 — CRM 0.5.0 installed, final closure
 
 User-authorized deploy succeeded. Installedsource/tag93ccb2fbe6660c9049a28aa87c7b4f5ec2384142

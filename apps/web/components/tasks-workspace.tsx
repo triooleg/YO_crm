@@ -5,6 +5,7 @@ import { tasksUi } from "../lib/i18n";
 import { CrmAlert } from "./crm/alert";
 import { CrmModal } from "./crm/modal";
 import { taskChannel, taskChannelIcons } from "../lib/task-channel";
+import { TaskClientLinks } from "./task-client-links";
 
 type User = { id: string; displayName: string; role: string };
 type Attachment = { id: string; path: string };
@@ -75,7 +76,7 @@ async function api(path: string, init?: RequestInit) {
   return response.json();
 }
 
-export function TasksWorkspace() {
+export function TasksWorkspace({ role }: { role?: string } = {}) {
   const [data, setData] = useState<Board>({ columns: [], users: [] }),
     [boardReady, setBoardReady] = useState(false),
     [boardLoading,setBoardLoading]=useState(true), [boardLoadError,setBoardLoadError]=useState(false),
@@ -456,6 +457,7 @@ export function TasksWorkspace() {
       </div>
       {editing && (
         <TaskDialog
+          allowClientNavigation={["OWNER", "ADMIN", "MANAGER"].includes(role ?? "")}
           task={editing}
           columns={data.columns}
           users={data.users}
@@ -606,6 +608,7 @@ export function TaskDialog({
   close,
   save,
   archive,
+  allowClientNavigation = false,
 }: {
   task: Partial<Task> & { sourceMessageId?: string };
   columns: Column[];
@@ -614,6 +617,7 @@ export function TaskDialog({
   close: () => void;
   save: (x: object) => Promise<void>;
   archive?: () => Promise<void>;
+  allowClientNavigation?: boolean;
 }) {
   const [files, setFiles] = useState<string[]>([]);
   const submittingRef = useRef(false);
@@ -761,6 +765,7 @@ export function TaskDialog({
             {tasksUi.client}: <b>{task.client.displayName}</b>
           </p>
         )}
+        {task.client && allowClientNavigation && <TaskClientLinks client={task.client} busy={saving} />}
         <footer>
           {archive && (
             <button type="button" className="danger" onClick={archive}>

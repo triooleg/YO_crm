@@ -15,7 +15,7 @@ const {taskChannel}=channelModule.exports;
 
 test("tasks navigation renders the real kanban workspace",()=>{
   assert.match(shell,/TasksWorkspace/);
-  assert.match(shell,/<TasksWorkspace\/>/);
+  assert.match(shell,/<TasksWorkspace role=\{auth\.role\}\/>/);
   assert.doesNotMatch(shell,/section===items\[7\]\[0\][^?]*\?<ComingSoon/);
 });
 
