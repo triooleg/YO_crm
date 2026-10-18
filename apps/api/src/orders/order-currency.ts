@@ -34,7 +34,7 @@ export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, or
   if (order.invoices.length) throw new OrderCurrencyChangeError("INVOICE_HISTORY_EXISTS", "Нельзя изменить валюту заказа с историей инвойсов");
   if (order.expenses.length) throw new OrderCurrencyChangeError("EXPENSE_HISTORY_EXISTS", "Нельзя изменить валюту заказа со связанными расходами");
   if (order.shipment?.costMinor) throw new OrderCurrencyChangeError("SHIPMENT_COST_EXISTS", "Нельзя изменить валюту заказа с расходами на доставку");
-  if ((order.orderShipments ?? []).some((shipment) => shipment.customerChargeMinor > 0 || shipment.atelierCostMinor > 0)) throw new OrderCurrencyChangeError("SHIPMENT_COST_EXISTS", "Нельзя изменить валюту заказа с доходами или расходами по посылкам");
+  if ((order.orderShipments ?? []).some((shipment) => shipment.customerChargeMinor > 0 || (shipment.customerChargeOriginalMinor ?? 0) > 0 || shipment.atelierCostMinor > 0)) throw new OrderCurrencyChangeError("SHIPMENT_COST_EXISTS", "Нельзя изменить валюту заказа с доходами или расходами по посылкам");
   if (String(order.sourceSystem ?? "").toUpperCase() === "KEYCRM") throw new OrderCurrencyChangeError("KEYCRM_ORDER_OWNED", "Валюта заказа, управляемого KeyCRM, изменяется только в источнике");
   const [providerSetting, cacheSetting] = await Promise.all([
     tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } }),

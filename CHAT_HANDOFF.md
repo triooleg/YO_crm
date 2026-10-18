@@ -1,5 +1,52 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-18 — CRM 0.5.0 deployment authorized, preparing
+
+User explicitly requested deployment after local acceptance. Current read-only
+probe confirms installed0.4.1/5c9a8d8, old API40e3cb2e and WEB63e1e333;
+36 migrations, all4containers healthy. Version metadata0.5.0 follows SemVer.
+Final metadata-bearing quality EXIT0:1659tests, types, API+Nextbuild; generated
+ambient restored and webtscPASS. No business feature edits after local acceptance.
+Operational policy is ROLL-FORWARD-ONLY for this whole attempt: no old-writer
+rollback window, no automatic database restore/drop, no losing post-backup writes.
+Retain old images/source for evidence; recover with pinned compatible candidate
+images or a separately reviewed compatible fix. Additive Prisma migration must
+precede candidate API startup; never seed. Preserve PostgreSQL/Redis/config/proxy.
+Private operational evidence/helper .local/shipment-expense-currency-deploy/.
+Backup, exact archive/images, independent helper gate, switch and live smoke
+are pending, and will be recorded below after actual completion.
+## 2026-10-18 — валюты посылки и расходов, LOCAL ONLY
+
+User requested currency switching for shipments and expenses and confirmed both
+customer delivery charge and atelier carrier expense. Worktree finance-approved-redesign,
+base31041ef9b2941efd91ca1382ac819e3884c48c71; uncommitted feature diff.
+Two independently labeled EUR/USD/UAH selectors; edit restores originals; async
+save retained. Existing expense selectors preserved with input-unit hint.
+Customer charge uses integer official NBU/ECB conversion into order currency,
+immutable original/rate evidence and applied-only totals. Unchanged inputs preserve
+historical conversion. Atelier Expense retains original money once; linked finance
+edits/archive synchronize parcel mirror/version/audits under order lock. Existing
+expense category/notes retained. KeyCRM applied-money writes preserve/clear FX
+provenance coherently, old NULL snapshot/rollback compatible. Shipping/Finance and
+KeyCRM import explicitly advance parcel versions; stale editors rejected.
+
+Prepared migration20261018120000 adds3nullable provenance columns+CHECK. NO project
+or production DB SQL applied, no backfill, seed, commit, push or deployment.
+Only generated local Prisma client and synthetic PGlite migration verification.
+Old writer rollback after new currency data is unsafe; release needs compatible plan.
+
+Focused RED/GREEN receipts and public import future-version regression92PASS.
+Browser9PASS with mocked API/external requests blocked;8screens1366x950/390x950,
+visual scopedPASS. OrderExpenseEditor/card pixels have source+semantic coverage,
+not unobscured screenshot proof. Compatibility/business feature blockers closed.
+Final pinned pnpm11.16 quality:check EXIT0:1145API+488WEB+26DB=1659PASS; all
+workspace types, Nest and Next builds PASS. Generated next-env.d.ts restored;
+post-restoration web tsc EXIT0, git diff --check EXIT0. Independent final release gate PASS — LOCAL ONLY; Standards/Spec PASS, no blockers.
+Plan docs/plans/shipment-expense-currencies.md; validation
+ docs/ui/shipment-expense-currency-validation.md; private evidence
+.local/shipment-expense-currency/. Installed0.4.1 production remains unchanged.
+
+
 ## 2026-10-15 — CRM 0.4.1 WEB deployed, installed verification
 
 User explicitly authorized deploy. Runtime/source/tag

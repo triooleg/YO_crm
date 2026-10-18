@@ -639,7 +639,8 @@ export class KeycrmService {
         const shipmentWriteMode = shipmentWriteModeBeforeWrite;
         const parcelData = { carrier: matchedCarrier, status: persisted.shippingStatus, trackingNumber: order.delivery.trackingCode, customerChargeMinor: order.deliveryMinor, currency: order.currency, shippedAt: order.delivery.shippedAt, serviceName: order.delivery.serviceName, externalServiceId: order.delivery.serviceId, externalStatus: order.delivery.externalStatus };
         if (shipmentWriteMode === "UPDATE") {
-          const updatedParcel = await tx.orderShipment.update({ where: { id: providerShipment!.id }, data: parcelData });
+          const moneyChanged = providerShipment!.customerChargeMinor !== parcelData.customerChargeMinor || providerShipment!.currency !== parcelData.currency;
+          const updatedParcel = await tx.orderShipment.update({ where: { id: providerShipment!.id }, data: { ...parcelData, updatedAt: new Date(Math.max(Date.now(), providerShipment!.updatedAt.getTime() + 1)), ...(moneyChanged ? { customerChargeOriginalMinor: null, customerChargeOriginalCurrency: null, customerChargeRateSnapshot: Prisma.DbNull } : {}) } });
           await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "OrderShipment", entityId: updatedParcel.id, before: providerShipment!, after: updatedParcel } });
         } else if (shipmentWriteMode === "CREATE") {
           const createdParcel = await tx.orderShipment.create({ data: { orderId: persisted.id, ...parcelData, isPrimary: true } });
@@ -1131,6 +1132,13 @@ function rollbackSnapshotMatches(current: RollbackSnapshot, storedValue: unknown
     const previous = oldInstances.get(String(instance.id));
     if (previous && !Object.hasOwn(previous, "standardHeight") && instance.standardHeight === null) delete instance.standardHeight;
   }
+  const oldShipments = rowsById(stored.orderShipments);
+  for (const shipment of compatible.orderShipments) {
+    const previous = oldShipments.get(String(shipment.id));
+    if (previous) for (const field of ["customerChargeOriginalMinor", "customerChargeOriginalCurrency", "customerChargeRateSnapshot"]) {
+      if (!Object.hasOwn(previous, field) && shipment[field] === null) delete shipment[field];
+    }
+  }
   if (stored.version === 2) return jsonValuesEqual(compatible, stored);
   if (compatible.orderItemInstances.length || compatible.orderShipments.length) return false;
   const { version: _version, orderItemInstances: _instances, orderShipments: _shipments, ...legacyCurrent } = compatible;
@@ -1160,7 +1168,8 @@ function restorableData(source: Record<string, unknown>, omitted: string[]): Rec
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(source)) {
     if (omitted.includes(key)) continue;
-    if (value === null && JSON_RESTORE_FIELDS.has(key)) result[key] = Prisma.JsonNull;
+    if (value === null && key === "customerChargeRateSnapshot") result[key] = Prisma.DbNull;
+    else if (value === null && JSON_RESTORE_FIELDS.has(key)) result[key] = Prisma.JsonNull;
     else if (typeof value === "string" && (key.endsWith("At") || key === "issueDate" || key === "dueDate")) result[key] = new Date(value);
     else result[key] = value;
   }

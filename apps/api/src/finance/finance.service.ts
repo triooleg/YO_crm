@@ -30,8 +30,39 @@ import { saveProductionSettingsTransaction } from "./production-settings";
  async createCategory(d:CreateExpenseCategoryDto,u:User){const name=d.name.trim();if(!name)throw new BadRequestException("Введите название статьи");return this.prisma.$transaction(async tx=>{const x=await tx.expenseCategory.create({data:{name}});await tx.auditLog.create({data:{actorId:u.id,action:"CREATE",entityType:"ExpenseCategory",entityId:x.id,after:x}});return x})}
  async createExpense(d:CreateExpenseDto,u:User){return this.prisma.$transaction(async tx=>{await this.validateExpenseRelations(tx,d.categoryId,d.orderId);const x=await tx.expense.create({data:{categoryId:d.categoryId,orderId:d.orderId,amountMinor:d.amountMinor,currency:d.currency.toUpperCase(),incurredAt:new Date(d.incurredAt),notes:d.notes?.trim()||null}});await tx.auditLog.create({data:{actorId:u.id,action:"CREATE",entityType:"Expense",entityId:x.id,after:x}});return x})}
  async updateCategory(id:string,d:UpdateExpenseCategoryDto,u:User){const name=d.name?.trim();if(d.name!==undefined&&!name)throw new BadRequestException("Введите название статьи");return this.prisma.$transaction(async tx=>{const before=await tx.expenseCategory.findUnique({where:{id}});if(!before)throw new NotFoundException("Статья расходов не найдена");const x=await tx.expenseCategory.update({where:{id},data:{name,active:d.active}});await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"ExpenseCategory",entityId:id,before,after:x}});return x})}
- async updateExpense(id:string,d:UpdateExpenseDto,u:User){return this.prisma.$transaction(async tx=>{const before=await tx.expense.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Расход не найден");if(d.categoryId!==undefined)await this.validateExpenseCategory(tx,d.categoryId);if(d.orderId!==undefined&&d.orderId!==null)await this.validateExpenseOrder(tx,d.orderId);const x=await tx.expense.update({where:{id},data:{categoryId:d.categoryId,orderId:d.orderId,amountMinor:d.amountMinor,currency:d.currency?.toUpperCase(),incurredAt:d.incurredAt?new Date(d.incurredAt):undefined,notes:d.notes===null?null:d.notes?.trim()}});await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"Expense",entityId:id,before,after:x}});return x})}
- async archiveExpense(id:string,u:User){return this.prisma.$transaction(async tx=>{const before=await tx.expense.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Расход не найден");const x=await tx.expense.update({where:{id},data:{archivedAt:new Date()}});await tx.auditLog.create({data:{actorId:u.id,action:"ARCHIVE",entityType:"Expense",entityId:id,before,after:x}});return x})}
+ async updateExpense(id:string,d:UpdateExpenseDto,u:User){return this.prisma.$transaction(async tx=>{
+  const before=await this.expenseForMutation(tx,id);
+  if(before.orderShipment&&d.orderId!==undefined&&d.orderId!==before.orderShipment.orderId)throw new BadRequestException("Расход посылки нельзя перенести в другой заказ или отвязать от заказа");
+  if(d.categoryId!==undefined)await this.validateExpenseCategory(tx,d.categoryId);
+  if(d.orderId!==undefined&&d.orderId!==null)await this.validateExpenseOrder(tx,d.orderId);
+  const x=await tx.expense.update({where:{id},data:{categoryId:d.categoryId,orderId:d.orderId,amountMinor:d.amountMinor,currency:d.currency?.toUpperCase(),incurredAt:d.incurredAt?new Date(d.incurredAt):undefined,notes:d.notes===null?null:d.notes?.trim()}});
+  await this.syncExpenseShipment(tx,before,x.amountMinor,u.id,false);
+  await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"Expense",entityId:id,before,after:x}});return x;
+ })}
+ async archiveExpense(id:string,u:User){return this.prisma.$transaction(async tx=>{
+  const before=await this.expenseForMutation(tx,id);
+  const x=await tx.expense.update({where:{id},data:{archivedAt:new Date()}});
+  await this.syncExpenseShipment(tx,before,0,u.id,true);
+  await tx.auditLog.create({data:{actorId:u.id,action:"ARCHIVE",entityType:"Expense",entityId:id,before,after:x}});return x;
+ })}
+ private async expenseForMutation(tx:Prisma.TransactionClient,id:string){
+  let before=await tx.expense.findFirst({where:{id,archivedAt:null},include:{orderShipment:true}});
+  if(!before)throw new NotFoundException("Расход не найден");
+  if(before.orderShipment){
+   const orderId=before.orderShipment.orderId;
+   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))",orderId);
+   before=await tx.expense.findFirst({where:{id,archivedAt:null},include:{orderShipment:true}});
+   if(!before)throw new NotFoundException("Расход не найден");
+   if(before.orderShipment&&before.orderShipment.orderId!==orderId)throw new BadRequestException("Связь расхода с посылкой изменилась. Обновите данные");
+  }
+  return before;
+ }
+ private async syncExpenseShipment(tx:Prisma.TransactionClient,before:Prisma.ExpenseGetPayload<{include:{orderShipment:true}}>,amountMinor:number,actorId:string,archive:boolean){
+  const parcel=before.orderShipment;if(!parcel)return;
+  const after=await tx.orderShipment.update({where:{id:parcel.id},data:{atelierCostMinor:amountMinor,...(archive?{atelierExpenseId:null}:{}),updatedAt:new Date(Math.max(Date.now(),parcel.updatedAt.getTime()+1))}});
+  await tx.auditLog.create({data:{actorId,action:"UPDATE",entityType:"OrderShipment",entityId:parcel.id,before:parcel,after}});
+ }
+
  settings(){return this.prisma.appSetting.findMany({where:{OR:[{section:"finance",key:{in:["invoicePrefix","sellerName","sellerAddress","defaultCurrency"]}},{section:"orders",key:"depositPercent"},{section:"production",key:{in:["defaultDurationDays","shippingLeadDays"]}}]},orderBy:[{section:"asc"},{key:"asc"}]})}
  async saveSetting(d:UpdateSettingDto,u:User){
   const allowed:Record<string,string[]>={finance:["invoicePrefix","sellerName","sellerAddress","defaultCurrency"],orders:["depositPercent"]};

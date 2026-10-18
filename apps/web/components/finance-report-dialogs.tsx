@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Alert, Badge, Group, Modal, Select, Stack, Table, Text, Textarea, TextInput, Tooltip } from '@mantine/core';
-import { financeUi, financeReportUi as ui } from '../lib/i18n';
+import { financeUi, financeReportUi as ui, ordersDashboardUi } from '../lib/i18n';
 import { parseOrderPriceMinor } from '../lib/order-price';
 import { financeDate, moneyLabel, type ExpenseRow, type FinanceOrder, type FinanceReport, type PaymentRow } from '../lib/finance-report';
 import { CrmButton } from './crm/settings-controls';
@@ -32,6 +32,7 @@ export function FinanceExpenseDialog({row,report,request,onClose,onSaved}:{row?:
     <Select label={ui.category} data={categories.map(item=>({value:item.id,label:item.name}))} value={category} onChange={value=>setCategory(value||'')} required disabled={busy} allowDeselect={false}/>
     <Select searchable clearable label={ui.order} placeholder={ui.allOrders} onSearchChange={setSearch} data={orders.map(item=>({value:item.id,label:`${item.number} · ${item.clientName}`}))} value={order||null} onChange={value=>setOrder(value||'')} disabled={busy}/>
     <Group grow><TextInput label={ui.amount} required inputMode="decimal" value={amount} onChange={event=>setAmount(event.currentTarget.value)} disabled={busy}/><Select label={ui.operationCurrency} value={currency} onChange={value=>value&&setCurrency(value)} data={['EUR','USD','UAH']} allowDeselect={false} disabled={busy}/></Group>
+    <Text size="xs" c="dimmed">{ordersDashboardUi.expenseCurrencyInputHint}</Text>
     <TextInput type="date" label={ui.date} required value={date} onChange={event=>setDate(event.currentTarget.value)} disabled={busy}/><Textarea label={ui.notes} value={notes} onChange={event=>setNotes(event.currentTarget.value)} maxLength={300} disabled={busy}/>
     <Group justify="flex-end"><CrmButton tone="secondary" type="button" onClick={onClose} disabled={busy}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy} disabled={!categories.length}>{ui.save}</CrmButton></Group>
   </Stack></form></Modal>;

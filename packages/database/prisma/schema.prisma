@@ -589,6 +589,9 @@ model OrderShipment {
   status              ShippingStatus  @default(NOT_READY)
   trackingNumber      String?
   customerChargeMinor Int             @default(0)
+  customerChargeOriginalMinor Int?
+  customerChargeOriginalCurrency String?
+  customerChargeRateSnapshot Json?
   atelierCostMinor    Int             @default(0)
   atelierExpenseId    String?         @unique
   currency            String

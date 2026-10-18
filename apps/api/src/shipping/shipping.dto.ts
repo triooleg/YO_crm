@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { ShippingCarrier, ShippingStatus } from "@prisma/client";
-import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Length, Max, Min, ValidateIf } from "class-validator";
 export class UpsertShipmentDto {
   @ApiProperty({ enum: ShippingCarrier }) @IsEnum(ShippingCarrier) carrier!: ShippingCarrier;
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @Length(1, 120) trackingNumber?: string | null;
@@ -23,6 +23,8 @@ export class UpsertOrderShipmentDto {
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @Length(1,120) trackingNumber?: string|null;
   @ApiProperty() @IsInt() @Min(0) @Max(100000000) customerChargeMinor!: number;
   @ApiProperty() @IsInt() @Min(0) @Max(100000000) atelierCostMinor!: number;
+  @ApiPropertyOptional({ enum: ["EUR","USD","UAH"] }) @ValidateIf((_, value) => value !== undefined) @IsIn(["EUR","USD","UAH"]) customerChargeCurrency?: string;
+  @ApiPropertyOptional({ enum: ["EUR","USD","UAH"] }) @ValidateIf((_, value) => value !== undefined) @IsIn(["EUR","USD","UAH"]) atelierCostCurrency?: string;
   @ApiProperty() @IsIn(["EUR","USD","UAH"]) currency!: string;
   @ApiProperty({ enum: ShippingStatus }) @IsEnum(ShippingStatus) status!: ShippingStatus;
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsDateString() shippedAt?: string|null;

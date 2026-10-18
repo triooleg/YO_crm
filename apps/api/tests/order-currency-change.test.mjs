@@ -76,6 +76,12 @@ test("currency change rejects a stale order snapshot before monetary writes", as
   assert.equal(state.audits.length, 0);
 });
 
+test("a positive foreign delivery original protects history even when applied amount rounds to zero", async () => {
+  const { tx, state } = fixture({ orderShipments: [{ customerChargeMinor: 0, atelierCostMinor: 0, customerChargeOriginalMinor: 1, customerChargeOriginalCurrency: "UAH" }] });
+  await assert.rejects(() => changeOrderCurrencyTransaction(tx, "o1", "USD", "owner-1", new Date()), error => error.code === "SHIPMENT_COST_EXISTS");
+  assert.equal(state.order.currency, "EUR"); assert.equal(state.activities.length, 0);
+});
+
 test("currency change rejects a converted Prisma Int overflow before monetary writes", async () => {
   const { tx, state } = fixture({ priceMinor: 2_147_483_647, items: [{ id: "i1", priceMinor: 2_147_483_647 }] });
   await assert.rejects(

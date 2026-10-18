@@ -44,7 +44,7 @@ export function OrderExpenseEditor({orderId,orderNumber,currency:initialCurrency
       {loading?<p>{ui.loading}</p>:categories.length===0&&!error?<CrmAlert>{ui.expenseCategoriesMissing}</CrmAlert>:null}
       <CrmNativeSelect label={ui.expenseType} value={categoryId} disabled={busy||loading||!categories.length} onChange={event=>setCategoryId(event.currentTarget.value)} data={categories.map(category=>({value:category.id,label:category.name}))} required />
       <CrmTextInput label={financeUi.amount} inputMode="decimal" value={amount} disabled={busy} onChange={event=>setAmount(event.currentTarget.value)} required />
-      <CrmNativeSelect label={financeUi.currency} value={currency} disabled={busy} onChange={event=>setCurrency(event.currentTarget.value)} data={["EUR","USD","UAH"]} />
+      <CrmNativeSelect label={financeUi.currency} description={ui.expenseCurrencyInputHint} value={currency} disabled={busy} onChange={event=>setCurrency(event.currentTarget.value)} data={["EUR","USD","UAH"]} />
       <CrmTextInput label={financeUi.date} type="date" value={date} disabled={busy} onChange={event=>setDate(event.currentTarget.value)} required />
       <CrmTextarea label={financeUi.notes} value={notes} disabled={busy} maxLength={300} onChange={event=>setNotes(event.currentTarget.value)} />
       <small>{ui.financeExpensesHint}</small>

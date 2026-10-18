@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
-import { OrderType } from "@prisma/client";
+import { OrderType, Prisma } from "@prisma/client";
 import ts from "typescript";
 import { loadTargetModule } from "./overview-target-loader.mjs";
 import { KeycrmClient } from "../src/keycrm/keycrm-client.ts";
@@ -1355,8 +1355,160 @@ function localCompositionImportFixture({ manualItemOverride = false, composition
     const before=structuredClone(state),beforeWrites=businessWrites;
     try{return await callback(tx)}catch(error){Object.assign(state,before);businessWrites=beforeWrites;throw error}
   } });
-  return { state, issues, service, get businessWrites() { return businessWrites; } };
+  return { state, issues, service, tx, get businessWrites() { return businessWrites; } };
 }
+
+function shipmentCurrencyImportFixture(shipmentOverrides = {}) {
+  const f = localCompositionImportFixture();
+  const shipment = {
+    id: 'parcel-1', orderId: 'order-1', externalServiceId: 'service-1',
+    customerChargeMinor: 900, currency: 'EUR', archivedAt: null, updatedAt: new Date('2026-10-01'),
+    customerChargeOriginalMinor: 1000, customerChargeOriginalCurrency: 'USD',
+    customerChargeRateSnapshot: { source: 'ECB', numerator: '9', denominator: '10' },
+    ...shipmentOverrides,
+  };
+  const writes = [];
+  f.tx.orderShipment = {
+    findMany: async () => [structuredClone(shipment)],
+    update: async ({ data }) => {
+      writes.push(data);
+      Object.assign(shipment, data, data.customerChargeRateSnapshot === Prisma.DbNull ? { customerChargeRateSnapshot: null } : {});
+      return structuredClone(shipment);
+    },
+  };
+  f.tx.shipment = { findUnique: async () => ({ id: 'legacy-shipment', shippedAt: new Date('2026-10-01') }) };
+  const incoming = normalizedOrder({
+    deliveryMinor: 900,
+    delivery: { ...normalizedOrder().delivery, serviceId: 'service-1', serviceName: 'DHL', trackingCode: 'TRACK-1', externalStatus: 'in_transit' },
+    items: [{ externalId: 'product-1', name: 'Provider', quantity: 1, priceMinor: 10000, notes: null, sku: null, externalImageUrl: null, properties: [] }],
+  });
+  return { ...f, shipment, writes, incoming };
+}
+
+test('KeyCRM changed applied shipment charge clears foreign provenance in the same write', async () => {
+  const f = shipmentCurrencyImportFixture();
+  f.incoming.deliveryMinor = 1200;
+  assert.equal(await f.service.importOrder(f.incoming, 'owner', 'run-1'), 'UPDATED');
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].customerChargeMinor, 1200);
+  assert.equal(f.writes[0].currency, 'EUR');
+  assert.equal(f.writes[0].customerChargeOriginalMinor, null);
+  assert.equal(f.writes[0].customerChargeOriginalCurrency, null);
+  assert.equal(f.writes[0].customerChargeRateSnapshot, Prisma.DbNull);
+});
+
+test('KeyCRM unchanged applied money and status sync preserve foreign provenance', async () => {
+  const f = shipmentCurrencyImportFixture();
+  const before = structuredClone(f.shipment.customerChargeRateSnapshot);
+  assert.equal(await f.service.importOrder(f.incoming, 'owner', 'run-1'), 'UPDATED');
+  assert.equal(f.shipment.externalStatus, 'in_transit');
+  assert.equal(f.shipment.customerChargeMinor, 900);
+  assert.equal(f.shipment.currency, 'EUR');
+  assert.equal(f.shipment.customerChargeOriginalMinor, 1000);
+  assert.equal(f.shipment.customerChargeOriginalCurrency, 'USD');
+  assert.deepEqual(f.shipment.customerChargeRateSnapshot, before);
+  for (const field of ['customerChargeOriginalMinor', 'customerChargeOriginalCurrency', 'customerChargeRateSnapshot']) assert.equal(Object.hasOwn(f.writes[0], field), false);
+});
+
+test('KeyCRM changed applied currency clears provenance even when the minor amount is unchanged', async () => {
+  const f = shipmentCurrencyImportFixture({ currency: 'USD' });
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  assert.equal(f.shipment.customerChargeMinor, 900);
+  assert.equal(f.shipment.currency, 'EUR');
+  assert.equal(f.shipment.customerChargeOriginalMinor, null);
+  assert.equal(f.shipment.customerChargeOriginalCurrency, null);
+  assert.equal(f.writes[0].customerChargeRateSnapshot, Prisma.DbNull);
+});
+
+test('KeyCRM new parcel leaves original money at SQL NULL defaults', async () => {
+  const f = shipmentCurrencyImportFixture();
+  f.tx.orderShipment.findMany = async () => [];
+  let created;
+  f.tx.orderShipment.create = async ({ data }) => {
+    created = { customerChargeOriginalMinor: null, customerChargeOriginalCurrency: null, customerChargeRateSnapshot: null, ...data };
+    return { id: 'new-parcel', ...created };
+  };
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  assert.equal(created.customerChargeMinor, 900);
+  assert.equal(created.currency, 'EUR');
+  assert.equal(created.customerChargeOriginalMinor, null);
+  assert.equal(created.customerChargeOriginalCurrency, null);
+  assert.equal(created.customerChargeRateSnapshot, null);
+});
+
+function captureShipmentMutation(f) {
+  const run = { id: 'run-1', mode: 'APPLY', status: 'PARTIAL', rolledBackAt: null, mutations: [] };
+  f.tx.keycrmSyncMutation = {
+    count: async () => run.mutations.length,
+    create: async ({ data }) => { const row = { id: 'mutation-1', rolledBackAt: null, ...data }; run.mutations.push(row); return row; },
+    update: async () => undefined,
+  };
+  f.tx.keycrmSyncRun = { findUnique: async () => run, update: async ({ data }) => Object.assign(run, data) };
+  f.service.prisma.keycrmSyncRun = f.tx.keycrmSyncRun;
+  return run;
+}
+
+test('KeyCRM v2 import snapshots roundtrip foreign shipment provenance through public rollback', async () => {
+  const f = shipmentCurrencyImportFixture();
+  const run = captureShipmentMutation(f);
+  f.incoming.deliveryMinor = 1200;
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  const mutation = run.mutations[0];
+  const saved = JSON.stringify([mutation.beforeSnapshot, mutation.afterSnapshot]);
+  assert.equal(mutation.beforeSnapshot.version, 2);
+  assert.deepEqual(structuredClone(mutation.beforeSnapshot.orderShipments[0].customerChargeRateSnapshot), { source: 'ECB', numerator: '9', denominator: '10' });
+  assert.equal(mutation.beforeSnapshot.orderShipments[0].customerChargeOriginalMinor, 1000);
+  assert.equal(mutation.afterSnapshot.orderShipments[0].customerChargeOriginalMinor, null);
+  assert.equal(mutation.afterSnapshot.orderShipments[0].customerChargeRateSnapshot, null);
+  await f.service.rollback('run-1', { id: 'owner' });
+  assert.equal(f.shipment.customerChargeMinor, 900);
+  assert.equal(f.shipment.customerChargeOriginalMinor, 1000);
+  assert.equal(f.shipment.customerChargeOriginalCurrency, 'USD');
+  assert.deepEqual(structuredClone(f.shipment.customerChargeRateSnapshot), { source: 'ECB', numerator: '9', denominator: '10' });
+  assert.equal(JSON.stringify([mutation.beforeSnapshot, mutation.afterSnapshot]), saved);
+});
+
+test('KeyCRM rollback restores SQL DbNull for an explicitly null shipment rate snapshot', async () => {
+  const f = shipmentCurrencyImportFixture({ customerChargeOriginalMinor: null, customerChargeOriginalCurrency: null, customerChargeRateSnapshot: null });
+  captureShipmentMutation(f);
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  await f.service.rollback('run-1', { id: 'owner' });
+  assert.equal(f.writes.at(-1).customerChargeOriginalMinor, null);
+  assert.equal(f.writes.at(-1).customerChargeOriginalCurrency, null);
+  assert.equal(f.writes.at(-1).customerChargeRateSnapshot, Prisma.DbNull);
+});
+
+for (const [label, laterProvenance] of [
+  ['NULL', null],
+  ['foreign triple', { customerChargeOriginalMinor: 1000, customerChargeOriginalCurrency: 'USD', customerChargeRateSnapshot: { source: 'ECB', numerator: '9', denominator: '10' } }],
+  ['zero original amount', { customerChargeOriginalMinor: 0 }],
+  ['empty original currency', { customerChargeOriginalCurrency: '' }],
+  ['empty JSON snapshot', { customerChargeRateSnapshot: {} }],
+]) test('KeyCRM old v2 shipment snapshot accepts only additive NULL provenance: ' + label, async () => {
+  const f = shipmentCurrencyImportFixture({ customerChargeOriginalMinor: null, customerChargeOriginalCurrency: null, customerChargeRateSnapshot: null });
+  const run = captureShipmentMutation(f);
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  const mutation = run.mutations[0];
+  for (const snapshot of [mutation.beforeSnapshot, mutation.afterSnapshot]) {
+    for (const field of ['customerChargeOriginalMinor', 'customerChargeOriginalCurrency', 'customerChargeRateSnapshot']) delete snapshot.orderShipments[0][field];
+  }
+  const saved = JSON.stringify([mutation.beforeSnapshot, mutation.afterSnapshot]);
+  f.writes.length = 0;
+  if (laterProvenance) {
+    Object.assign(f.shipment, laterProvenance);
+    await assert.rejects(() => f.service.rollback('run-1', { id: 'owner' }), /изменён после импорта/);
+    assert.equal(f.writes.length, 0);
+    assert.equal(run.rolledBackAt, null);
+  } else {
+    await f.service.rollback('run-1', { id: 'owner' });
+    assert.equal(f.shipment.customerChargeMinor, 900);
+    assert.equal(f.shipment.customerChargeOriginalMinor, null);
+    assert.equal(f.shipment.customerChargeOriginalCurrency, null);
+    assert.equal(f.shipment.customerChargeRateSnapshot, null);
+    assert.equal(f.writes.length, 1);
+  }
+  assert.equal(JSON.stringify([mutation.beforeSnapshot, mutation.afterSnapshot]), saved);
+});
 
 test('local composition conflict skips provider quantity growth before any business mutation, including retry', async () => {
   const f = localCompositionImportFixture(), before = structuredClone(f.state);
@@ -1506,4 +1658,12 @@ for(const changedValue of [false,true])for(const importedNew of [false,true])tes
  await assert.rejects(service.rollback('run',{id:'owner'}),/изменён после импорта/);
  assert.equal(root.discountMinor,discountMinor);assert.equal(root.priceMinor,priceMinor);assert.equal(rollbackWrites,0);if(!changedValue)assert.ok(root.updatedAt.getTime()>previousVersion);assert.equal(activities.filter(a=>a.type==='ORDER_DISCOUNT_UPDATED').length,1);
  const savedVersion=root.updatedAt.getTime();await applyOrderDiscount(tx,root.id,command,token,'discount-same-key-123','owner');assert.equal(root.updatedAt.getTime(),savedVersion);assert.equal(activities.length,1);
+});
+
+test('KeyCRM shipment sync advances a future parcel version monotonically', async () => {
+  const previous = new Date('2099-01-01T00:00:00.000Z');
+  const f = shipmentCurrencyImportFixture({ updatedAt: previous });
+  await f.service.importOrder(f.incoming, 'owner', 'run-1');
+  assert.ok(f.shipment.updatedAt.getTime() > previous.getTime());
+  assert.equal(f.writes[0].updatedAt.getTime(), previous.getTime() + 1);
 });

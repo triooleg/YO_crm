@@ -208,6 +208,14 @@ cost and shipped/delivered timestamps. An order may ultimately require several
 Shipments; its shipping status and shipping summary are aggregate order
 projections, not attributes copied from an arbitrary Shipment.
 
+The customer delivery charge and the atelier's carrier expense are independent
+amounts and may use different supported currencies. A customer charge has its
+original amount/currency and an applied amount in the order currency, with the
+official conversion evidence retained. Unrelated shipment edits do not revalue
+that applied charge. Only the applied customer charge contributes to commercial
+order totals; the carrier expense is an original-currency Expense, counted once
+in expense reporting and never added to the client's debt.
+
 ### Structured Order Note
 
 An authored, categorized note attached to an order and optionally to an Order
