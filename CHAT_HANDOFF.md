@@ -22,7 +22,7 @@ Exact GitHub Quality39128737959 and CRMrelease39130749261 SUCCESS; immutable tag
 crm-v0.6.0 points to runtime036b95e. Independent visual scopedPASS both features,
 including loaded order destinations1366/390 and scrolled editfooter; createbottom
 crop remains a pixel limit. Independent operational/installed axes and TAG PASS;
-publication receipts now recorded for final release closure. No feature blocker.
+FINAL independent RELEASE CLOSURE PASS; publication verified. No feature blocker.
 Report docs/ui/task-shipment-web-release-0.6.0-2026-10-18.md; private operational
 evidence .local/task-shipment-web-deploy/ incl actualruns/2026-10-18T13-14-03-780Z.
 Oldsource /home/trio/yoleotard-crm-v050-evidence-036b95e retained; no data restore.

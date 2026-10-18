@@ -92,3 +92,5 @@ Immutable `crm-v0.6.0` points to runtime source `036b95e`. Exact-commit GitHub
 [Quality gates](https://github.com/triooleg/YO_crm/actions/runs/39128737959) and
 [CRM release](https://github.com/triooleg/YO_crm/actions/runs/39130749261) succeeded.
 The subsequent documentation closure does not change installed source or images.
+
+Final independent release closure: **PASS**, all required scoped gates complete.
