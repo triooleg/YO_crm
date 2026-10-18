@@ -1,5 +1,40 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-18 — CRM 0.5.0 installed, final closure
+
+User-authorized deploy succeeded. Installedsource/tag93ccb2fbe6660c9049a28aa87c7b4f5ec2384142
+/crm-v0.5.0. APIimage9a1c3904cf1c6147705203cbdd27f12fb89bd1fb970197d6e24a5e148d244464;
+WEB74d9dc297028261e7a062d0dfe1f7ddb1e01946453a3f79dfed1bfbc0df5e957.
+FULL20261018T115730Z-v041-pre-v050 verified/checksums/catalog/uploads/manifest.
+Archive829files SHA33cb7e73ea0af5346335510fafc136ae9858a6b1450e59957177e4bd4152875a.
+ExactQuality39125292897 andCRMrelease39126303815 SUCCESS; tag immutable.
+
+Applied only20261018120000_shipment_customer_charge_currency, tracker36->37.
+Historical36rows/SQLbytes preserved, including preexisting meta_inbox source/tracker
+checksum mismatch (both exactidentities pinned, not repaired). No seed/backfill/profile
+replay/provider/customer testwrite. StoppedAPI pre/postmigration23businessfingerprints
+match after3newfieldnormalization; all3newfieldsSQLNULL verified. Postbusiness deltas[].
+API/WEB only recreated --no-deps, exactPG/RedisIDs/start/mounts/privateconfig retained.
+Recovered via compatible candidate only; no old-writer rollback window opened.
+
+FirstAPIbuild superseded due mailparser incidental3.9.39->3.9.40. Pinnedbuild uses
+exact oldAPIlock+derivedoperationalDockerfile frozeninstall;471fullresolvedpackages,
+21directdependencies/keysets+Node match installedold. WEBNext16.3.4, tracedReact/
+ReactDOM19.2.8 same. Finalpinnedimage onlyinstalled; oldmaterialretainedforevidence.
+
+Actualread-onlysmoke79checks/8screens1366/390, console/page/HTTPerrors0, writes0.
+PASS_WITH_UNAVAILABLE: bounded60orders/12details didn'tfind foreigncustomerparcel,
+legacyNULLparcel ororderlinkedexpenseforscopededit. Globalexpenseeditactualchecked.
+No save performed; local9browser+1659tests/types/build coverpersistence paths.
+Independentactual8framevisualPASS. Publicexternalbrowserroot200+healthok true;
+canonicalHTTPS/SNIlocalNPMroot+health200. Initialserverpubliccurltimeout retained,
+causenotestablished; noDNS/proxyfix. Newstartup logs clean; oldAPI SIGTERM/oldWEB ENOTFOUND switch diagnostics retained
+and classified by release. Final log collection after enhanced smoke.
+
+Report docs/ui/crm-0.5.0-deployment.md; private .local/shipment-expense-currency-deploy/.
+Executed switchhelperbca5984b preservedserver-switch.py/switch-plan.json;
+readonlypostretryhelperd3aaa6ec, noreswitch. Independent FINAL INSTALLED RELEASE ACCEPT/PASS with3 disclosed natural coverage limits; no blockers.
+Subsequent docs-only closure commits do not change installed source/image/tag.
 ## 2026-10-18 — CRM 0.5.0 deployment authorized, preparing
 
 User explicitly requested deployment after local acceptance. Current read-only
