@@ -44,6 +44,7 @@ const requireForOrders = specifier => {
   if (specifier === "./production-context") return { loadProductionOrders: (...args) => productionLoader(...args) };
   if (specifier === "sharp") return () => ({});
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   return nativeRequire(specifier);
 };
 const source = readFileSync(new URL("../src/orders/orders.service.ts", import.meta.url), "utf8");

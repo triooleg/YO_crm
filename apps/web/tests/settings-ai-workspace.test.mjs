@@ -12,8 +12,11 @@ const communicationsCss = await readFile(
   "utf8",
 );
 test("AI настройки находятся в самостоятельной вкладке", () => {
-  assert.match(source, /<CrmTabList/);
-  assert.match(source, /ariaLabel=\{settingsUi\.title\}/);
+  assert.match(source, /<Tabs\.Tab/);
+  assert.match(source, /aria-label=\{settingsUi\.title\}/);
+  assert.match(source, /orientation="vertical"/);
+  assert.match(source, /window\.addEventListener\(['"]popstate['"],sync\)/);
+  assert.match(source, /url\.searchParams\.set\('tab',next\)/);
   assert.match(source, /settingsUi\.aiTab/);
   assert.match(source, /settings-ai-panel/);
 });

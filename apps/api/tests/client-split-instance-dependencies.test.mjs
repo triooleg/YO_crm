@@ -50,7 +50,7 @@ function fixture() {
   const source = { id: 'source', firstName: '', displayName: 'Source', source: 'MANUAL', status: 'ACTIVE', archivedAt: null, updatedAt: stamp };
   const moved = { ...parseMovedEntityIds(null), sourceAiModes: [], targetAiModes: [], athletes: ['moved-athlete'], orders: ['moved-order'] };
   const item = id => ({ id: id + '-design', athleteId: null, measurement: null, archivedAt: null, instances: [] });
-  const state = {
+  const state = { measurementSubmission: [],
     client: [target, { ...source, archivedAt: stamp }],
     athlete: [{ id: 'moved-athlete', clientId: 'target' }, { id: 'kept-athlete', clientId: 'target' }],
     order: ['moved-order', 'retained-order'].map(id => ({ id, clientId: 'target', athleteId: null, measurement: null, archivedAt: null, items: [item(id)] })),

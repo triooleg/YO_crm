@@ -1,0 +1,47 @@
+.settings-tax-integration .settings-tax-layout { display: flex; gap: 18px; align-items: stretch; }
+.settings-tax-integration .settings-tax-sidebar { flex: 0 0 216px; padding: 12px; border: 1px solid var(--mantine-color-gray-3); border-radius: var(--mantine-radius-md); background: var(--mantine-color-white); align-self: stretch; }
+.settings-tax-integration .settings-tax-sidebar [role="tab"] { justify-content: flex-start; white-space: normal; min-height: 40px; border-radius: var(--mantine-radius-sm); border: 0; }
+.settings-tax-integration .settings-tax-sidebar [role="tab"][data-active] { background: var(--mantine-color-yoleotard-0); color: var(--mantine-color-yoleotard-7); }
+.settings-tax-content { flex: 1; min-width: 0; }
+.tax-settings-workspace { min-width: 0; }
+.tax-settings-workspace [role="tablist"] { flex-wrap: wrap; }
+.tax-settings-workspace td { overflow-wrap: anywhere; }
+.orders-order-tab-finance { min-width: 0; max-width: 100%; }
+.tax-settings-status { padding: 12px; background: var(--mantine-color-yoleotard-0); border-radius: var(--mantine-radius-sm); }
+.tax-settings-status[data-enabled="true"]{background:var(--mantine-color-teal-0);border:1px solid var(--mantine-color-teal-2)}
+.tax-settings-workspace>.mantine-Stack-root>.mantine-Title-root,.tax-settings-workspace>div>.mantine-Title-root{font-size:28px;font-weight:800}
+.tax-order-finance.orders-tab-finance-approved { display: flex; flex-direction: column; gap: 14px; }
+.tax-order-information { color: var(--mantine-color-dark-8); }
+.tax-order-information .mantine-Title-root { font-size: 22px; line-height: 1.25; font-weight: 800; }
+.tax-order-information .tax-order-price-label { font-size: 14px; line-height: 1.35; }
+.tax-order-price-card .crm-nav-icon { width: 27px; height: 27px; }
+.tax-order-price-card { height: 100%; min-width: 0; }
+.tax-order-price-total { background: var(--mantine-color-yoleotard-0); border-color: var(--mantine-color-yoleotard-2); }
+.tax-order-information .tax-order-price-value { font-size: clamp(18px, 1.55vw, 25px); overflow-wrap: anywhere; line-height: 1.25; }
+.tax-order-payments-balance { display: grid; grid-template-columns: minmax(0, 2.5fr) minmax(260px, 1fr); gap: 14px; align-items: start; }
+.tax-order-payments-balance > *, .tax-order-details, .tax-order-details .orders-finance-side, .tax-order-details .orders-finance-bottom { min-width: 0; }
+.tax-order-payments-balance > .orders-approved-card { grid-column: auto; }
+.tax-order-details .orders-finance-side > .orders-approved-card { grid-column: auto; }
+.tax-order-payments-balance .orders-finance-summary { background: var(--mantine-color-yellow-0); }
+.tax-order-finance .tax-order-balance-value { display:block; font-size:28px; font-weight:800; line-height:1.25; margin:6px 0 8px; }
+.tax-order-finance .tax-order-balance-context { color:var(--muted); font-size:12px; line-height:1.5; }
+.tax-order-composition .mantine-Title-root{font-size:17px;margin-bottom:12px}
+.tax-order-composition-grid{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);gap:16px;align-items:start}
+.tax-order-composition-grid .mantine-Table-td,.tax-order-composition-grid .mantine-Table-th{font-size:13px;white-space:normal;padding:9px;line-height:1.45}
+.tax-order-composition-total{background:var(--mantine-color-yoleotard-0);font-weight:700;color:var(--mantine-color-yoleotard-8)}
+@media(max-width:800px){.tax-order-composition-grid{grid-template-columns:minmax(0,1fr)}}
+.tax-order-details .orders-finance-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tax-order-details .orders-finance-calculation { width: 100%; }
+.tax-order-details .orders-finance-bottom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tax-order-finance .orders-finance-summary-strip { display: flex; flex-wrap: wrap; gap: 16px; }
+.tax-order-finance .orders-finance-summary-strip > * { min-width: 110px; flex: 1; }
+@media (max-width: 1000px) {
+  .settings-tax-integration .settings-tax-sidebar { flex-basis: 172px; padding: 8px; }
+  .tax-order-payments-balance { grid-template-columns: minmax(0, 1fr); }
+  .tax-order-details .orders-finance-side, .tax-order-details .orders-finance-bottom { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .settings-tax-integration .settings-tax-layout { flex-direction: column; gap: 12px; }
+  .settings-tax-integration .settings-tax-sidebar { flex: 0 0 auto; width: 100%; flex-direction: row; flex-wrap: wrap; }
+  .settings-tax-integration .settings-tax-sidebar [role="tab"] { flex: 1 1 auto; min-height: 36px; }
+}

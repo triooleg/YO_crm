@@ -1,4 +1,5 @@
 "use client";
+import { takeParentMeasurementDraft } from "../lib/parent-measurements-message-draft";
 
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
@@ -888,7 +889,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       ){
         const nextMessages=x.messages||[],prepared=prepareInboxMessages(nextMessages,openingChannel);
         setMessages(nextMessages);
-        setText(prepared.draft?.content||"");setComposerAiRunId(prepared.draftAiRunId);composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";lastAutosavedAiRunId.current=prepared.draftAiRunId;setDraftStatus(prepared.draft?"SAVED":"IDLE");
+        const requestedDraft=takeParentMeasurementDraft(c.id,prepared.draft?.content||"");setText(requestedDraft.text);setComposerAiRunId(requestedDraft.applied?undefined:prepared.draftAiRunId);composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";lastAutosavedAiRunId.current=prepared.draftAiRunId;setDraftStatus(prepared.draft?"SAVED":"IDLE");
         const firstForChannel=nextMessages.find((message:Message)=>message.channel===openingChannel)||nextMessages[0];
         const initialDate=localDateKey(firstForChannel?.createdAt||new Date());
         setSummaryDate(initialDate);setSummaryMonth(new Date(`${initialDate}T12:00:00`));
@@ -1926,7 +1927,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         }}
       />}
       {addingAthlete&&client&&<AddAthlete clientId={client.id} request={api} returnFocusRef={addAthleteTriggerRef} close={()=>setAddingAthlete(false)} done={()=>{setAddingAthlete(false);void loadClientDetail(client.id).catch(e=>setError((e as Error).message))}}/>}
-      {editingMeasurements&&client&&<MeasurementPanel client={{id:client.id,displayName:client.displayName,athletes:[editingMeasurements]}} request={api} title={ui.editMeasurements} initialValues={editableInboxMeasurementValues(editingMeasurements.measurements[0])} onClose={()=>setEditingMeasurements(undefined)} onSaved={async()=>{setEditingMeasurements(undefined);await loadClientDetail(client.id)}}/>}
+      {editingMeasurements&&client&&<MeasurementPanel client={{id:client.id,displayName:client.displayName,athletes:[editingMeasurements]}} request={api} title={ui.editMeasurements} initialValues={editableInboxMeasurementValues(editingMeasurements.measurements[0])} sourceMeasurementId={editingMeasurements.measurements[0]?.id} definitionVersion={editingMeasurements.measurements[0]?.definitionVersion} onClose={()=>setEditingMeasurements(undefined)} onSaved={async()=>{setEditingMeasurements(undefined);await loadClientDetail(client.id)}}/>}
       {preview && (
         <div
           className="communications-lightbox"

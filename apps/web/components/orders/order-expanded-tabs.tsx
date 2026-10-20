@@ -1,16 +1,26 @@
 "use client";
+import { TaxOrderPanel } from "../taxes/tax-order-panel";
+import { OrderFinancialInformation, OrderCostComposition } from "./order-financial-information";
+import { orderTaxPresentation, type OrderPriceEstimate } from "../../lib/order-tax-presentation";
+import { taxIntegrationOrderUi as taxUi } from "../../lib/i18n";
 import { orderSourceUi as sourceUi } from "../../lib/i18n";
 import { sourceLabel } from "../../lib/order-source";
 
 import "../../app/designs-instances.css";
 import { HistoricalInstance } from "./historical-instance";
+import { ParentMeasurementsPanel, type ParentMeasurementsWorkspaceContext } from './parent-measurements-panel';
+import { MeasurementsWorkspace, type MeasurementsSelection } from './measurements-workspace';
+import { MeasurementsAdminComment } from './measurements-admin-comment';
+import { createOrderMeasurementsWizardRequest } from './measurements-wizard-request';
+import { AthleteMeasurementWizard } from '../athlete-measurement-wizard';
+import { parentMeasurementsStaffUi as staffUi } from '../../lib/i18n';
 import { DesignsInstancesTab, CompositionEditor } from "./designs-instances";
 import { OrderDiscountEditor } from "./order-discount-editor";
 import { orderDiscountUi } from "../../lib/i18n";
 import { InstanceMeasurementDrawer } from "./instance-measurement-drawer";
 import { MeasurementUsage, MeasurementArchiveAction, type MeasurementUsageRow } from "./measurement-usage";
 import { designsInstancesUi as designsUi } from "../../lib/i18n";
-import { Select } from "@mantine/core";
+import { Accordion, Button, Group, Text, Select } from "@mantine/core";
 
 import { moneyLabel } from "../../lib/finance-report";
 import { orderSettlement } from "../../lib/order-settlement.mjs";
@@ -18,7 +28,7 @@ import { dataEvidenceUi } from "../../lib/i18n";
 
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Badge, Menu, Modal, UnstyledButton } from "@mantine/core";
-import { orderFormUi, ordersDashboardUi as ui, overviewContextUi } from "../../lib/i18n";
+import { orderFormUi, ordersDashboardUi as ui, overviewContextUi, parentProductionConfirmationUi as parentProductionUi } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
 import { orderInitialTab, shipmentContextId } from "../../lib/order-context";
 import { orderTimelinePresentation, productionStatusForDisplay } from "../../lib/production-view";
@@ -27,6 +37,7 @@ import { CrmAlert } from "../crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "../crm/settings-controls";
 import { CrmStatusBadge } from "../crm/status-badge";
 import { CrmTabList } from "../crm/tab-list";
+import { measurementSemanticLabel,measurementSemanticNote } from "../../lib/measurement-semantics";
 import { measurementFieldLabels, MeasurementPanel } from "../measurement-panel";
 import { basicMeasurementNumbers, additionalMeasurementNumbers } from "../measurement-definition";
 import { OrderExpenseEditor } from "./order-expense-editor";
@@ -34,7 +45,7 @@ import { InvoiceEditor } from "../invoice-editor";
 import type { Order } from "../orders-workspace";
 
 export type Athlete = NonNullable<Order["athlete"]> & {
-  updatedAt?: string; archivedAt?: string | null;
+  updatedAt?: string; archivedAt?: string | null; discipline?: string | null; birthDate?: string | null;
   measurements?: Array<NonNullable<Order["measurement"]> & { notes?: string; archivedAt?: string | null }>;
 };
 
@@ -113,6 +124,7 @@ export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities"> &
   notesStructured?: Array<{
     id: string;
     category: string;
+    athleteId?: string | null;
     visibility: string;
     title: string;
     body: string;
@@ -122,7 +134,7 @@ export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities"> &
   }>;
 };
 
-export type OrderNoteInput = { category: string; visibility: string; title: string; body: string };
+export type OrderNoteInput = { athleteId?: string; category: string; visibility: string; title: string; body: string };
 export type OrderShipmentInput = {
   carrier: string;
   trackingNumber: string | null;
@@ -146,6 +158,8 @@ type StructuredOrderNote = NonNullable<ExpandedOrderView["notesStructured"]>[num
 type MeasurementAssignment = { id: string; item: ExpandedOrderItem; instance?: OrderItemInstanceView; measurement?: NonNullable<Order["measurement"]> };
 
 type TabCallbacks = {
+  taxRole?: string;
+  onDraftMeasurementMessage?: (text:string)=>void;
   measurementActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
   financeActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
   compositionActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> };
@@ -266,7 +280,7 @@ export function OrderExpandedTabs(props: Props) {
       {activeTab === "designs" && <DesignsInstancesTab order={order} items={items} bridge={props.financeActions} compositionBridge={props.compositionActions} focusInstanceId={focusInstanceId} onMeasurements={openMeasurements} />}
       {activeTab === "measurements" && <OrderMeasurementsTab {...props} items={items} focusAthleteId={focusAthleteId} focusInstanceId={focusInstanceId} onOpenInstance={openInstance} />}
       {activeTab === "client" && <OrderClientTab {...props} items={items} />}
-      {activeTab === "finance" && <OrderFinanceTab {...props} items={items} onAddDesign={()=>setFinanceDesignEditor({action:'ADD'})} onEditItem={itemId=>setFinanceDesignEditor({action:'EDIT',itemId})} />}
+      {activeTab === "finance" && <TaxOrderPanel orderId={order.id} role={props.taxRole ?? ""} refreshKey={order.updatedAt} renderFinance={estimate => <OrderFinanceTab {...props} items={items} priceEstimate={estimate} onAddDesign={()=>setFinanceDesignEditor({action:'ADD'})} onEditItem={itemId=>setFinanceDesignEditor({action:'EDIT',itemId})} />}/>}
       {activeTab === "production" && <OrderProductionTab {...props} items={items} />}
       {activeTab === "delivery" && <OrderDeliveryTab {...props} items={items} targetShipmentId={targetShipmentId} />}
       {activeTab === "notes" && <OrderNotesTab {...props} />}
@@ -333,64 +347,90 @@ function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliver
   </div>;
 }
 
-function OrderMeasurementsTab({ order, items, onMeasurements, onAddAthlete, addAthleteButtonRef, onBindMeasurement, measurementActions, financeActions, focusAthleteId, focusInstanceId, onOpenInstance }: Props & { items: ExpandedOrderItem[]; focusAthleteId?:string; focusInstanceId?:string; onOpenInstance:(row:MeasurementUsageRow)=>void }) {
-  const athletes = [...new Map([...uniqueAthletes(order, items), ...(order.client.athletes ?? [])].map((athlete) => [athlete.id, athlete])).values()];
-  const [scope,setScope]=useState<string | null>("client");
-  const [drawerInstance,setDrawerInstance]=useState<OrderItemInstanceView>();
-  const [selectedAthleteId, setSelectedAthleteId] = useState(focusAthleteId??athletes[0]?.id);
-  useEffect(()=>{if(focusAthleteId)setSelectedAthleteId(focusAthleteId);},[focusAthleteId]);
-  const assignedIds=new Set(items.flatMap(item=>item.instances?.length?item.instances.flatMap(i=>i.athlete?[i.athlete.id]:[]):item.athlete?[item.athlete.id]:[]));
-  const scopedAthletes=athletes.filter(a=>(!a.archivedAt||assignedIds.has(a.id))&&(scope!=="order"||assignedIds.has(a.id)));
-  const [query, setQuery] = useState("");
-  const selectedAthlete = scopedAthletes.find((athlete) => athlete.id === selectedAthleteId) ?? scopedAthletes[0];
-  const visibleAthletes = scopedAthletes.filter((athlete) => athleteName(athlete).toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru")));
-  const assignments = items.flatMap<MeasurementAssignment>((item) => item.instances?.length
-    ? item.instances.filter((instance) => instance.athlete && instance.athlete.id === selectedAthlete?.id).map((instance) => ({ id: instance.id, item, instance, measurement: ownedMeasurement(instance.measurement ?? undefined, instance.athlete ?? undefined) }))
-    : item.athlete && item.athlete.id === selectedAthlete?.id ? [{ id: item.id, item, instance: undefined, measurement: ownedMeasurement(item.measurement, item.athlete) }] : []);
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>(focusInstanceId??"");
-  useEffect(()=>{if(focusInstanceId)setSelectedAssignmentId(focusInstanceId);},[focusInstanceId]);
-  const assignment = assignments.find((entry) => entry.id === selectedAssignmentId) ?? assignments.find((entry) => entry.measurement) ?? assignments[0];
-  const currentItem = assignment?.instance ? undefined : assignment?.item;
-  const [chosenVersionId,setChosenVersionId]=useState<string>();
-  const baseMeasurement=assignment?.measurement ?? (!assignment && selectedAthlete ? latestMeasurement(selectedAthlete) : undefined);
-  const currentMeasurement:(NonNullable<Order["measurement"]>&{archivedAt?:string|null})|undefined=selectedAthlete?.measurements?.find(m=>m.id===chosenVersionId)??baseMeasurement;
-  useEffect(()=>setChosenVersionId(undefined),[selectedAthlete?.id,selectedAssignmentId]);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [nameOpen, setNameOpen] = useState(false);
-  const [measurementTab, setMeasurementTab] = useState("basic");
-  const history = [...new Map([...(selectedAthlete?.measurements ?? []), ...assignments.flatMap((entry) => entry.measurement ? [entry.measurement] : [])].filter((entry) => entry.athleteId === selectedAthlete?.id).map((entry) => [entry.id, entry])).values()].sort((a, b) => b.measuredAt.localeCompare(a.measuredAt));
-  const chooseAssignment = (id: string) => {setChosenVersionId(undefined);setSelectedAssignmentId(id);};
-  const options = currentItem ? clientMeasurementOptions(order, currentItem) : [];
-  return <div className="orders-tab-measurements-approved">
-    <aside className="orders-athlete-rail"><Select className="design-measurements-scope" aria-label={designsUi.athletes} value={scope} onChange={setScope} data={[{value:"client",label:designsUi.clientScope},{value:"order",label:designsUi.orderScope}]}/><header><h3>{ui.athletesInOrder}</h3><span>{athletes.length}</span></header>{onAddAthlete && <CrmButton ref={addAthleteButtonRef} tone="secondary" size="compact-xs" onClick={onAddAthlete}>{ui.addAthlete}</CrmButton>}<CrmTextInput aria-label={ui.searchAthletes} placeholder={ui.searchAthletes} value={query} onChange={(event) => setQuery(event.currentTarget.value)} />{visibleAthletes.length ? visibleAthletes.map((athlete) => { const index = athletes.indexOf(athlete); return <button key={athlete.id} className={athlete.id === selectedAthlete?.id ? "active" : ""} onClick={() => {setChosenVersionId(undefined);setSelectedAthleteId(athlete.id);}}><b>{index + 1}</b><span><strong>{athleteName(athlete)}{athlete.archivedAt ? ` · ${designsUi.archived}` : ""}</strong><small>{latestMeasurement(athlete) ? `${ui.measurementTakenAt}: ${formatDate(latestMeasurement(athlete)!.measuredAt)}` : ui.noMeasurements}</small></span></button>; }) : <EmptyState text={scopedAthletes.length ? ui.noSearchResults : athletes.length ? designsUi.noAssignedAthletes : designsUi.noClientAthletes} />}</aside>
-    <div className="orders-measurement-workspace">
-      {selectedAthlete ? <>
-        <header><div><span className="orders-avatar-small">{initials(athleteName(selectedAthlete))}</span><h3>{athleteName(selectedAthlete)}</h3><p>{currentMeasurement ? `${assignment ? ui.currentMeasurement : ui.profileMeasurements} · ${formatDate(currentMeasurement.measuredAt)}` : ui.noMeasurements}</p></div><div className="orders-measurement-toolbar">{measurementActions && !selectedAthlete.archivedAt && <CrmButton tone="secondary" size="compact-sm" onClick={() => setNameOpen(true)}> {ui.editAthleteName}</CrmButton>}{measurementActions && !selectedAthlete.archivedAt && (!assignment || assignment.instance) && <CrmButton tone="secondary" size="compact-sm" onClick={() => setEditorOpen(true)}>{currentMeasurement ? ui.editMeasurements : ui.addMeasurements}</CrmButton>}{!selectedAthlete.archivedAt && currentItem?.persistedItemId && <CrmButton tone="secondary" size="compact-sm" onClick={() => onMeasurements(currentItem.persistedItemId)}>{currentMeasurement ? ui.newMeasurementVersion : ui.addMeasurements}</CrmButton>}</div></header>
-        {financeActions&&selectedAthlete.updatedAt&&!selectedAthlete.archivedAt&&<MeasurementArchiveAction label={designsUi.archiveAthlete} path={`/order-tabs/${order.id}/athletes/${selectedAthlete.id}/archive`} body={{expectedUpdatedAt:selectedAthlete.updatedAt}} bridge={financeActions}/>}
-        {financeActions&&currentMeasurement&&!currentMeasurement.archivedAt&&!selectedAthlete.archivedAt&&<MeasurementArchiveAction label={designsUi.archiveVersion} path={`/order-tabs/${order.id}/measurements/${currentMeasurement.id}/archive`} body={{expectedArchivedAt:null}} bridge={financeActions}/>}
-        {history.length>0&&<Select label={designsUi.version} value={currentMeasurement?.id??null} onChange={id=>setChosenVersionId(id??undefined)} data={history.map(m=>({value:m.id,label:`${formatDate(m.measuredAt)} · ${m.id}`}))}/>}
-        {assignments.length > 1 && <CrmNativeSelect label={ui.measurementProductSelection} value={assignment?.id ?? ""} onChange={(event) => chooseAssignment(event.currentTarget.value)} data={assignments.map((entry) => ({ value: entry.id, label: `${entry.item.name} · ${entry.instance ? displayInstanceNumber(items, entry.item, entry.instance.ordinal) : ui.measurementAssignmentAtDesignLevel}` }))} />}
-        {assignment?.instance&&financeActions&&<CrmButton size="compact-sm" tone="secondary" onClick={()=>setDrawerInstance(assignment.instance)}>{designsUi.assign}</CrmButton>}
-        <CrmTabList value={measurementTab} onChange={setMeasurementTab} className="orders-measurement-subtabs" ariaLabel={ui.measurementSections} tabs={[{ value: "basic", label: ui.basicMeasurements }, { value: "additional", label: ui.additionalMeasurements }, { value: "photo", label: ui.measurementPhoto }, { value: "history", label: ui.measurementHistory }]} />
-        {currentItem?.persistedItemId && options.length > 0 && <CrmNativeSelect aria-label={`${ui.bindMeasurement}: ${currentItem.name}`} value={currentMeasurement?.id || ""} onChange={(event) => event.target.value && void onBindMeasurement(currentItem.persistedItemId!, event.target.value, currentMeasurement?.id ?? null)} data={[{ value: "", label: ui.bindMeasurement }, ...options]} />}
-        {measurementTab === "basic" || measurementTab === "additional" ? currentMeasurement ? <MeasurementGrid measurement={currentMeasurement} numbers={measurementTab === "basic" ? basicMeasurementNumbers : additionalMeasurementNumbers} /> : <EmptyState text={ui.noMeasurements} /> : measurementTab === "photo" ? <EmptyState text={ui.noAthletePhoto} /> : history.length ? <ol className="orders-measurement-history-compact">{history.map((measurement, index) => <li key={measurement.id}><div><strong>{formatDate(measurement.measuredAt)}</strong><span>{measurement.id === currentMeasurement?.id ? assignment ? ui.measurementUsedInSelection : ui.currentVersion : `${ui.version} ${history.length - index}`}</span></div><p>{basicMeasurementNumbers.map(number => <span key={number} title={measurementFieldLabels[number - 1]}>№{number}: <strong>{measurement.values?.[`m${number}`] == null ? "—" : `${formatCm(measurement.values[`m${number}`]!)} см`}</strong></span>)}</p></li>)}</ol> : <EmptyState text={ui.noMeasurementHistory} />}
-      </> : <EmptyState text={ui.noAthletesInOrder} />}
-    </div>
-    <aside className="orders-measurement-side">
-      <TabCard title={ui.usedInProducts}><MeasurementUsage orderId={order.id} athleteId={selectedAthlete?.id} bridge={measurementActions??financeActions} onOpen={onOpenInstance}/></TabCard>
-      <TabCard title={ui.measurementHistory}>{history.length ? history.map((measurement, index) => <div className="orders-history-dot" key={measurement.id}><i /><span><strong>{formatDate(measurement.measuredAt)}</strong><small>{measurement.id === currentMeasurement?.id ? assignment ? ui.measurementUsedInSelection : ui.currentVersion : `${ui.version} ${history.length - index}`}</small></span></div>) : <EmptyState text={ui.noMeasurementHistory} />}</TabCard>
-    </aside>
-    <div className="orders-measurement-summary orders-tab-span-full"><SummaryMetric label={ui.totalAthletes} value={String(athletes.length)} /><SummaryMetric label={ui.measurementsReceivedCount} value={`${athletes.filter((athlete) => latestMeasurement(athlete)).length} ${ui.of} ${athletes.length}`} /><SummaryMetric label={ui.usedInProducts} value={String(items.reduce((count, item) => count + (item.instances?.length ? item.instances.filter((instance) => instance.athlete).length : item.athlete ? 1 : 0), 0))} /><SummaryMetric label={ui.latestUpdate} value={latestClientMeasurementDate(athletes) || ui.notSpecified} /></div>
-    {drawerInstance&&financeActions&&<InstanceMeasurementDrawer key={drawerInstance.id} order={order} items={items} instance={drawerInstance} bridge={financeActions} onClose={()=>setDrawerInstance(undefined)}/>}
-    {nameOpen && selectedAthlete && measurementActions && <AthleteNameEditor athlete={selectedAthlete} clientId={order.client.id} actions={measurementActions} onClose={() => setNameOpen(false)} />}
-    {editorOpen && selectedAthlete && measurementActions && <OrderMeasurementEditor order={order} athlete={selectedAthlete} assignment={assignment} measurement={currentMeasurement} actions={measurementActions} onClose={() => setEditorOpen(false)} />}
-  </div>;
+function OrderMeasurementsTab({ order, items, onMeasurements, onAddAthlete, addAthleteButtonRef, onBindMeasurement, measurementActions, financeActions, focusAthleteId, focusInstanceId, onOpenInstance, onDraftMeasurementMessage, onCreateNote, onUpdateNote }: Props & { items: ExpandedOrderItem[]; focusAthleteId?: string; focusInstanceId?: string; onOpenInstance: (row: MeasurementUsageRow) => void }) {
+  const athletes = [...new Map([...uniqueAthletes(order, items), ...(order.client.athletes ?? [])].map(athlete => [athlete.id, athlete])).values()];
+  const [manualSelection, setManualSelection] = useState<MeasurementsSelection>();
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [sportConfirmation, setSportConfirmation] = useState<{ discipline: string; resolve: (confirmed: boolean) => void }>();
+  const wizardRequest = useRef<ReturnType<typeof createOrderMeasurementsWizardRequest> | undefined>(undefined);
+  const [nameAthlete, setNameAthlete] = useState<Athlete>();
+  const [drawerInstance, setDrawerInstance] = useState<OrderItemInstanceView>();
+  const [drawerSelection, setDrawerSelection] = useState<{athleteId:string;measurementId:string|null}>();
+  const bridge = measurementActions ?? financeActions;
+  function beginWizard() {
+    if (!bridge) return;
+    if (!wizardRequest.current?.hasUncertain()) wizardRequest.current = createOrderMeasurementsWizardRequest(order.id, order.client.id, bridge.request, async discipline => {
+      const designSports = new Set(items.map(item => item.discipline).filter(Boolean));
+      if (!designSports.size || [...designSports].every(sport => sport === discipline)) return true;
+      return new Promise<boolean>(resolve => setSportConfirmation({ discipline, resolve }));
+    }, true);
+    setWizardOpen(true);
+  }
+  const liveItem = manualSelection?.assignment ? items.find(item => item.id === manualSelection.assignment?.item.id) : undefined;
+  const liveInstance = manualSelection?.assignment?.instance ? liveItem?.instances?.find(i => i.id === manualSelection.assignment?.instance?.id) : undefined;
+  const liveAssignment = manualSelection?.assignment ? { ...manualSelection.assignment, item: liveItem ?? manualSelection.assignment.item, instance: liveInstance ?? manualSelection.assignment.instance } : undefined;
+  const instances = items.flatMap(item => (item.instances ?? []).filter(i => !i.archivedAt).map(i => ({ id: i.id, updatedAt: i.updatedAt, ordinal: i.ordinal, designName: item.name, productionStatus: i.productionStatus, startedAt: i.startedAt, completedAt: i.completedAt, shippedAt: i.orderShipment?.status === 'SHIPPED' || i.orderShipment?.status === 'DELIVERED' ? 'dispatched' : null })));
+  const renderWorkspace = (staff: ParentMeasurementsWorkspaceContext) => <MeasurementsWorkspace orderId={order.id} athletes={athletes} items={items}
+    assignedAthleteIds={uniqueAthletes(order, items).map(a => a.id)} focusAthleteId={focusAthleteId} focusInstanceId={focusInstanceId} staff={staff} addAthleteButtonRef={addAthleteButtonRef}
+    onAddAthlete={bridge ? beginWizard : undefined}
+    onAddManually={bridge ? athlete => { if (athlete && !athlete.archivedAt) setManualSelection({ athlete }); else beginWizard(); } : undefined}
+    onEdit={bridge ? setManualSelection : undefined}
+    renderUsage={athleteId => <MeasurementUsage orderId={order.id} athleteId={athleteId} bridge={bridge} onOpen={onOpenInstance} />}
+    renderComment={athleteId => <MeasurementsAdminComment orderId={order.id} athleteId={athleteId} notes={order.notesStructured} onCreateNote={onCreateNote} onUpdateNote={onUpdateNote} onRefresh={bridge?.onSaved} />}
+    renderLegacyActions={({ athlete, measurement, assignment }) => <Group gap="xs" mt="sm">
+      {measurementActions && !athlete.archivedAt && <CrmButton tone="secondary" size="compact-xs" onClick={() => setNameAthlete(athlete)}>{ui.editAthleteName}</CrmButton>}
+      {measurement && bridge && items.some(item=>item.instances?.some(i=>!i.archivedAt)) && <CrmButton size="compact-xs" tone="secondary" onClick={()=>{const target=items.flatMap(item=>item.instances??[]).find(i=>!i.archivedAt);if(target){setDrawerSelection({athleteId:athlete.id,measurementId:measurement.id});setDrawerInstance(target);}}}>{designsUi.assign}</CrmButton>}
+      {assignment?.instance && !measurement && bridge && <CrmButton size="compact-xs" tone="secondary" onClick={() => {setDrawerSelection(undefined);setDrawerInstance(assignment.instance);}}>{designsUi.assign}</CrmButton>}
+      {!athlete.archivedAt && assignment && !assignment.instance && assignment.item.persistedItemId && <>
+        <CrmButton size="compact-xs" tone="secondary" onClick={() => onMeasurements(assignment.item.persistedItemId)}>{ui.newMeasurementVersion}</CrmButton>
+        <CrmNativeSelect aria-label={`${ui.bindMeasurement}: ${assignment.item.name}`} value={assignment.item.measurement?.id ?? ''} disabled={staff.busy} onChange={event => { if (event.target.value) void onBindMeasurement(assignment.item.persistedItemId!, event.target.value, assignment.item.measurement?.id ?? null); }} data={[{ value: '', label: ui.bindMeasurement }, ...clientMeasurementOptions(order, assignment.item)]} />
+      </>}
+      {financeActions && athlete.updatedAt && !athlete.archivedAt && <MeasurementArchiveAction label={designsUi.archiveAthlete} path={`/order-tabs/${order.id}/athletes/${athlete.id}/archive`} body={{ expectedUpdatedAt: athlete.updatedAt }} bridge={financeActions} />}
+      {financeActions && measurement && !measurement.archivedAt && !athlete.archivedAt && <MeasurementArchiveAction label={designsUi.archiveVersion} path={`/order-tabs/${order.id}/measurements/${measurement.id}/archive`} body={{ expectedArchivedAt: null }} bridge={financeActions} />}
+    </Group>}
+  />;
+  return <>
+    {bridge ? <ParentMeasurementsPanel compact orderId={order.id} onUpdated={bridge.onSaved} onDraftMessage={onDraftMeasurementMessage} instances={instances} renderWorkspace={renderWorkspace} /> : renderWorkspace({ data: null, loading: false, busy: false, feedback: null, requestInvitations: () => {}, refresh: () => {}, submissionActions: () => null })}
+    {wizardOpen && bridge && <AthleteMeasurementWizard presentation="drawer" measurementMetadata clientId={order.client.id} clientName={order.client.displayName} request={(path, init) => wizardRequest.current!(path, init)} returnFocusRef={addAthleteButtonRef} onClose={() => { if (!wizardRequest.current?.hasUncertain()) setWizardOpen(false); }} onSaved={async () => { await bridge.onSaved(); setWizardOpen(false); }} />}
+    <Modal opened={!!sportConfirmation} title={staffUi.manualSportTitle} onClose={() => { sportConfirmation?.resolve(false); setSportConfirmation(undefined); }} closeButtonProps={{ 'aria-label': staffUi.close }}>
+      <Text>{staffUi.manualSportWarning}</Text><Text fw={600}>{sportConfirmation ? staffUi.disciplines[sportConfirmation.discipline as keyof typeof staffUi.disciplines] ?? staffUi.unknownStatus : ''}</Text><Group mt="sm"><Button variant="default" onClick={() => { sportConfirmation?.resolve(false); setSportConfirmation(undefined); }}>{staffUi.cancel}</Button><Button onClick={() => { sportConfirmation?.resolve(true); setSportConfirmation(undefined); }}>{staffUi.manualSportConfirm}</Button></Group>
+    </Modal>
+    {drawerInstance && bridge && <InstanceMeasurementDrawer key={drawerInstance.id} order={order} items={items} instance={drawerInstance} bridge={bridge} initialSelection={drawerSelection} initialTargets={drawerSelection?[]:undefined} onClose={() => {setDrawerInstance(undefined);setDrawerSelection(undefined);}} />}
+    {nameAthlete && measurementActions && <AthleteNameEditor athlete={nameAthlete} clientId={order.client.id} actions={measurementActions} onClose={() => setNameAthlete(undefined)} />}
+    {manualSelection && bridge && <OrderMeasurementEditor order={order} athlete={athletes.find(a => a.id === manualSelection.athlete.id) ?? manualSelection.athlete} assignment={liveAssignment} measurement={manualSelection.measurement} actions={bridge} onClose={() => setManualSelection(undefined)} />}
+  </>;
 }
 
-function OrderMeasurementEditor({ order, athlete, assignment, measurement, actions, onClose }: { order: ExpandedOrderView; athlete: Athlete; assignment?: MeasurementAssignment; measurement?: NonNullable<Order["measurement"]>; actions: NonNullable<TabCallbacks["measurementActions"]>; onClose: () => void }) {
+function OrderMeasurementEditor({ order, athlete, assignment, measurement, actions, onClose }: { order: ExpandedOrderView; athlete: Athlete; assignment?: MeasurementAssignment; measurement?: NonNullable<Order["measurement"]> & { notes?: string }; actions: NonNullable<TabCallbacks["measurementActions"]>; onClose: () => void }) {
   // Freeze the selected copy source separately from the current assigned snapshot CAS.
-  const [original] = useState(() => ({ orderId: order.id, client: { id: order.client.id, displayName: order.client.displayName, athletes: [athlete] }, instance: assignment?.instance, measurement }));
-  return <MeasurementPanel client={original.client} request={(path, init) => original.instance && init?.method === "POST" && path.endsWith("/measurements") ? actions.request(`/order-tabs/${original.orderId}/instances/${original.instance.id}/measurement`, { ...init, body: JSON.stringify({ ...JSON.parse(String(init.body)), expectedMeasurementId: original.instance.measurement?.id ?? null, expectedUpdatedAt: original.instance.updatedAt }) }) : actions.request(path, init)} initialValues={original.measurement?.values} title={original.measurement ? ui.editMeasurements : ui.addMeasurements} onClose={onClose} onSaved={async () => { await actions.onSaved(); onClose(); }} />;
+  const selectionScope = JSON.stringify([order.id, athlete.id, assignment?.instance?.id, assignment?.instance?.updatedAt, assignment?.instance?.athlete?.id, assignment?.instance?.measurement?.id, assignment?.instance?.measurement?.definitionVersion, assignment?.instance?.startedAt, assignment?.instance?.productionStatus, measurement?.id, measurement?.definitionVersion]);
+  const [original] = useState(() => ({ scope: selectionScope, orderId: order.id, client: { id: order.client.id, displayName: order.client.displayName, athletes: [athlete] }, instance: assignment?.instance, measurement }));
+  const profileExpectedDiscipline=useRef(original.client.athletes[0]?.discipline??null);
+  const requiresConfirmation = !!original.instance &&
+    (!!original.instance.startedAt || ['MATERIALS', 'CUTTING', 'SEWING', 'DECORATION', 'QUALITY_CONTROL', 'ON_HOLD'].includes(original.instance.productionStatus)) &&
+    (original.instance.measurement?.definitionVersion === 'PARENT_BODY_V1' || original.measurement?.definitionVersion === 'PARENT_BODY_V1');
+  const [confirmed, setConfirmed] = useState(false), [reason, setReason] = useState(''), [error, setError] = useState('');
+  const [approval, setApproval] = useState<{ scope: string; reason: string } | null>(null);
+  useEffect(() => { setConfirmed(false); setReason(''); setApproval(null); setError(''); }, [selectionScope]);
+  const changed = selectionScope !== original.scope;
+  const confirmationValid = !!approval && approval.scope === selectionScope && !changed;
+  if (requiresConfirmation && !confirmationValid) return <Modal opened centered title={parentProductionUi.title} onClose={onClose} closeButtonProps={{'aria-label':parentProductionUi.cancel}}>
+    <p>{parentProductionUi.hint}</p>
+    <strong>{[athlete.firstName, athlete.lastName].filter(Boolean).join(' ')} · {original.measurement?.id ?? original.instance?.measurement?.id}</strong>
+    <CrmCheckbox label={parentProductionUi.confirmed} checked={!changed && confirmed} disabled={changed} onChange={event => setConfirmed(event.currentTarget.checked)} />
+    <CrmTextarea label={parentProductionUi.reason} maxLength={2000} required value={changed ? '' : reason} disabled={changed} onChange={event => setReason(event.currentTarget.value)} />
+    {(error || changed) && <CrmAlert>{changed ? parentProductionUi.changed : error}</CrmAlert>}
+    <div className="orders-measurement-toolbar"><CrmButton tone="secondary" onClick={onClose}>{parentProductionUi.cancel}</CrmButton>
+      <CrmButton disabled={changed || !confirmed || !reason.trim() || reason.trim().length > 2000} onClick={() => {
+        if (changed || !confirmed || !reason.trim() || reason.trim().length > 2000) { setError(changed ? parentProductionUi.changed : parentProductionUi.required); return; }
+        setApproval({ scope: selectionScope, reason: reason.trim() });
+      }}>{parentProductionUi.continue}</CrmButton></div>
+  </Modal>;
+  return <MeasurementPanel client={original.client} request={(path, init) => {
+    if (!original.instance || init?.method !== "POST" || !path.endsWith("/measurements")) return actions.request(path, init);
+    if (requiresConfirmation && !confirmationValid) throw new Error(parentProductionUi.changed);
+    return actions.request(`/order-tabs/${original.orderId}/instances/${original.instance.id}/measurement`, { ...init, body: JSON.stringify({ ...JSON.parse(String(init.body)), expectedMeasurementId: original.instance.measurement?.id ?? null, expectedUpdatedAt: original.instance.updatedAt, ...(requiresConfirmation ? { confirmProduction: true, reason: approval!.reason } : {}) }) });
+  }} creationOrderId={!original.instance ? original.orderId : undefined} initialDiscipline={original.client.athletes[0]?.discipline} designDisciplines={(order.items??[]).flatMap(item=>item.discipline?[item.discipline]:[])} onDisciplineSave={async discipline=>{const a=original.client.athletes[0]!;await actions.request(`/clients/${original.client.id}/athletes/${a.id}`,{method:"PATCH",body:JSON.stringify({firstName:a.firstName,lastName:a.lastName??null,expectedFirstName:a.firstName,expectedLastName:a.lastName??null,discipline,expectedDiscipline:profileExpectedDiscipline.current})});profileExpectedDiscipline.current=discipline;}} onReconcileProfile={async()=>{await actions.onSaved();onClose();}} initialMeasuredAt={original.measurement?.measuredAt} initialNotes={original.measurement?.notes} initialValues={original.measurement?.values} sourceMeasurementId={original.measurement?.id} definitionVersion={original.measurement?.definitionVersion} title={original.measurement ? ui.editMeasurements : ui.addMeasurements} onClose={onClose} onSaved={async () => { await actions.onSaved(); onClose(); }} />;
 }
 
 function AthleteNameEditor({ athlete, clientId, actions, onClose }: { athlete: Athlete; clientId: string; actions: NonNullable<TabCallbacks["measurementActions"]>; onClose: () => void }) {
@@ -440,22 +480,21 @@ function ClientPreferencesForm({ preferences, onCancel, onSubmit }: { preference
   return <form className="orders-client-preferences-form" onSubmit={submit}><p>{ui.clientPreferencesHint}</p><CrmTextarea data-autofocus highlighted value={value} onChange={(event) => setValue(event.currentTarget.value)} autosize minRows={8} maxRows={18} spellCheck={false} aria-label={ui.clientPreferences} />{error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onCancel}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer></form>;
 }
 
-function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, compositionActions, onVoidPayment }: Props & { items: ExpandedOrderItem[] }) {
+function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, compositionActions, onVoidPayment }: Props & { items: ExpandedOrderItem[]; priceEstimate?: OrderPriceEstimate }) {
   const paidMinor = paid(order), percentage = paidMinor === null ? null : order.priceMinor ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
   const paymentHistory = order.paymentHistory ?? order.payments;
-  const productsMinor = items.reduce((sum, item) => sum + item.priceMinor * item.quantity, 0);
+  const priceView = orderTaxPresentation(order, items, priceEstimate);
   const latestPayment = [...paymentHistory].filter(payment => !("voidedAt" in payment && payment.voidedAt)).sort((a,b) => Date.parse(b.receivedAt)-Date.parse(a.receivedAt))[0];
   const [voidTarget, setVoidTarget] = useState<{payment: NonNullable<ExpandedOrderView["paymentHistory"]>[number]; orderUpdatedAt: string}>();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [expenseOpen,setExpenseOpen]=useState(false);
   const [error, setError] = useState("");
-  const paymentsRef = useRef<HTMLDivElement>(null);
-  const notes = order.notesStructured?.find(note => note.category === "FINANCE" && note.title === ui.financialNotes);
-  return <div className="orders-tab-finance-approved">
+  return <div className="orders-tab-finance-approved tax-order-finance">
     {expenseOpen&&expenseActions&&<OrderExpenseEditor orderId={order.id} orderNumber={order.number} currency={order.currency} actions={expenseActions} onClose={()=>setExpenseOpen(false)} />}
+    <div className="orders-finance-reference-main">
     <TabCard className="orders-finance-calculation" title={ui.orderCostCalculation}>
-      <div className="orders-finance-scroll"><div className="orders-finance-table"><header><span>{ui.position}</span><span>{ui.quantity}</span><span>{ui.unitPrice}</span><span>{ui.total}</span><span /></header>{items.map((item, index) => <div key={item.id}><span><b>{index + 1}</b><ItemThumb item={item} /><strong>{item.name}</strong></span><span>{item.quantity} {ui.pieces}</span><span>{money(item.priceMinor, order.currency)}</span><strong>{money(item.priceMinor * item.quantity, order.currency)}</strong><CrmActionIcon aria-label={`${ui.financeEditPosition}: ${item.name}`} onClick={() => item.persistedItemId && onEditItem(item.persistedItemId)} disabled={!item.persistedItemId}>···</CrmActionIcon></div>)}</div></div>
+      <div className="orders-finance-scroll"><div className="orders-finance-table"><header><span>{ui.position}</span><span>{ui.quantity}</span><span>{ui.unitPrice}</span><span>{ui.total}</span><span /></header>{items.map((item, index) => <div key={item.id}><span><b>{index + 1}</b><ItemThumb item={item} /><span className="orders-finance-item-description"><strong>{item.name}</strong><small>{disciplineLabel(item.discipline || undefined)}</small></span></span><span>{item.quantity} {ui.pieces}</span><span>{money(item.priceMinor, order.currency)}</span><strong>{money(item.priceMinor * item.quantity, order.currency)}</strong><CrmActionIcon aria-label={`${ui.financeEditPosition}: ${item.name}`} onClick={() => item.persistedItemId && onEditItem(item.persistedItemId)} disabled={!item.persistedItemId}>···</CrmActionIcon></div>)}</div></div>
       <h4 className="orders-finance-subheading">{ui.financeAdditionalServices}</h4>
       {order.taxMinor ? <MoneyRow label={ui.financeTax} value={order.taxMinor} currency={order.currency} /> : null}
       {order.giftWrapMinor ? <MoneyRow label={ui.financeGiftWrap} value={order.giftWrapMinor} currency={order.currency} /> : null}
@@ -466,22 +505,26 @@ function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, o
       <CrmButton tone="secondary" size="compact-sm" onClick={onAddDesign}>＋ {ui.financeAddPosition}</CrmButton>
     </TabCard>
     <TabCard className="orders-finance-summary" title={ui.orderTotal}>
-      <MoneyRow label={`${ui.products} (${itemQuantity(order)} ${ui.pieces})`} value={productsMinor} currency={order.currency} />
-      <MoneyRow label={ui.financeAdditionalServices} value={(order.taxMinor || 0)+(order.giftWrapMinor || 0)} currency={order.currency} />
-      <MoneyRow label={ui.shippingPaidByClient} value={order.deliveryMinor || 0} currency={order.currency} />
+      <MoneyRow label={taxUi.lineAmounts} value={priceView.productsMinor} currency={order.currency} />
+      {order.taxMinor ? <MoneyRow label={ui.financeTax} value={order.taxMinor} currency={order.currency} /> : null}
+      {order.giftWrapMinor ? <MoneyRow label={ui.financeGiftWrap} value={order.giftWrapMinor} currency={order.currency} /> : null}
+      <MoneyRow label={taxUi.clientDelivery} value={order.deliveryMinor ?? null} currency={order.currency} />
       <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />
       <MoneyRow label={ui.total} value={order.priceMinor} currency={order.currency} strong />
       <MoneyRow label={ui.paid} value={paidMinor} currency={order.currency} tone="success" />
-      <MoneyRow label={ui.balance} value={balance(order)} currency={order.currency} tone={balance(order) ? "danger" : "success"} />
+      <MoneyRow label={ui.balance} value={balance(order)} currency={order.currency} tone="danger" />
       <div className="orders-finance-progress"><i style={{width:`${percentage ?? 0}%`}} /></div><small className="orders-finance-progress-label">{percentage === null ? dataEvidenceUi.unavailable : `${percentage}% ${ui.financePaidPercent}`}</small>
-      <div className="orders-finance-currency"><small>{ui.currency}</small><strong>{order.currency}</strong><CrmButton tone="secondary" size="compact-sm" onClick={onCurrency}>{ui.changeCurrency}: {order.currency}</CrmButton></div>
+      <Text size="xs" c="dimmed" mt="sm">{taxUi.fixedPriceHint}</Text>
+      {!priceView.allocated && <Text size="xs" c="dimmed" mt="xs">{taxUi.allocationHint}</Text>}
+      <div className="orders-finance-currency"><small>{ui.changeCurrency}</small><b>{order.currency}</b><CrmButton tone="secondary" size="compact-xs" onClick={onCurrency}>{ui.changeCurrency}: {order.currency}</CrmButton></div>
     </TabCard>
     <div className="orders-finance-side">
-      <TabCard title={ui.clientPayments} action={<CrmButton tone="secondary" size="compact-xs" onClick={onPayment}>＋ {ui.addPaymentPlain}</CrmButton>}>
-        <div className="orders-finance-scroll" ref={paymentsRef}><div className="orders-finance-payments"><header><span>{ui.financeDate}</span><span>{ui.financeAmount}</span><span>{ui.financeMethod}</span><span>{ui.financeStatus}</span><span>{ui.financeComment}</span><span /></header>
+      <TabCard title={taxUi.orderPayments} action={<CrmButton tone="secondary" size="compact-xs" onClick={onPayment}>＋ {ui.addPaymentPlain}</CrmButton>}>
+        <div className="orders-finance-scroll"><div className="orders-finance-payments"><header><span>{ui.financeDate}</span><span>{ui.financeAmount}</span><span>{ui.financeMethod}</span><span>{ui.financeStatus}</span><span>{ui.financeComment}</span><span /></header>
           {paymentHistory.map(payment => { const historyPayment = payment as NonNullable<ExpandedOrderView["paymentHistory"]>[number]; return <div className={`orders-payment-row${historyPayment.voidedAt ? " is-voided" : ""}`} key={payment.id}><span>{formatDate(payment.receivedAt)}</span><b>{money(payment.amountMinor, payment.currency)}</b><span>{paymentMethodLabel(payment.method)}</span><Badge variant="light" color={historyPayment.voidedAt ? "gray" : "teal"} size="sm" title={historyPayment.voidedAt ? ui.voidedPayment : ui.paymentReceived}>{historyPayment.voidedAt ? ui.financeVoidedShort : ui.paymentReceived}</Badge><span className="orders-payment-comment" title={[historyPayment.voidReason, payment.reference, payment.notes].filter(Boolean).join(" · ")}>{historyPayment.isImported && <small title={ui.importedPaymentHint}>{ui.importedPayment}</small>}{historyPayment.voidedAt && <small>{formatDate(historyPayment.voidedAt)} · {historyPayment.voidReason}</small>}{payment.reference && <small>{payment.reference}</small>}{payment.notes && <small>{payment.notes}</small>}{!payment.reference && !payment.notes && "—"}</span><span>{onVoidPayment && historyPayment.canVoid && order.updatedAt && <Menu withinPortal position="bottom-end"><Menu.Target><CrmActionIcon aria-label={`${ui.paymentActions}: ${payment.id}`}>···</CrmActionIcon></Menu.Target><Menu.Dropdown><Menu.Item color="red" onClick={() => setVoidTarget({payment:historyPayment,orderUpdatedAt:order.updatedAt!})}>{ui.voidPayment}</Menu.Item></Menu.Dropdown></Menu>}</span></div>; })}
         </div></div>{!paymentHistory.length && <EmptyState text={ui.noPayments} />}
       </TabCard>
+
       <TabCard title={ui.shippingExpenses} action={expenseActions && <CrmButton tone="secondary" size="compact-xs" onClick={()=>setExpenseOpen(true)}>＋ {ui.financeAddExpense}</CrmButton>}>
         <div className="orders-finance-scroll"><div className="orders-finance-expenses"><header><span>{ui.financeDate}</span><span>{ui.method}</span><span>{ui.financeAmount}</span><span>{ui.financeStatus}</span><span>{ui.tracking}</span></header>{order.expenses?.map(expense => { const shipment=order.orderShipments?.find(entry=>entry.atelierExpense?.id===expense.id); return <div key={expense.id}><span>{formatDate(expense.incurredAt)}</span><span>{shipment ? shipmentMethodLabel(shipment) : expense.category.name}</span><b>{money(expense.amountMinor,expense.currency)}</b><span>—</span><span>{shipment?.trackingNumber || "—"}</span></div>; })}</div></div>
         {!order.expenses?.length && <EmptyState text={ui.noShippingExpenses} compact />}<small className="orders-finance-footnote">{ui.financeExpensesHint}</small>
@@ -490,12 +533,9 @@ function OrderFinanceTab({ expenseActions, order, items, onFinance, onPayment, o
         <div className="orders-finance-scroll"><div className="orders-finance-invoices"><header><span>{ui.invoiceNumber}</span><span>{ui.financeDate}</span><span>{ui.financeAmount}</span><span>{ui.financeStatus}</span><span>{ui.financeActionsLabel}</span></header>{order.invoices.map(invoice=><div className="orders-invoice-row" key={invoice.id}><strong>{invoice.number}</strong><span>{formatDate(invoice.issueDate)}</span><b>{money(invoice.totalMinor, invoice.currency || order.currency)}</b><span>{ui.financeInvoiceStatuses[invoice.status as keyof typeof ui.financeInvoiceStatuses] || ui.notSpecified}</span><span className="orders-invoice-actions"><ActionIcon component="a" variant="subtle" href={`/api/finance/invoices/${invoice.id}/document`} target="_blank" rel="noreferrer" aria-label={`${ui.financeViewInvoice}: ${invoice.number}`}><TabIcon name="file"/></ActionIcon><ActionIcon component="a" variant="subtle" href={`/api/finance/invoices/${invoice.id}/document?download=1`} aria-label={`${ui.financeDownloadInvoice}: ${invoice.number}`}>↓</ActionIcon></span></div>)}</div></div>{!order.invoices.length && <EmptyState text={ui.noInvoices} compact />}
       </TabCard>
     </div>
-    <div className="orders-finance-bottom">
-      <TabCard title={ui.financialNotes}><FinancialNotesEditor note={notes} loaded={order.notesStructured !== undefined} orderId={order.id} actions={financeActions}/></TabCard>
-      <TabCard title={ui.quickActions}><div className="orders-quick-action-grid"><CrmButton tone="secondary" size="compact-sm" onClick={onPayment}>{ui.addPaymentPlain}</CrmButton>{expenseActions && <CrmButton tone="secondary" size="compact-sm" onClick={()=>setExpenseOpen(true)}>{ui.financeAddExpense}</CrmButton>}{financeActions && <CrmButton tone="secondary" size="compact-sm" onClick={()=>setInvoiceOpen(true)}>{ui.financeCreateInvoice}</CrmButton>}<CrmButton tone="secondary" size="compact-sm" onClick={onCurrency}>{ui.changeCurrency}</CrmButton><CrmButton tone="secondary" size="compact-sm" onClick={()=>paymentsRef.current?.scrollIntoView({block:"center"})}>{ui.financeViewPayments}</CrmButton>{onFinance && <CrmButton tone="secondary" size="compact-sm" onClick={onFinance}>{ui.openFinance}</CrmButton>}</div></TabCard>
-      <TabCard title={ui.financeReminders}><EmptyState text={ui.financeNoReminders} compact /></TabCard>
     </div>
     <div className="orders-finance-summary-strip"><SummaryMetric label={ui.financeTotalPositions} value={String(items.length)}/><SummaryMetric label={ui.orderTotal} value={money(order.priceMinor,order.currency)}/><SummaryMetric label={ui.paid} value={money(paidMinor,order.currency)}/><SummaryMetric label={ui.balance} value={money(balance(order),order.currency)}/><SummaryMetric label={ui.financeLastPayment} value={latestPayment ? formatDate(latestPayment.receivedAt) : ui.notSpecified}/></div>
+    <Accordion className="orders-finance-tax-information" variant="separated"><Accordion.Item value="information"><Accordion.Control>{taxUi.financialInformation}</Accordion.Control><Accordion.Panel><OrderFinancialInformation order={order} items={items} estimate={priceEstimate}/><OrderCostComposition order={order} items={items} estimate={priceEstimate}/></Accordion.Panel></Accordion.Item></Accordion>
     {error && <CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}
     {voidTarget && onVoidPayment && <PaymentVoidDialog payment={voidTarget.payment} expectedOrderUpdatedAt={voidTarget.orderUpdatedAt} onVoid={onVoidPayment} onClose={()=>setVoidTarget(undefined)}/>}
     {discountOpen && compositionActions && <OrderDiscountEditor orderId={order.id} discountMinor={order.discountMinor || 0} currency={order.currency} bridge={compositionActions} onClose={() => setDiscountOpen(false)} />}
@@ -794,7 +834,7 @@ function InstanceRow({ item, instance, order, onAssign }: { item: ExpandedOrderI
 function ActivityList({ activities, rich }: { activities: ExpandedOrderView["activities"]; rich?: boolean }) { return <div className={`orders-approved-activities${rich ? " is-rich" : ""}`}>{activities.map((activity) => <div key={activity.id}><span>{formatDateTime(activity.createdAt)}</span><i><TabIcon name="history" /></i><strong>{repairMojibake(activity.summary)}</strong>{rich && <small>{activity.actor?.displayName || ui.systemUser}</small>}</div>)}</div>; }
 function FileRow({ file }: { file: { name: string; mimeType: string; sizeBytes: number; createdAt: string; path?: string } }) { return <div className="orders-approved-file-row"><TabIcon name="file" /><span><strong>{file.name}</strong><small>{formatFileSize(file.sizeBytes)} · {formatDate(file.createdAt)}</small></span></div>; }
 
-function MeasurementGrid({ measurement, numbers = Array.from({ length: 17 }, (_, index) => index + 1) }: { measurement: NonNullable<Order["measurement"]>; numbers?: number[] }) { return <div className="orders-approved-measurement-grid">{numbers.map((number) => { const tone = [1, 2, 3, 15].includes(number) ? "is-required" : [6, 7, 8].includes(number) ? "is-sleeve" : ""; return <div className={tone || undefined} key={number}><small>№{number} · {measurementFieldLabels[number - 1]}</small><strong>{measurement.values?.[`m${number}`] == null ? "—" : `${formatCm(measurement.values[`m${number}`]!)} см`}</strong></div>; })}</div>; }
+function MeasurementGrid({ measurement, numbers = Array.from({ length: 17 }, (_, index) => index + 1) }: { measurement: NonNullable<Order["measurement"]>; numbers?: number[] }) { return <>{measurementSemanticNote(measurement.definitionVersion)&&<p role="note">{measurementSemanticNote(measurement.definitionVersion)}</p>}<div className="orders-approved-measurement-grid">{numbers.map((number) => { const tone = [1, 2, 3, 15].includes(number) ? "is-required" : [6, 7, 8].includes(number) ? "is-sleeve" : ""; return <div className={tone || undefined} key={number}><small>№{number} · {measurementSemanticLabel(number,measurementFieldLabels[number - 1]!,measurement.definitionVersion)}</small><strong>{measurement.values?.[`m${number}`] == null ? "—" : `${formatCm(measurement.values[`m${number}`]!)} см`}</strong></div>; })}</div></>; }
 
 function TabIcon({ name }: { name: string }) { const paths: Record<string, ReactNode> = { details: <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></>, designs: <><rect x="4" y="5" width="13" height="15" rx="2" /><path d="M8 5V3h12v15h-3" /></>, measurements: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h5" /></>, client: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>, finance: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6m-6 4h6m-6 4h4" /></>, production: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></>, delivery: <><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>, notes: <><path d="M4 20h16V4H4z" /><path d="M8 9h8m-8 4h8m-8 4h5" /></>, history: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>, edit: <><path d="m4 20 4-1 10-10-3-3L5 16l-1 4Z" /></>, file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></> }; return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.details}</svg>; }
 
@@ -825,7 +865,7 @@ function initials(value: string) { return value.split(/\s+/).filter(Boolean).sli
 function ownedMeasurement(measurement: Order["measurement"], athlete?: Athlete) { return measurement && athlete && measurement.athleteId === athlete.id ? measurement : undefined; }
 function latestMeasurement(athlete: Athlete) { return athlete.measurements?.length ? [...athlete.measurements].filter((measurement) => measurement.athleteId === athlete.id).sort((a, b) => b.measuredAt.localeCompare(a.measuredAt))[0] : undefined; }
 function uniqueAthletes(order: ExpandedOrderView, items: ExpandedOrderItem[]) { const values = [order.athlete as Athlete | undefined, ...items.flatMap((item) => [item.athlete, ...(item.instances ?? []).map((instance) => instance.athlete)])].filter((athlete): athlete is Athlete => Boolean(athlete)); return [...new Map(values.map((athlete) => [athlete.id, athlete])).values()]; }
-function clientMeasurementOptions(order: ExpandedOrderView, item: ExpandedOrderItem) { return (order.client.athletes ?? []).filter((athlete) => !item.athlete || athlete.id === item.athlete.id).flatMap((athlete) => (athlete.measurements ?? []).map((measurement) => ({ value: measurement.id, label: `${athleteName(athlete)} · ${formatDate(measurement.measuredAt)}` }))); }
+function clientMeasurementOptions(order: ExpandedOrderView, item: ExpandedOrderItem) { return (order.client.athletes ?? []).filter((athlete) => !item.athlete || athlete.id === item.athlete.id).flatMap((athlete) => (athlete.measurements ?? []).map((measurement) => ({ value: measurement.id, label: `${athleteName(athlete)} · ${formatDate(measurement.measuredAt)}${measurementSemanticNote(measurement.definitionVersion)?` · ${measurementSemanticNote(measurement.definitionVersion)}`:""}` }))); }
 function deliveryRecipient(order: ExpandedOrderView) { return order.deliveryAddressSet ? order.deliveryRecipient || ui.notSpecified : order.client.displayName; }
 function deliveryPlace(order: ExpandedOrderView) { if (!order.deliveryAddressSet) return [order.client.address, order.client.city, order.client.postalCode, order.country || order.client.country].filter(Boolean).join(", ") || ui.addressMissing; return order.deliveryAddressText || [order.deliveryAddressLine1, order.deliveryAddressLine2, order.deliveryCity, order.deliveryRegion, order.deliveryPostalCode, order.country].filter(Boolean).join(", ") || ui.addressMissing; }
 function deliveryCountry(order: ExpandedOrderView) { return order.deliveryAddressSet ? order.country : order.country || order.client.country; }

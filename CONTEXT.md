@@ -73,6 +73,28 @@ archive metadata; historical explicit references and immutable values remain
 readable. A new version can be copied from a historical snapshot without moving
 other order or instance references.
 
+### Measurement Definition
+
+The meaning of the numbered fields belonging to a snapshot, distinct from its
+capture source or its date. A legacy snapshot retains the original sleeve
+measurement convention. `PARENT_BODY_V1` means body measurements without
+allowances: number 6 is pure sleeve length. Copying a version does not silently
+reinterpret or arithmetically adjust that number.
+
+### Parent Measurement Participant
+
+A representative submitting measurements for their own children within an
+order invitation. This is neither a CRM staff user nor a replacement client or
+athlete profile. Sharing the invitation admits another independent participant;
+it does not share the first participant's children or measurement history.
+
+### Parent Measurement Submission
+
+A confirmed version supplied by a participant and linked to the existing client,
+athlete and order. An unfinished draft is not a confirmed snapshot. Received,
+staff-verified and assigned to a physical item are separate states; receipt
+alone does not approve measurements or choose a costume for the child.
+
 ## Orders, production and fulfilment
 
 ### Order
@@ -383,3 +405,35 @@ cannot create/edit a slot or restart planning/work through status/instance write
 An explicit unsent READY_TO_SHIP sale belongs to the ready KPI/filter. Refunded or
 cancelled payments are not operationally awaiting payment. Display normalization
 never changes stored statuses, historical slots, payments or audit records.
+
+
+## FOP tax accounting
+
+The business has one implicit Ukrainian FOP tax profile, independent of staff
+User identities, Client country, KeyCRM accounts and the commercial Order.taxMinor.
+The confirmed accounting start is 2026-05-01 inclusive in Europe/Kyiv. A TaxPolicy
+is a dated immutable version of the group, unified-tax rule, military levy and ESV
+rate. The current approved scheme is group3 without VAT: 5% unified tax and 1%
+military levy against actual receipts; ESV is monthly and independent of orders.
+A future group2 policy uses fixed monthly unified tax and its distinct military
+levy formula. A new policy never revalues used historical periods.
+
+A TaxPeriod freezes the policy and statutory bases for its month and can retain
+an immutable closing snapshot. A TaxEntry root identifies one Payment/component
+or month/component. Its append-only events retain source changes, historical NBU
+valuation, pending retries, final calculation and explicit corrections. Roots,
+source markers and drafts are not money. A CRM receipt void is not automatically
+proof of a legal refund. Gross amount and recognized income date can need explicit
+reconciliation; pending evidence makes the tax report incomplete.
+
+TaxExpenseAllocation distinguishes a link to one actual UAH Expense from its
+allocations and reversals. Accrual does not create a cash Expense or change the
+client's debt. Actual tax payment is counted once per linked Expense; allocations
+may settle another month's liability, and unused payment remains credit. Generic
+expense mutation cannot silently change a linked tax payment. The existing cash
+report keeps its established UTC calendar and currency policy; tax income dates
+and periods use Kyiv, with original currency/date/rate evidence preserved.
+
+See [ADR0009](docs/decisions/0009-fop-tax-ledger-and-cash-expenses.md) and the
+[approved implementation plan](docs/plans/fop-tax-accounting.md). The module is
+internal accounting support, not a tax declaration or bank-payment integration.

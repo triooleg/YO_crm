@@ -2,6 +2,7 @@ import {ORDER_SOURCES, normalizeOrderSourceFilter, matchesOrderSource, type Orde
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { assertExchangeRateCacheFresh, buildRateForPair, type ExchangeRateCache, type ExchangeRateCurrency, type RationalRate } from "./exchange-rates";
+import type { FiscalReport } from './finance-fiscal.types';
 
 type DateValue = Date | string;
 type Payment = { id: string; orderId: string | null; amountMinor: number; currency: string; receivedAt: DateValue; method: string; notes?: string | null; appliedAmountMinor?: number | null; appliedCurrency?: string | null; voidedAt?: DateValue | null };
@@ -9,7 +10,7 @@ type Order = { id: string; number: string; clientId: string; client: { displayNa
 type Expense = { id: string; categoryId: string; category: { name: string }; amountMinor: number; currency: string; incurredAt: DateValue; orderId?: string | null; order?: { number: string } | null; notes?: string | null; archivedAt?: DateValue | null; orderShipment?: { id: string } | null };
 type Invoice = { id: string; number: string; orderId: string; order: { number: string; clientId: string; client: { displayName: string } }; issueDate: DateValue; dueDate?: DateValue | null; totalMinor: number; currency: string; status: string; archivedAt?: DateValue | null };
 export type FinanceReportSources = { orderSources?: Record<string,OrderSource>; orders: Order[]; payments: Payment[]; expenses: Expense[]; invoices: Invoice[]; categories: { id: string; name: string; active?: boolean }[] };
-export type FinanceReportQuery = { source?: string; month?: string; currency?: string; range?: number; tab?: string; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
+export type FinanceReportQuery = { source?: string; month?: string; currency?: string; range?: number; tab?: string; taxComponent?: 'UNIFIED'|'MILITARY'|'ESV'; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
 export type FinanceValuation = { provider: string; cache: ExchangeRateCache | null };
 
 const ISO_CURRENCIES = ["EUR", "USD", "UAH"];
@@ -48,11 +49,12 @@ export function normalizeFinanceQuery(query: FinanceReportQuery, now = new Date(
   if (!/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException("Выберите корректный месяц отчёта");
   if (!ISO_CURRENCIES.includes(currency) || ![3, 6, 12].includes(range)) throw new BadRequestException("Недопустимая валюта или период отчёта");
   if (!Number.isInteger(page) || page < 1 || page > 100000 || ![10, 25, 50, 100].includes(pageSize)) throw new BadRequestException("Недопустимая страница отчёта");
-  if (!["payments", "expenses", "invoices"].includes(tab) || !["date", "number", "client", "amount", "paid", "balance", "category", "status"].includes(query.sort || "date") || !["asc", "desc"].includes(query.direction || "desc") || !["all", "forecast"].includes(query.scope || "all")) throw new BadRequestException("Недопустимая сортировка или вкладка отчёта");
+  if (!["payments", "expenses", "invoices", "taxes"].includes(tab) || !["date", "number", "client", "amount", "paid", "balance", "category", "status"].includes(query.sort || "date") || !["asc", "desc"].includes(query.direction || "desc") || !["all", "forecast"].includes(query.scope || "all")) throw new BadRequestException("Недопустимая сортировка или вкладка отчёта");
+  if (query.taxComponent && !['UNIFIED','MILITARY','ESV'].includes(query.taxComponent)) throw new BadRequestException('Неизвестный налоговый компонент');
   for (const key of ["from", "to"] as const) if (query[key] && (!/^\d{4}-\d{2}-\d{2}$/.test(query[key]!) || !Number.isFinite(Date.parse(query[key]!)) || new Date(query[key]!).toISOString().slice(0, 10) !== query[key])) throw new BadRequestException("Некорректная дата фильтра");
   if (query.from && query.to && query.from > query.to) throw new BadRequestException("Дата начала позже даты окончания");
   if ((query.search?.length || 0) > 200 || [query.clientId, query.categoryId, query.orderId, query.valuationVersion].some(value => (value?.length || 0) > 128)) throw new BadRequestException("Слишком длинное значение фильтра");
-  const allowedStatus = tab === "payments" ? ["UNPAID", "PARTIAL", "PAID"] : tab === "invoices" ? ["DRAFT", "ISSUED", "PAID", "CANCELLED"] : [];
+  const allowedStatus = tab === "payments" ? ["UNPAID", "PARTIAL", "PAID"] : tab === "invoices" ? ["DRAFT", "ISSUED", "PAID", "CANCELLED"] : tab === 'taxes' ? ['CALCULATED','CLOSED','VALUATION_PENDING','DATE_EVIDENCE_MISSING','PERIOD_MISSING','POLICY_MISSING','ACCOUNTING_DISABLED','BEFORE_ACCOUNTING_START','OFFICIAL_BASIS_PENDING','SOURCE_MISSING','RECEIPT_CONFIRMATION_REQUIRED','CLOSED_PERIOD_RECONCILIATION_REQUIRED','MANUAL_RECONCILIATION_REQUIRED','LEGAL_REFUND_RECONCILIATION','NBU_RETRY_PENDING','APPROVED_BACKFILL_REQUIRED','DRAFT_CORRECTION_PENDING','MONTHLY_GENERATION_PENDING'] : [];
   if (query.status && !allowedStatus.includes(query.status)) throw new BadRequestException("Недопустимый статус отчёта");
   return { ...query, source:normalizeOrderSourceFilter(query.source), month, currency, range, page, pageSize, tab, sort: query.sort || "date", direction: query.direction || "desc", scope: query.scope || "all" };
 }
@@ -126,7 +128,7 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
   const activeInvoices = invoiceRows.filter(invoice => invoice.status !== "CANCELLED");
   let rows: Record<string, unknown>[] = query.tab === "expenses" ? expenseRows : query.tab === "invoices" ? invoiceRows : query.scope === "forecast" ? upcoming : allOrderRows.filter(order => order.receivedInMonth || (order.activeDebt && order.originalBalanceMinor > 0));
   const search = query.search?.trim().toLocaleLowerCase("ru-RU");
-  rows = rows.filter(row => matchesOrderSource((row.orderSource as OrderSource)||'UNKNOWN',query.source)&&(!search || [row.number, row.orderNumber, row.clientName, row.categoryName, row.notes].some(value => typeof value === "string" && value.toLocaleLowerCase("ru-RU").includes(search))) && (!query.status || row.status === query.status) && (!query.clientId || row.clientId === query.clientId) && (!query.categoryId || row.categoryId === query.categoryId) && (!query.orderId || row.orderId === query.orderId) && (!query.from || typeof row.date === "string" && row.date.slice(0, 10) >= query.from) && (!query.to || typeof row.date === "string" && row.date.slice(0, 10) <= query.to));
+  rows = rows.filter(row => matchesOrderSource((row.orderSource as OrderSource)||'UNKNOWN',query.source)&&(!search || (query.tab === "expenses" && typeof row.id === "string" && row.id.toLocaleLowerCase("ru-RU") === search) || [row.number, row.orderNumber, row.clientName, row.categoryName, row.notes].some(value => typeof value === "string" && value.toLocaleLowerCase("ru-RU").includes(search))) && (!query.status || row.status === query.status) && (!query.clientId || row.clientId === query.clientId) && (!query.categoryId || row.categoryId === query.categoryId) && (!query.orderId || row.orderId === query.orderId) && (!query.from || typeof row.date === "string" && row.date.slice(0, 10) >= query.from) && (!query.to || typeof row.date === "string" && row.date.slice(0, 10) <= query.to));
   const keys: Record<string, string> = { date: "date", number: "number", client: "clientName", amount: "amountMinor", paid: "paidMinor", balance: "balanceMinor", category: "categoryName", status: "status" }, key = keys[query.sort]!;
   rows.sort((left, right) => {
     const a = left[key], b = right[key];
@@ -147,7 +149,7 @@ export function csvCell(value: unknown) {
   if (/^[\s]*[=+@\-\t\r]/u.test(text)) text = "'" + text;
   return '"' + text.replace(/"/g, '""') + '"';
 }
-export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, tab: string) {
+export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, tab: string, historicalExpenses?: FiscalReport['expenseValues']) {
   const amounts = (value: unknown) => {
     if (typeof value !== "number") return "";
     const minor = BigInt(value), absolute = minor < 0n ? -minor : minor;
@@ -160,5 +162,10 @@ export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, 
   headers.push("Источник заказа");
   const sourceLabels:Record<string,string>={WEBSITE:'С сайта',MANUAL:'Ручной / CRM',INSTAGRAM:'Instagram',FACEBOOK:'Facebook',CHAT:'Чат',WHATSAPP:'WhatsApp',VIBER:'Viber',EMAIL:'E-mail',OTHER:'Другое',UNKNOWN:'Не определён'};
   lines.forEach((line,index)=>line.push(sourceLabels[String(report.table.rows[index]!.orderSource)]||sourceLabels.UNKNOWN));
+  if(tab==='expenses'&&historicalExpenses){
+    const values=new Map(historicalExpenses.map(e=>[e.expenseId,e]));
+    headers.push('Историческая сумма','Дата исторической оценки','Доказательства исторического курса');
+    lines.forEach((line,index)=>{const v=values.get(String(report.table.rows[index]!.id));line.push(v?.amountMinor==null?'Не рассчитано':amounts(v.amountMinor),v?.valuationDate??'',JSON.stringify(v?.fxEvidence??null));});
+  }
   return "\uFEFF" + [headers, ...lines].map(row => row.map(csvCell).join(";")).join("\r\n");
 }

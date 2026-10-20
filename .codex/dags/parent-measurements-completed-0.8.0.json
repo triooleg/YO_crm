@@ -1,0 +1,362 @@
+{
+  "version": 1,
+  "task": {
+    "id": "parent-measurements-local",
+    "title": "Parent measurements approved local stages 1+2",
+    "description": "Owner approved local schema/security and implementation 2026-10-19; native agents, explicit no commit/push/deploy override commit-gate; integrator-only patches.",
+    "base_ref": "a80a9b3",
+    "max_fix_cycles": 5,
+    "fix_cycles": 0
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "title": "plan",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "ARCHITECT",
+      "kind": "analysis",
+      "depends_on": [],
+      "affected_paths": [
+        "docs/plans/parent-measurements.md"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.787Z"
+    },
+    {
+      "id": "access",
+      "title": "access",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/api/src/parent-measurements/parent-measurements-access.service.ts",
+        "apps/api/src/parent-measurements/parent-measurements-security.ts",
+        "apps/api/src/parent-measurements/parent-measurements.guard.ts"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "semantics",
+      "title": "semantics",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/api/src/clients",
+        "apps/api/src/orders",
+        "apps/web/components"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "mobile",
+      "title": "mobile",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/web/app/parent-measurements",
+        "apps/web/components/parent-measurements",
+        "apps/web/lib/parent-measurements-model.ts"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "staff",
+      "title": "staff",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/parent-measurements-panel.tsx"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "data",
+      "title": "data",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "DATABASE",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "packages/database",
+        "apps/api/src/parent-measurements/parent-measurements.service.ts"
+      ],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "integrate",
+      "title": "integrate",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "INTEGRATOR",
+      "kind": "integration",
+      "depends_on": [
+        "access",
+        "semantics",
+        "mobile",
+        "staff",
+        "data"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "test",
+      "title": "test",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "TESTER",
+      "kind": "test",
+      "depends_on": [
+        "integrate"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "compatibility",
+      "title": "compatibility",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "regression",
+      "title": "regression",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "business-security",
+      "title": "business-security",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "visual",
+      "title": "visual",
+      "description": "Approved parent measurements local implementation; native isolated agents, no commits allowed by current user scope",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    },
+    {
+      "id": "release",
+      "title": "release",
+      "description": "Final LOCAL acceptance only; production deployment explicitly prohibited",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "compatibility",
+        "regression",
+        "business-security",
+        "visual"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "priority": 50,
+      "acceptance_criteria": [
+        "Approved plan",
+        "Preserve compatibility",
+        "Behavioral evidence"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-18T21:39:59.789Z"
+    }
+  ]
+}

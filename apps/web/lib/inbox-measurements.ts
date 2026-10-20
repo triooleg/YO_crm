@@ -1,6 +1,7 @@
 export type InboxMeasurement = {
   id: string;
   measuredAt: string;
+  definitionVersion?: string | null;
   unit?: string;
   height?: string | number | null;
   chest?: string | number | null;

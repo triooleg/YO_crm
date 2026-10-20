@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import {createRequire} from "node:module";
 import ts from "typescript";
 
 function compile(source){
@@ -9,7 +10,7 @@ function compile(source){
 }
 
 const [serviceSource,policySource,provenanceSource]=await Promise.all([
-  readFile(new URL("../src/clients/clients.service.ts",import.meta.url),"utf8"),
+  readFile(process.env.YO_PM_CLIENT_BASELINE??new URL("../src/clients/clients.service.ts",import.meta.url),"utf8"),
   readFile(new URL("../src/clients/client-merge-policy.ts",import.meta.url),"utf8"),
   readFile(new URL("../src/clients/client-merge-provenance.ts",import.meta.url),"utf8"),
 ]);
@@ -18,8 +19,7 @@ vm.runInNewContext(compile(policySource),{module:policyModule,exports:policyModu
 const provenanceModule={exports:{}};
 vm.runInNewContext(compile(provenanceSource),{module:provenanceModule,exports:provenanceModule.exports,require:id=>id==="@prisma/client"?{ContactChannel:Object.fromEntries(["WEBSITE","CHATWOOT","INSTAGRAM","FACEBOOK","WHATSAPP","EMAIL","TELEGRAM","REFERRAL","RETURNING_CUSTOMER","MANUAL","OTHER"].map(value=>[value,value]))}:{},Set,Map,JSON,Date,Object,Array,Error});
 
-class BadRequestException extends Error{}
-class NotFoundException extends Error{}
+const {BadRequestException,NotFoundException}=createRequire(import.meta.url)("@nestjs/common");
 const serviceModule={exports:{}};
 const measurementModule={exports:{}};
 vm.runInNewContext(compile(await readFile(new URL("../src/clients/measurement-data.ts",import.meta.url),"utf8")),{module:measurementModule,exports:measurementModule.exports,require:()=>({BadRequestException}),Date,Object,Array,Number});
@@ -71,6 +71,10 @@ function fakePrisma(seed,{failRelation,shortCountRelation,shortDelete,failStage}
     };
     const move=(name,where,data)=>{if(name===(prisma.failRelation||failRelation))throw new Error("forced relation failure");let count=0;for(const row of state.relations[name])if(matches(row,where)){Object.assign(row,data);count++}const short=name===(prisma.shortCountRelation||shortCountRelation)&&(!prisma.shortCountId||where.id?.in?.includes(prisma.shortCountId));return{count:short?Math.max(0,count-1):count}};
     const tx={
+      measurementSubmission:{findFirst:async({where})=>(state.parentSubmissions||[]).find(row=>where.OR.some(condition=>{
+        const order=condition.child.participant.invitation.orderId,athlete=condition.athleteId;
+        return (order.in?order.in.includes(row.orderId):!order.notIn.includes(row.orderId))&&(athlete.in?athlete.in.includes(row.athleteId):!athlete.notIn.includes(row.athleteId));
+      }))||null},
       $executeRaw:async()=>0,
       $queryRaw:async()=>[],
       client:{
@@ -142,6 +146,18 @@ test("merge followed by split restores recorded ownership and keeps later target
   assert.equal(prisma.state.redirects.length,0);
   assert.ok(prisma.state.operations[0].splitAt);
   assert.ok(prisma.state.audits.some(item=>item.action==="SPLIT"));
+});
+
+for(const direction of ['moving-order','moving-athlete'])test(`parent submissions prevent an ownership split across clients: ${direction}`,async()=>{
+ const prisma=fakePrisma(initialState()),service=new ClientsService(prisma);
+ await service.merge('target','source',{id:'owner'});
+ const moved=prisma.state.operations[0].movedEntityIds;
+ if(direction==='moving-order')prisma.state.relations.athlete.push({id:'later-athlete',clientId:'target'});
+ else prisma.state.relations.order.push({id:'later-order',clientId:'target'});
+ prisma.state.parentSubmissions=[{id:'received-parent',orderId:direction==='moving-order'?moved.orders[0]:'later-order',athleteId:direction==='moving-order'?'later-athlete':moved.athletes[0]}];
+ const before=JSON.stringify(prisma.state);
+ await assert.rejects(service.split('target','source',{id:'owner'}),error=>error.getStatus()===400&&error.message==='CLIENT_SPLIT_DEPENDENCY_CONFLICT');
+ assert.equal(JSON.stringify(prisma.state),before);
 });
 
 test("conversation-scoped AI override is restored exactly once",async()=>{

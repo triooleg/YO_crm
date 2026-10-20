@@ -796,6 +796,7 @@ test("отменённая оплата сохраняется уже при п�
   let paymentRow;
   const activities = [];
   const audits = [];
+  const taxHooks=[];
   const tx = {
     $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined,
     $queryRaw: async () => [],
@@ -817,7 +818,7 @@ test("отменённая оплата сохраняется уже при п�
     activity: { create: async ({ data }) => { activities.push(data); } },
     auditLog: { create: async ({ data }) => { audits.push(data); } },
   };
-  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  const service = new KeycrmService({ $transaction: callback => callback(tx) }, {capturePayment:async(...args)=>taxHooks.push(args)});
   const result = await service.importOrder(normalizedOrder({
     payments: [{ externalId: "pay-cancelled", amountMinor: 3000, currency: "EUR", isPaid: false, receivedAt: null, method: "OTHER", reference: null, notes: null, externalStatus: "cancelled" }],
   }), "owner-1", "run-1");
@@ -827,6 +828,7 @@ test("отменённая оплата сохраняется уже при п�
   assert.equal(paymentRow.receivedAt.toISOString(), "2026-10-01T00:00:00.000Z");
   assert.equal(activities.some(row => row.type === "PAYMENT_IMPORTED_VOIDED"), true);
   assert.equal(audits.some(row => row.entityType === "Payment" && row.action === "CREATE"), true);
+  assert.equal(taxHooks.length,0);
 });
 
 test("foreign-currency cancellation гасит существующую оплату, но не создаёт новую", async () => {
@@ -834,6 +836,7 @@ test("foreign-currency cancellation гасит существующую опла
   let orderRow = { id: "order-1", number: "KC-14", clientId: "client-1", sourceLinkMode: "IMPORTED", sourceSystem: "KEYCRM", currency: "EUR", externalUpdatedAt: new Date("2026-10-01T00:00:00Z"), depositRequiredMinor: 5000, priceMinor: 10000, type: OrderType.CUSTOM_ORDER, paymentStatus: "PARTIALLY_PAID", productionStatus: "NOT_SCHEDULED" };
   let paymentRow = { id: "payment-8", orderId: "order-1", sourceSystem: "KEYCRM", sourceAccount: "connection-1", externalId: "8", amountMinor: 5000, currency: "UAH", voidedAt: null };
   let creates = 0;
+  const taxHooks=[];
   const tx = {
     $executeRaw: async () => undefined, $executeRawUnsafe: async () => undefined,
     $queryRaw: async () => [],
@@ -853,7 +856,7 @@ test("foreign-currency cancellation гасит существующую опла
     activity: { findFirst: async () => null, create: async () => undefined }, auditLog: { create: async () => undefined },
     keycrmSyncIssue: { findFirst: async () => null, create: async () => undefined },
   };
-  const service = new KeycrmService({ $transaction: callback => callback(tx) });
+  const service = new KeycrmService({ $transaction: callback => callback(tx) }, {capturePayment:async(...args)=>taxHooks.push(args)});
   const result = await service.importOrder(normalizedOrder({
     externalId: "14",
     payments: [{ externalId: "8", amountMinor: 5000, currency: "UAH", isPaid: false, materializeIfMissing: false, receivedAt: null, method: "OTHER", reference: null, notes: null, externalStatus: "canceled" }],
@@ -862,6 +865,7 @@ test("foreign-currency cancellation гасит существующую опла
   assert.equal(creates, 0);
   assert.equal(typeof paymentRow.voidedAt?.toISOString, "function");
   assert.equal(paymentRow.externalStatus, "canceled");
+  assert.equal(taxHooks.length,1);assert.equal(taxHooks[0][0],tx);assert.equal(taxHooks[0][1],paymentRow.id);assert.equal(taxHooks[0][2],"IMPORT_VOID");assert.ok(paymentRow.voidedAt);
 });
 
 test("foreign-currency cancellation без прежней оплаты не материализуется", async () => {
@@ -894,7 +898,7 @@ test("rollback неудачного APPLY архивирует новый зак
     orderItem: { updateMany: async () => undefined, count: async () => 0 },
     orderItemInstance: { findMany: async () => [instance], updateMany: async ({ data }) => { writes.instancesArchived = Boolean(data.archivedAt); } },
     client: { findMany: async () => [] }, keycrmClientLink: { findMany: async () => [] },
-    payment: { updateMany: async ({ data }) => { writes.paymentsVoided = Boolean(data.voidedAt && data.voidReason); } },
+    payment: { findMany: async () => [{id:"unchanged-manual"},{id:"provider-voided"}], updateMany: async ({ data }) => { writes.paymentsVoided = Boolean(data.voidedAt && data.voidReason); } },
     activity: { create: async () => undefined },
     keycrmSyncMutation: { update: async ({ data }) => { writes.mutationRolledBack = Boolean(data.rolledBackAt); Object.assign(mutation, data); } },
     auditLog: { create: async () => { writes.audit = true; } },
@@ -904,8 +908,11 @@ test("rollback неудачного APPLY архивирует новый зак
     $transaction: (callback, options) => { if (options) transactionOptions = options; return callback(tx); },
     keycrmSyncRun: { findUnique: async () => ({ ...run, startedBy: { id: "owner-1", displayName: "Owner" }, _count: { issues: 0 } }) },
   };
-  const result = await new KeycrmService(prisma).rollback("run-1", { id: "owner-1" });
+  const taxHooks=[];
+  const result = await new KeycrmService(prisma,{capturePayment:async(...args)=>taxHooks.push(args)}).rollback("run-1", { id: "owner-1" });
   assert.equal(Boolean(result.rolledBackAt), true);
+  assert.deepEqual(taxHooks.map(x=>[x[1],x[4].createIfMissing]),[["unchanged-manual",false],["provider-voided",false]]);
+  assert.ok(taxHooks.every(x=>x[0]===tx));
   assert.deepEqual(writes, { paymentsVoided: true, instancesArchived: true, orderArchived: true, mutationRolledBack: true, runRolledBack: true, audit: true });
   assert.deepEqual(removedImages, [`keycrm-${"a".repeat(32)}.jpg`]);
   assert.deepEqual(JSON.parse(JSON.stringify(transactionOptions)), { maxWait: 10_000, timeout: 120_000 });
@@ -1307,7 +1314,7 @@ test('local add or duplicate on imported order preserves its commercial total on
  assert.equal(slotSyncs,0);assert.ok(updates.length);assert.equal(updates[0].priceMinor,25000);assert.equal(updates[0].depositRequiredMinor,12500);
 });
 
-function localCompositionImportFixture({ manualItemOverride = false, compositionEvent = false, manualDiscount = false, manualPrice = false } = {}) {
+function localCompositionImportFixture({ manualItemOverride = false, compositionEvent = false, manualDiscount = false, manualPrice = false, taxes } = {}) {
   const state = {
     order: { id: 'order-1', number: 'K-1', clientId: 'client-1', sourceLinkMode: 'IMPORTED', sourceSystem: 'KEYCRM', sourceAccount: 'connection-1', externalId: 'order-1', currency: 'EUR', externalUpdatedAt: new Date('2026-10-01'), depositRequiredMinor: 12500, priceMinor: 25000, type: OrderType.CUSTOM_ORDER, paymentStatus: 'PARTIALLY_PAID', productionStatus: 'NOT_SCHEDULED' },
     items: [
@@ -1354,7 +1361,7 @@ function localCompositionImportFixture({ manualItemOverride = false, composition
   const service = new KeycrmService({ $transaction: async callback => {
     const before=structuredClone(state),beforeWrites=businessWrites;
     try{return await callback(tx)}catch(error){Object.assign(state,before);businessWrites=beforeWrites;throw error}
-  } });
+  } }, taxes);
   return { state, issues, service, tx, get businessWrites() { return businessWrites; } };
 }
 
@@ -1666,4 +1673,31 @@ test('KeyCRM shipment sync advances a future parcel version monotonically', asyn
   await f.service.importOrder(f.incoming, 'owner', 'run-1');
   assert.ok(f.shipment.updatedAt.getTime() > previous.getTime());
   assert.equal(f.writes[0].updatedAt.getTime(), previous.getTime() + 1);
+});
+for(const state of ['new','historical-active','restored','manual-link'])test(`tax first-capture eligibility for KeyCRM ${state}`,async()=>{
+ const KeycrmService=loadKeycrmService();
+ let orderRow={id:'order-1',number:'KC-14',clientId:'client-1',sourceLinkMode:state==='manual-link'?'MATCHED_EXISTING':'IMPORTED',sourceSystem:'KEYCRM',currency:'EUR',externalUpdatedAt:new Date('2026-10-01T00:00:00Z'),depositRequiredMinor:5000,priceMinor:10000,type:OrderType.CUSTOM_ORDER,paymentStatus:'PARTIALLY_PAID',productionStatus:'NOT_SCHEDULED'};
+ let receipt=state==='new'?null:{id:'payment-8',orderId:'order-1',sourceSystem:state==='manual-link'?null:'KEYCRM',sourceAccount:state==='manual-link'?null:'connection-1',externalId:state==='manual-link'?null:'8',amountMinor:5000,currency:'EUR',receivedAt:new Date('2026-05-01T10:00:00Z'),voidedAt:state==='restored'?new Date('2026-10-01T00:00:00Z'):null};
+ const hooks=[];
+ const tx={$executeRaw:async()=>{},$executeRawUnsafe:async()=>{},$queryRaw:async()=>[],order:{findUnique:async()=>orderRow,update:async({data})=>(orderRow={...orderRow,...data})},clientMergeRedirect:{findUnique:async()=>null},client:{findUniqueOrThrow:async()=>({id:'client-1',email:null,phone:null,country:null,city:null,address:null,postalCode:null}),update:async({data})=>({id:'client-1',...data})},keycrmClientLink:{findUnique:async()=>null},orderItem:{count:async()=>0},orderItemInstance:{findMany:async()=>[]},payment:{findUnique:async()=>state==='manual-link'&&!receipt?.externalId?null:receipt,update:async({data})=>(receipt={...receipt,...data}),findMany:async()=>receipt&&!receipt.voidedAt?[receipt]:[],upsert:async({create,update})=>(receipt=receipt?{...receipt,...update}:{id:'new-receipt',...create})},productionSlot:{findUnique:async()=>null},shipment:{findUnique:async()=>null},activity:{findFirst:async()=>null,create:async()=>{}},auditLog:{create:async()=>{}},keycrmSyncIssue:{findFirst:async()=>null,create:async()=>{}}};
+ const service=new KeycrmService({$transaction:fn=>fn(tx)},{capturePayment:async(...args)=>hooks.push(args)});
+ await service.importOrder(normalizedOrder({externalId:'14',payments:[{externalId:'8',amountMinor:5000,currency:'EUR',isPaid:true,receivedAt:new Date('2026-05-01T10:00:00Z'),method:'OTHER',externalStatus:'paid'}]}),'owner-1','run-1');
+ assert.equal(hooks.length,state==='manual-link'?2:1);assert.ok(hooks.every(h=>h[0]===tx&&h[1]===receipt.id));assert.ok(hooks.every(h=>h[4].createIfMissing===!['historical-active','manual-link'].includes(state)));if(state==='manual-link')assert.equal(receipt.id,'payment-8');
+});
+
+test('tax hooks reconcile matched-existing rollback and reapply without first-capturing unrelated manual history',async()=>{
+ const hooks=[],f=localCompositionImportFixture({taxes:{capturePayment:async(...args)=>hooks.push(args)}});
+ const oldManual={id:'untouched-manual',orderId:'order-1',amountMinor:5000,currency:'EUR',receivedAt:new Date('2026-05-01'),voidedAt:null,sourceSystem:null};
+ const provider={id:'restored-provider',orderId:'order-1',amountMinor:5000,currency:'EUR',receivedAt:new Date('2026-05-01'),voidedAt:new Date('2026-10-01'),sourceSystem:'KEYCRM',sourceAccount:'connection-1',externalId:'provider-pay'};
+ f.state.payments=[oldManual,provider];
+ f.tx.order.findUnique=async()=>structuredClone({...f.state.order,items:f.state.items,payments:f.state.payments,productionSlot:null,shipment:null,invoices:f.state.invoices,expenses:[],agreements:[]});
+ f.tx.orderItem.update=async({where,data})=>{const row=f.state.items.find(x=>x.id===where.id);Object.assign(row,data);return structuredClone(row)};
+ f.tx.payment.findUnique=async()=>structuredClone(provider);
+ f.tx.payment.upsert=async({update})=>{Object.assign(provider,update);return structuredClone(provider)};
+ f.tx.payment.update=async({where,data})=>{const row=f.state.payments.find(x=>x.id===where.id);Object.assign(row,data);return structuredClone(row)};
+ const run=captureShipmentMutation(f),incoming=normalizedOrder({payments:[{externalId:'provider-pay',amountMinor:5000,currency:'EUR',receivedAt:new Date('2026-05-01'),isPaid:true,method:'OTHER',externalStatus:'paid'}]});
+ await f.service.importOrder(incoming,'owner','run-1');assert.equal(hooks.at(-1)[2],'IMPORT_RESTORE');assert.equal(hooks.at(-1)[4].createIfMissing,true);
+ await f.service.rollback('run-1',{id:'owner'});
+ const compensation=hooks.filter(h=>h[2].startsWith('ROLLBACK:'));assert.deepEqual(compensation.map(h=>h[1]).sort(),['restored-provider','untouched-manual']);assert.ok(compensation.every(h=>h[4].createIfMissing===false));assert.ok(provider.voidedAt);
+ await f.service.importOrder(incoming,'owner','run-2');assert.equal(hooks.at(-1)[2],'IMPORT_RESTORE');assert.equal(provider.voidedAt,null);
 });

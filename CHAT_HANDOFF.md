@@ -1,5 +1,452 @@
 # Yoleotard CRM — передача контекста
 
+## 2026-10-19 — Tax financial integration LOCAL COMPLETE / FINAL REVIEW PASS / NOT DEPLOYED
+
+Current task is the owner's attached `YO_CRM_Tax_Integration_Codex_Package.zip` / matching MD and three approved PNGs. Canonical checkout remains `D:/CodexData/.codex/worktrees/finance-approved-redesign/YO_crm`; stale `D:/Projects/YO_crm` untouched. Explicit scope: local implementation only; no deployment/production access, mass backfill, risky production migrations, Git commit/push/issues or customer messages. Prior installed 0.9.0 remains unchanged.
+
+Plan: `docs/plans/tax-financial-integration.md`; primary-source research: `docs/research/tax-financial-integration-2026-10-19.md`. Preserve captured1047-file dirty baseline `.local/tax-integration/baseline.json` + exact `before/`; compare task diff against these bytes, NOT HEAD. Workers imported with hash guards; task runtime/test delta23 modified originals/20 new source/document paths (handoff/report/assets added afterward), no missing originals. New schema/migrations/dependencies: none; schema41 reused. Deployment files, payment/KeyCRM/invoice mutation owners, parent measurements, production/shipping and auth remain unchanged against baseline.
+
+Implemented: fixed-price order finance cards + visible cost composition + retained9tabs/actions; dedicated Settings Taxes with actual version/rates/official sources/history/future policies and read-only impact preview before existing authoritative CAS/idempotent policy publication; additive fiscal server projection from one RepeatableRead snapshot with bounded historical NBU lookups outside transaction; Finance8KPI, separate accrued/cash results, one combined expense+tax donut, linked-tax cash exclusion, fiscal expense table/recents/export and tax drilldowns retaining existing operations. Tax UAH is authoritative; EUR/USD are dated presentation. Unknown allocation/FX is explicit; no tax estimated from unallocated unpaid fixed price. Global FOP/monthly obligations are not artificially allocated by source/order filters.
+
+Review fixes: tax failure retains legacy expense records/pagination with explicit UTC/unknown historical-value label; lifecycle ADJUST uses recognized receipt incomeDate, independent corrections/exemptions retain posting evidence, monthly ESV uses labelled period-end management presentation. Red/green and initial failed harness runs retained privately. Expense editing retains original money/currency and exact originalTimestamp when date is unchanged.
+
+Verified so far: `corepack pnpm quality:check` final ROOT_EXIT0, API1505 + web613 + database26 PASS (2144 total),11 explicit opt-in skips; types/API+NextTurbopack builds PASS. DAG45PASS. Fresh dedicated synthetic PostgreSQL55442 tax_accounting_test/schema41:26PASS/no skips; earlier reused database fixture conflict retained, not used as acceptance. Actual local AppModule+fresh synthetic database six HTTP groups/21requests PASS; partial receipt, no double expense, fixed400EUR, native close/retro-preview rejection/read-counter and closed-snapshot preservation. Final restarted-source API three-currency reads PASS. External NBU boundary is deterministic only in these synthetic HTTP checks; no live provider/production proof claimed. Mounted14 finance/settings checks,12 order/settings browser tests and adapted legacy tax browser11PASS; old assertions preserved, navigation + preview fixture updated. Fullhost Next3551→API45441 screenshots1920/1366/390, no API response mocking, external requests blocked. Final visual acceptance PASS covers35 actual post-mobile-fix screenshots,1920×1080/1366×768/390×960 and all internal scroll sections. One scoped min-width/max-width rule fixes the expanded finance grid; permanent mounted test uses the actual expanded table context and verifies panel/text fit. Final quality-mobile-final.log ROOT_EXIT0 certifies2144PASS/11 explicit opt-in skips/types/builds. Four mandatory roles plus Standards/Spec and independent release-final.md PASS LOCAL ONLY FINAL; old BLOCK reports are retained as superseded history.
+
+Private evidence includes local DB credentials/cookies: keep `.local/tax-integration/http-config.json` and `http-browser-state.json` private; never print/copy them. Final report/screens are under `docs/ui/tax-financial-integration-2026-10-19.md` / matching directory, synthetic data only. No production credentials were read in this task. Owned synthetic API45441 and fresh PostgreSQL55442 stopped after verification; existing development3551/PostgreSQL55441 left untouched. Final documentation/DAG-only completion is authorized by release review; no runtime/test drift permitted.
+
+## 2026-10-19 — FOP tax accounting 0.9.0 DEPLOYED / ENABLED / FINAL RELEASE PASS
+
+Latest direct user instruction «делай деплой» superseded prior local-only restriction. Canonical checkout remains D:/CodexData/.codex/worktrees/finance-approved-redesign/YO_crm; do not deploy stale D:/Projects/YO_crm. No Git commit/push/tag, seed, customer messages, proxy/firewall modification, destructive migration or historical Payment apply.
+
+Installed snapshot 0db1c963eff412bd218622213ce86c0df86b88cd82f2f7c8870aea233a95c80d; API sha256:df2f87435da09f1885b8ddc926393f2dbf9c89f7231887cb4707ee61760662c2; Web sha256:994e70a2b54f27a2ef246a92a644a47e30afaf9c46d3dbed385fcb094836df5d. Frozen source1031 files/all hashes match;965 prior-installed protected members retained. Only api/web replaced; postgres/redis identities/mounts/networks unchanged, parent intake true, existing firewall active. Schema41: old40 migration rows unchanged, additive20261019123000_fop_tax_ledger SHA421d78865df438058a1fb6508ab1786322f77d72d65a0e96e09adc8669f52a27. Migration transaction BEGIN/lock_timeout5s/statement_timeout120s/COMMIT preserves original DDL;26 localPG plus abort/lock preservation passed, release quality2114PASS/10explicit opt-in skips/typechecks/builds PASS.
+
+Fresh FULL backup20261019T122731Z-v081-pre-taxes-v090 at /home/trio/yoleotard-crm-backups, checksum/catalog/uploads verified; actual isolatedPG16 restore retained all legacy rows/history, Linux26PG+18units/nativeSharp/dependency/read-only-runtime/cleanup PASS. Initial original offline helpers failed at Corepack bootstrap before restore; successful separate isolation-offline.py explicitly bound to immutable parent plan used actual installed dependency closure and image-owned Prisma CLI without bootstrap/network. Failed attempts retained; no application or image change to bypass tests.
+
+OWNER API initial policy and enable succeeded via separately reviewed resumable auth-v2/activate-v2; config revision2 enabled, start2026-05-01 inclusive Europe/Kyiv; group3/PERCENT500bps, military100bps, ESV2200bps, fixedNULL, no future group2 transition scheduled. Six ESV obligations May-Oct190234UAH minor each,total1141404minor;12ledger events/6periods/1policy/0allocations/0Payment roots. Historical837Payments NOT captured; historical apply requires separate preview/apply. New eligible receipts accrue through approved hooks. Missing original-date NBU lookup remains durable60s/backoff<=24h, never current-rate substitution.
+
+Installed disabled+enabled browser/API smoke16paths PASS; widths1366/768/390, no page/console errors or document overflow, no synthetic business mutations. Sessions and existing FX cache effects are ordinary service writes. Final20immutable Measurement hashes,837Payment economic hashes(amount/currency/receivedAt),parent settings unchanged. Root/health/parent HTTPS200; directTCP3500/4500 unavailable from workstation. Bound startup-to13:06:38UTC logs API261/Web5lines zero error/warn/fatal/unhandled markers, no bounds reached; not indefinite monitoring. Private real-data screenshots/logs stay .local/tax-accounting-deploy; public report docs/release-evidence/tax-accounting-v0.9.0-2026-10-19.md. Local synthetic screenshots remain docs/ui/tax-accounting-2026-10-19/.
+
+Mandatory staged gates and final independent INSTALLED-ENABLED acceptance PASS: .local/tax-accounting-deploy/installed-final-review.md, rg3-v2-review.md, activation-review.md; local roles retained PASS. Remote operational receipts /home/trio/yo-crm-tax-accounting-0db1c963eff4-6866211d379a; frozen bundle and prior root retained. After policy/history exists, old0.8.1 API fallback is forbidden by strict4-table-empty guard; retain tax-aware handlers/schema41 and roll forward. Do not erase ledger/drop tables/edit tracker/restore old production DB. Source bundle is immutable; this post-cut handoff/report documentation is local and does not modify installed runtime snapshot.
+
+## 2026-10-19 — FOP tax accounting LOCAL / VERIFIED — LOCAL GATE PASS / NO DEPLOY
+
+User approved local four-table implementation and payment hooks; explicit NO DEPLOY persists. Accounting starts2026-05-01 inclusive Europe/Kyiv. Initial FOP3 5% withoutVAT +1% military, monthlyESV22% of verified2026 minimumwage8647UAH =>1902.34UAH. Dated futuregroup2 monthlyfixed mode does not reprice used history. Unknownfuturewage remains pending; no2026fallback. Accrued/paid/allocated/debt/credit separated; Expensecash countedonce.
+
+Canonical INTEGRATOR finance-approved-redesign; initial1002-file baseline .local/tax-accounting/baseline.json, exact originals before/, finalcandidate candidate-files.json (61paths). 985originalfiles unchanged,17taskmodified, no missing/outsidepathchanges. No commits/push/productionaccess/deploy/realbackfill. Installedproduction0.8.1 staysunchanged. Workerpatches integrated; narrowreviewfixes then applied canonical. Do not copyoldworkermanifests overfinalsource. Allagentsfinalsourcefrozen.
+
+Fouradditivetables TaxPolicy/TaxPeriod/TaxEntry/TaxExpenseAllocation, migration41. Taxsequence ordersimmutableevents; rootsindependentofpolicies. Paymenthooks preserveoriginaleconomics/orderdeposit/production/contracts. createIfMissing:false onunchangedhistoricalreplay/link/rollback preventsunapprovedfirstcapture whiletrackedlifecycle continues. RawcashOrder.taxMinorunchanged. Root AppModule owns TaxesController/authguards, explicitTaxesServiceDI factories preservelegacyconstructors; TaxesModuleprovidersonly. LinkedTaxExpense generaledit/archive guarded, specializedauditedcorrection retained.
+
+HistoricalNBUoriginalincomedate retries durable60s boundedexponential<=24h, restart-safe, missing!=zero/currentrate. Monthlyworker independentofUI/orders. ReportRepeatableRead thenFXoutsidetx. SharedPaymentgross/dateconfirmation atomic, independentcorrections survive lifecycle, validallocationsretained/excessreleasedtocredit, closedsnapshotsimmutable. S1bankdateMay->June->Mayfixed. S2closedconfirmedmonthrestore appendsauditeddurablemanualreview, excludesbeforeLIMIT, continueslatereligibleNBU/sourcework, requiresownerexplicitopenposting. CB1CSV dedupbyTaxEntry.id acrossentries/subsequentCorrections; distinctidenticalevents/outsidecorrections preserved. CSVhumanlabelsRussian, snapshots/signs/quoting/formulaprotection retained. UUIDexception isintegratordecisionwithinapprovedlocalscope, notseparateuserapproval.
+
+Finalquality-cb1-final.log ROOT_EXIT0:2114PASS/10explicitoptinskips, typechecksandAPI/Webproductionbuilds. Browser-cb1-final.log23PASS0skip; spec-fixes-final.log26PGPASS0skip; order-tax-atomic-reviewed.log1PGPASS; dag-reviewed45PASS. FullNest+PGsyntheticHTTPproof real-http-evidence.json, actualOrdersServiceauditfailure rollsbackPayment/deposit/production/root/history; positivecommitpassed. Mounted-payment-refresh.log actualexistingUIadd+void causes2taxGET200,0fullnavigations/errors; eventhistory12->14. host-error-isolation-final.log syntheticTax503leavescashhostmounted/errors[]. host-all-reviewed.log finance/settings/order1920/768/390 allerrors[]/noouteroverflow. Publicscreenshots copiedexactly docs/ui/tax-accounting-2026-10-19/, publicreport .md. Tablehorizontalscrollatmobileintentional. Noinstalled/liveclaim.
+
+Mandatorycompatibility/businessPASS final-compatibility-business-review.md; regressionPASS regression-review.md; visualPASS ui-review.md; independentStandardsPASS standards-final-independent.md; SpecPASS spec-review.md. OldBLOCK/logs retainedandsuperseded. WindowsPrismaDLLlock inquality-reviewed.log resolvedby stoppingownlocalAPI beforefreshfullquality; browserassertionraces corrected testonly. LastCB1runtimefixfollowedbyfullrootquality+23browserPASS. Final local release-gatekeeper review PASS: .local/tax-accounting/release-final-review.md. No open local blockers. Production readiness requires separate approval, backup, migration, activation and installed proof; none is authorized by this local task.
+
+LocalonlyPG18 loopback55441 UTC testdatabases tax_accounting_test/tax_accounting_http_test, all41migrationsappliedonlythere. Privateconfig/sessionhelpers .local/tax-accounting NEVERprintdatabase.json/local-browser.json/browser-state.json. OwnfullAPI45441 stoppedforfinalPrismagenerate; Nextdev3551 mayremain, nofunctionalAPIuntilstarted. No productioncredentialsloaded. CONTEXT/ADR0009/research/approvedplanupdated. Do not activateorapplyhistory automaticallyinmigration/pagevisit. Final documentation hashes and DAG status reconciled after LOCAL PASS; runtime source unchanged.
+
+## 2026-10-19 — Measurements workspace 0.8.1 DEPLOYED / FINAL RELEASE PASS
+
+Latest direct user instruction «проверь, исправь и сделай деплой» supersedes the prior local-only restriction below. INTEGRATOR finance-approved-redesign worktree remains canonical for this task. No Git commit/push/tag/Release, seed, schema migration, proxy/firewall alteration or customer message.
+
+Installed snapshot a4c51556d9275e242313511b0e53b3ca4edea5ee4b304fdb028649fe91344a68; API sha256:2af66dca1209f11026ae7bf80af560aa2a2733f77c095f0aaf99bbc4414db39e; WEB sha256:549676676b5e5264c110b9343d011290b306fa7a0e3061107067b0495161db4b. Source986 files, protected924 baseline bytes and entire database subtree unchanged. Include .measurements-workspace-images.yml LAST after .parent-measurements-images.yml and prior chain; retain docker-compose.release-no-db.yml start-only override. Only api/web replaced. PostgreSQL/Redis identities/mounts/config unchanged, all40 migration records identical. Parent intake remains true.
+
+FULL backup20261019T070729Z-v080-pre-measurements-v081 checksum/catalog/uploads PASS, isolated PG16 restore66 tables/614 clients/504 orders/17 measurements PASS. Both nativeSharp tests and29Linux tests PASS; old/new dependency graphs identical. Root quality-v081 EXIT0:2069PASS/7 documented opt-in skips. Prior mandatory source/visual/Standards/Spec reviews remain PASS; concrete preswitch release gate PASS. Orchestration-only SFTP writable mode and Docker namespace-name/ID checks were corrected; immutable attempts retained. Final supplement838ed121... PASS, no application code change arose from those checks.
+
+Installed empty and populated order measurements smoke PASS (4 required +13 additional, manual Drawer without save, invitation dialog, desktop/tablet/mobile); overview/finance/statistics/order reads200, no pageErrors or blocked business writes. Public12 negative checks PASS; HTTPS root/health/parent200. All17 pre-existing full-row measurement hashes and parent counts unchanged. Bounded installed API242/Web5 log lines contain0 ERROR/uncaught matches; exact source986-file manifest verified after policy publication. Fresh LAN TCP3500/4500 refused; existing direct-port unit active, no new IPv6/WAN/restart claim.
+
+User-approved two-chart±3cm policy now published through existing OWNER API with fresh empty-policy GET +expectedVersion:null CAS, exact113-rule payload b7698461..., active version8829cfda-8274-4399-a527-78bb648be98d; immutable version row and audit each1 verified. No snapshot updates. Generic four-field rules cover95–176cm without extrapolation. Earlier historical no-publication notes below are superseded by this authorized publication.
+
+Rollback retains both definition-aware0.8.0 images/root/schema40/uploads/history; explicit reviewed helper rollback only, never old0.7 readers or production restore. App rollback does not erase/undo policy: any later policy change requires fresh CAS through API. Keep current and old roots/images/backup. Unused Docker build cache older6h only was reclaimed (5.643GB), with all images/volumes/backups retained.
+
+Private deployment evidence: .local/measurements-workspace-deploy; independent review .local/parent-measurements-refinement/deploy-plan-review.md. Public report docs/release-evidence/measurements-workspace-v0.8.1-2026-10-19.md; UI comparison docs/ui/measurements-workspace-2026-10-19.md. No real production invitation/child/snapshot created for smoke; positive submission/write/race scenarios retain separately attributed synthetic local proof. Final independent installed/documentation release review PASS; no open blockers.
+
+
+
+
+## 2026-10-19 — Measurements workspace refinement LOCAL / VERIFIED — RELEASE LOCAL PASS
+
+Latest user scope is D:/download/YO_CRM_Measurements_Tab_Codex_TZ.md and Approved_Design.png. Explicit NO DEPLOY for these changes; the prior0.8.0 authorization below is historical. No commits/push/production mutations authorized. Active INTEGRATOR remains finance-approved-redesign worktree; preserve969-file dirty baseline captured in .local/parent-measurements-refinement/baseline-source.
+
+Plan/API inventory: docs/plans/parent-measurements-compact-ranges.md. Staff workspace becomes22/60/18, required1/2/3/15 cards + compact13 grid, received/verified/assigned separate, existing links/binding/immutablehistory preserved. Existing OrderNote MEASUREMENTS/INTERNAL with athleteId supplies administrator comments and audit. Additive staff dashboard provenance comes only from immutable submission payload, plus manual roster IDs from order-owned activity. No schema changes. Existing order-tabs idempotent athlete/snapshot create routes are reused; do NOT implement the cancelled optional clientDTO/idempotency proposal.
+
+Public-only preceding refinements: narrow numeric input+adjacent slider (all17), canonicalhalfcm/noautofill/noclamp, red exact-value warnings, exact EN/FR diagrams. Pure offline two-chart±3cm generator prepared in API source, not runtime-wired or activated. Any future policy publication must use existing OWNER/ADMIN CAS/audit with fresh version. Earlier rule6 body-only sleeve semantics retained. Assembled quality-final-v3 EXIT0: API1452 + web591 + database26 =2069PASS,7 explicitly opt-in skips. DAG45PASS. Public14-browser +3 visual checks PASS; actual all-root-CSS staff/manual/new-athlete browser2PASS; legacy invitations browser1PASS; QA-only full ExpandedOrder export52actualmodules/header/9tabs captured at1920/1703/1366/768/390 with errors[]. Standard/Spec and compatibility/regression/business/visual reviews PASS (historical blockers superseded by closures). Final independent local release-review.md LOCAL PASS:57/57hashes,83additional focused PASS. No production/deploy authorization. Public report docs/ui/measurements-workspace-2026-10-19.md with exact screenshot copies.
+
+Existing athlete PATCH has OPTIONAL paired discipline/expectedDiscipline CAS; name-only consumers unchanged. Manual saves reconcile unknown profile and snapshot commands, keep last confirmed profile CAS, block altered/closed pending requests; HTTP4xx releases rejected command. OrdersDashboard preserves Error messages and adds response.status for this distinction. New-athlete wizard opts into a right Drawer and snapshot-specific date/notes only in this tab. No new schema/endpoints. Both cancelled client-snapshot-idempotency proposal and production range publication remain absent.
+
+Additional loopback start of built production Next server was rejected by tool automatic policy (blocked by policy), so built-runtime/live smoke is unverified; do not retry via a workaround. Build and earlier local browser evidence passed. No production access/mutation/deployment, Git commit/push or customer message. Production remains installed0.8.0 unchanged.
+
+## 2026-10-19 — Parent measurements 0.8.0 DEPLOYED and ENABLED
+
+Latest direct user request authorized deployment, superseding the earlier local-only
+restriction below. A separate direct reply approved the exact four-rule direct-port
+restriction and public enablement. No Git commit/push/tag, seed or customer send.
+
+Installed reviewed snapshot38aabe79c43c64559b5c1093b1bf14107f890dafca90822c0cafea13649b1b07,
+baseHEADa80a9b3ff3c7e803915a9e91964366aac1085382; APIsha256:85f94af882597d5f34ee6846e00bb31e5ab0c7076757deddabf01fe5fe465270,
+WEBsha256:8dedd0e33739435b0ccd2066f1672ed99b47aaf267f066623f9c33b0c5f8ebb0.
+Root source /home/trio/yoleotard-crm; composeprojectyoleotard-crm. Include the final
+.parent-measurements-images.yml overlay after the prior release overlays: pinned
+images, NODE_ENVproduction and PARENT_MEASUREMENTS_ENABLED=true; retain start-only
+docker-compose.release-no-db.yml. Never use the base startup migrate+seed command.
+
+FULLbackup20261019T000300Z-v070-pre-parent-measurements verified/restored on isolated
+PG16. Three additive migrations37->40 now live. Each new SQL uses BEGIN/COMMIT,
+lock_timeout5s/statement_timeout120s; no37historicalSQL edits. Precisely one existing
+historical checksum CRLF exception is retained:20260820210000_meta_inbox (recorded
+LF hash ef0fe63..., deployed raw2a9481...). Never repair migration history blindly.
+Actual-copy57historical-table original-field hashes unchanged; lock abort~6s leaves
+no partialDDL; old/new Prisma read and rollback ownership/write probes PASS.
+Linux35PG regressions, bothnativeSharpfixtures, bothnew-image disabledfallback PASS.
+Finalrootquality after metadata+SQLwrappers EXIT0; all independent source, migration,
+preswitch and activation reviews PASS. Private receipts .local/parent-measurements-deploy/.
+
+Installed authenticated reads (orders/details/parentpanel/overview/finance/statistics),
+actual staff measurementpanel and public320/390/768/1366 browser smoke PASS before
+and after enable; zeroJSerrors/businesswrites/customer sends. Public privacy headers,
+401missing-session,403foreign-origin,413bodybound/static-photo404 PASS. Canonical
+NPM forwarding confirmed by Redis:4startchecks use1real budget, spoofed IP prefixes
+create none. All16historical live snapshots' original fields match the verified backup;
+definitionVersionNULL remains. PostgreSQL/Redis identities/volumes unchanged. No real
+parent invite/child/snapshot created in production; positive submit/photo/QR/private
+isolation/draft workflows retain separately attributed prior synthetic E2E proof.
+
+Approved firewall: four exact commented rules (yo-crm-parent-direct-ports) at position1
+in IPv4/v6 INPUT/DOCKER-USER reject physicalenp3s0 TCP3500/4500, including established
+direct traffic. Canonical443/SSH/NPMDockerbridge/internalAPI preserved. Root-owned
+/usr/local/sbin/yoleotard-crm-direct-ports and
+/etc/systemd/system/yoleotard-crm-direct-ports.service; active/enabled, PartOfDocker.
+180s rollbacktimer was armed before apply and cancelled afterfreshchecks; timer and
+rollbackjob now absent/inactive. Fresh LAN/public-addresshairpin directports refused,
+HTTPSroot/APIhealth200 and rulehitcounters observed. No globalIPv6address. Docker
+restart lifecycle is statically linked, not live-restarted for testing; no independent
+WANvantage. Firewall rollback removes only exact owned rules/owned persistence.
+
+Safe application fallback MUST retain BOTH definition-aware0.8 images/schema40/
+uploads/history and set intakefalse. No old-reader rollback after any parent data;
+no snapshot +/-2 conversion or database restore over accepted history. m6pure body
+length applies only to PARENT_BODY_V1, legacyversions retain +2label semantics.
+
+Report: docs/release-evidence/parent-measurements-v0.8.0-2026-10-19.md.
+Post-release report/handoff edits are local documentation, outside the immutable
+installed snapshot/archive. Initial unrelated dirtybaseline still preserved.
+
+## 2026-10-19 — Parent measurements LOCAL implementation and checks complete
+
+Owner approved both local stages; explicitly NO deployment, production migration,
+Git commit/push, or customer sends. Active integrator finance-approved-redesign/YO_crm,
+branch codex/website-sales; protect initial dirty baseline (892 entries), not HEAD.
+Both stages integrated: private shared/personal invitations + parent sessions/recovery,
+canonical Athlete/Measurement snapshots and staff review/explicit instance assignment;
+six-language mobile form, immutable copies/history, original photos, cm/in, autosave,
+versioned ranges, scoped photos and draft-only Inbox insertion. m6 is pure body sleeve,
+no +2 or arithmetic conversion. Legacy snapshots retain old semantics and hash retries.
+Three additive migrations tested only on isolated PostgreSQL18 (40 migrations total).
+Production intake disabled by default unless separately authorized PARENT_MEASUREMENTS_ENABLED=true.
+B4 six legacy assignment paths now require confirmation/CAS/reason for oldORnew BODY
+WIP changes; cohort paths fail closed for this case, legacy→legacy stays compatible.
+
+Pinned pnpm11.16.0 quality:check EXIT0 including final slider-floor fix, quality-slider-final.log: API1423PASS/
+3opt-in skips, web560PASS/2opt-in skips, database26PASS, typecheck/generate/Nest/NextbuildPASS.
+DAG45PASS; diff-checkPASS. Explicit real-PG9 + promoted durable35PASS (fresh dedicated
+regression DB), actualHTTP10PASS, finalproduction-bundle Chromium12PASS six languages.
+Three real parent browser contexts ->3distinct snapshots/private isolation/no-store;
+actualstafforder->invite->correctclientInbox keeps manualtext+link, realPUT200 DRAFTpersisted,
+no send requests or sent outbound messages. Realstaff390/1366/1920, public320/390/768/1366;
+independent componentvisual8widths/focus/contrast6.03:1PASS. Physicaldevices not tested.
+Four independent mandatory roles PASS; supplementalStandards/SpecPASS. Final local release
+review .local/parent-measurements-implementation/release-local-review.md: POST-CLAMP LOCAL ACCEPT,
+zero blockers; production gates NOT RUN / OUT OF SCOPE. Final two-file slider-floor correction (approved lower1 -> min1, not -2) red/green9PASS,
+all4roles narrowdeltaPASS; finalrootqualityEXIT0. Runtime frozen; only finalstatus/registry changes.
+
+Docs: docs/parent-measurements.md, docs/ui/parent-measurements-2026-10-19.md with safe
+actualscreens, docs/plans/parent-measurements.md, ADR0008 and CONTEXT glossary.
+Evidence/privatefixture/diff registry .local/parent-measurements-implementation/;
+new opt-in test apps/api/tests/parent-measurements-regression-postgres.test.mjs.
+QAAPI4509/RedisRESP56389, production-bundle QA3530 and localPG55439 stopped safely;
+all four owned ports verified closed; synthetic databases and private evidence retained. Windows traced standalone React junction EPERM: QA used installedNext production
+customserver with loopbackrewrite; standardrootbuildPASS; no Docker/Linux/deployproof.
+Keep all test data/files private and retained; never reuse fixturecredentials on production.
+No production/server/proxy/data/provider changes were made.
+
+## 2026-10-18 — Statistics WEB-only deployed; installed gate ACCEPT
+
+Latest user explicitly said deploy. MAIN froze881files snapshotac4bea610b91c3b2a0ec2b65e296ee0ccdf19457f1027b2ee57d376093297597;
+only8reviewed paths overlay4fa,873protected members unchanged. Serverprobe4fa/API9071488a/
+WEBe6e95431 allhealthy,37migrations; freshFULL20261018T193853Z-v070-pre-statistics-repair
+checksums/dump/uploads/tracker verified. Isolated stage/WEBbuild/preswitchreview passed. WEBa22d9bc installed; initial
+post root+health200,API/PG/Redis exactpreserved,37migrations and19business table
+counts/bounded10000row hashes unchanged.
+Evidence/helper .local/statistics-repair-deploy/. Final OWNER smoke1328checks/15framesPASS; fivewidths/fullcountries/innerscroll,
+annual/Oct realDTO/cashrank/filter/reset/EURUSD UAHnoreload/Overviewroundtrip.
+0unexpectederrors;1exactdeliberatelyblockedlegacyavatar unavailable. Four failed
+verifier-only attempts retained; no appcorrection/extra deploy duringvalidation.
+Finalpost root+health200;17of19economic/history tables unchanged. Expense3->4 and
+AuditLog14929->14930 matchoneconcurrentauthenticatedExpenseCREATE19:48:27.009;
+read-onlyauditlimit30actual1 andallprior3Expensecount/hash provepreservation.
+No helper/smoke economicDML or DBrestore; no globalquiescenceclaim.
+Final independentinstalled ACCEPT/PASS_WITH_UNAVAILABLE_MEDIA, zero blockers;
+.local/statistics-repair-deploy/installed-release-review.md; receiptindex22/22hashes verified.
+Report docs/ui/statistics-repair-deployment-2026-10-18.md.
+No commit/push/migration/seed or economic-data mutations authorized. Preserve API/PG/Redis,
+private config/proxy/storage; previous root+image rollback without DB restoration.
+
+## 2026-10-18 — Statistics follow-up: notices, sales rankings and single-line countries (LOCAL)
+
+Latest user reports generic warning(2), zero-sales TOP rows and wrapped countries.
+Eight-file task baseline exactly matches deployed4fa13117; five web runtime files
+changed. Allocation notices now explain normal unlinked overhead in blue; genuine
+and unknown warnings remain orange with counts. Client/country sales tables omit
+cash-only rows before TOP10 slicing; received rankings/nullFX and lifetime retain
+them. Underlying DTO, cash/sales totals, charts, CSV, API/FX/RBAC/storage untouched.
+Country names full/nowrap in both rankings; count cells compact, TOPclient names
+narrowed only1191–1450; Mantine internal scrolling remains.
+
+Evidence .local/statistics-repair/ (before/paths/manifest/task.diff, red-first unit
+and browser). Final rootquality EXIT0 19:32:27Z:1751PASS/1expectedskip, types/buildsPASS;
+ambientrestore/posttypes/diff0. Full frozen Chromium21PASS/0skip, fivewidths,
+roles/filters/export/cash-only/FX/headers and no consoleerrors. Four role and
+Standards/Spec implementation reviews PASS; final independent LOCALrelease gate PASS/zero blockers
+.local/statistics-repair/release-review.md. Report docs/ui/statistics-repair-2026-10-18.md;
+synthetic screenshots same-named directory.
+Read-only installed API19:34:26Z confirms unallocatedexpensecount2, missingFX0,
+annual143orders/241pieces; October6/14 and cash-onlycountry6/client7groups.
+Authsessions only; no expense/order/FX write. No new UI installed.
+No commit/push/deploy/migration/seed/production write authorized or performed for
+this new follow-up. Live remains4fa13117. Prior UI/FX release remains preserved.
+
+## 2026-10-18 — UI/FX API+WEB installed; actual smoke and audit reconciliation PASS
+
+User-authorized snapshot4fa13117f1b87871941cd1d035b81d5d8d28a8c27fe52e765f24cc4f71dd7c72,
+API9071488a / WEBe6e95431 installed; frozen881files overlays only11accepted
+paths from8abb;870 protected members/dependency inventories preserved.0.7.0
+unchanged; no Git publication, migration/seed/backfill or DB restoration.
+FULL20261018T185136Z-v070-pre-ui-fx verified. PG/Redis/private/proxy/storage and
+37migration files/tracker preserved. Local quality1749PASS+expectedskip.
+
+Actual final OWNER smoke2026-10-18T19-10-33-045Z PASS_WITH_UNAVAILABLE,
+794checks/42frames/0blockers; full countries, five-width header contract,
+production68px/all12width-mode combinations, EUR/USD/UAH no reload, expense
+currency async draft retained/pending-disabled/settled-enabled. Form CANCELLED;
+no expense/payment/order/shipment/general setting writes.17authorized automatic
+selected-provider FX metadata POSTs. Raw73console matches73blocked avatars;
+HTTP2known archived-order404. Natural unallocated-expense warning1 retained;
+paginated cash independent sum unavailable; OWNER live only.
+
+Real cold-cache recovery captured attempt2: NBU fetched2026-10-11 -> actual
+2026-10-18T19:01:57.884Z,effective2026-10-19. Current report uses exactcache;
+final full run reuses it. Earlier failed harness attempts preserved, not relabeled.
+No installed app/source correction or extra deployment during validation.
+
+Finalpost191205 root+health200,18economic table counts/bounded10000row hashes
+unchanged; AuditLog14926->14927 only one authorized cache UPDATE with exact old
+and new values, provider unchanged. FXsettings/last100audits separately matched;
+not global/full-history proof. Evidence .local/ui-fx-deploy/reconciliation.json.
+Independent final installed gate ACCEPT/PASS_WITH_UNAVAILABLE, zero blockers;
+.local/ui-fx-deploy/release-review.md.
+Report docs/ui/ui-fx-deployment-report-2026-10-18.md. Follow-up docs outside image.
+
+## 2026-10-18 — Local fixes ready: full countries, compact production, FX recovery
+
+Three user follow-ups implemented locally against deployed8abb: full wrapped
+country names ONLY TOP10 clients; production header100=>68px (20/28/20) with
+unchanged row/timeline alignment; Finance auto official-rate preflight before
+page/currency report loading and expense currency changes. No page reload,
+provider switching, stored-money rewrite or payment snapshot change.
+
+New POST finance/exchange-rates/ensure-current uses OWNER/ADMIN/ACCOUNTANT,
+selected provider, current Kyiv-day cache reuse and existing audited refresh;
+parallel calls coalesce per provider/service instance. Report GET stays readonly.
+Only refresh503 can fall through to the server-validated report with warning;
+expired foreign conversion still fails without invented totals. Expense draft
+is retained; latest preflight pending blocks save, source503 preserves existing
+raw expense entry with warning, other errors require retry. Minor units/currency
+remain exact. Auth/settings/manual refresh/payment rules unchanged.
+
+Frozen11file manifest .local/client-country-full/final-manifest.json.
+Final root quality EXIT0 UTC18:29:00Z:1749PASS (API1221/WEB502/DB26),1expected
+opt-in skip, types/API+WEB builds PASS. Ambient restore/posttypes/diff0;
+manifest drift[]. Historical retry-label type error corrected then rerun GREEN.
+Country scoped5width+1366money containment and explicitUS/GBstressPASS;
+production12combinations/220checksPASS; finance1536/390async76checksPASS;
+API FX26focusedPASS. All browser proof uses synthetic local fixtures; no live
+provider/DB/new installed-version claim. Four role/supplemental review reports
+and final LOCAL release ACCEPT/PASS (zero blockers) in .local/client-country-full.
+Report docs/ui/local-ui-fx-fixes-2026-10-18.md.
+
+NO new deployment authorization or deploy/commit/push/migration/seed performed.
+Production remains previous8abb/UIheader release below until separately deployed.
+
+## 2026-10-18 — Header alignment WEB-only deployed; installed smoke PASS
+
+User-authorized WEB-only deployment installed snapshot8abbf718cd7563d743fdffb54ee88e0e6b9f8dc111e50305b1a47e9816090014,
+WEBa37bea2a; exact APIb940 container, PostgreSQL and Redis preserved. No Git
+publication, migration/seed or database restore.880file archive is r3 plus only
+five reviewed runtime UI files and existing opt-in test; all protected bytes and
+resolved dependency inventories retained. Version0.7.0 unchanged.
+
+Fresh FULL backup20261018T180157Z-v070-pre-header verified. Final full root
+quality EXIT0 (1736PASS/1expected opt-in skip), cleanup types/diff EXIT0.
+Actual owner Chromium smoke2026-10-18T18-05-28-630Z PASS_WITH_UNAVAILABLE,
+411checks/21screenshots/0blockers/0business-write attempts. Five widths verify
+both mode directions, exact header/mode geometry, white active controls,
+8Overview KPIs, left-aligned flags/countries,19px width/8px gap, no overflow.
+Existing two archived-order detail404/cash aggregate crosscheck unavailable;
+73blocked external avatars exactly explain73console entries. No new unexpected
+API/console/page error. No live non-owner role claim.
+
+Final post-smoke root and /api/health200, exact source/images/private/37migrations
+and protected services preserved;19table counts/bounded10000row hashes unchanged.
+Independent final installed release gate ACCEPT/PASS_WITH_UNAVAILABLE; zero blockers.
+Evidence .local/overview-header-deploy; report:
+docs/ui/overview-header-deployment-report-2026-10-18.md. Follow-up docs remain
+outside immutable image. Earlier LOCAL entry below is historical predeploy.
+
+## 2026-10-18 — Overview/Statistics header alignment and country column, LOCAL
+
+New user refinements after deployed0.7.0: same top-header/mode-control dimensions,
+spacing and dense KPI rhythm using Statistics; white active blue/violet labels;
+left-align TOP10 client countries/flags like TOP10 countries. Implemented locally
+in five UI/theme/CSS files plus the existing opt-in browser test. No API/schema,
+business calculations, role policies, routes or mutation handlers changed.
+
+Overview header alone uses the existing Statistics Mantine variant. Shared grid
+keeps mode-control geometry equal, including responsive two-row period controls;
+compact KPIs retain content. Active SegmentedControl color is set through theme;
+filled white labels preserve Mantine's disabled-state styling. Client-country
+Th/Td classes align left with the same19px flags/8px gap; monetary/count columns
+remain right-aligned and the72px country clipping limit is retained.
+
+Actual local Chromium regression on synthetic HTTP fixtures: original black
+active text reproduced RED, country alignment reproduced RED, final GREEN at
+1920/1536/1366/820/390. Exact header/mode rectangles equal within1px, white text,
+all8Overview KPIs, both mode directions, aligned flag coordinates/spacing and
+no document overflow verified. Runtime API mocks were used only by the opt-in
+test, never production. Private paired screenshots/geometry are under
+.local/sales-statistics/browser/matching-*; task reviews/logs .local/overview-header.
+
+Root quality EXIT0; final affected WEB502tests/typecheck/build EXIT0 after last
+country-class refinement. This request authorizes local UI work only; deployed
+0.7.0 snapshot290172/APIb940/WEB4daa remains unchanged. No commit/push/deploy was
+performed. Independent compatibility/business/regression/visual and local
+release-readiness reviews are tracked in the task evidence directory.
+
+## 2026-10-18 — CRM0.7.0 Statistics deployed; final real smoke complete
+
+Independent final installed release gate: ACCEPT/PASS_WITH_UNAVAILABLE;
+compatibility/business/regression/visual/release reviews closed, zero blockers.
+
+User-authorized API+WEB deploy installed snapshot290172e72fef6af5363faaa9f6188c1b9a2d36abbc86e66c26aa28adb73faa69,
+APIb940ce5a / WEB4daa2320. Git basea80a9b3 is distinct from the uncommitted
+snapshot; no commit/push/tag. Runtime DB schema/data were not migrated/seeded or
+restored. PG/Redis instances, secrets/proxy/storage and37migration bytes/tracker
+preserved. Frozen dependency inventories exactly equal the pre-deploy baseline.
+
+Final FULL backup20261018T154902Z-v070-pre-v070r3 verified. Quality1736PASS
+(API1208,WEB502,DB26),1opt-in skip; types/build/ambient cleanup/diff EXIT0.
+Actual owner read-only smoke2026-10-18T15-59-53-608Z: PASS_WITH_UNAVAILABLE,
+251checks/11frames/0blockers/0business-write attempts. Archived receipt preserved
+originalIDs, actual click opened canonical client URL/profile HTTP200. All tabs,
+currencies, filters, history, CSV and old Overview exercised. Explicit limits:
+2archived original detail404s, paginated cash sum unavailable,68existing avatar
+images deliberately blocked by test policy and precisely matched to raw console
+entries. No unexplained API/console/page errors; no external network expansion.
+
+Final POST160044 confirms root+health200, snapshot/images/private/schema/tracker
+and protected services exact;19table counts+bounded10000row hashes unchanged
+through smoke. This is not a full-history hash or global quiescence claim.
+Private proof/logs/screens: .local/sales-statistics-deploy-r3 and
+.local/sales-statistics-deploy/runs/2026-10-18T15-59-53-608Z.
+Report: docs/ui/sales-statistics-deployment-report-2026-10-18.md. Post-deploy
+report/handoff are local follow-up documentation outside the frozen880file image
+snapshot. Earlier failed attempts/rollback remain historical evidence below.
+
+## 2026-10-18 — Corrected Statistics installed; archived-receipt navigation fix-forward
+
+R2 snapshot7c1094ac installed API52d169ca/WEB2c32ceaf, report HTTP200 and
+browser KPI/DTO comparisons confirmed. Actual read smoke exercised240 checks,
+all tabs/currencies/filters/history/CSV and1536/390 screenshots. A retained cash
+receipt exposed the separate archived-order detail restriction: Orders detail
+excludes archived orders, but the statistics row linked there. This remains a
+blocking navigation defect pending fix-forward, not a reason to remove cash.
+The legacy Overview also displays an external Instagram avatar blocked by the
+read-only test policy; that harness limitation is separate from product errors.
+
+R3 local correction retains original payment/order IDs and all cash values,
+adds optional orderArchived from the original order, and routes archived
+receipts to the canonical client using the existing record permissions.
+ACCOUNTANT stays within analytics; active/legacy order links stay unchanged.
+Model and navigation regressions failed first, then GREEN19+9. Full quality is
+running; r3 deployment prep uses current r2 as its explicit baseline, separate
+private receipts and an additional immutable image overlay. No migration/seed.
+
+## 2026-10-18 — Statistics HTTP query correction; deployment retry in progress
+
+First 0.7.0 snapshot b45e1db5 passed build/health but actual authenticated
+Statistics GET returned HTTP400. Nest ValidationPipe constructs ES2022 DTOs
+with own undefined optional fields; the normalizer incorrectly rejected them.
+An actual ValidationPipe regression reproduced the exact error before the fix;
+the normalizer now skips undefined only, retaining null/array rejection.
+The targeted test is GREEN3/3. Full quality is being rerun for the new artifact.
+
+Manual compatible rollback restored healthy0.6 API9a1c3904/WEBeb56bf67 with no
+database restoration, migration or seed. All37 migrations and PG/Redis preserved;
+bounded19table samples/counts before/after first switch were unchanged.
+Failed snapshot/source and private diagnostics retained. Retry uses independent
+.local/sales-statistics-deploy-r2 receipts and a fresh manifest/backup; user deploy
+authorization persists. Installed browser acceptance is still required.
+
+## 2026-10-18 — 0.7.0 sales statistics deployment authorized, in progress
+
+User explicitly requested deployment after local implementation acceptance.
+Scope: API + WEB only, no schema migration/seed/backfill/business edits. Local
+release metadata is 0.7.0. Docker WEB now copies the pure API statistics type
+contract required by its isolated typecheck; no API runtime code is bundled.
+Existing PG/Redis, secrets, proxy and dependency graphs must remain unchanged.
+Deploy a fully manifested uncommitted snapshot, separate from its Git base;
+no commit/push/tag publication was authorized. MAIN owns the deploy helper in
+.local/sales-statistics-deploy; live authenticated smoke is read-only.
+
+Actual preflight: version0.6.0/source036b95e, API9a1c3904, WEBeb56bf67 healthy;
+37 migrations unchanged. FULL20261018T150941Z-v060-pre-v070 verified including
+checksums, dump/upload catalogs and completed backup metadata. Retain old images
+and source; recovery replaces API/WEB only and never restores production data.
+
+
+## 2026-10-18 — Sales statistics implemented locally; no deployment
+
+User authority: new Statistics mode inside Overview, approved spec/PNG in
+`docs/ui/sales-statistics-approved-*`; ALL physical products including accessories
+are counted independently from distinct orders. No commit/push/deploy or production
+read/write is authorized by this request. No schema change/migration was needed.
+
+New read-only `/overview/sales-statistics` + `/export`: full cursor-batched Prisma
+snapshot, canonical clients/first-order history, independent creation/cash dates,
+real order provenance and delivery country, historical NBU/ECB exact FX, role
+redaction and actor/query/valuation-pinned CSV. UI has five tabs, six KPI, world
+map, rankings/charts, URL filters/history and paged drill-down; old Overview lives
+behind the mode wrapper. ACCOUNTANT does not gain Order/Client detail permission.
+
+Methodology and DB plan: `docs/plans/sales-statistics.md`.
+Report/screenshots: `docs/ui/sales-statistics-implementation-report.md` and
+`docs/ui/sales-statistics-2026-10-18/`. Independent fixture-browser evidence is
+explicitly not production-data proof. Tests/helpers use synthetic data only;
+there is no runtime mock branch.
+
+Verification: frozen full quality unit/types/build EXIT0; evidence is recorded in
+`.local/sales-statistics/quality-release.log`. Restored next-env after build and
+confirmed WEB typecheck + git diff --check EXIT0 in post-restore-exit-receipt.json.
+API1207 + Web501 + DB26 passed, opt-in browser skipped by ordinary unit command;
+DAG tooling45 passed. Independent Chromium full16 scenarios passed, with targeted
+post-review coverage for 1366 money-column visibility and source receipts. Five
+viewport comparisons and compatibility/business/Spec-FX/visual reviews passed.
+Final LOCAL release gate PASS; no outstanding mandatory checks. See final report
+for exact evidence provenance.
+
+Work is uncommitted on `codex/website-sales` in the existing integrator worktree
+`D:/CodexData/.codex/worktrees/finance-approved-redesign/YO_crm`, base a80a9b3.
+Primary D:/Projects/YO_crm unrelated dirty changes were not touched. Do not deploy
+without a new explicit request. Production was not queried or changed here.
+
 ## 2026-10-18 — CRM 0.6.0 installed and published
 
 Explicit user-authorized WEB-only deployment installed source036b95e2203b0cb0cefe0608b91a729df2dd5c71.

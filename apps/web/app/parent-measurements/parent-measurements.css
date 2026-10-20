@@ -1,0 +1,58 @@
+.pm-root {
+  --pm-border: var(--mantine-color-yoleotard-1);
+  --pm-ink: #17124d;
+  min-height: 100dvh;
+  background: #f7f6ff;
+  color: var(--pm-ink);
+  padding: 24px 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.pm-root *, .pm-root *::before, .pm-root *::after { box-sizing: border-box; }
+.pm-root .pm-card { width: min(100%, 460px); min-height: calc(100dvh - 48px); margin: 0 auto; background: white; border: 1px solid var(--pm-border); border-radius: var(--mantine-radius-xl); padding: 22px; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 6px 28px #29205208; }
+.pm-root .pm-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; margin: 0; }
+.pm-root .pm-header > .mantine-Select-root { width: 118px; flex: 0 0 118px; }
+.pm-root .pm-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pm-root .pm-brand > span { font-style: italic; color: #fa2072; font-size: 32px; font-weight: 700; letter-spacing: -4px; padding-right: 4px; }
+.pm-root .pm-brand strong { display: block; font-size: 18px; line-height: 1.2; }
+.pm-root .pm-brand small { display: block; font-size: 10px; color: var(--mantine-color-dimmed); }
+.pm-root .pm-title { font-size: clamp(23px, 6vw, 28px); line-height: 1.2; margin: 0; color: var(--pm-ink); outline: none; }
+.pm-root .pm-content { flex: 1; }
+.pm-root .pm-step { flex-wrap: nowrap; }
+.pm-root .pm-step > .mantine-Progress-root { flex: 1; }
+.pm-root .pm-step > .mantine-Text-root { max-width: 42%; }
+.pm-root .pm-athlete { background: var(--mantine-color-yoleotard-0); }
+.pm-root .pm-languages { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.pm-root .pm-roster-copy { min-width: 0; flex: 1; }
+.pm-root .pm-footer { border-top: 1px solid var(--pm-border); padding-top: 14px; margin-top: 8px; display: grid; gap: 12px; }
+.pm-root .pm-diagram { width: 100%; height: auto; border-radius: var(--mantine-radius-md); }
+.pm-root .pm-private-photo { width: 100%; max-height: 220px; object-fit: contain; border-radius: var(--mantine-radius-md); }
+.pm-root .pm-shared-qr { width: min(100%, 280px); height: auto; }
+.pm-root .pm-photo-button { display: block; padding: 0; height: auto; width: 100%; }
+.pm-root .pm-photo-button .mantine-Button-inner { height: auto; }
+.pm-root .pm-photo-button .mantine-Button-label { display: block; width: 100%; height: auto; }
+.pm-root .pm-photo-button img { display: block; width: 100%; height: 260px; object-fit: contain; border-radius: var(--mantine-radius-md); background: var(--mantine-color-gray-0); }
+.pm-root .pm-core-links { display: grid; gap: 6px; }
+.pm-root .pm-summary { margin: 0; border: 1px solid var(--pm-border); border-radius: var(--mantine-radius-md); overflow: hidden; }
+.pm-root .pm-summary > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--pm-border); font-size: 13px; }
+.pm-root .pm-summary > div:last-child { border-bottom: 0; }
+.pm-root .pm-summary dt { color: var(--mantine-color-dimmed); }
+.pm-root .pm-summary dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.pm-root .pm-success-mark { width: 78px; height: 78px; display: grid; place-items: center; align-self: center; background: var(--mantine-color-teal-5); color: white; border-radius: 50%; font-size: 48px; margin: 18px 0; }
+.pm-root .mantine-Accordion-label strong { display: block; color: var(--mantine-color-yoleotard-7); }
+.pm-root .mantine-Alert-message { overflow-wrap: anywhere; }
+.pm-zoom-image { display: block; width: 100%; height: auto; }
+.pm-root .pm-value-controls { min-width: 0; }
+.pm-root .pm-value-input { flex: 0 0 auto; font-size: var(--mantine-font-size-md); width: calc(var(--pm-value-characters, 6) * 1ch + 2 * var(--mantine-spacing-md) + 2px); font-variant-numeric: tabular-nums; }
+.pm-root .pm-value-unit { flex: 0 0 auto; white-space: nowrap; }
+.pm-root .pm-value-slider { flex: 1 1 0; min-width: 0; }
+.pm-measure-screen .pm-card { gap: 10px; }
+.pm-measure-screen .pm-title { font-size: 24px; }
+.pm-measure-screen .pm-photo-button img { height: 210px; }
+.pm-measure-screen .pm-footer { gap: 6px; padding-top: 8px; margin-top: 0; }
+.pm-measure-screen .pm-athlete { padding: 8px; }
+@media (max-width: 480px) {
+  .pm-root { padding: 0; background: white; }
+  .pm-root .pm-card { min-height: 100dvh; padding: 18px 16px max(18px, env(safe-area-inset-bottom)); border: 0; border-radius: 0; box-shadow: none; }
+  .pm-root .pm-header > .mantine-Select-root { width: 106px; flex-basis: 106px; }
+}

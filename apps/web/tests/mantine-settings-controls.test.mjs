@@ -65,14 +65,16 @@ test("branding and production forms use shared controls and preserve payload fie
 test("all standard Settings controls use the shared Mantine layer", () => {
   assert.match(controls, /Textarea/);
   assert.match(controls, /CrmTextarea/);
-  assert.match(settings, /CrmTabList/);
+  assert.match(settings, /<Tabs\.Tab/);
+  assert.match(settings, /className="settings-tax-sidebar" aria-label=\{settingsUi.title\}/);
+  assert.match(settings, /onChange=\{value => value && selectSection\(value\)\}/);
   assert.match(tabs, /aria-controls=\{tab\.panelId\}/);
   assert.match(tabs, /id=\{tab\.tabId\}/);
   assert.match(settings, /panelId:"settings-finance-panel"/);
   assert.match(settings, /tabId:"settings-finance-tab"/);
   assert.match(settings, /aria-labelledby="settings-finance-tab"/);
   assert.equal((settings.match(/aria-labelledby="settings-communications-tab"/g) || []).length, 2);
-  assert.match(settings, /title:settingsUi\.comingSoon/);
+  assert.match(settings, /value:"taxes",label:taxUi\.taxes/);
   assert.match(settings, /<CrmTextInput[^>]*name="currentPassword"/);
   assert.match(settings, /<CrmNativeSelect[^>]*name="defaultCurrency"/);
   assert.match(settings, /<CrmTextarea[^>]*name="sellerAddress"/);

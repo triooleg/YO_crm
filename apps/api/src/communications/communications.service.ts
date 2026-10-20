@@ -1,3 +1,4 @@
+import { measurementDefinitionAnnotation } from "../clients/measurement-data";
 import {
   BadGatewayException,
   BadRequestException,
@@ -2969,13 +2970,13 @@ export class AiAssistantService {
   private async summaryContext(clientId:string){
     const client=await this.p.client.findFirst({where:{id:clientId,archivedAt:null},select:{
       displayName:true,country:true,city:true,language:true,timezone:true,
-      athletes:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{firstName:true,lastName:true,discipline:true,club:true,coach:true,measurements:{orderBy:{measuredAt:"desc"},take:1,select:{measuredAt:true,unit:true,height:true,chest:true,waist:true,hips:true,torso:true,values:true}}}},
+      athletes:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{firstName:true,lastName:true,discipline:true,club:true,coach:true,measurements:{orderBy:{measuredAt:"desc"},take:1,select:{measuredAt:true,definitionVersion:true,unit:true,height:true,chest:true,waist:true,hips:true,torso:true,values:true}}}},
       orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:10,select:{number:true,type:true,discipline:true,requiredDeliveryAt:true,promisedProductionAt:true,priceMinor:true,currency:true,depositRequiredMinor:true,deliveryMinor:true,discountMinor:true,salesStatus:true,productionStatus:true,paymentStatus:true,shippingStatus:true,payments:{where:{voidedAt:null},orderBy:{receivedAt:"asc"},select:{amountMinor:true,currency:true,method:true,receivedAt:true}},shipment:{select:{carrier:true,trackingNumber:true,costMinor:true,currency:true,shippedAt:true,deliveredAt:true}}}},
     }});
     if(!client)throw new NotFoundException("Клиент не найден");
     return{
       client:{displayName:client.displayName,country:client.country,city:client.city,language:client.language,timezone:client.timezone},
-      athletes:client.athletes.map(athlete=>({firstName:athlete.firstName,lastName:athlete.lastName,discipline:athlete.discipline,club:athlete.club,coach:athlete.coach,measurements:athlete.measurements})),
+      athletes:client.athletes.map(athlete=>({firstName:athlete.firstName,lastName:athlete.lastName,discipline:athlete.discipline,club:athlete.club,coach:athlete.coach,measurements:athlete.measurements.map(snapshot=>({...snapshot,definitionAnnotation:measurementDefinitionAnnotation(snapshot.definitionVersion)}))})),
       orders:client.orders.map(order=>({number:order.number,type:order.type,discipline:order.discipline,requiredDeliveryAt:order.requiredDeliveryAt,promisedProductionAt:order.promisedProductionAt,salesStatus:order.salesStatus,productionStatus:order.productionStatus,paymentStatus:order.paymentStatus,shippingStatus:order.shippingStatus,price:{display:formatMinorMoney(order.priceMinor,order.currency)},depositRequired:{display:formatMinorMoney(order.depositRequiredMinor,order.currency)},delivery:{display:formatMinorMoney(order.deliveryMinor,order.currency)},discount:{display:formatMinorMoney(order.discountMinor,order.currency)},payments:order.payments.map(payment=>({display:formatMinorMoney(payment.amountMinor,payment.currency),method:payment.method,receivedAt:payment.receivedAt})),shipment:order.shipment?{carrier:order.shipment.carrier,trackingNumber:order.shipment.trackingNumber,cost:{display:formatMinorMoney(order.shipment.costMinor,order.shipment.currency)},shippedAt:order.shipment.shippedAt,deliveredAt:order.shipment.deliveredAt}:null})),
     };
   }

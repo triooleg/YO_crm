@@ -1,26 +1,29 @@
+import type { FiscalReport, FiscalTaxRow } from './tax-integration-contract';
 import { parseSource } from './order-source-values.mjs';
 import type { OrderSource, OrderSourceFilter, SourceAmount } from './order-source';
 import type { FinanceInvoice } from '../components/invoice-editor';
 
 export type DisplayCurrency = 'EUR' | 'USD' | 'UAH';
-export type FinanceTab = 'payments' | 'expenses' | 'invoices';
+export type FinanceTab = 'payments' | 'expenses' | 'invoices' | 'taxes';
 export type FinanceFilters = {
-  source?:OrderSourceFilter; month:string; currency:DisplayCurrency; range:number; tab:FinanceTab; page:number; pageSize:number;
+  source?:OrderSourceFilter; taxComponent?:''|'UNIFIED'|'MILITARY'|'ESV'; month:string; currency:DisplayCurrency; range:number; tab:FinanceTab; page:number; pageSize:number;
   search:string; status:string; clientId:string; categoryId:string; orderId:string; from:string; to:string;
   sort:'date'|'number'|'client'|'amount'|'paid'|'balance'|'category'|'status'; direction:'asc'|'desc'; scope:'all'|'forecast';
 };
 export type PaymentRow = {orderSource?:OrderSource;id:string;orderId:string;number:string;clientId:string;clientName:string;date:string|null;amountMinor:number;paidMinor:number;balanceMinor:number;status:'UNPAID'|'PARTIAL'|'PAID';method:string|null;notes:string|null;originalCurrency:string;originalAmountMinor:number;originalPaidMinor:number;originalBalanceMinor:number;roundingDifferenceMinor:number;forecastDate:string|null;forecastSource:'deadline'|'production'|null};
 export type ExpenseRow = {orderSource?:OrderSource;id:string;date:string;categoryId:string;categoryName:string;orderId:string|null;number:string|null;notes:string|null;amountMinor:number;originalAmountMinor:number;originalCurrency:string;shipmentId:string|null};
+export type FinanceExpenseView = Omit<ExpenseRow,'amountMinor'|'orderSource'> & {amountMinor:number|null;orderSource?:string;originalTimestamp?:string};
 export type InvoiceRow = {orderSource?:OrderSource;id:string;orderId:string;number:string;orderNumber:string;clientId:string;clientName:string;date:string;dueDate:string|null;status:string;amountMinor:number;paidMinor:number|null;balanceMinor:number|null;originalCurrency:string;originalAmountMinor:number};
 export type FinanceOrder = {id:string;number:string;archivedAt?:string|null;displayCurrency:string;priceMinor:number;depositRequiredMinor:number;currency:string;requiredDeliveryAt?:string;client:{displayName:string;country?:string;language?:string};payments:{id?:string;displayAmountMinor:number;amountMinor:number;currency:string;appliedAmountMinor?:number;appliedCurrency?:string;receivedAt?:string;method?:string;reference?:string;notes?:string}[];invoices:FinanceInvoice[]};
 export type FinanceReport = {
+ fiscal?: FiscalReport;
  sourceAnalytics?:{websiteReceivedMinor:number;totalReceivedMinor:number;breakdown:SourceAmount[];trend:{month:string;breakdown:SourceAmount[]}[]};
   month:string;currency:DisplayCurrency;valuationVersion:string;valuation:{provider:string|null;effectiveDate:string|null;fetchedAt:string|null;officialUrl:string|null};today:string;forecastUntil:string;
   current:{receivedMinor:number;expensesMinor:number;resultMinor:number};previous:{receivedMinor:number;expensesMinor:number;resultMinor:number};
   debtMinor:number;forecastMinor:number;forecastCount:number;invoiceCount:number;invoiceTotalMinor:number;unpaidInvoiceCount:number;
   monthlyTrend:{month:string;receivedMinor:number;expensesMinor:number;resultMinor:number}[];
   categoryBreakdown:{id:string;name:string;amountMinor:number}[];recentExpenses:ExpenseRow[];upcoming:PaymentRow[];
-  table:{tab:FinanceTab;rows:(PaymentRow|ExpenseRow|InvoiceRow)[];total:number;page:number;pageSize:number};
+  table:{tab:FinanceTab;rows:(PaymentRow|ExpenseRow|InvoiceRow|FiscalTaxRow)[];total:number;page:number;pageSize:number};
   options:{clients:{id:string;name:string}[];categories:{id:string;name:string;active?:boolean}[];orders:{id:string;number:string;clientName:string;currency:string}[]};
 };
 export function moveFinanceMonth(month:string, delta:number){const [year,value]=month.split('-').map(Number);const next=new Date(Date.UTC(year!,value!-1+delta,1));return `${next.getUTCFullYear()}-${String(next.getUTCMonth()+1).padStart(2,'0')}`;}
@@ -30,13 +33,14 @@ export function patchFinanceFilters(current:FinanceFilters,next:Partial<FinanceF
   const result={...current,...next,page:next.page??1};
   if(next.tab&&next.tab!==current.tab){
     result.status='';
+    if(next.tab!=='taxes'&&current.taxComponent!==undefined)result.taxComponent='';
     if(next.tab==='expenses')result.clientId='';
     if(current.tab==='expenses')result.categoryId='';
   }
   return result;
 }
 export type FinanceMoneyField = 'amount'|'paid'|'balance';
-export function originalMinor(row:PaymentRow|ExpenseRow|InvoiceRow,field:FinanceMoneyField='amount'):number|null{
+export function originalMinor(row:PaymentRow|FinanceExpenseView|InvoiceRow,field:FinanceMoneyField='amount'):number|null{
   if(field==='amount')return row.originalAmountMinor;
   if('originalPaidMinor' in row)return field==='paid'?row.originalPaidMinor:row.originalBalanceMinor;
   if('status' in row&&row.status==='PAID')return field==='paid'?row.originalAmountMinor:0;
@@ -67,7 +71,8 @@ export function readFinanceRoute(base:FinanceFilters,query:string):FinanceFilter
  const params=new URLSearchParams(query),result={...base,source:parseSource(params.get('source'))};
  const period=params.get('period');if(period&&/^(?:19|20|21)\d{2}-(0[1-9]|1[0-2])$/.test(period))result.month=period;
  const currency=params.get('currency');if(currency&&['EUR','USD','UAH'].includes(currency))result.currency=currency as DisplayCurrency;
- const tab=params.get('tab');if(tab&&['payments','expenses','invoices'].includes(tab))result.tab=tab as FinanceTab;
+ const tab=params.get('tab');if(tab&&['payments','expenses','invoices','taxes'].includes(tab))result.tab=tab as FinanceTab;
+ const component=params.get('taxComponent');if(params.has('taxComponent')||base.taxComponent!==undefined||result.tab==='taxes')result.taxComponent=component&&['UNIFIED','MILITARY','ESV'].includes(component)?component as FinanceFilters['taxComponent']:'';
  for(const key of ['search','status','clientId','categoryId','orderId','from','to'] as const)result[key]=params.get(key)||'';
  const page=Number(params.get('page'));if(Number.isSafeInteger(page)&&page>0&&page<=100000)result.page=page;
  const size=Number(params.get('pageSize'));if(FINANCE_PAGE_SIZES.includes(size as 10))result.pageSize=size;

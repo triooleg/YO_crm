@@ -13,6 +13,8 @@ test("invoice editor supports rows and updates",()=>{for(const token of [/setInv
 test("invoice editor exposes dates language and status",()=>{for(const token of [/issueDate/,/dueDate/,/language/,/status/,/financeUi\.issueDate/,/financeUi\.dueDate/,/financeUi\.invoiceStatus/])assert.match(finance,token)});
 test("archived order invoice keeps an editor fallback",()=>{assert.match(finance,/\/finance\/report\/orders\//);assert.match(finance,/order\.archivedAt/)});
 test("finance workspace edits and archives expenses",()=>{assert.match(finance,/FinanceExpenseDialog/);assert.match(finance,/editExpense/);assert.match(finance,/archiveExpense/);assert.match(finance,/ui\.archive/)});
-test("finance workspace renders monthly and category analytics",()=>{assert.match(finance,/categoryBreakdown/);assert.match(finance,/monthlyTrend/);assert.match(finance,/ui\.expenseStructure/);assert.match(finance,/ui\.dynamics/)});
+// The fiscal integration replaces the old cash-only graph inputs; mounted-browser
+// acceptance covers amounts and drilldowns, while this guard retains the chart surfaces.
+test("finance workspace retains monthly and classified expense analytics",()=>{assert.match(finance,/finance-report-bar-chart/);assert.match(finance,/data-expense-structure/);assert.match(finance,/onCategory/);assert.match(finance,/onTax/)});
 
 test("preserves archived expense relations and shows modal errors",()=>{assert.match(finance,/row\.categoryName/);assert.match(finance,/category!==row\.categoryId/);assert.match(finance,/order!==\(row\.orderId/);assert.match(finance,/role="alert"/);assert.match(finance,/aria-hidden="true"/);assert.match(finance,/role="img"/);assert.match(finance,/download=1/)})

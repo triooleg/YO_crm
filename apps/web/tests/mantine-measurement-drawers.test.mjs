@@ -21,7 +21,8 @@ test("редактор и просмотр замеров используют M
   assert.match(form, /closeOnEscape=\{!busy\}/);
   assert.match(form, /closeOnClickOutside=\{!busy\}/);
   assert.match(editor, /<MeasurementEditor/);
-  assert.match(editor, /disabled=\{saving\}/);
+  assert.match(editor, /disabled=\{locked\}/);
+  assert.match(editor, /const locked=saving\|\|creationUnknown\|\|profileUnknown/);
   assert.match(editor, /submittingRef=useRef\(false\)/);
   assert.match(editor, /if\(submittingRef\.current\)return/);
   assert.match(editor, /submittingRef\.current=true/);

@@ -55,8 +55,11 @@ export class UpdateAthleteDto {
   @ApiProperty({ nullable: true }) @Transform(({ value }) => typeof value === "string" ? value.trim() || null : value) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(100) lastName!: string | null;
   @ApiProperty() @IsString() @Length(1,100) expectedFirstName!: string;
   @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedLastName!: string | null;
+  @ApiPropertyOptional({ enum: Discipline }) @ValidateIf(dto => dto.discipline !== undefined || dto.expectedDiscipline !== undefined) @IsEnum(Discipline) discipline?: Discipline;
+  @ApiPropertyOptional({ enum: Discipline, nullable: true }) @ValidateIf(dto => (dto.discipline !== undefined || dto.expectedDiscipline !== undefined) && dto.expectedDiscipline !== null) @IsEnum(Discipline) expectedDiscipline?: Discipline | null;
 }
 export class CreateMeasurementDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1,100) sourceMeasurementId?:string;
   @ApiProperty() @IsDateString() measuredAt!:string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @IsIn([105,110,115,120,125,130,135,140,144,148,152,156,159,162,165,168,172]) standardHeight?:number;
   @ApiProperty() @IsNumber() @Min(1) m1!:number;

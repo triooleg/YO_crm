@@ -8,7 +8,8 @@ export class FinanceReportQueryDto {
   @IsOptional() @IsString() @MaxLength(7) month?: string;
   @IsOptional() @IsIn(["EUR", "USD", "UAH"]) currency?: string;
   @IsOptional() @Type(() => Number) @IsIn([3, 6, 12]) range?: number;
-  @IsOptional() @IsIn(["payments", "expenses", "invoices"]) tab?: string;
+  @IsOptional() @IsIn(["payments", "expenses", "invoices", "taxes"]) tab?: string;
+  @IsOptional() @IsIn(['UNIFIED', 'MILITARY', 'ESV']) taxComponent?: 'UNIFIED' | 'MILITARY' | 'ESV';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) page?: number;
   @IsOptional() @Type(() => Number) @IsIn([10, 25, 50, 100]) pageSize?: number;
   @IsOptional() @IsString() @MaxLength(200) search?: string;

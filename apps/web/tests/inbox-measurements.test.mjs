@@ -3,12 +3,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import ts from "typescript";
 import vm from "node:vm";
+import {createRequire} from 'node:module';
+const nativeRequire=createRequire(import.meta.url),cache=new Map();
 
 async function load(path) {
-  const source = await readFile(new URL(path, import.meta.url), "utf8");
+  const url=new URL(path,import.meta.url);
+  if(cache.has(url.href))return cache.get(url.href).exports;
+  const source = await readFile(url, "utf8");
   const javascript = ts.transpileModule(source, {compilerOptions: {module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   const module = {exports:{}};
-  vm.runInNewContext(javascript,{module,exports:module.exports});
+  cache.set(url.href,module);
+  const dependencies=new Map();
+  for(const [,name] of javascript.matchAll(/require\("([^"]+)"\)/g))if(name.startsWith('.'))dependencies.set(name,await load(new URL(name+'.ts',url)));
+  vm.runInNewContext(javascript,{module,exports:module.exports,require:name=>dependencies.get(name)??nativeRequire(name)});
   return module.exports;
 }
 const {editableInboxMeasurementValues,inboxMeasurements} = await load("../lib/inbox-measurements.ts");

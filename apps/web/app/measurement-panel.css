@@ -22,3 +22,7 @@
 .measurement-editor-form>footer>div{display:flex;gap:9px}
 .measurement-editor-form>footer:has(>div){justify-content:space-between}
 @media(max-width:540px){.measurement-editor-header,.measurement-editor-description,.measurement-editor-scroll,.measurement-editor-form>footer{padding-inline:12px}.measurement-editor-table>header,.measurement-editor-table>label{grid-template-columns:24px minmax(0,1fr) 100px;padding-inline:6px}.measurement-editor .mantine-Tabs-tab{font-size:12px}}
+
+.measurement-editor-semantic-note{margin:0 0 12px;font-size:12px;line-height:1.5;color:var(--muted)}
+
+.measurement-editor-header{flex-direction:row;margin:0}

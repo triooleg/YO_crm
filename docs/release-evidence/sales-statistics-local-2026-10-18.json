@@ -1,0 +1,258 @@
+{
+  "task": "Sales statistics local implementation",
+  "baseHead": "a80a9b3ff3c7e803915a9e91964366aac1085382",
+  "branch": "codex/website-sales",
+  "capturedUtc": "2026-10-18T15:04:05.9243521Z",
+  "committed": false,
+  "deployed": false,
+  "productionAccess": false,
+  "schemaChanges": false,
+  "quality": {
+    "command": "pnpm quality:check",
+    "exitCode": 0,
+    "apiPassed": 1207,
+    "webPassed": 501,
+    "databasePassed": 26,
+    "ordinaryOptInBrowserSkipped": 1,
+    "typecheck": "PASS",
+    "build": "PASS",
+    "dagTestsPassed": 45,
+    "postRestoreWebTypecheckExitCode": 0,
+    "diffCheckExitCode": 0
+  },
+  "browser": {
+    "provenance": "Real local Chromium and UI; synthetic HTTP projected by actual model/query/CSV, synthetic FX; no real DB/provider/production proof",
+    "fullLeafScenariosPassed": 16,
+    "fullNodeTestsPassed": 17,
+    "incrementalVisualCasesPassed": 5,
+    "incrementalFinalCasesPassed": 2,
+    "pageErrors": 0,
+    "boundaryViolations": 0,
+    "viewports": [
+      "1536x1024",
+      "1920x1080",
+      "1366x768",
+      "820x1180",
+      "390x844"
+    ]
+  },
+  "reviews": {
+    "compatibility": "PASS",
+    "standards": "PASS",
+    "businessSecurity": "PASS",
+    "sourceSpecFx": "PASS",
+    "regression": "PASS",
+    "visual": "scoped fixture-browser PASS",
+    "localRelease": "PASS"
+  },
+  "files": [
+    {
+      "path": "apps/api/src/app.module.ts",
+      "sha256": "9e76f004356554e7531a9dc90128738a4ae9e27f15ed88ccd03fdc7d548ebed5"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics-country-data.json",
+      "sha256": "6d9eb3717148e4461ef8455e3e19d0faade45c33757ec8ac2203b5f96339f7b3"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics-country.ts",
+      "sha256": "795f033078570329c1758c4fce5a569792ced16fb98d8bb36cd307efa6f4f817"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics-fx.ts",
+      "sha256": "8958df13b28aa01aeb4c694112609336ee8e741d4c4648ef65f277765419cd0b"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.controller.ts",
+      "sha256": "220cea39257f23c9e522a3791c0a252134194365c8e88d61d2254f6ad98d2d16"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.dto.ts",
+      "sha256": "24391e9919a5160506a09dc6c6099c81123881d8514af64ca66486a452d1cee1"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.model.ts",
+      "sha256": "9ed418cf3e45a0c499606738ec6d9095a4f811db120716f81398edd0173f1175"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.query.ts",
+      "sha256": "dc0effb04dfa5518e61cf478525716869074df908835117611ccd130d9021559"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.service.ts",
+      "sha256": "c6eccb5fc58eb6d631ef4440677974c5d145d3972c7aa50092b8dcb03b537345"
+    },
+    {
+      "path": "apps/api/src/overview/sales-statistics.types.ts",
+      "sha256": "04ed1e83475e30f0f53b7b2857a79b1d3bf74fd58257fd9e6b3c84de876e2e3a"
+    },
+    {
+      "path": "apps/api/tests/sales-statistics-fx.test.mjs",
+      "sha256": "2f076605b344a7f96b75990f9e25465f34b0677dfb7bda6fb441e82edae061cb"
+    },
+    {
+      "path": "apps/api/tests/sales-statistics-model.test.mjs",
+      "sha256": "6d8d11b843e871c2c64cf1f2391ff610dad98089707a25bba74d70c6010271b4"
+    },
+    {
+      "path": "apps/api/tests/sales-statistics-query.test.mjs",
+      "sha256": "717b8a8552a2021d450fdefe441f9dde1fb767d1f2e0155fcd77fdf30e5d5e49"
+    },
+    {
+      "path": "apps/api/tests/sales-statistics-service.test.mjs",
+      "sha256": "bf028bde1f8dfa13b852aef1c6b79b1fa85bafe329c4f3ef0ca7a385f60a72b5"
+    },
+    {
+      "path": "apps/web/app/layout.tsx",
+      "sha256": "2cba2146507240444e640e81a6f2a9ef8044f744bfad01d051ed2a0ec3bd1f26"
+    },
+    {
+      "path": "apps/web/app/sales-statistics-map.css",
+      "sha256": "e9397858febb5b4efdde961820d03d668d9492b5a01a3a5237f727f49fb45ce6"
+    },
+    {
+      "path": "apps/web/app/sales-statistics.css",
+      "sha256": "a77ccc2183188cf4b73bcf9d2462acf919a3120b279ba4541e0683042b0c3a11"
+    },
+    {
+      "path": "apps/web/components/crm-shell.tsx",
+      "sha256": "ac34f7a1e7fdc95b47e7860487026cc54427798fef2a0b88b8f338a505c847bc"
+    },
+    {
+      "path": "apps/web/components/overview-modes-workspace.tsx",
+      "sha256": "9235071a2ccc40c6f6a622fc24b1920603f4ef55fd4a951c879906d6e779f3db"
+    },
+    {
+      "path": "apps/web/components/overview-workspace.tsx",
+      "sha256": "c93a06937b15b74d14bd3ebb97108886778fc87146004384fb43a6c1ab395906"
+    },
+    {
+      "path": "apps/web/components/sales-statistics-charts.tsx",
+      "sha256": "17b25f23adfc1fcfdffdce034834d67935c45fd44914d513f74762ed13586c51"
+    },
+    {
+      "path": "apps/web/components/sales-statistics-map.tsx",
+      "sha256": "5b36f92cb978354e49542948aafcee64ffbf0a89a2781466ca426068a7e77257"
+    },
+    {
+      "path": "apps/web/components/sales-statistics-tables.tsx",
+      "sha256": "59a2b05063791b863544070a4e52c7d47605d14b04fa2bcf50d5d0008a10b443"
+    },
+    {
+      "path": "apps/web/components/sales-statistics-workspace.tsx",
+      "sha256": "60d10aa7005cbc18b1b50bc352d8cdab0700f1ac6592a7d0cf677c76d5fb8f86"
+    },
+    {
+      "path": "apps/web/lib/crm-sections.ts",
+      "sha256": "cb212592a91acec7f5d35437216f996793e761a2c84659362ae008b04dd1dc80"
+    },
+    {
+      "path": "apps/web/lib/i18n.ts",
+      "sha256": "df522e65eb3b1d169c954cb7beb0d5d75491fb8379f495788fde55928d0ac0af"
+    },
+    {
+      "path": "apps/web/lib/mantine-theme.ts",
+      "sha256": "81b2a153fba97718add66a82b40c5b5cc5c8d888d1a8c75c0526c8f6de0bab51"
+    },
+    {
+      "path": "apps/web/lib/sales-statistics-types.ts",
+      "sha256": "350e57c250f87c5c9c2d2443b56b5af01eb0c5b552fc9b97f87c9135d6317dba"
+    },
+    {
+      "path": "apps/web/lib/sales-statistics-world.ts",
+      "sha256": "cddbba38a7aa19d0bf08bdaa265e6bb29105fa6d66fd576830e1d3ff215e1b1f"
+    },
+    {
+      "path": "apps/web/lib/sales-statistics.ts",
+      "sha256": "376a633940090dda5517705f54f3bd2e5ceb512e01584b5ac99271db529f79e3"
+    },
+    {
+      "path": "apps/web/tests/fixtures/sales-statistics-browser-fixture.mjs",
+      "sha256": "5aabdc03f5165c5d0b0fd85caf167d6b48cad1acb8afdc2b669e79beb2101f9d"
+    },
+    {
+      "path": "apps/web/tests/sales-statistics-browser.test.mjs",
+      "sha256": "7f193bda55c33c98dbafd6a234faf96ce4716f8239dd6fc3f60b66ede0b9920f"
+    },
+    {
+      "path": "apps/web/tests/sales-statistics-charts.test.mjs",
+      "sha256": "abe024c6ec99e5813013e7235ce2d47f4180e3a142b3d5a472d19a3f3b507d60"
+    },
+    {
+      "path": "apps/web/tests/sales-statistics.test.mjs",
+      "sha256": "f223a8eafcadb025c270e7c30f13de8d88f0c1e7d5b2c9a5fef6591d6c23050d"
+    },
+    {
+      "path": "CHAT_HANDOFF.md",
+      "sha256": "153f7635b277127eb576004e53055eb0486d2aec16ad2c59d9c197ae1b24cf99"
+    },
+    {
+      "path": "docs/plans/sales-statistics.md",
+      "sha256": "f12608fa55da7fb63cc854907046a6fdae8b9688b16f31d5674e40752982a64a"
+    },
+    {
+      "path": "docs/release-evidence/sales-statistics-local-2026-10-18.md",
+      "sha256": "aa6e2363d12587e41ffc4adbd8c419917f6cda1adcaa16858629caa0cf515023"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/sources-receipts-MANAGER.png",
+      "sha256": "59c495b8c57c55fea26666b98e45ab03dcdab135aa353718b08b2356fb8c2aec"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/sources-receipts-OWNER.png",
+      "sha256": "6951cc4aaae57e2c817bc241542b071eaef7b15d9766cc80531fc6889e94843d"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-1366-lower.png",
+      "sha256": "7e3c7e8fb436c296058988383a4b0c6b721461253e637c6e49ec8950ed5cf33d"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-1366-viewport.png",
+      "sha256": "197cc7be8b5d151d02599da763f1c8646a05638fbb6c210bd8db69aa555d438d"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-1536-full.png",
+      "sha256": "e3e9785d2423d9b592391c01da367b21f65696215027d9c3c2190100d61150d7"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-1536-viewport.png",
+      "sha256": "af6b429884b70c28d75598f13e6e7a2d55a18761cda3a1f5033e361503db1d21"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-1920-viewport.png",
+      "sha256": "e55c208a29313f6bebab457068987a0bbf73e8962f42be5d7b9cc76dfdc75392"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-390-filters.png",
+      "sha256": "6b447ff59d8752d6a80966624ce654dba858c361bb6c630c9153e32c2f9f0152"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-390-full.png",
+      "sha256": "a66afa7126a98bbcda2f8f52993538d120345ef92248f71858310178bf58506e"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-390-viewport.png",
+      "sha256": "a66afa7126a98bbcda2f8f52993538d120345ef92248f71858310178bf58506e"
+    },
+    {
+      "path": "docs/ui/sales-statistics-2026-10-18/statistics-820-viewport.png",
+      "sha256": "038b2d47fb234cbff5e45c0caba4bff7903b0bb4146b0a4fe2b9558d267bb8e7"
+    },
+    {
+      "path": "docs/ui/sales-statistics-approved-design.png",
+      "sha256": "e9573c3bba96ca95f4582aa2ca3f92d368cd728e24c0357ecb4ba7c1ab9989b4"
+    },
+    {
+      "path": "docs/ui/sales-statistics-approved-spec.md",
+      "sha256": "f1b29374560d723e07cca813e06ac82e3fc2b602065d1cecd917bb87a635db93"
+    },
+    {
+      "path": "docs/ui/sales-statistics-implementation-report.md",
+      "sha256": "571bb2b8d6cbad490e9e2e05a85dd3093fda0276d1f26be0e6ccbdcd4610d25b"
+    },
+    {
+      "path": "docs/ui/sales-statistics-map-source.md",
+      "sha256": "cdc3d8098546f69338f698d65550b249989b0d61abf6b142458514cc49b79729"
+    }
+  ]
+}

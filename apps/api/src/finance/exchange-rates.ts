@@ -240,6 +240,8 @@ export async function fetchOfficialRates(provider: ExchangeRateProvider, fetcher
 
 @Injectable()
 export class ExchangeRatesService {
+  private readonly currentRefreshes = new Map<ExchangeRateProvider, ReturnType<ExchangeRatesService["refresh"]>>();
+
   constructor(private readonly prisma: PrismaService) {}
 
   async status() {
@@ -275,6 +277,22 @@ export class ExchangeRatesService {
       if (!refreshed.cache) throw new ServiceUnavailableException("Официальные курсы недоступны");
       return refreshed.cache;
     }
+  }
+
+  async ensureCurrent(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {
+    const current = await this.status();
+    try {
+      if (!current.cache) throw new Error("Кэш курсов отсутствует");
+      assertExchangeRateCacheFresh(current.cache, now);
+      if (businessCalendarDate(new Date(current.cache.fetchedAt)) !== businessCalendarDate(now)) throw new Error("Кэш официальных курсов устарел");
+      return current;
+    } catch { /* Only this endpoint requires a fetch on the current business day. */ }
+    const inFlight = this.currentRefreshes.get(current.provider);
+    if (inFlight) return inFlight;
+    const pending = this.refresh(actor, fetcher, now);
+    this.currentRefreshes.set(current.provider, pending);
+    try { return await pending; }
+    finally { this.currentRefreshes.delete(current.provider); }
   }
 
   async refresh(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {

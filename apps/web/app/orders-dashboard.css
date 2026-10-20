@@ -350,6 +350,27 @@
 .orders-payment-void-form{display:grid;gap:14px}
 .orders-payment-void-form>p{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
 .orders-payment-void-form>footer{display:flex;justify-content:flex-end;gap:8px}
+/* Order finance reference: composition, settlement and documents stay visible. */
+.tax-order-finance .orders-finance-reference-main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.56fr) minmax(0,1.12fr);gap:8px;align-items:stretch;min-width:0}
+.orders-finance-reference-main>.orders-finance-calculation,.orders-finance-reference-main>.orders-finance-summary,.orders-finance-reference-main>.orders-finance-side{grid-column:auto;min-width:0}
+.orders-finance-reference-main .orders-finance-table{min-width:450px}
+.orders-finance-reference-main .orders-finance-table>div{min-height:62px}
+.orders-finance-reference-main .orders-finance-table .orders-item-thumb{width:40px;height:48px;flex-basis:40px}
+.orders-finance-item-description{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}
+.orders-finance-item-description small{font-size:10px;color:var(--muted)}
+.orders-finance-reference-main .orders-finance-summary .orders-approved-money{align-items:flex-start;gap:8px;font-size:11px}
+.orders-finance-reference-main .orders-finance-summary .orders-approved-money>b{white-space:nowrap}
+.orders-finance-reference-main .orders-finance-summary .orders-approved-money.is-strong{font-size:16px}
+.orders-finance-reference-main .orders-finance-summary .orders-approved-money.is-success>b,.orders-finance-reference-main .orders-finance-summary .orders-approved-money.is-danger>b{font-size:14px}
+.orders-finance-reference-main .orders-finance-side{display:flex;flex-direction:column;gap:8px}
+.orders-finance-reference-main .orders-finance-side>.orders-approved-card{grid-column:auto}
+.orders-finance-reference-main .orders-finance-currency{grid-template-columns:1fr}
+.orders-finance-reference-main .orders-finance-currency>small{grid-column:auto}
+.orders-finance-reference-main .orders-finance-currency .crm-button{justify-self:start;max-width:100%}
+.tax-order-finance .orders-finance-bottom{grid-template-columns:1.45fr 1fr .75fr;gap:8px}
+.orders-finance-tax-information .tax-order-information{margin-bottom:10px}
+@media(max-width:1200px){.tax-order-finance .orders-finance-reference-main{grid-template-columns:minmax(0,1fr) minmax(220px,.5fr)}.orders-finance-reference-main>.orders-finance-side{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.orders-finance-reference-main .orders-finance-side>.orders-approved-card:first-child{grid-column:1/-1}.tax-order-finance .orders-finance-bottom{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.tax-order-finance .orders-finance-reference-main,.orders-finance-reference-main>.orders-finance-side,.tax-order-finance .orders-finance-bottom{grid-template-columns:minmax(0,1fr)}.orders-finance-reference-main>.orders-finance-summary{grid-column:auto}.orders-finance-reference-main .orders-finance-side>.orders-approved-card:first-child{grid-column:auto}}
 @media(max-width:1100px){.orders-tab-finance-approved{grid-template-columns:minmax(0,1.4fr) minmax(210px,.6fr)}.orders-tab-finance-approved>.orders-finance-side{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr))}.orders-finance-side>.orders-approved-card:first-child{grid-column:1/-1}.orders-finance-bottom{grid-template-columns:1fr 1fr}.orders-finance-summary-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:640px){.orders-tab-finance-approved,.orders-tab-finance-approved>.orders-finance-side,.orders-finance-bottom{grid-template-columns:minmax(0,1fr)}.orders-tab-finance-approved>.orders-finance-summary{grid-column:1}.orders-finance-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
@@ -390,3 +411,94 @@
 .orders-order-flow{grid-template-columns:repeat(3,minmax(0,1fr))}
 .orders-order-flow article,.orders-flow-caption{min-width:0}
 .orders-flow-caption small{min-width:0;max-width:100%;overflow-wrap:anywhere}
+
+/* Parent intake stays within the existing measurements sidebar. */
+.orders-parent-measurements-compact{min-width:0;padding:12px;border:1px solid var(--mantine-color-gray-3);border-radius:var(--mantine-radius-md);background:var(--mantine-color-body)}
+.orders-parent-measurements-compact .orders-parent-measurements-submissions{max-height:420px;overflow-y:auto;overscroll-behavior:contain}
+.orders-parent-measurements-compact .orders-parent-measurements-parameters{max-height:320px;overflow-y:auto;overscroll-behavior:contain}
+.orders-parent-measurements-compact .orders-parent-measurements-basics{min-width:0;overflow-wrap:anywhere}
+.orders-parent-measurements-compact .mantine-Group-root{min-width:0}
+.orders-parent-measurements-compact .mantine-Button-root{max-width:100%}
+.orders-parent-measurements-compact .mantine-Button-label{white-space:normal;text-align:left}
+/* Approved staff measurements workspace: final values, canonical snapshots and explicit actions. */
+.orders-measurements-png{--measure-border:#e6e1f7;--measure-muted:#7c749f;--measure-violet:var(--mantine-color-yoleotard-6,#7642ff);color:#101048;min-width:0;display:grid;gap:12px}
+.orders-measurements-png *{box-sizing:border-box}
+.orders-measurements-intake{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;background:#fff;border:1px solid var(--measure-border);border-radius:9px}
+.orders-measurements-intake>div:first-child{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.orders-measurements-intake h4{font-size:16px}
+.orders-measurements-columns{display:grid;grid-template-columns:minmax(0,22fr) minmax(0,60fr) minmax(0,18fr);gap:8px;align-items:stretch}
+.orders-measurements-roster,.orders-measurements-athlete-workspace{border:1px solid var(--measure-border);border-radius:9px;background:#fff;min-width:0}
+.orders-measurements-roster{padding:14px}
+.orders-measurements-roster h5,.orders-measurements-information h5,.orders-measurements-bottom h5{font-size:15px;color:#11103d}
+.orders-measurements-roster-list{display:grid;align-content:start;gap:8px;max-height:540px;overflow:auto;overscroll-behavior:contain}
+.orders-measurements-athlete{display:flex;align-items:center;gap:10px;padding:12px 8px;width:100%;border:1px solid var(--measure-border);border-radius:9px;min-width:0}
+.orders-measurements-athlete.is-selected{border-color:#a588ff;background:linear-gradient(110deg,#faf7ff,#f2edff)}
+.orders-measurements-athlete>span:last-child{display:grid;gap:5px;min-width:0;flex:1}
+.orders-measurements-athlete strong{font-size:14px;overflow-wrap:anywhere}
+.orders-measurements-athlete small{font-size:11px;color:var(--measure-muted);line-height:1.4}
+.orders-measurements-athlete-status{display:flex;align-items:center;justify-content:space-between;gap:5px;flex-wrap:wrap}
+.orders-measurements-athlete-status .mantine-Badge-label{white-space:normal}
+.orders-measurements-athlete-workspace{padding:12px 6px;box-shadow:0 2px 4px #30216b0a}
+.orders-measurements-athlete-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:0 10px 12px}
+.orders-measurements-athlete-header h3{font-size:20px}
+.orders-measurements-sport{max-width:100%;height:auto;min-height:36px;padding:7px 12px;font-weight:500;text-transform:none;font-size:12px}
+.orders-measurements-sport .mantine-Badge-label{white-space:normal;line-height:1.4}
+.orders-measurements-header-actions{display:grid;justify-items:end;gap:6px;margin-left:auto}
+.orders-measurements-header-actions>.mantine-Badge-root{height:auto;min-height:30px;padding:5px 12px;text-transform:none}
+.orders-measurements-header-actions>.mantine-Badge-root .mantine-Badge-label{white-space:normal}
+.orders-measurements-section-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:3px 0 8px;padding:7px 12px;background:linear-gradient(90deg,#f6f2ff,#fdfcff);border-radius:7px;color:var(--measure-violet);font-size:13px;flex-wrap:wrap}
+.orders-measurements-section-heading>span{font-size:11px}
+.orders-measurements-required-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.orders-measurements-value{min-width:0;position:relative}
+.orders-measurements-value.is-required{display:grid;grid-template-columns:32px minmax(0,1fr) 17px;grid-template-rows:1fr auto;gap:12px 10px;padding:13px 10px;border:1px solid var(--measure-border);border-radius:9px;min-height:108px}
+.orders-measurements-number{display:grid;place-items:center;width:26px;height:26px;flex-shrink:0;border-radius:50%;background:#eee9ff;color:#8156ed;font-size:12px}
+.orders-measurements-value.is-required .orders-measurements-number{width:32px;height:32px;color:#fff;font-size:15px;grid-row:1}
+.orders-measurements-value.is-required .number-1{background:linear-gradient(120deg,#ff8d93,#ff4e63)}
+.orders-measurements-value.is-required .number-2{background:linear-gradient(120deg,#ffda6a,#ffc400)}
+.orders-measurements-value.is-required .number-3{background:linear-gradient(120deg,#ace9fd,#5ec8ed)}
+.orders-measurements-value.is-required .number-15{background:linear-gradient(120deg,#d1abff,#a75ef3)}
+.orders-measurements-label{font-size:11px;line-height:1.55;overflow-wrap:anywhere}
+.orders-measurements-value.is-required .orders-measurements-label{grid-column:2/4}
+.orders-measurements-value.is-required>strong{grid-column:1/3;padding-left:36px;font-size:18px;line-height:1.35;overflow-wrap:anywhere}
+.orders-measurements-presence{display:grid;place-items:center;align-self:center;border-radius:50%;background:#04b87a;color:white;width:16px;height:16px;font-size:11px}
+.orders-measurements-presence.is-empty{background:#f1eef8;color:#8b83a3}
+.orders-measurements-additional-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(5,auto);grid-auto-flow:column;gap:5px 8px;padding:0 6px 6px}
+.orders-measurements-value.is-additional{display:grid;grid-template-columns:26px minmax(0,1fr) auto 14px;align-items:center;gap:7px;padding:5px;border:1px solid #f0ecfb;border-radius:8px;min-height:38px}
+.orders-measurements-value.is-additional .orders-measurements-label{font-size:10px;line-height:1.3}
+.orders-measurements-value.is-additional>strong{font-size:10px;white-space:normal;text-align:right}
+.orders-measurements-value.is-additional .orders-measurements-presence{width:13px;height:13px;font-size:9px}
+.orders-measurements-warning{grid-column:1/-1;margin:0;line-height:1.45}
+.orders-measurements-parent-note{white-space:pre-wrap;overflow-wrap:anywhere;max-height:96px;overflow:auto}
+.orders-measurements-review-actions{margin:10px 6px 0}
+.orders-measurements-information{display:grid;align-content:start;gap:8px;min-width:0}
+.orders-measurements-information>.mantine-Paper-root,.orders-measurements-bottom>.mantine-Paper-root{border-color:var(--measure-border);border-radius:9px}
+.orders-measurements-information dl{display:grid;gap:16px;margin:16px 0 20px}
+.orders-measurements-information dl>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;font-size:11px;line-height:1.5}
+.orders-measurements-information dt{color:var(--measure-muted)}
+.orders-measurements-information dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.orders-measurements-information .mantine-Button-label{white-space:normal;text-align:left;line-height:1.4}
+
+.orders-measurements-history-entry{display:flex;gap:10px;align-items:flex-start;padding:8px 0;min-width:0;width:100%;text-align:left}
+.orders-measurements-history-entry>i{width:9px;height:9px;border:2px solid #00b87b;border-radius:50%;flex-shrink:0;margin-top:3px}
+.orders-measurements-history-entry>span{display:grid;gap:4px;min-width:0}
+.orders-measurements-history-entry strong{font-size:11px;font-weight:500}
+.orders-measurements-history-entry small{font-size:10px;color:var(--measure-muted);overflow-wrap:anywhere}
+.orders-measurements-bottom{display:grid;grid-template-columns:minmax(0,72fr) minmax(0,28fr);gap:8px;align-items:start}
+.orders-measurements-comment-input{min-width:0;flex:1}
+.orders-measurements-readonly-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:60vh;overflow:auto}
+.orders-measurements-png .design-measurement-usage .design-usage-row{min-width:0}
+.orders-measurements-png .design-measurement-usage strong,.orders-measurements-png .design-measurement-usage small{white-space:normal;overflow-wrap:anywhere}
+.orders-measurements-png button:focus-visible,.orders-measurements-png a:focus-visible{outline:2px solid var(--measure-violet);outline-offset:2px}
+.orders-parent-measurements-compact .orders-parent-measurements-parameters>*{flex-shrink:0}
+.orders-parent-measurements-compact .orders-parent-measurements-submissions>*{flex-shrink:0}
+@media(max-width:1200px){.orders-measurements-columns{grid-template-columns:minmax(220px,26fr) minmax(0,74fr)}.orders-measurements-information{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.orders-measurements-additional-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.orders-measurements-value.is-required{padding:10px 7px;gap:8px 5px}.orders-measurements-value.is-required>strong{padding-left:15px;font-size:16px}}
+@media(max-width:1024px){.orders-measurements-columns{grid-template-columns:1fr}.orders-measurements-roster-list{max-height:250px}.orders-measurements-information{grid-template-columns:repeat(2,minmax(0,1fr))}.orders-measurements-bottom{grid-template-columns:1fr}.orders-measurements-additional-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:none;grid-auto-flow:row}.orders-measurements-header-actions{justify-items:start;margin-left:0}.orders-measurements-required-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.orders-measurements-value.is-required{min-height:104px}.orders-measurements-intake{padding:10px}.orders-measurements-intake>.mantine-Group-root{gap:6px}}
+@media(max-width:420px){.orders-measurements-information{grid-template-columns:1fr}.orders-measurements-additional-grid{grid-template-columns:1fr}.orders-measurements-section-heading{padding:7px}.orders-measurements-readonly-grid{grid-template-columns:1fr}.orders-measurements-comment>form>.mantine-Group-root{flex-wrap:wrap}.orders-measurements-comment-input{flex-basis:100%}}
+
+.orders-measurements-athlete-status .mantine-Badge-root{height:auto;min-height:20px;padding-block:3px;line-height:1.35}
+
+.orders-measurements-intake,.orders-measurements-athlete-header{margin:0}
+.athlete-wizard-drawer{height:100dvh;max-height:100dvh;border-radius:0}
+.athlete-wizard-drawer .athlete-wizard-header{flex-direction:row;align-items:center;gap:12px;margin:0}
+.athlete-wizard-drawer .athlete-wizard-body{display:flex;flex:1;min-height:0;flex-direction:column;overflow:hidden}
+.athlete-wizard-drawer .athlete-wizard-layout{flex:1;min-height:0;height:auto}

@@ -1,4 +1,6 @@
-import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable } from "./order-assignment-eligibility";
+import type { TaxesService } from "../taxes/taxes.service";
+import { createMeasurementData, inheritMeasurementDefinition } from "../clients/measurement-data";
+import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
 import {loadOrderSourceMap,matchesOrderSource} from './order-source';
 import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,type OrderListReadQuery} from './order-list-read-model';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
@@ -75,7 +77,7 @@ async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService, private readonly exchangeRates: ExchangeRatesService) {}
+  constructor(private readonly prisma: PrismaService, private readonly exchangeRates: ExchangeRatesService, private readonly taxes?: TaxesService) {}
 
   async defaults() {
     const [setting, duration, lead] = await Promise.all([
@@ -119,8 +121,8 @@ export class OrdersService {
         createdAt: true, productionSlot: true,
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
-        measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, values: true } },
-        items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { instances: { where: { archivedAt: null }, select: { id: true, ordinal: true, updatedAt: true, productionStatus: true, standardHeight: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true } } } }, id: true, archivedAt: true, discipline: true, notes: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, values: true } } } },
+        measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } },
+        items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { instances: { where: { archivedAt: null }, select: { id: true, ordinal: true, updatedAt: true, productionStatus: true, standardHeight: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true } } } }, id: true, archivedAt: true, discipline: true, notes: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
@@ -166,17 +168,17 @@ export class OrdersService {
           files:{orderBy:{createdAt:"desc"},select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,createdAt:true}},
           orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:8,select:{id:true,number:true,createdAt:true,priceMinor:true,currency:true,salesStatus:true,productionStatus:true,shippingStatus:true,modelImagePath:true,externalImageUrl:true}},
           athletes: { where: { archivedAt: null }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: {
-            id: true, firstName: true, lastName: true, archivedAt: true, updatedAt: true,
-            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+            id: true, firstName: true, lastName: true, birthDate: true, discipline: true, archivedAt: true, updatedAt: true,
+            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
           } },
         } },
         athlete: {
           select: {
             id: true, clientId: true, archivedAt: true, firstName: true, lastName: true,
-            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+            measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
           },
         },
-        measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+        measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
         items: {
           where: { archivedAt: null },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -185,11 +187,11 @@ export class OrdersService {
             athlete: {
               select: {
                 id: true, clientId: true, archivedAt: true, firstName: true, lastName: true,
-                measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+                measurements: { orderBy: [{ measuredAt: "desc" }, { createdAt: "desc" }], select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
               },
             },
-            measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
-            instances:{where:{archivedAt:null},orderBy:{ordinal:"asc"},select:{id:true,ordinal:true,standardHeight:true,productionStatus:true,plannedStartAt:true,plannedEndAt:true,startedAt:true,completedAt:true,updatedAt:true,athlete:{select:{id:true,firstName:true,lastName:true,archivedAt:true,updatedAt:true}},measurement:{select:{id:true,athleteId:true,archivedAt:true,measuredAt:true,values:true}},orderShipment:{select:{id:true,status:true,trackingNumber:true}}}},
+            measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
+            instances:{where:{archivedAt:null},orderBy:{ordinal:"asc"},select:{id:true,ordinal:true,standardHeight:true,productionStatus:true,plannedStartAt:true,plannedEndAt:true,startedAt:true,completedAt:true,updatedAt:true,athlete:{select:{id:true,firstName:true,lastName:true,archivedAt:true,updatedAt:true}},measurement:{select:{id:true,athleteId:true,archivedAt:true,measuredAt:true,definitionVersion:true,values:true}},orderShipment:{select:{id:true,status:true,trackingNumber:true}}}},
             files:{orderBy:[{sortOrder:"asc"},{createdAt:"asc"}],select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,role:true,sortOrder:true,createdAt:true}},
           },
         },
@@ -526,7 +528,7 @@ export class OrdersService {
       if(item.athleteId&&item.athleteId!==measurement.athleteId)throw new BadRequestException("Выбранные замеры не принадлежат спортсмену этой позиции");
       const athleteId=item.athleteId??measurement.athleteId;
       if(item.measurementId===measurement.id&&item.athleteId===athleteId){await reconcileAndPropagateOrderItemInstances(tx,item);return item}
-      await assertItemAssignmentMutable(tx,orderId,item);
+      await assertItemAssignmentMutable(tx,orderId,item,measurement.definitionVersion);
       const updated=await tx.orderItem.update({where:{id:item.id},data:{athleteId,measurementId:measurement.id}});
       await reconcileAndPropagateOrderItemInstances(tx,updated,item);
       await tx.activity.create({data:{clientId:item.order.clientId,orderId,type:"ORDER_ITEM_MEASUREMENT_BOUND",summary:`К дизайну заказа ${item.order.number} привязан снимок замеров`,metadata:{itemId:item.id,measurementId:measurement.id,previousMeasurementId:item.measurementId,athleteId,previousAthleteId:item.athleteId}}});
@@ -615,6 +617,7 @@ export class OrdersService {
         await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });
         if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
       }
+      if (this.taxes) await this.taxes.capturePayment(tx, payment.id, "CREATE", actor.id);
       return payment;
     });
   }
@@ -646,15 +649,14 @@ export class OrdersService {
       await tx.activity.create({ data: { clientId: order.clientId, orderId, actorId: actor.id, type: "PAYMENT_VOIDED", summary: "Отменена ручная оплата YO CRM", metadata: { paymentId, reason, paidMinor, currency: order.currency } } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Payment", entityId: paymentId, before: payment, after: updated } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { paymentStatus: order.paymentStatus }, after: { paymentStatus } } });
+      if (this.taxes) await this.taxes.capturePayment(tx, paymentId, "VOID", actor.id);
       return { payment: updated, paymentStatus, paidMinor, orderUpdatedAt: updatedOrder.updatedAt };
     });
   }
 
   async addMeasurement(orderId: string, dto: OrderMeasurementDto, actor: User) {
-    const { measuredAt, standardHeight, notes, expectedMeasurementId, ...numbered } = dto;
-    if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
-      throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
-    }
+    const { standardHeight, expectedMeasurementId } = dto;
+    createMeasurementData('', dto); // Validate numbered fields before starting any writes.
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { items: { where: { archivedAt: null } } } });
@@ -678,20 +680,12 @@ export class OrdersService {
       const athlete = await tx.athlete.findFirst({ where: { id: athleteId, clientId: order.clientId, archivedAt: null } });
       if (!athlete) throw new NotFoundException("Спортсмен заказа не найден");
       if (!item) { const context=await tx.order.findFirst({where:{id:orderId,archivedAt:null},select:assignmentOrderSelect}); if(!context)throw new NotFoundException("Заказ не найден"); assertAssignmentMutable(context,order); }
-      if (item) await assertItemAssignmentMutable(tx,orderId,item);
-      const measurement = await tx.measurement.create({
-        data: {
-          athleteId: athlete.id,
-          measuredAt: new Date(measuredAt),
-          chest: dto.m1,
-          waist: dto.m2,
-          hips: dto.m3,
-          torso: dto.m15,
-          values: { standardHeight, ...numbered },
-          notes,
-          source: previousMeasurementId ? `Редактирование замеров заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из заказа",
-        },
-      });
+      const definitionVersion = await inheritMeasurementDefinition(tx, athlete.id, dto.sourceMeasurementId, previousMeasurementId);
+      if (item) await assertItemAssignmentMutable(tx,orderId,item,definitionVersion);
+      await assertParentBodyProductionChange(tx,order,definitionVersion,true);
+      const data = createMeasurementData(athlete.id, dto, definitionVersion);
+      if (!definitionVersion) data.source = previousMeasurementId ? `Редактирование замеров заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из заказа";
+      const measurement = await tx.measurement.create({ data });
       const updatedOrder = await tx.order.update({ where: { id: orderId }, data: { athleteId: athlete.id, measurementId: measurement.id } });
       if (item) {
         const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });
@@ -705,10 +699,8 @@ export class OrdersService {
   }
 
   async addItemMeasurement(orderId: string, itemId: string, dto: OrderMeasurementDto, actor: User) {
-    const { measuredAt, standardHeight, notes, expectedMeasurementId, ...numbered } = dto;
-    if (Object.values(numbered).some(value => value !== undefined && !Number.isInteger(value * 2))) {
-      throw new BadRequestException("Измерения должны вводиться с шагом 0,5 см");
-    }
+    const { standardHeight, expectedMeasurementId } = dto;
+    createMeasurementData('', dto); // Validate numbered fields before starting any writes.
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({
@@ -728,26 +720,18 @@ export class OrdersService {
       }
       const athlete = await tx.athlete.findFirst({ where: { id: item.athleteId, clientId: order.clientId, archivedAt: null } });
       if (!athlete) throw new NotFoundException("Спортсмен позиции заказа не найден");
-      if (item) await assertItemAssignmentMutable(tx,orderId,item);
-      const measurement = await tx.measurement.create({
-        data: {
-          athleteId: athlete.id,
-          measuredAt: new Date(measuredAt),
-          chest: dto.m1,
-          waist: dto.m2,
-          hips: dto.m3,
-          torso: dto.m15,
-          values: { standardHeight, ...numbered },
-          notes,
-          source: previousMeasurementId ? `Редактирование замеров позиции заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из позиции заказа",
-        },
-      });
-      const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { measurementId: measurement.id } });
-      await reconcileAndPropagateOrderItemInstances(tx, updatedItem, item);
+      const definitionVersion = await inheritMeasurementDefinition(tx, athlete.id, dto.sourceMeasurementId, previousMeasurementId);
+      if (item) await assertItemAssignmentMutable(tx,orderId,item,definitionVersion);
       const mirrorsExistingItem = previousMeasurementId !== null && order.athleteId === athlete.id && order.measurementId === previousMeasurementId;
       const mirrorsSingleItem = order.items.length === 1
         && (order.athleteId === null || order.athleteId === athlete.id)
         && (order.measurementId === null || order.measurementId === previousMeasurementId);
+      if (mirrorsExistingItem || mirrorsSingleItem) await assertParentBodyProductionChange(tx,order,definitionVersion,true);
+      const data = createMeasurementData(athlete.id, dto, definitionVersion);
+      if (!definitionVersion) data.source = previousMeasurementId ? `Редактирование замеров позиции заказа ${order.number}` : standardHeight ? `Ростовой стандарт ${standardHeight} см` : "Ручной ввод из позиции заказа";
+      const measurement = await tx.measurement.create({ data });
+      const updatedItem = await tx.orderItem.update({ where: { id: item.id }, data: { measurementId: measurement.id } });
+      await reconcileAndPropagateOrderItemInstances(tx, updatedItem, item);
       let updatedOrder: { athleteId: string | null; measurementId: string | null } | undefined;
       if (mirrorsExistingItem || mirrorsSingleItem) {
         updatedOrder = await tx.order.update({ where: { id: order.id }, data: { athleteId: athlete.id, measurementId: measurement.id } });

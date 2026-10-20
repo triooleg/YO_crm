@@ -6,7 +6,7 @@ import { parseSource, sourcePercentages, type OrderSourceFilter } from '../lib/o
 import { SourceModeControl, SourceFilterControl, SourceBreakdownChart, SourceTrendChart, SourceTrendLegend } from './order-source-analytics';
 import { orderLabel } from '../lib/orders-i18n';
 import { overviewUi as ui } from '../lib/i18n';
-import { overviewTheme } from '../lib/mantine-theme';
+import { overviewTheme, salesStatisticsTheme } from '../lib/mantine-theme';
 import { comparisonPercent, financeDate, moneyLabel, moveFinanceMonth, type FinanceReport } from '../lib/finance-report';
 import { overviewPermissions, type OverviewOrders, type OverviewTasks, type OverviewMessages, type OverviewShipments, type OverviewNavigate } from '../lib/overview-report';
 import { overviewTargets, type OverviewTarget } from '../lib/overview-navigation';
@@ -49,7 +49,7 @@ function localDate(value:string){return new Intl.DateTimeFormat('en-CA',{timeZon
 function imageSource(path:string|null){return path?(path.startsWith('/api/orders/images/')||/^https?:\/\//.test(path)?path:`/api/orders/images/${path}`):undefined}
 function dueLabel(value:string|null,today:string){if(!value)return ui.noDueDate;const day=localDate(value);if(day===today)return ui.today;const tomorrow=new Date(`${today}T12:00:00Z`);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);if(day===localDate(tomorrow.toISOString()))return ui.tomorrow;return financeDate(value)}
 
-export function OverviewWorkspace({role,onNavigate}:{role:string;onNavigate:OverviewNavigate}){
+export function OverviewWorkspace({role,onNavigate,modeControl}:{role:string;onNavigate:OverviewNavigate;modeControl?:ReactNode}){
  const controlTokens=overviewTheme.other!.overviewControls;
  const permissions=overviewPermissions(role),[selection,setSelection]=useState(initialSelection),[ready,setReady]=useState(false);
  const [trendRange,setTrendRange]=useState(6),[financeRange,setFinanceRange]=useState(6),[metric,setMetric]=useState('orders');
@@ -95,13 +95,13 @@ export function OverviewWorkspace({role,onNavigate}:{role:string;onNavigate:Over
  }
  const activePanels=[permissions.orders?orders:null,permissions.tasks?tasks:null,permissions.messages?messages:null,permissions.shipments?shipments:null,permissions.finance?finance:null];
  const loading=!ready||activePanels.some(panel=>panel&&(panel.loading||(!panel.data&&!panel.error)));
- return <MantineProvider theme={overviewTheme} forceColorScheme="light" cssVariablesSelector=".overview-page"><section className="overview-page" aria-label={ui.title} aria-busy={loading} data-overview-ready={ready&&!loading}>
-  <header className="overview-header"><div><h1>{greeting}, {ui.brand}! <span aria-hidden="true">👋</span></h1><p>{ui.subtitle}{dateText?`, ${dateText}`:''}</p></div><div className="overview-period-controls">
-   <Button.Group><FinanceReportMonthPicker month={month} label={ui.selectMonth} onChange={value=>updateSelection({month:value})} icon={<OverviewIcon name="calendar"/>}/>
+ return <MantineProvider theme={overviewTheme} forceColorScheme="light" cssVariablesSelector=".overview-page"><section className="overview-page overview-page--aligned" aria-label={ui.title} aria-busy={loading} data-overview-ready={ready&&!loading}>
+  <MantineProvider theme={salesStatisticsTheme} cssVariablesSelector=".overview-header"><header className="overview-header"><div><h1>{greeting}, {ui.brand}! <span aria-hidden="true">👋</span></h1><p>{ui.subtitle}{dateText?`, ${dateText}`:''}</p></div>{modeControl}<div className="overview-period-controls">
+   <div className="overview-period-picker"><FinanceReportMonthPicker compact month={month} label={ui.selectMonth} onChange={value=>updateSelection({month:value})} icon={<OverviewIcon name="calendar"/>}/></div><Button.Group>
    <CrmButton tone="secondary" miw={controlTokens.periodArrowMinWidth} px={controlTokens.periodArrowPadding} aria-label={ui.previousMonth} onClick={()=>updateSelection({month:moveFinanceMonth(month,-1)})}><OverviewIcon name="left"/></CrmButton>
    <CrmButton tone="secondary" miw={controlTokens.periodArrowMinWidth} px={controlTokens.periodArrowPadding} aria-label={ui.nextMonth} onClick={()=>updateSelection({month:moveFinanceMonth(month,1)})}><OverviewIcon name="right"/></CrmButton></Button.Group>
    <Select className="overview-currency" aria-label={ui.currency} value={currency} allowDeselect={false} onChange={value=>value&&updateSelection({currency:value})} data={[{value:'EUR',label:'€ EUR'},{value:'USD',label:'$ USD'},{value:'UAH',label:'₴ UAH'}]} comboboxProps={{width:112,position:'bottom-end'}}/>
-  </div></header>
+  </div></header></MantineProvider>
   <section className="overview-kpis" aria-label={ui.title}>
    {permissions.orders&&kpi({title:ui.total,value:counts?.total,panel:orders,icon:'bag',tone:'violet',target:overviewTargets.orders('period',month),subtitle:ui.orders,comparison:counts?comparisonPercent(counts.total,counts.previousTotal):null})}
    {permissions.orders&&orders.data?.sourceAnalytics&&kpi({title:sourceUi.onlineOrders,value:orders.data.sourceAnalytics.websiteCount,panel:orders,icon:'cart',tone:'green',target:overviewTargets.ordersSource('WEBSITE',month),subtitle:`${sourcePercentages([orders.data.sourceAnalytics.websiteCount,orders.data.sourceAnalytics.total-orders.data.sourceAnalytics.websiteCount])[0]}% ${sourceUi.shareOrders}`})}

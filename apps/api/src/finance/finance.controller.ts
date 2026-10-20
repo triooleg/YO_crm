@@ -18,6 +18,7 @@ import { FinanceReportQueryDto } from "./finance-report.dto";
  @Get("exchange-rates") @Roles("OWNER","ADMIN","MANAGER") exchangeRateStatus(){return this.exchangeRates.status()}
  @Patch("exchange-rates/settings") @Roles("OWNER","ADMIN") saveExchangeRateProvider(@Body() dto:UpdateExchangeRateProviderDto,@Req() req:Request&{user:User}){return this.exchangeRates.setProvider(dto.provider,req.user)}
  @Post("exchange-rates/refresh") @Roles("OWNER","ADMIN") refreshExchangeRates(@Req() req:Request&{user:User}){return this.exchangeRates.refresh(req.user)}
+ @Post("exchange-rates/ensure-current") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") ensureCurrentExchangeRates(@Req() req:Request&{user:User}){return this.exchangeRates.ensureCurrent(req.user)}
  @Post("expense-categories") @Roles("OWNER","ADMIN","ACCOUNTANT") category(@Body() dto:CreateExpenseCategoryDto,@Req() req:Request&{user:User}){return this.finance.createCategory(dto,req.user)}
  @Post("expenses") @Roles("OWNER","ADMIN","ACCOUNTANT") expense(@Body() dto:CreateExpenseDto,@Req() req:Request&{user:User}){return this.finance.createExpense(dto,req.user)}
  @Patch("expense-categories/:id") @Roles("OWNER","ADMIN","ACCOUNTANT") updateCategory(@Param("id") id:string,@Body() dto:UpdateExpenseCategoryDto,@Req() req:Request&{user:User}){return this.finance.updateCategory(id,dto,req.user)}

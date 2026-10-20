@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useState } from "react";
+import { measurementSemanticLabel, measurementSemanticNote } from "../lib/measurement-semantics";
 import { Drawer, Tabs } from "@mantine/core";
 import { athleteMeasurementWizardUi as ui, ordersDashboardUi, measurementEditorUi, measurementDefinitionUi } from "../lib/i18n";
 import { CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
@@ -8,6 +9,7 @@ import { additionalMeasurementNumbers, basicMeasurementNumbers, measurementField
 
 type Props = {
   opened?: boolean;
+  definitionVersion?: string | null;
   title: string;
   description: string;
   values: Record<string, string>;
@@ -23,7 +25,7 @@ type Props = {
 };
 
 // Save destinations and immutable-snapshot rules remain owned by the caller.
-export function MeasurementEditor({ opened = true, title, description, values, standardHeight, busy, onValue, onHeight, onClose, onSubmit, context, error, footer }: Props) {
+export function MeasurementEditor({ opened = true, definitionVersion, title, description, values, standardHeight, busy, onValue, onHeight, onClose, onSubmit, context, error, footer }: Props) {
   const [section, setSection] = useState<string | null>("basic");
   const groups = [{ key: "basic", numbers: basicMeasurementNumbers }, { key: "additional", numbers: additionalMeasurementNumbers }];
   return <Drawer opened={opened} title={title} aria-label={title} onClose={() => !busy && onClose()} position="right" size="min(720px, 100%)" trapFocus returnFocus closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} classNames={{ content: "measurement-editor", header: "measurement-editor-header", body: "measurement-editor-body" }}>
@@ -41,6 +43,7 @@ export function MeasurementEditor({ opened = true, title, description, values, s
       onSubmit(event);
     }}>
       <div className="measurement-editor-scroll">
+        {measurementSemanticNote(definitionVersion)&&<p className="measurement-editor-semantic-note" role="note">{measurementSemanticNote(definitionVersion)}</p>}
         {context}
         <h3>{ui.athleteMeasurements}</h3>
         <CrmNativeSelect label={ui.standardHeight} value={standardHeight === undefined ? "" : String(standardHeight)} disabled={busy} onChange={event => onHeight(event.currentTarget.value)} data={[{ value: "", label: ui.standardHeightOptional }, ...measurementPresetHeights.map(height => ({ value: String(height), label: `${height} см` }))]} />
@@ -54,8 +57,8 @@ export function MeasurementEditor({ opened = true, title, description, values, s
             <div className="measurement-editor-table">
               <header><span>{ui.measurementNumber}</span><span>{ui.measurementParameter}</span><span>{ui.measurementValue}</span></header>
               {numbers.map(number => <label key={number} className={basicMeasurementNumbers.includes(number) ? "required" : undefined}>
-                <b>{number}</b><span title={number === 15 ? measurementDefinitionUi.torsoHelp : undefined}>{measurementFieldLabels[number - 1]}{basicMeasurementNumbers.includes(number) ? " *" : ""}</span>
-                <CrmTextInput name={`m${number}`} aria-label={`${number}. ${measurementFieldLabels[number - 1]}`} type="number" min={1} step={0.5} required={basicMeasurementNumbers.includes(number)} disabled={busy} value={values[`m${number}`] || ""} onChange={event => { const value = event.currentTarget.value; onValue(`m${number}`, value); }} placeholder="см" />
+                <b>{number}</b><span title={number === 15 ? measurementDefinitionUi.torsoHelp : undefined}>{measurementSemanticLabel(number,measurementFieldLabels[number - 1]!,definitionVersion)}{basicMeasurementNumbers.includes(number) ? " *" : ""}</span>
+                <CrmTextInput name={`m${number}`} aria-label={`${number}. ${measurementSemanticLabel(number,measurementFieldLabels[number - 1]!,definitionVersion)}`} type="number" min={1} step={0.5} required={basicMeasurementNumbers.includes(number)} disabled={busy} value={values[`m${number}`] || ""} onChange={event => { const value = event.currentTarget.value; onValue(`m${number}`, value); }} placeholder="см" />
               </label>)}
             </div>
           </Tabs.Panel>)}

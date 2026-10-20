@@ -6,7 +6,7 @@ import { CrmNavIcon } from "./crm-nav-icon";
 import { ClientWorkspace } from "./client-workspace";
 import { OrdersDashboard } from "./orders-dashboard";
 import { ProductionWorkspace } from "./production-workspace";
-import { OverviewWorkspace } from "./overview-workspace";
+import { OverviewModesWorkspace as OverviewWorkspace } from "./overview-modes-workspace";
 import { FinanceWorkspace } from "./finance-workspace";
 import { SettingsWorkspace } from "./settings-workspace";
 import { authUi, navigationUi, releaseHistoryUi, communicationsUi } from "../lib/i18n";

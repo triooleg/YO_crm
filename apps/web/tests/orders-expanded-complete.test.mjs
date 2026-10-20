@@ -47,7 +47,7 @@ test("обзор сохраняет четыре независимых стат
 test("каждое изделие редактирует только собственный неизменяемый снимок замеров", () => {
   assert.match(expanded, /items\.map\(\(item/);
   assert.match(expanded, /measurement\.values/);
-  assert.match(expanded, /onMeasurements\(currentItem\.persistedItemId\)/);
+  assert.match(expanded, /onMeasurements\(assignment\.item\.persistedItemId\)/);
   assert.match(dashboard, /orderItemId=\{item\?\.id\}/);
   assert.match(measurementPanel, /\/orders\/\$\{orderId\}\/items\/\$\{orderItemId\}\/measurement/);
   assert.match(tabs, /Array\.from\(\{ length: 17 \}/);
@@ -88,5 +88,14 @@ test("новый дизайн и пустая позиция использую�
   assert.match(dashboard, /const athletes=order\.client\.athletes\?\?uniqueOrderAthletes\(order\)/);
   assert.match(tabs, /function clientMeasurementOptions\(order: ExpandedOrderView, item: ExpandedOrderItem\)/);
   assert.match(tabs, /\(order\.client\.athletes \?\? \[\]\)\.filter\(\(athlete\) => !item\.athlete \|\| athlete\.id === item\.athlete\.id\)/);
-  assert.match(expanded, /const options = currentItem \? clientMeasurementOptions\(order, currentItem\)/);
+  assert.match(expanded, /clientMeasurementOptions\(order, assignment\.item\)/);
+});
+
+test('actual measurement options restrict an owned item and expose all client athletes for an unassigned item',async()=>{
+ const{createRequire}=await import('node:module');const require=createRequire(import.meta.url),ts=require('typescript');
+ const ast=ts.createSourceFile('tabs.tsx',tabs,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='clientMeasurementOptions');
+ const code=ts.transpileModule(fn.getText(ast),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const options=new Function('athleteName','formatDate','measurementSemanticNote',code+';return clientMeasurementOptions;')(a=>a.firstName,x=>x,()=>null);
+ const order={client:{athletes:[{id:'a',firstName:'Анна',measurements:[{id:'a-v1',measuredAt:'2026-10-18'},{id:'a-v2',measuredAt:'2026-10-19'}]},{id:'b',firstName:'София',measurements:[{id:'b-v1',measuredAt:'2026-10-19'}]}]}};
+ const before=structuredClone(order);assert.deepEqual(options(order,{athlete:{id:'a'}}).map(o=>o.value),['a-v1','a-v2']);assert.deepEqual(options(order,{}).map(o=>o.value),['a-v1','a-v2','b-v1']);assert.deepEqual(order,before);
 });

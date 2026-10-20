@@ -144,3 +144,10 @@ test('cancelled foreign invoice needs FX only when its document is requested',()
   assert.equal(visible.invoiceCount,0);
   assert.throws(()=>report.buildFinanceReport(base({invoices:[{...invoice,status:'ISSUED'}]}),{month:'2026-10',currency:'EUR'},valuation,now),/курс/);
 });
+
+test('tax cash expense deep link finds its exact source by ID without changing cash totals or partial search',()=>{
+ const data=base({expenses:[expense('tax-cash-source',1000),expense('other',500)]});
+ const linked=build(data,{tab:'expenses',search:'tax-cash-source'});
+ assert.equal(linked.table.total,1);assert.equal(linked.table.rows[0].id,'tax-cash-source');assert.equal(linked.current.expensesMinor,1500);
+ assert.equal(build(data,{tab:'expenses',search:'tax-cash'}).table.total,0);
+});

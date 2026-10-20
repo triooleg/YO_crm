@@ -1,0 +1,475 @@
+{
+  "provenance": "Actual local Next3551/API45441; no API mocks. Synthetic integration records precreated by MAIN. Not production proof.",
+  "status": "PASS",
+  "checks": [
+    {
+      "view": "finance-may-eur",
+      "width": 1920,
+      "height": 1080,
+      "pass": true
+    },
+    {
+      "view": "settings-taxes",
+      "width": 1920,
+      "height": 1080,
+      "pass": true
+    },
+    {
+      "view": "order-finance",
+      "width": 1920,
+      "height": 1080,
+      "pass": true
+    },
+    {
+      "view": "order-finance-header",
+      "width": 1920,
+      "pass": true,
+      "tabCount": 9,
+      "cssMutations": false
+    },
+    {
+      "view": "finance-may-eur",
+      "width": 1366,
+      "height": 768,
+      "pass": true
+    },
+    {
+      "view": "settings-taxes",
+      "width": 1366,
+      "height": 768,
+      "pass": true
+    },
+    {
+      "view": "order-finance",
+      "width": 1366,
+      "height": 768,
+      "pass": true
+    },
+    {
+      "view": "order-finance-header",
+      "width": 1366,
+      "pass": true,
+      "tabCount": 9,
+      "cssMutations": false
+    },
+    {
+      "view": "finance-may-eur",
+      "width": 390,
+      "height": 960,
+      "pass": true
+    },
+    {
+      "view": "finance-may-eur-scroll-coverage",
+      "width": 390,
+      "pass": true,
+      "ports": 1
+    },
+    {
+      "view": "settings-taxes",
+      "width": 390,
+      "height": 960,
+      "pass": true
+    },
+    {
+      "view": "settings-taxes-scroll-coverage",
+      "width": 390,
+      "pass": true,
+      "ports": 1
+    },
+    {
+      "view": "order-finance",
+      "width": 390,
+      "height": 960,
+      "pass": true
+    },
+    {
+      "view": "order-finance-header",
+      "width": 390,
+      "pass": true,
+      "tabCount": 9,
+      "cssMutations": false
+    },
+    {
+      "view": "order-mobile-expanded-width",
+      "width": 390,
+      "pass": true,
+      "panel": 336,
+      "frame": 356,
+      "viewport": 390,
+      "accordionsExpanded": true
+    },
+    {
+      "view": "order-finance-scroll-coverage",
+      "width": 390,
+      "pass": true,
+      "ports": 1
+    }
+  ],
+  "scrollCoverage": [
+    {
+      "view": "finance-may-eur",
+      "width": 390,
+      "maxStepsPerPort": 16,
+      "stepHeightRatio": 0.8,
+      "ports": [
+        {
+          "selector": "html:nth-child(1) > body:nth-child(2) > main:nth-child(4) > section:nth-child(2)",
+          "samples": [
+            {
+              "top": 0,
+              "height": 856,
+              "max": 2337,
+              "step": 0,
+              "screenshot": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-top.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 684,
+              "height": 856,
+              "max": 2337,
+              "step": 1,
+              "screenshot": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-step-01.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 1368,
+              "height": 856,
+              "max": 2337,
+              "step": 2,
+              "screenshot": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-mid.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 2052,
+              "height": 856,
+              "max": 2337,
+              "step": 3,
+              "screenshot": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-step-03.png",
+              "visibleMarkers": [
+                "tablePagination",
+                "recentExpenses"
+              ]
+            },
+            {
+              "top": 2337,
+              "height": 856,
+              "max": 2337,
+              "step": 4,
+              "screenshot": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-bottom.png",
+              "visibleMarkers": [
+                "tablePagination",
+                "recentExpenses",
+                "valuationFooter"
+              ]
+            }
+          ],
+          "complete": true
+        }
+      ],
+      "requiredMarkers": [
+        "tablePagination",
+        "recentExpenses",
+        "valuationFooter"
+      ],
+      "seenMarkers": [
+        "tablePagination",
+        "recentExpenses",
+        "valuationFooter"
+      ]
+    },
+    {
+      "view": "settings-taxes",
+      "width": 390,
+      "maxStepsPerPort": 16,
+      "stepHeightRatio": 0.8,
+      "ports": [
+        {
+          "selector": "html:nth-child(1) > body:nth-child(2) > main:nth-child(4) > section:nth-child(2)",
+          "samples": [
+            {
+              "top": 0,
+              "height": 856,
+              "max": 864,
+              "step": 0,
+              "screenshot": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-top.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 684,
+              "height": 856,
+              "max": 864,
+              "step": 1,
+              "screenshot": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-mid.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 864,
+              "height": 856,
+              "max": 864,
+              "step": 2,
+              "screenshot": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-bottom.png",
+              "visibleMarkers": [
+                "policyHistory"
+              ]
+            }
+          ],
+          "complete": true
+        }
+      ],
+      "requiredMarkers": [
+        "policyHistory"
+      ],
+      "seenMarkers": [
+        "policyHistory"
+      ]
+    },
+    {
+      "view": "order-finance",
+      "width": 390,
+      "maxStepsPerPort": 16,
+      "stepHeightRatio": 0.8,
+      "ports": [
+        {
+          "selector": "html:nth-child(1) > body:nth-child(2) > main:nth-child(4) > section:nth-child(2)",
+          "samples": [
+            {
+              "top": 0,
+              "height": 856,
+              "max": 4808,
+              "step": 0,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-top.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 684,
+              "height": 856,
+              "max": 4808,
+              "step": 1,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-01.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 1368,
+              "height": 856,
+              "max": 4808,
+              "step": 2,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-02.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 2052,
+              "height": 856,
+              "max": 4808,
+              "step": 3,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-03.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 2736,
+              "height": 856,
+              "max": 4808,
+              "step": 4,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-mid.png",
+              "visibleMarkers": []
+            },
+            {
+              "top": 3420,
+              "height": 856,
+              "max": 4808,
+              "step": 5,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-05.png",
+              "visibleMarkers": [
+                "documents",
+                "notes"
+              ]
+            },
+            {
+              "top": 4104,
+              "height": 856,
+              "max": 4808,
+              "step": 6,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-06.png",
+              "visibleMarkers": [
+                "documents",
+                "notes"
+              ]
+            },
+            {
+              "top": 4788,
+              "height": 856,
+              "max": 4808,
+              "step": 7,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-07.png",
+              "visibleMarkers": [
+                "taxRows"
+              ]
+            },
+            {
+              "top": 4808,
+              "height": 856,
+              "max": 4808,
+              "step": 8,
+              "screenshot": "scroll-coverage-p2-fixed/order-finance-390-port-00-bottom.png",
+              "visibleMarkers": [
+                "taxRows"
+              ]
+            }
+          ],
+          "complete": true
+        }
+      ],
+      "requiredMarkers": [
+        "documents",
+        "notes",
+        "taxRows"
+      ],
+      "seenMarkers": [
+        "documents",
+        "notes",
+        "taxRows"
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-1920x1080.png",
+      "sha256": "b57b8379dd6c03ba3077bbb9aa1598733d4623bf0d35d9fa444427d1ed730aa3"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-1920x1080.png",
+      "sha256": "b6158f318bbbd14feb4df48330d507703f28cdf301f9985eae8219a1af194af3"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-1920x1080.png",
+      "sha256": "c722b0ad4ae1d16d0f7f7796cefc936e1bbc1e10924240bdeac765f32a66c1b4"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-1920-header.png",
+      "sha256": "b58e42632ed2a22e06797413d2a196fdbb0cb7b9d200723c98009a2142e245b8"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-1366x768.png",
+      "sha256": "f5358877704534f03b2a2b6f2844c2d74bd34c54308b0855976f7501119302cf"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-1366x768.png",
+      "sha256": "3b18be2f969d8435882e5932a7f68abf3d48620137681023e4e2d03b768bf246"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-1366x768.png",
+      "sha256": "a9a6ecb7612187239856cc46660d45d32565a34f2a4093a8039fe50665a3bb00"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-1366-header.png",
+      "sha256": "c727fcfdb729c7a3c3606a47738dc7f40fd3124dbeb4d495a7a532cf06d60dee"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390x960.png",
+      "sha256": "086704f79b2e690021d687fbfb6b786060a658ab674d1089e972e9fb6a232370"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-top.png",
+      "sha256": "086704f79b2e690021d687fbfb6b786060a658ab674d1089e972e9fb6a232370"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-top.png",
+      "sha256": "086704f79b2e690021d687fbfb6b786060a658ab674d1089e972e9fb6a232370"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-step-01.png",
+      "sha256": "0219bcc8d7608ce9bb7eb3c716946ac374f99fe6a10be93070364961017d3139"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-mid.png",
+      "sha256": "cf51cee8dd2c6d2a54d3d134a1d66a8abfee5899c5de8faf32e608ef8e45d581"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-step-03.png",
+      "sha256": "677ddfda4cd9ee34b51543babc36ff59c252311c61eceb4ebe4490775c281622"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-port-00-bottom.png",
+      "sha256": "1c379a270638b976ada6a041728ad2bbbf090dc06f4fdfc5a9e30ddc77dfb575"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/finance-may-eur-390-bottom.png",
+      "sha256": "4cdfbee48ed0ca4a9e7bdb9e2036e3c5cc4c0ee98b0605694847b2a11e75ad6d"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390x960.png",
+      "sha256": "a6ef7c915531f8e682d5153cc7d8cc10f7cfa19114c4ac67f2cd4fe42c273926"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390-top.png",
+      "sha256": "a6ef7c915531f8e682d5153cc7d8cc10f7cfa19114c4ac67f2cd4fe42c273926"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-top.png",
+      "sha256": "a6ef7c915531f8e682d5153cc7d8cc10f7cfa19114c4ac67f2cd4fe42c273926"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-mid.png",
+      "sha256": "4621b958b15645104773531a6d73f4178165693328b6cf1aaa2f5be7ec8a9fb3"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390-port-00-bottom.png",
+      "sha256": "0db26fb522a9e6ce21c8199e5d73963f32976499bb3c4c04cbc90e769cfc27d4"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/settings-taxes-390-bottom.png",
+      "sha256": "0db26fb522a9e6ce21c8199e5d73963f32976499bb3c4c04cbc90e769cfc27d4"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390x960.png",
+      "sha256": "e66a152d9f9895cd62494d5199913c9496905fee70cd64f2c8130b94dd16e49a"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-header.png",
+      "sha256": "8de5acf109db9222553d7709cd214592c6161334feb07a5fbcdad9e3f40655aa"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-top.png",
+      "sha256": "247f7dfc59c3cc755f4c412ddea1ea38de0c8b554ecf1e9106c4315ee33d4f0d"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-top.png",
+      "sha256": "247f7dfc59c3cc755f4c412ddea1ea38de0c8b554ecf1e9106c4315ee33d4f0d"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-01.png",
+      "sha256": "91c035976b0d55c407590e259c25053be4ff0aa502ecde37317763c8cf0abbc9"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-02.png",
+      "sha256": "1f1f49266e0100f931cac75e765db2fb7bde6fc85783f5d9581f9a5a3273dc92"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-03.png",
+      "sha256": "87b989c62ea5eb2d574261fbef1a963005c8dedcff8a18917c021d814faee76f"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-mid.png",
+      "sha256": "b5f4b2f4bfb5ec9b64498affb7a6c4f8e1308e74f9912a31bff3cb6cab8b0688"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-05.png",
+      "sha256": "06cc22d48c61c12b0b56e77af27980990f3a73da4afd5a73000ce4b076a99820"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-06.png",
+      "sha256": "491f693fd0b6da574cce8472584b4fa20002ff3997ed033bfaf99a00f0ccc085"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-step-07.png",
+      "sha256": "3002634d403b88740d68fff7b907c4ac996aeb59ceafc25e8c80c2e9e4b2951c"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-port-00-bottom.png",
+      "sha256": "558f9ccf065766a6a8c96ed4c576d85e2cade9274251cfd9267dbebeb50662ae"
+    },
+    {
+      "file": "scroll-coverage-p2-fixed/order-finance-390-bottom.png",
+      "sha256": "558f9ccf065766a6a8c96ed4c576d85e2cade9274251cfd9267dbebeb50662ae"
+    }
+  ]
+}

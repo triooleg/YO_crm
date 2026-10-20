@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "task": {
+    "id": "fop-tax-accounting",
+    "title": "Approved local FOP tax accounting",
+    "description": "User approved local schema and payment hooks 2026-10-19. Native isolated agents, no commit/push/deploy; integrator-only copied patches.",
+    "base_ref": "HEAD",
+    "max_fix_cycles": 3,
+    "fix_cycles": 1
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "title": "plan",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "PLANNER",
+      "kind": "analysis",
+      "depends_on": [],
+      "status": "DONE",
+      "affected_paths": [
+        "docs/plans/fop-tax-accounting.md"
+      ],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "backend",
+      "title": "backend",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/api/src/taxes",
+        "packages/database/prisma"
+      ],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-19",
+      "approval_note": "Explicit user approval 2026-10-19 local schema and tax payment accrual; exact time not recorded, date-only marker. No deployment."
+    },
+    {
+      "id": "frontend",
+      "title": "frontend",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/web/components/taxes",
+        "apps/web/lib/tax-accounting.ts"
+      ],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-19",
+      "approval_note": "Explicit user approval 2026-10-19 local schema and tax payment accrual; exact time not recorded, date-only marker. No deployment."
+    },
+    {
+      "id": "integrate",
+      "title": "integrate",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "INTEGRATOR",
+      "kind": "integration",
+      "depends_on": [
+        "backend",
+        "frontend"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/api/src/orders",
+        "apps/api/src/integrations/keycrm"
+      ],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "approved_at": "2026-10-19",
+      "approval_note": "Explicit user approval 2026-10-19 local schema and tax payment accrual; exact time not recorded, date-only marker. No deployment."
+    },
+    {
+      "id": "test",
+      "title": "test",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "TESTER",
+      "kind": "test",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "description": "Approved local implementation; no commits authorized",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Approved tax plan and compatibility"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    }
+  ]
+}

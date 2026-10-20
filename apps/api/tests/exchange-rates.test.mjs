@@ -162,3 +162,177 @@ test("refresh failure never opens a write transaction and preserves the previous
   await assert.rejects(() => service.refresh({ id: "owner-1" }, async () => ({ ok: false, status: 503, text: async () => "" })), /Не удалось получить/);
   assert.equal(transactionCalled, false);
 });
+
+const ensureNow = new Date("2026-10-18T08:00:00.000Z");
+const ensureActor = { id: "accountant-1" };
+function ensureFixture({ provider = "NBU", fetchedAt = "2026-10-10T08:00:00.000Z", effectiveDate = "2026-10-16" } = {}) {
+  const cache = provider === "NBU" ? {
+    version: 1, provider, officialUrl: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew", effectiveDate, fetchedAt,
+    rates: [
+      { baseCurrency: "EUR", quoteCurrency: "UAH", decimal: "48", numerator: "48", denominator: "1", sourceSeriesOrValcode: "EUR" },
+      { baseCurrency: "USD", quoteCurrency: "UAH", decimal: "40", numerator: "40", denominator: "1", sourceSeriesOrValcode: "USD" },
+    ],
+  } : {
+    version: 1, provider, officialUrl: "https://data.ecb.europa.eu/help/api/data", effectiveDate, fetchedAt,
+    rates: [{ baseCurrency: "EUR", quoteCurrency: "USD", decimal: "1.2", numerator: "6", denominator: "5", sourceSeriesOrValcode: "EXR/D.USD.EUR.SP00.A" }],
+  };
+  const state = { provider, cache, calls: [], locks: [], audits: [], transactions: 0 };
+  const appSetting = {
+    findUnique: async ({ where }) => ({ id: where.section_key.key, value: where.section_key.key === "exchangeRateProvider" ? state.provider : state.cache }),
+    upsert: async ({ update }) => { state.cache = update.value; return { id: "exchangeRateCache", value: state.cache }; },
+  };
+  const tx = {
+    appSetting,
+    $executeRawUnsafe: async (...args) => { state.locks.push(args); },
+    auditLog: { create: async ({ data }) => { state.audits.push(data); } },
+  };
+  const service = new ExchangeRatesService({ appSetting, $transaction: async callback => { state.transactions++; return callback(tx); } });
+  const fetcher = async url => {
+    state.calls.push(url);
+    if (String(url).includes("ecb.europa.eu")) return { ok: true, text: async () => "CURRENCY,CURRENCY_DENOM,TIME_PERIOD,OBS_VALUE,OBS_STATUS\nUSD,EUR,2026-10-16,1.2,A\n" };
+    const currency = String(url).endsWith("EUR") ? "EUR" : "USD";
+    return { ok: true, text: async () => JSON.stringify([{ rate: currency === "EUR" ? 48 : 40, cc: currency, exchangedate: "16.10.2026" }]) };
+  };
+  return { service, state, fetcher };
+}
+
+test("ensure-current refreshes a cache fetched more than seven days ago through audited refresh", async () => {
+  const { service, state, fetcher } = ensureFixture();
+  const result = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+  assert.equal(result.cache.fetchedAt, ensureNow.toISOString());
+  assert.equal(result.provider, "NBU");
+  assert.equal(result.cache.effectiveDate, "2026-10-16");
+  assert.equal(state.calls.length, 2);
+  assert.equal(state.audits.length, 1);
+  assert.equal(state.audits[0].actorId, ensureActor.id);
+  assert.equal(state.locks[0][1], "yoleotard-exchange-rates");
+});
+
+test("parallel ensure-current requests share one selected-provider fetch and audit", async () => {
+  const { service, state, fetcher } = ensureFixture();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const delayedFetch = async url => { await gate; return fetcher(url); };
+  const pending = Array.from({ length: 20 }, () => service.ensureCurrent(ensureActor, delayedFetch, ensureNow));
+  await new Promise(resolve => setImmediate(resolve));
+  release();
+  const results = await Promise.all(pending);
+  assert.equal(state.calls.length, 2);
+  assert.equal(state.audits.length, 1);
+  assert.ok(results.every(result => result.cache.fetchedAt === ensureNow.toISOString()));
+});
+
+test("ensure-current refreshes yesterday's fetchedAt even with a current effective date", async () => {
+  const { service, state, fetcher } = ensureFixture({ fetchedAt: "2026-10-17T20:00:00.000Z", effectiveDate: "2026-10-18" });
+  const result = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+  assert.equal(result.cache.fetchedAt, ensureNow.toISOString());
+  assert.equal(state.calls.length, 2);
+});
+
+test("ensure-current reuses today's weekend official cache without fetching or auditing", async () => {
+  const { service, state } = ensureFixture({ fetchedAt: "2026-10-18T01:00:00.000Z" });
+  const result = await service.ensureCurrent(ensureActor, async () => { assert.fail("must reuse cache"); }, ensureNow);
+  assert.equal(result.cache.fetchedAt, "2026-10-18T01:00:00.000Z");
+  assert.equal(result.cache.effectiveDate, "2026-10-16");
+  assert.equal(state.transactions, 0);
+});
+
+test("ensure-current uses the Kyiv business day rather than UTC or elapsed 24 hours", async () => {
+  // Both timestamps are October 18 in Kyiv, but different UTC dates.
+  const sameDay = ensureFixture({ fetchedAt: "2026-10-17T21:30:00.000Z" });
+  const reused = await sameDay.service.ensureCurrent(ensureActor, async () => { assert.fail("same Kyiv day"); }, ensureNow);
+  assert.equal(reused.cache.fetchedAt, "2026-10-17T21:30:00.000Z");
+  // These timestamps share a UTC date but straddle Kyiv midnight.
+  const priorDay = ensureFixture({ fetchedAt: "2026-10-17T20:30:00.000Z" });
+  const refreshed = await priorDay.service.ensureCurrent(ensureActor, priorDay.fetcher, new Date("2026-10-17T21:30:00.000Z"));
+  assert.equal(refreshed.cache.fetchedAt, "2026-10-17T21:30:00.000Z");
+  assert.equal(priorDay.state.calls.length, 2);
+});
+
+test("ensure-current still rejects stale official dates and future fetchedAt even if fetched today", async () => {
+  for (const settings of [
+    { fetchedAt: "2026-10-18T01:00:00.000Z", effectiveDate: "2026-10-10" },
+    { fetchedAt: "2026-10-18T09:00:00.000Z" },
+    { fetchedAt: "2026-10-18T01:00:00.000Z", effectiveDate: "2026-10-20" },
+  ]) {
+    const { service, state, fetcher } = ensureFixture(settings);
+    const result = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+    assert.equal(result.cache.fetchedAt, ensureNow.toISOString());
+    assert.equal(result.cache.effectiveDate, "2026-10-16");
+    assert.equal(state.calls.length, 2);
+  }
+});
+
+test("ensure-current refreshes missing, damaged or other-provider cache using the selected provider only", async () => {
+  for (const cache of [null, { version: 99 }, ensureFixture({ provider: "ECB" }).state.cache]) {
+    const { service, state, fetcher } = ensureFixture();
+    state.cache = cache;
+    const result = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+    assert.equal(result.cache.provider, "NBU");
+    assert.equal(state.calls.length, 2);
+    assert.ok(state.calls.every(url => url.startsWith("https://bank.gov.ua/")));
+  }
+});
+
+test("ensure-current never falls back from selected ECB to NBU for UAH", async () => {
+  const { service, state, fetcher } = ensureFixture({ provider: "ECB" });
+  const result = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+  assert.equal(state.calls.length, 1);
+  assert.match(state.calls[0], /^https:\/\/data-api.ecb.europa.eu\//);
+  assert.equal(result.provider, "ECB");
+  assert.throws(() => buildRateForPair(result.cache, "UAH", "EUR"), /не поддерживает/);
+});
+
+test("failed parallel ensure-current preserves the old cache, rejects all callers and allows retry", async () => {
+  const { service, state, fetcher } = ensureFixture();
+  const before = plain((await service.status()).cache);
+  let calls = 0;
+  const failedFetch = async () => { calls++; return { ok: false, status: 503 }; };
+  const results = await Promise.allSettled(Array.from({ length: 10 }, () => service.ensureCurrent(ensureActor, failedFetch, ensureNow)));
+  assert.ok(results.every(result => result.status === "rejected" && /Не удалось получить/.test(result.reason.message)));
+  assert.equal(calls, 2);
+  assert.deepEqual(plain((await service.status()).cache), before);
+  assert.equal(state.transactions, 0);
+  assert.equal(state.audits.length, 0);
+  const retry = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+  assert.equal(retry.cache.fetchedAt, ensureNow.toISOString());
+  assert.equal(state.audits.length, 1);
+});
+
+test("freshly fetched but stale official observations reject without replacing the old cache", async () => {
+  const { service, state } = ensureFixture();
+  const before = plain((await service.status()).cache);
+  const staleFetch = async url => ({ ok: true, text: async () => JSON.stringify([
+    { cc: String(url).endsWith("EUR") ? "EUR" : "USD", rate: 40, exchangedate: "10.10.2026" },
+  ]) });
+  await assert.rejects(() => service.ensureCurrent(ensureActor, staleFetch, ensureNow), /устарела/);
+  assert.deepEqual(plain((await service.status()).cache), before);
+  assert.equal(state.transactions, 0);
+});
+
+test("provider change keeps the refresh conflict guard and does not coalesce different providers", async () => {
+  const { service, state, fetcher } = ensureFixture();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const oldRequest = service.ensureCurrent(ensureActor, async url => { await gate; return fetcher(url); }, ensureNow);
+  const oldResult = assert.rejects(oldRequest, /Источник курсов изменился/);
+  await new Promise(resolve => setImmediate(resolve));
+  // Another administrator changes the selected provider and invalidates its cache.
+  state.provider = "ECB";
+  state.cache = null;
+  const newResult = await service.ensureCurrent(ensureActor, fetcher, ensureNow);
+  assert.equal(newResult.provider, "ECB");
+  release();
+  await oldResult;
+  assert.equal((await service.status()).cache.provider, "ECB");
+  assert.equal(state.audits.length, 1);
+  assert.equal(state.calls.filter(url => url.includes("bank.gov.ua")).length, 2);
+  assert.equal(state.calls.filter(url => url.includes("ecb.europa.eu")).length, 1);
+});
+
+test("legacy currentOrRefresh retains its seven-day cache policy for payment and shipment consumers", async () => {
+  const { service, state } = ensureFixture({ fetchedAt: "2026-10-17T08:00:00.000Z" });
+  const result = await service.currentOrRefresh(ensureActor, async () => { assert.fail("legacy cache remains valid"); }, ensureNow);
+  assert.equal(result.fetchedAt, "2026-10-17T08:00:00.000Z");
+  assert.equal(state.transactions, 0);
+});

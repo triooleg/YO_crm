@@ -1,4 +1,16 @@
+import { TaxesController } from "./taxes/taxes.controller";
+import { TaxesModule } from "./taxes/taxes.module";
+import { TaxesService } from "./taxes/taxes.service";
+import { PrismaService } from "./prisma.service";
+import { ParentMeasurementsRangesService } from './parent-measurements/parent-measurements-ranges.service';
+import { ParentMeasurementsPublicController,ParentMeasurementsStaffController,ParentMeasurementsRangesController } from './parent-measurements/parent-measurements.controller';
+import { ParentMeasurementsAccessService } from './parent-measurements/parent-measurements-access.service';
+import { ParentMeasurementsService } from './parent-measurements/parent-measurements.service';
+import { ParentMeasurementsGuard } from './parent-measurements/parent-measurements.guard';
+import { ParentMeasurementsRetentionService } from './parent-measurements/parent-measurements-retention.service';
 import { OverviewController } from "./overview/overview.controller";
+import { SalesStatisticsController } from "./overview/sales-statistics.controller";
+import { SalesStatisticsService } from "./overview/sales-statistics.service";
 import { OverviewService } from "./overview/overview.service";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
@@ -37,10 +49,9 @@ import { BrandingService } from "./branding/branding.service";
 import { KeycrmController } from "./keycrm/keycrm.controller";
 import { KeycrmService } from "./keycrm/keycrm.service";
 import { KeycrmWorkerService } from "./keycrm/keycrm-worker.service";
-
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BackupsModule, IntelligenceModule],
-  controllers: [OverviewController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, OrderCompositionController, OrderMeasurementAssignmentsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
-  providers: [OverviewService, AuthService, SessionGuard, RolesGuard, ClientsService, OrdersService, OrderTabsService, OrderCompositionService, OrderMeasurementAssignmentsService, FinanceService, FinanceReportService, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, KeycrmService, KeycrmWorkerService],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, TaxesModule, BackupsModule, IntelligenceModule],
+  controllers: [TaxesController, ParentMeasurementsRangesController, ParentMeasurementsPublicController, ParentMeasurementsStaffController, OverviewController, SalesStatisticsController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, OrderCompositionController, OrderMeasurementAssignmentsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
+  providers: [ParentMeasurementsRangesService, ParentMeasurementsAccessService, ParentMeasurementsService, ParentMeasurementsGuard, ParentMeasurementsRetentionService, OverviewService, SalesStatisticsService, AuthService, SessionGuard, RolesGuard, ClientsService, { provide: OrdersService, useFactory: (prisma: PrismaService, rates: ExchangeRatesService, taxes: TaxesService) => new OrdersService(prisma, rates, taxes), inject: [PrismaService, ExchangeRatesService, TaxesService] }, OrderTabsService, OrderCompositionService, OrderMeasurementAssignmentsService, { provide: FinanceService, useFactory: (prisma: PrismaService, taxes: TaxesService) => new FinanceService(prisma, taxes), inject: [PrismaService, TaxesService] }, { provide: FinanceReportService, useFactory: (prisma: PrismaService, taxes: TaxesService) => new FinanceReportService(prisma, taxes), inject: [PrismaService, TaxesService] }, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, { provide: KeycrmService, useFactory: (prisma: PrismaService, taxes: TaxesService) => new KeycrmService(prisma, taxes), inject: [PrismaService, TaxesService] }, KeycrmWorkerService],
 })
 export class AppModule {}

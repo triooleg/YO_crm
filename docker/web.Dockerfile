@@ -5,6 +5,7 @@ COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile=false
 COPY apps/web apps/web
+COPY apps/api/src/overview/sales-statistics.types.ts apps/api/src/overview/sales-statistics.types.ts
 ARG NEXT_PUBLIC_API_BASE_URL
 ARG CRM_VERSION
 ARG CRM_COMMIT

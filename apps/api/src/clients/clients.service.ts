@@ -1,11 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, type AiMode, type User } from "@prisma/client";
+import { Discipline, Prisma, type AiMode, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto, UpdateAthleteDto } from "./clients.dto";
 import { planClientAiMerge } from "./client-merge-policy";
 import { clientMergeSnapshot, conditionalTargetRestore, hasValidClientMergeSnapshot, hasValidDeletedAiSettings, hasValidMovedEntityIds, legacyMergeTargetClientId, legacySourceChannels, parseMergeArray, parseMergeObject, parseMovedEntityIds, sourceRestoreData } from "./client-merge-provenance";
-import { createMeasurementData } from "./measurement-data";
+import { createMeasurementData, inheritMeasurementDefinition } from "./measurement-data";
 
 const ids=(rows?:{id:string}[])=>rows?.map(row=>row.id)||[];
 
@@ -179,6 +179,14 @@ export class ClientsService {
       if(conversations.some(item=>sourceChannelSet.has(item.channel)))throw new BadRequestException("CLIENT_SPLIT_CONVERSATION_CONFLICT");
       const conversationIds=conversations.map(item=>item.id),splitAt=new Date();
 
+      if(operation&&(moved!.orders.length||moved!.athletes.length)){
+        const publicDependency=await tx.measurementSubmission.findFirst({where:{OR:[
+          {child:{participant:{invitation:{orderId:{in:moved!.orders}}}},athleteId:{notIn:moved!.athletes}},
+          {child:{participant:{invitation:{orderId:{notIn:moved!.orders}}}},athleteId:{in:moved!.athletes}},
+        ]},select:{id:true}});
+        if(publicDependency)throw new BadRequestException('CLIENT_SPLIT_DEPENDENCY_CONFLICT');
+      }
+
       if(operation&&moved!.athletes.length){
         const dependentOrder=await tx.order.findFirst({where:{clientId:targetId,id:{notIn:moved!.orders},OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}},{items:{some:{OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}},{instances:{some:{OR:[{athleteId:{in:moved!.athletes}},{measurement:{athleteId:{in:moved!.athletes}}}]}}}]}}}]},select:{id:true}});
         if(dependentOrder)throw new BadRequestException("CLIENT_SPLIT_DEPENDENCY_CONFLICT");
@@ -307,7 +315,7 @@ export class ClientsService {
   }
 
   async addMeasurement(clientId: string, athleteId: string, dto: CreateMeasurementDto, actor: User) {
-    const data = createMeasurementData(athleteId, dto);
+    createMeasurementData(athleteId, dto); // Validate the numbered fields before opening the transaction.
     const { standardHeight } = dto;
     return this.prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
@@ -316,6 +324,7 @@ export class ClientsService {
       await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${athleteId} FOR UPDATE`;
       const athlete = await tx.athlete.findFirst({ where: { id: athleteId, clientId, archivedAt: null } });
       if (!athlete) throw new NotFoundException("Спортсмен не найден");
+      const data = createMeasurementData(athleteId, dto, await inheritMeasurementDefinition(tx, athleteId, dto.sourceMeasurementId));
       const measurement = await tx.measurement.create({
         data
       });
@@ -326,6 +335,11 @@ export class ClientsService {
   }
 
   async updateAthlete(clientId: string, athleteId: string, dto: UpdateAthleteDto, actor: User) {
+    const withDiscipline = dto.discipline !== undefined || dto.expectedDiscipline !== undefined;
+    if (withDiscipline && (!Object.values(Discipline).includes(dto.discipline as Discipline) ||
+      (dto.expectedDiscipline !== null && !Object.values(Discipline).includes(dto.expectedDiscipline as Discipline)))) {
+      throw new BadRequestException("Укажите вид спорта и его ожидаемое прежнее значение");
+    }
     return this.prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:" + clientId},0))`;
@@ -334,14 +348,22 @@ export class ClientsService {
       await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${athleteId} FOR UPDATE`;
       const before = await tx.athlete.findFirst({ where: { id: athleteId, clientId, archivedAt: null } });
       if (!before) throw new NotFoundException("Спортсмен не найден");
+      const firstName = dto.firstName.trim(), lastName = dto.lastName?.trim() || null;
+      // Only the extended request may replay a committed result after a lost response.
+      if (withDiscipline && before.firstName === firstName && before.lastName === lastName && before.discipline === dto.discipline) return before;
       const changed = await tx.athlete.updateMany({
-        where: { id: athleteId, clientId, archivedAt: null, firstName: dto.expectedFirstName, lastName: dto.expectedLastName },
-        data: { firstName: dto.firstName.trim(), lastName: dto.lastName?.trim() || null }
+        where: { id: athleteId, clientId, archivedAt: null, firstName: dto.expectedFirstName, lastName: dto.expectedLastName,
+          ...(withDiscipline ? { discipline: dto.expectedDiscipline } : {}) },
+        data: { firstName, lastName, ...(withDiscipline ? { discipline: dto.discipline } : {}) }
       });
       if (changed.count !== 1) throw new ConflictException("Данные спортсмена уже изменены. Обновите данные и повторите действие");
       const athlete = await tx.athlete.findUniqueOrThrow({ where: { id: athleteId } });
-      await tx.activity.create({ data: { clientId, actorId: actor.id, type: "ATHLETE_UPDATED", summary: `Изменено имя спортсмена: ${athlete.firstName}`, metadata: { athleteId } } });
-      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Athlete", entityId: athleteId, before: { firstName: before.firstName, lastName: before.lastName }, after: { firstName: athlete.firstName, lastName: athlete.lastName } } });
+      const sportOnly = withDiscipline && before.firstName === athlete.firstName && before.lastName === athlete.lastName;
+      const changedFields = (["firstName", "lastName", "discipline"] as const).filter(key => before[key] !== athlete[key]);
+      const auditBefore = withDiscipline ? Object.fromEntries(changedFields.map(key => [key, before[key]])) : { firstName: before.firstName, lastName: before.lastName };
+      const auditAfter = withDiscipline ? Object.fromEntries(changedFields.map(key => [key, athlete[key]])) : { firstName: athlete.firstName, lastName: athlete.lastName };
+      await tx.activity.create({ data: { clientId, actorId: actor.id, type: sportOnly ? "ATHLETE_DISCIPLINE_UPDATED" : "ATHLETE_UPDATED", summary: sportOnly ? `Изменён вид спорта спортсмена: ${athlete.firstName}` : `Изменено имя спортсмена: ${athlete.firstName}`, metadata: { athleteId } } });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Athlete", entityId: athleteId, before: auditBefore, after: auditAfter } });
       return athlete;
     });
   }

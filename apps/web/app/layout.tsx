@@ -32,6 +32,10 @@ import "./mantine-overrides.css";
 import "./finance-report.css";
 import "./overview-workspace.css";
 import "./order-source-analytics.css";
+import "./sales-statistics.css";
+import "./sales-statistics-map.css";
+import "./tax-financial-integration.css";
+import "./tax-integration-order-settings.css";
 
 export const metadata: Metadata = {
   title: "CRM Yoleotard",

@@ -1,3 +1,4 @@
+import type { TaxesService } from "../taxes/taxes.service";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InvoiceStatus, type Prisma, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
@@ -6,7 +7,7 @@ import { CreateExpenseCategoryDto,CreateExpenseDto,UpdateExpenseCategoryDto,Upda
 import { renderInvoicePdf } from "./invoice-pdf";
 import { saveProductionSettingsTransaction } from "./production-settings";
 @Injectable() export class FinanceService{
- constructor(private readonly prisma:PrismaService){}
+ constructor(private readonly prisma:PrismaService,private readonly taxes?:TaxesService){}
  private period(month?:string){const d=month&&/^\d{4}-\d{2}$/.test(month)?new Date(month+"-01T00:00:00Z"):new Date(),start=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1)),end=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)),previousStart=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()-1,1));return{start,end,previousStart,month:start.toISOString().slice(0,7)}}
  async summary(month?:string){
   const r=this.period(month),trendStart=new Date(Date.UTC(r.start.getUTCFullYear(),r.start.getUTCMonth()-5,1));
@@ -32,6 +33,7 @@ import { saveProductionSettingsTransaction } from "./production-settings";
  async updateCategory(id:string,d:UpdateExpenseCategoryDto,u:User){const name=d.name?.trim();if(d.name!==undefined&&!name)throw new BadRequestException("Введите название статьи");return this.prisma.$transaction(async tx=>{const before=await tx.expenseCategory.findUnique({where:{id}});if(!before)throw new NotFoundException("Статья расходов не найдена");const x=await tx.expenseCategory.update({where:{id},data:{name,active:d.active}});await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"ExpenseCategory",entityId:id,before,after:x}});return x})}
  async updateExpense(id:string,d:UpdateExpenseDto,u:User){return this.prisma.$transaction(async tx=>{
   const before=await this.expenseForMutation(tx,id);
+  if(this.taxes)await this.taxes.assertExpenseMutable(tx,id);
   if(before.orderShipment&&d.orderId!==undefined&&d.orderId!==before.orderShipment.orderId)throw new BadRequestException("Расход посылки нельзя перенести в другой заказ или отвязать от заказа");
   if(d.categoryId!==undefined)await this.validateExpenseCategory(tx,d.categoryId);
   if(d.orderId!==undefined&&d.orderId!==null)await this.validateExpenseOrder(tx,d.orderId);
@@ -41,6 +43,7 @@ import { saveProductionSettingsTransaction } from "./production-settings";
  })}
  async archiveExpense(id:string,u:User){return this.prisma.$transaction(async tx=>{
   const before=await this.expenseForMutation(tx,id);
+  if(this.taxes)await this.taxes.assertExpenseMutable(tx,id);
   const x=await tx.expense.update({where:{id},data:{archivedAt:new Date()}});
   await this.syncExpenseShipment(tx,before,0,u.id,true);
   await tx.auditLog.create({data:{actorId:u.id,action:"ARCHIVE",entityType:"Expense",entityId:id,before,after:x}});return x;

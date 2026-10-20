@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsDateString, IsInt, IsOptional, IsString, Length, Matches, Max, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Length, Matches, Max, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { CreateAthleteDto, CreateMeasurementDto } from '../clients/clients.dto';
 
 export class CreateOrderAthleteDto extends CreateAthleteDto {
@@ -16,6 +16,8 @@ export class MeasurementAssignmentTargetDto {
 }
 
 export class AssignOrderMeasurementsDto {
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() confirmProduction?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Length(1,2000) reason?: string;
   @ApiProperty({ type: [MeasurementAssignmentTargetDto] })
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(1000) @ArrayUnique((target: MeasurementAssignmentTargetDto | null) => target?.id)
   @ValidateNested({ each: true }) @Type(() => MeasurementAssignmentTargetDto)

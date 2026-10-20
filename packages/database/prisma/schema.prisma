@@ -292,6 +292,9 @@ model User {
   authoredActivities        Activity[]                 @relation("ActivityActor")
   authoredOrderNotes        OrderNote[]                @relation("OrderNoteAuthor")
   editedOrderNoteRevisions  OrderNoteRevision[]        @relation("OrderNoteRevisionEditor")
+  parentMeasurementInvitations MeasurementInvitation[] @relation("ParentMeasurementInvitationIssuer")
+  parentMeasurementAssignments MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetActor")
+  parentMeasurementEvents MeasurementPublicEvent[] @relation("ParentMeasurementEventActor")
 }
 
 model Session {
@@ -361,6 +364,7 @@ model Client {
   @@index([email])
   @@index([phone])
   @@index([status, archivedAt])
+  parentMeasurementInvitations MeasurementInvitation[] @relation("ParentMeasurementInvitationClient")
 }
 
 model ClientMergeRedirect {
@@ -418,6 +422,8 @@ model Athlete {
   orderNotes   OrderNote[]
 
   @@index([clientId, archivedAt])
+  parentMeasurementChildren MeasurementParticipantChild[] @relation("ParentMeasurementChildAthlete")
+  parentMeasurementSubmissions MeasurementSubmission[] @relation("ParentMeasurementSubmissionAthlete")
 }
 
 model Measurement {
@@ -433,6 +439,8 @@ model Measurement {
   values     Json?
   notes      String?
   source     String?
+  definitionVersion String?
+  parentSubmissions MeasurementSubmission[]
   createdAt  DateTime    @default(now())
   archivedAt DateTime?
   athlete    Athlete     @relation(fields: [athleteId], references: [id])
@@ -442,9 +450,13 @@ model Measurement {
 
   @@index([athleteId, measuredAt])
   @@index([athleteId, archivedAt, measuredAt])
+  parentAssignmentsBefore MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetBefore")
+  parentAssignmentsAfter MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetAfter")
 }
 
 model Order {
+  taxEntries TaxEntry[]
+  measurementInvitations MeasurementInvitation[]
   id                   String           @id @default(cuid())
   number               String           @unique
   clientId             String
@@ -678,6 +690,7 @@ model OrderItemInstance {
   @@index([measurementId])
   @@index([orderShipmentId])
   @@index([productionStatus, archivedAt])
+  parentMeasurementAssignmentEvents MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetInstance")
 }
 
 model OrderCompositionOperation {
@@ -751,6 +764,7 @@ model OrderNoteRevision {
 }
 
 model Payment {
+  taxEntries TaxEntry[]
   id          String        @id @default(cuid())
   orderId     String
   amountMinor Int
@@ -1398,6 +1412,7 @@ model ExpenseCategory {
 }
 
 model Expense {
+  taxAllocations TaxExpenseAllocation[]
   id          String          @id @default(cuid())
   categoryId  String
   orderId     String?
@@ -1532,4 +1547,268 @@ model BackupSetting {
   storageProvider BackupStorageProvider @default(LOCAL)
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
+}
+
+model MeasurementInvitation {
+  id String @id @default(cuid())
+  orderId String
+  clientIdAtIssue String
+  createdById String
+  tokenHash String @unique
+  mode String
+  locale String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  admissionLimit Int @default(100)
+  admittedCount Int @default(0)
+  rootId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order Order @relation(fields:[orderId],references:[id],onDelete:Restrict)
+  participants MeasurementParticipant[]
+  @@index([orderId,createdAt])
+  @@index([rootId])
+  clientAtIssue Client @relation("ParentMeasurementInvitationClient", fields: [clientIdAtIssue], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_invitation_client_fk")
+  issuer User @relation("ParentMeasurementInvitationIssuer", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_invitation_issuer_fk")
+  root MeasurementInvitation? @relation("ParentMeasurementInvitationRoot", fields: [rootId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_invitation_root_fk")
+  derivedInvitations MeasurementInvitation[] @relation("ParentMeasurementInvitationRoot")
+  publicEvents MeasurementPublicEvent[] @relation("ParentMeasurementEventInvitation")
+}
+
+model MeasurementParticipant {
+  id String @id @default(cuid())
+  invitationId String
+  locale String @default("en")
+  units String @default("cm")
+  expiresAt DateTime
+  revokedAt DateTime?
+  generation Int @default(0)
+  consentVersion String
+  consentedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  invitation MeasurementInvitation @relation(fields:[invitationId],references:[id],onDelete:Restrict)
+  credentials MeasurementParticipantCredential[]
+  children MeasurementParticipantChild[]
+  @@index([invitationId])
+  publicEvents MeasurementPublicEvent[] @relation("ParentMeasurementEventParticipant")
+}
+
+model MeasurementParticipantCredential {
+  id String @id @default(cuid())
+  participantId String
+  kind String
+  tokenHash String @unique
+  generation Int
+  expiresAt DateTime
+  consumedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  participant MeasurementParticipant @relation(fields:[participantId],references:[id],onDelete:Restrict)
+  @@index([participantId,kind,expiresAt])
+}
+
+model MeasurementParticipantChild {
+  id String @id @default(cuid())
+  participantId String
+  revision Int @default(0)
+  draft Json
+  athleteId String?
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  participant MeasurementParticipant @relation(fields:[participantId],references:[id],onDelete:Restrict)
+  submissions MeasurementSubmission[]
+  @@unique([id,participantId])
+  @@index([participantId,updatedAt])
+  athlete Athlete? @relation("ParentMeasurementChildAthlete", fields: [athleteId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_child_athlete_fk")
+  draftAssets MeasurementDraftAsset[] @relation("ParentMeasurementAssetChild")
+}
+
+model MeasurementSubmission {
+  id String @id @default(cuid())
+  childId String
+  participantId String
+  revision Int
+  operationKey String
+  requestHash String
+  measurementId String @unique
+  athleteId String
+  previousSubmissionId String?
+  payload Json
+  reviewStatus String @default("RECEIVED")
+  submittedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  child MeasurementParticipantChild @relation(fields:[childId,participantId],references:[id,participantId],onDelete:Restrict)
+  measurement Measurement @relation(fields:[measurementId],references:[id],onDelete:Restrict)
+  @@unique([participantId,operationKey])
+  @@unique([childId,revision])
+  @@index([childId,submittedAt])
+  athlete Athlete @relation("ParentMeasurementSubmissionAthlete", fields: [athleteId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_submission_athlete_fk")
+  previousSubmission MeasurementSubmission? @relation("ParentMeasurementSubmissionPrevious", fields: [previousSubmissionId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_submission_previous_fk")
+  subsequentSubmissions MeasurementSubmission[] @relation("ParentMeasurementSubmissionPrevious")
+  targets MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetSubmission")
+  publicEvents MeasurementPublicEvent[] @relation("ParentMeasurementEventSubmission")
+  @@index([athleteId], map: "pm_submission_athlete_idx")
+}
+
+model MeasurementSubmissionTarget {
+  id String @id @default(cuid())
+  submissionId String
+  instanceId String
+  staffActorId String?
+  beforeMeasurementId String?
+  afterMeasurementId String
+  createdAt DateTime @default(now())
+  @@index([submissionId,createdAt])
+  @@index([instanceId,createdAt])
+  submission MeasurementSubmission @relation("ParentMeasurementTargetSubmission", fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_target_submission_fk")
+  instance OrderItemInstance @relation("ParentMeasurementTargetInstance", fields: [instanceId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_target_instance_fk")
+  staffActor User? @relation("ParentMeasurementTargetActor", fields: [staffActorId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_target_actor_fk")
+  beforeMeasurement Measurement? @relation("ParentMeasurementTargetBefore", fields: [beforeMeasurementId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_target_before_fk")
+  afterMeasurement Measurement @relation("ParentMeasurementTargetAfter", fields: [afterMeasurementId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_target_after_fk")
+}
+
+model MeasurementPublicEvent {
+  id String @id @default(cuid())
+  invitationId String
+  participantId String?
+  submissionId String?
+  actorType String
+  staffActorId String?
+  kind String
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([invitationId,createdAt])
+  @@index([submissionId,createdAt])
+  invitation MeasurementInvitation @relation("ParentMeasurementEventInvitation", fields: [invitationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_event_invite_fk")
+  participant MeasurementParticipant? @relation("ParentMeasurementEventParticipant", fields: [participantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_event_participant_fk")
+  submission MeasurementSubmission? @relation("ParentMeasurementEventSubmission", fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_event_submission_fk")
+  staffActor User? @relation("ParentMeasurementEventActor", fields: [staffActorId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "pm_event_actor_fk")
+}
+
+model MeasurementDraftAsset {
+  id String @id @default(cuid())
+  childId String
+  participantId String
+  storageKey String @unique
+  mimeType String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  archivedAt DateTime?
+  @@index([childId])
+  child MeasurementParticipantChild @relation("ParentMeasurementAssetChild", fields: [childId, participantId], references: [id, participantId], onDelete: Restrict, onUpdate: NoAction, map: "pm_asset_child_fk")
+}
+
+
+// Tax economic rows are append-only. PostgreSQL constraints/triggers live in
+// 20261019123000_fop_tax_ledger; pending receipt events never carry money.
+model TaxPolicy {
+ id String @id @default(cuid())
+ effectiveFrom String
+ group Int
+ unifiedMode String
+ unifiedRateBps Int
+ fixedUnifiedMinor BigInt?
+ fixedUnifiedWageRateBps Int?
+ militaryRateBps Int
+ esvRateBps Int
+ state String @default("PUBLISHED")
+ snapshot Json
+ createdAt DateTime @default(now())
+ periods TaxPeriod[]
+ entries TaxEntry[]
+}
+model TaxPeriod {
+ id String @id @default(cuid())
+ month String @unique
+ policyId String
+ state String @default("OPEN")
+ revision Int @default(0)
+ snapshot Json
+ closedAt DateTime?
+ closedSnapshot Json?
+ createdAt DateTime @default(now())
+ policy TaxPolicy @relation(fields:[policyId],references:[id],onDelete:Restrict)
+ entries TaxEntry[] @relation("TaxEntryPeriod")
+ originalEntries TaxEntry[] @relation("TaxEntryOriginalPeriod")
+}
+model TaxEntry {
+ sequence BigInt @unique @default(autoincrement())
+ id String @id @default(cuid())
+ periodId String
+ originalPeriodId String?
+ policyId String
+ paymentId String?
+ orderId String?
+ component String
+ kind String
+ rootId String?
+ reversesEntryId String?
+ sourceKey String? @unique
+ operationKey String @unique
+ payloadHash String
+ amountMinor BigInt?
+ baseMinor BigInt?
+ snapshot Json
+ createdAt DateTime @default(now())
+ period TaxPeriod @relation("TaxEntryPeriod",fields:[periodId],references:[id],onDelete:Restrict)
+ originalPeriod TaxPeriod? @relation("TaxEntryOriginalPeriod",fields:[originalPeriodId],references:[id],onDelete:Restrict)
+ policy TaxPolicy @relation(fields:[policyId],references:[id],onDelete:Restrict)
+ payment Payment? @relation(fields:[paymentId],references:[id],onDelete:Restrict)
+ order Order? @relation(fields:[orderId],references:[id],onDelete:Restrict)
+ root TaxEntry? @relation("TaxEntryRoot",fields:[rootId],references:[id],onDelete:Restrict)
+ events TaxEntry[] @relation("TaxEntryRoot")
+ reversesEntry TaxEntry? @relation("TaxEntryReversal",fields:[reversesEntryId],references:[id],onDelete:Restrict)
+ reversalEvents TaxEntry[] @relation("TaxEntryReversal")
+ allocations TaxExpenseAllocation[]
+ @@index([periodId,component,createdAt])
+ @@index([rootId,createdAt])
+ @@index([paymentId,createdAt])
+}
+model TaxExpenseAllocation {
+ sequence BigInt @unique @default(autoincrement())
+ id String @id @default(cuid())
+ kind String
+ expenseId String
+ linkId String?
+ rootId String?
+ reversesId String?
+ component String
+ amountMinor BigInt
+ incurredAt DateTime
+ snapshot Json
+ operationKey String @unique
+ payloadHash String
+ createdAt DateTime @default(now())
+ expense Expense @relation(fields:[expenseId],references:[id],onDelete:Restrict)
+ link TaxExpenseAllocation? @relation("TaxExpenseLink",fields:[linkId],references:[id],onDelete:Restrict)
+ allocations TaxExpenseAllocation[] @relation("TaxExpenseLink")
+ reverses TaxExpenseAllocation? @relation("TaxAllocationReversal",fields:[reversesId],references:[id],onDelete:Restrict)
+ reversalEvents TaxExpenseAllocation[] @relation("TaxAllocationReversal")
+ root TaxEntry? @relation(fields:[rootId],references:[id],onDelete:Restrict)
+ @@index([rootId])
+ @@index([expenseId,createdAt])
+}
+
+// Historical NBU evidence: READY first observation is immutable; failures retry.
+model HistoricalNbuRate {
+ currency String
+ incomeDate String
+ provider String @default("NBU")
+ status String
+ attempts Int @default(1)
+ leaseToken String?
+ leaseUntil DateTime? @db.Timestamptz(3)
+ retryAt DateTime? @db.Timestamptz(3)
+ lastErrorCode String?
+ numerator String?
+ denominator String?
+ effectiveDate String?
+ url String?
+ fetchedAt DateTime? @db.Timestamptz(3)
+ raw String?
+ createdAt DateTime @default(now()) @db.Timestamptz(3)
+ updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+ @@id([currency,incomeDate])
 }

@@ -1,3 +1,4 @@
+import type { TaxesService } from "../taxes/taxes.service";
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { OrderType, Prisma, type Client, type User } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -63,7 +64,7 @@ export class KeycrmService {
   private readonly processing = new Set<string>();
   private readonly prisma: PrismaService;
 
-  constructor(prisma: PrismaService) { this.prisma = prisma; }
+  constructor(prisma: PrismaService, private readonly taxes?: TaxesService) { this.prisma = prisma; }
 
   async settings(): Promise<SafeSettings> {
     const rows = await this.prisma.appSetting.findMany({ where: { section: SECTION } });
@@ -148,6 +149,9 @@ export class KeycrmService {
   }
 
   async createRun(dto: CreateKeycrmSyncRunDto, actor: User) {
+    if (dto.orderId !== undefined && (!Number.isSafeInteger(dto.orderId) || dto.orderId < 1)) throw new BadRequestException("Укажите положительный целый номер заказа KeyCRM");
+    const targetOrderId = dto.orderId === undefined ? null : String(dto.orderId);
+    if (targetOrderId && (dto.from !== undefined || dto.to !== undefined)) throw new BadRequestException("Выберите один заказ или период импорта");
     const requestedFrom = dto.from ? new Date(dto.from) : null;
     const requestedTo = dto.to ? new Date(dto.to) : new Date();
     if (requestedFrom && requestedTo && requestedFrom > requestedTo) throw new BadRequestException("Начальная дата не может быть позже конечной");
@@ -155,7 +159,7 @@ export class KeycrmService {
       return await this.prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", "KEYCRM_SYNC_CONFIGURATION");
         const existing = await tx.keycrmSyncRun.findUnique({ where: { clientRequestId: dto.clientRequestId } });
-        if (existing) return existing;
+        if (existing) { assertRunRetryScope(existing, dto, targetOrderId); return existing; }
         const settings = safeSettingsFromRows(await tx.appSetting.findMany({ where: { section: SECTION } }));
         if (!settings.enabled || !settings.apiTokenConfigured) throw new BadRequestException("Сначала включите KeyCRM и сохраните API-токен");
         if (!settings.connectionKey) throw new BadRequestException("Пересохраните API-токен KeyCRM, чтобы создать безопасную область синхронизации");
@@ -167,6 +171,8 @@ export class KeycrmService {
           const preview = await tx.keycrmSyncRun.findUnique({ where: { id: dto.previewRunId } });
           if (!preview || preview.mode !== "DRY_RUN" || !["COMPLETED", "PARTIAL"].includes(preview.status)) throw new ConflictException("Предварительная проверка не завершена");
           if (preview.configRevision !== settings.configRevision) throw new ConflictException("Настройки KeyCRM изменились. Выполните проверку повторно");
+          if (runTargetOrderId(preview.context) !== targetOrderId) throw new ConflictException("Проверка относится к другому заказу или режиму импорта. Выполните проверку повторно");
+          if (targetOrderId && (preview.status !== "COMPLETED" || preview.scannedCount !== 1 || preview.failedCount !== 0)) throw new ConflictException("Для переноса заказа требуется успешная проверка именно этого заказа");
           previewRunId = preview.id;
           previewRange = { requestedFrom: preview.requestedFrom, requestedTo: preview.requestedTo };
         }
@@ -177,17 +183,18 @@ export class KeycrmService {
           previewRunId,
           clientRequestId: dto.clientRequestId,
           configRevision: settings.configRevision,
-          requestedFrom: dto.dryRun ? requestedFrom : previewRange?.requestedFrom,
-          requestedTo: dto.dryRun ? requestedTo : previewRange?.requestedTo,
-          pageSize: settings.pageSize,
+          requestedFrom: targetOrderId ? null : dto.dryRun ? requestedFrom : previewRange?.requestedFrom,
+          requestedTo: targetOrderId ? null : dto.dryRun ? requestedTo : previewRange?.requestedTo,
+          pageSize: targetOrderId ? 1 : settings.pageSize,
+          ...(targetOrderId ? { context: { targetOrderId } } : {}),
         } });
-        await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "KeycrmSyncRun", entityId: run.id, after: { mode: run.mode, requestedFrom: run.requestedFrom, requestedTo: run.requestedTo, configRevision: run.configRevision } } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "KeycrmSyncRun", entityId: run.id, after: { mode: run.mode, requestedFrom: run.requestedFrom, requestedTo: run.requestedTo, configRevision: run.configRevision, ...(targetOrderId ? { targetOrderId } : {}) } } });
         return run;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const raced = await this.prisma.keycrmSyncRun.findUnique({ where: { clientRequestId: dto.clientRequestId } });
-        if (raced) return raced;
+        if (raced) { assertRunRetryScope(raced, dto, targetOrderId); return raced; }
       }
       throw error;
     }
@@ -321,6 +328,7 @@ export class KeycrmService {
       await this.prisma.keycrmSyncRun.update({ where: { id: runId }, data: { status: "RUNNING", startedAt: run.startedAt ?? new Date(), errorMessage: null } });
       const client = await this.client();
       const context = jsonObject(run.context);
+      const targetOrderId = runTargetOrderId(context);
       if (context.sourcesComplete !== true) {
         const sourcePage = Number.isInteger(context.sourcePage) && Number(context.sourcePage) > 0 ? Number(context.sourcePage) : 1;
         const sources = await client.listSources(sourcePage);
@@ -331,7 +339,9 @@ export class KeycrmService {
         await this.prisma.keycrmSyncRun.update({ where: { id: runId }, data: { context: { ...context, sourceNames, sourceCurrencies, sourcePage: sourcesComplete ? sourcePage : sourcePage + 1, sourcesComplete }, leaseOwner: null, leaseUntil: null } });
         return this.run(runId);
       }
-      const page = await client.listOrders({ page: run.currentPage, limit: run.pageSize, from: run.requestedFrom, to: run.requestedTo });
+      const page = targetOrderId
+        ? { data: [await client.getImportOrder(targetOrderId)], total: 1, per_page: 1 }
+        : await client.listOrders({ page: run.currentPage, limit: run.pageSize, from: run.requestedFrom, to: run.requestedTo });
       const refreshedContext = jsonObject((await this.prisma.keycrmSyncRun.findUnique({ where: { id: runId }, select: { context: true } }))?.context);
       const sourceNames = jsonStringMap(refreshedContext.sourceNames);
       const sourceCurrencies = jsonStringMap(refreshedContext.sourceCurrencies);
@@ -369,7 +379,7 @@ export class KeycrmService {
         leaseOwner: null,
         leaseUntil: null,
       } });
-      if (complete) await this.prisma.auditLog.create({ data: { actorId: run.startedById, action: "COMPLETE", entityType: "KeycrmSyncRun", entityId: run.id, after: { mode: run.mode, scannedCount: updatedRun.scannedCount, createdCount: updatedRun.createdCount, updatedCount: updatedRun.updatedCount, skippedCount: updatedRun.skippedCount, failedCount: updatedRun.failedCount, status: updatedRun.status } } });
+      if (complete) await this.prisma.auditLog.create({ data: { actorId: run.startedById, action: "COMPLETE", entityType: "KeycrmSyncRun", entityId: run.id, after: { mode: run.mode, scannedCount: updatedRun.scannedCount, createdCount: updatedRun.createdCount, updatedCount: updatedRun.updatedCount, skippedCount: updatedRun.skippedCount, failedCount: updatedRun.failedCount, status: updatedRun.status, ...(targetOrderId ? { targetOrderId } : {}) } } });
       return this.run(runId);
     } catch (error) {
       if (error instanceof ServiceUnavailableException) {
@@ -559,6 +569,7 @@ export class KeycrmService {
           if (candidates[0]) {
             const linkedPayment = await tx.payment.update({ where: { id: candidates[0].id }, data: { ...identity, externalStatus: payment.externalStatus } });
             await tx.auditLog.create({ data: { actorId, action: "LINK", entityType: "Payment", entityId: linkedPayment.id, before: candidates[0], after: linkedPayment } });
+            if (this.taxes) await this.taxes.capturePayment(tx, linkedPayment.id, "IMPORT_LINK", actorId, { createIfMissing: false });
             previous = linkedPayment;
           }
         }
@@ -574,6 +585,7 @@ export class KeycrmService {
             create: { orderId: persisted.id, amountMinor: payment.amountMinor, currency: payment.currency, method: payment.method, receivedAt: payment.receivedAt, reference: payment.reference, notes: payment.notes, ...identity, externalStatus: payment.externalStatus },
             update: { externalStatus: payment.externalStatus, voidedAt: null, voidReason: null },
           });
+          if (this.taxes) await this.taxes.capturePayment(tx, receipt.id, restored ? "IMPORT_RESTORE" : previous ? "IMPORT_REPLAY" : "IMPORT_CREATE", actorId, { createIfMissing: !previous || restored });
           if (!previous || restored) await tx.auditLog.create({ data: { actorId, action: restored ? "RESTORE" : "CREATE", entityType: "Payment", entityId: receipt.id, before: previous ?? undefined, after: receipt } });
           if (!previous || restored) await tx.activity.create({ data: { clientId, orderId: persisted.id, type: restored ? "PAYMENT_RESTORED" : "PAYMENT_RECEIVED", summary: restored ? "Оплата восстановлена по данным KeyCRM" : "Получена оплата из KeyCRM", metadata: { paymentId: receipt.id, keycrmPaymentId: payment.externalId, amountMinor: receipt.amountMinor, currency: receipt.currency } } });
         } else if (!previous) {
@@ -594,6 +606,7 @@ export class KeycrmService {
           await tx.activity.create({ data: { clientId, orderId: persisted.id, type: "PAYMENT_IMPORTED_VOIDED", summary: "Аннулированная оплата перенесена из истории KeyCRM", metadata: { paymentId: voided.id, keycrmPaymentId: payment.externalId, amountMinor: voided.amountMinor, currency: voided.currency, externalStatus: payment.externalStatus } } });
         } else if (!previous.voidedAt) {
           const voided = await tx.payment.update({ where: { id: previous.id }, data: { externalStatus: payment.externalStatus, voidedAt: new Date(), voidReason: `KeyCRM: ${payment.externalStatus}` } });
+          if (this.taxes) await this.taxes.capturePayment(tx, voided.id, "IMPORT_VOID", actorId);
           await tx.auditLog.create({ data: { actorId, action: "VOID", entityType: "Payment", entityId: previous.id, before: previous, after: voided } });
         } else if (previous) {
           await tx.payment.update({ where: { id: previous.id }, data: { externalStatus: payment.externalStatus } });
@@ -772,6 +785,10 @@ export class KeycrmService {
       for (const payment of rows(afterOrder.payments)) if (!beforePayments.has(payment.id as string)) await tx.payment.update({ where: { id: payment.id as string }, data: { voidedAt: rolledBackAt, voidReason: `Откат KeyCRM sync ${runId}` } });
       if (before.order.productionSlot) await tx.productionSlot.update({ where: { orderId: afterOrder.id }, data: restorableData(before.order.productionSlot as Record<string, unknown>, ["id", "orderId", "createdAt", "updatedAt"]) });
       if (before.order.shipment) await tx.shipment.update({ where: { orderId: afterOrder.id }, data: restorableData(before.order.shipment as Record<string, unknown>, ["id", "orderId", "createdAt", "updatedAt"]) });
+    }
+    if (this.taxes) {
+      const taxPayments = await tx.payment.findMany({ where: { orderId: afterOrder.id as string }, select: { id: true }, orderBy: { id: "asc" } });
+      for (const taxPayment of taxPayments) await this.taxes.capturePayment(tx, taxPayment.id, `ROLLBACK:${runId}`, undefined, { createIfMissing: false });
     }
     const beforeClients = rowsById(before.clients);
     for (const client of before.clients) await tx.client.update({ where: { id: client.id as string }, data: restorableData(client, ["id", "createdAt", "updatedAt"]) });
@@ -1096,6 +1113,17 @@ function safeAuditSettings(value: SafeSettings) { return { ...value, apiTokenCon
 function safeErrorCode(error: unknown) { return error instanceof Error ? error.name.replace(/[^A-Z0-9_]/gi, "_").toUpperCase().slice(0, 80) : "UNKNOWN_ERROR"; }
 function safeErrorMessage(error: unknown) { const value = error instanceof Error ? error.message : "Неизвестная ошибка"; return value.replace(/Bearer\s+\S+/gi, "Bearer [скрыто]").slice(0, 500); }
 function jsonObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function runTargetOrderId(value: unknown): string | null {
+  const context = jsonObject(value);
+  if (!Object.hasOwn(context, "targetOrderId")) return null;
+  const target = context.targetOrderId;
+  if (typeof target !== "string" || !/^[1-9]\d*$/.test(target) || !Number.isSafeInteger(Number(target))) throw new BadRequestException("Некорректный номер заказа в запуске KeyCRM. Создайте новую проверку");
+  return target;
+}
+function assertRunRetryScope(run: { context: unknown; mode: string; previewRunId: string | null }, dto: CreateKeycrmSyncRunDto, targetOrderId: string | null) {
+  const existingTarget = runTargetOrderId(run.context);
+  if ((existingTarget || targetOrderId) && (existingTarget !== targetOrderId || run.mode !== (dto.dryRun ? "DRY_RUN" : "APPLY") || (!dto.dryRun && run.previewRunId !== dto.previewRunId))) throw new ConflictException("Этот запрос уже использован для другого заказа или режима импорта");
+}
 function jsonStringMap(value: unknown): Record<string, string> { const object = jsonObject(value); return Object.fromEntries(Object.entries(object).filter((entry): entry is [string, string] => typeof entry[1] === "string")); }
 function jsonSnapshot(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function canonicalJson(value: unknown): string {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const controller = await readFile(new URL("../src/orders/orders.controller.ts", import.meta.url), "utf8");
+const awaitedMeasurementHelper = await readFile(new URL("../src/clients/measurement-data.ts", import.meta.url), "utf8");
 const service = await readFile(new URL("../src/orders/orders.service.ts", import.meta.url), "utf8");
 
 test("заказ принимает новый неизменяемый snapshot замеров через защищённый endpoint", () => {
@@ -36,7 +37,8 @@ test("snapshot создаётся или заменяется новым и св
 
 test("сервер сохраняет точность шага 0,5 см и не обновляет старый снимок", () => {
   const method = service.slice(service.indexOf("async addMeasurement"), service.indexOf("async upload(dto"));
-  assert.match(method, /Number\.isInteger\(value \* 2\)/);
+  assert.match(method, /createMeasurementData/);
+  assert.match(awaitedMeasurementHelper, /Number\.isInteger\(value \* 2\)/);
   assert.doesNotMatch(method, /measurement\.update/);
   assert.match(method, /measurement\.create/);
 });

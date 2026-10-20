@@ -7,7 +7,7 @@ import {moneyLabel} from '../../lib/finance-report';
 import {CrmStatusBadge} from '../crm/status-badge';
 import type {DesignsBridge} from './designs-instances';
 
-type Snapshot={id:string;athleteId:string;measuredAt:string;values?:Record<string,number>|null;archivedAt?:string|null};
+type Snapshot={id:string;athleteId:string;measuredAt:string;definitionVersion?:string|null;values?:Record<string,number>|null;archivedAt?:string|null};
 export type HistoricalInstanceRecord={
  orderId:string;orderNumber:string;currency:string;
  design:{id:string;name:string;sku?:string|null;notes?:string|null;designNumber?:number|null;priceMinor:number;archivedAt?:string|null};
@@ -15,7 +15,7 @@ export type HistoricalInstanceRecord={
  archived:boolean;
 };
 
-export function HistoricalInstance({contextOrderId,instanceId,bridge,onClose,renderMeasurements}:{contextOrderId:string;instanceId:string;bridge?:DesignsBridge;onClose:()=>void;renderMeasurements:(measurement:{id:string;athleteId:string;measuredAt:string;values?:Record<string,number>})=>ReactNode}){
+export function HistoricalInstance({contextOrderId,instanceId,bridge,onClose,renderMeasurements}:{contextOrderId:string;instanceId:string;bridge?:DesignsBridge;onClose:()=>void;renderMeasurements:(measurement:{id:string;athleteId:string;measuredAt:string;definitionVersion?:string|null;values?:Record<string,number>})=>ReactNode}){
  const [record,setRecord]=useState<HistoricalInstanceRecord>(),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  useEffect(()=>{
   let current=true;setRecord(undefined);setError('');

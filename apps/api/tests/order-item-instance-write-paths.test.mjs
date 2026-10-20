@@ -41,6 +41,7 @@ function loadOrdersService() {
     if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
     if (specifier === "sharp") return () => ({});
     if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   return nativeRequire(specifier);
   };
   vm.runInNewContext(javascript, { module, exports: module.exports, require: localRequire, Buffer, console, process, setTimeout, clearTimeout });

@@ -29,6 +29,7 @@ const { OrderTabsService } = load('../src/orders/order-tabs.service.ts');
 const { ClientsService } = load('../src/clients/clients.service.ts');
 const stamp = '2026-10-15T10:00:00.000Z';
 const actor = { id: 'manager-1' };
+const { compositionToken } = load('../src/orders/order-composition.ts');
 const date = () => new Date(stamp);
 
 // Only the Prisma boundary is simulated. A failed callback discards the whole draft.
@@ -112,6 +113,16 @@ function fixture({ loseClaim = null, failAudit = false, beforeTransaction = null
   return { state, service: new OrderMeasurementAssignmentsService(prisma), tabs: new OrderTabsService(prisma), clients: new ClientsService(prisma) };
 }
 const target = (id, expectedUpdatedAt = stamp) => ({ id, expectedUpdatedAt });
+for(const optional of [undefined,null])test(`pre-update legacy snapshot operation replays original hash with optional=${optional}`,async()=>{
+ const {state,service}=fixture();
+ const input={measuredAt:stamp,m1:61.5,m2:51,m3:71,m15:121,...(optional===null?{m6:null}:{}),operationKey:'legacy-snapshot-replay-123'};
+ // Independent pre-change payload shape: nullable definition did not exist.
+ const data={athleteId:'a1',measuredAt:new Date(stamp),chest:61.5,waist:51,hips:71,torso:121,values:{standardHeight:undefined,m1:61.5,m2:51,m3:71,m15:121,...(optional===null?{m6:null}:{})},notes:undefined,source:'Ручной ввод'};
+ state.operations.push({orderId:'o1',actorId:actor.id,operationKey:input.operationKey,requestHash:compositionToken({kind:'MEASUREMENT',actorId:actor.id,data}),result:{id:'m1'}});
+ const before=JSON.stringify(state.measurements),result=await service.createSnapshot('o1','a1',input,actor);
+ assert.equal(result.id,'m1');assert.equal(JSON.stringify(state.measurements),before);assert.equal(state.audits.length,0);
+ await assert.rejects(service.createSnapshot('o1','a1',{...input,m1:62},actor));
+});
 
 test('historical instance read keeps archived design/order/snapshot visible only inside the context client',async()=>{
  const {state,service}=fixture();state.orders.find(o=>o.id==='old').currency='EUR';

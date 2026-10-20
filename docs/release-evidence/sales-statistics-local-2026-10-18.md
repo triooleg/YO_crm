@@ -1,0 +1,27 @@
+# Sales statistics — LOCAL release gate
+
+2026-10-18. MAIN: D:/CodexData/.codex/worktrees/finance-approved-redesign/YO_crm. Uncommitted integration over a80a9b3. LOCAL scope only: no commit, push, deployment, production access, DB migration or provider operation authorized/performed by this reviewer.
+
+## Current verdict
+
+**FINAL LOCAL READINESS: PASS.** Source/functional/quality and final cleanup gates fulfilled. No concrete blocking source finding identified in the inspected RBAC/FX/export/integration surface. This verdict accepts the uncommitted local implementation only; commit/push/deployment/production access remain unauthorized.
+
+## Scope and inspected contracts
+
+Reviewed .agents/README.md/release contract, continuity/spec/implementation report, actual statistics controller/service/query/model/FX and table/mode integration. Existing Overview retained through separate mode wrapper; production role denied statistics in controller guard and service permissions. OWNER/ADMIN/ACCOUNTANT have financial projection, MANAGER receives null financial values and no monetary CSV columns; ACCOUNTANT gains no Orders/Clients module permission. Existing writers are not replaced.
+
+Cursor-batched read snapshot uses RepeatableRead; official historical FX work occurs after the DB transaction, with fixed HTTPS endpoints, redirect rejection, deadline/body/cache/request bounds and no operational-cache write/fallback. Original event-date amounts remain distinct from applied order settlement; absent/conflicting historical evidence returns null rather than invented zero. Integer minor-unit/BigInt valuation, receipt-date cash independent of order creation/status, canonical clients and historical first-order classification inspected. Receipt-only groups survive missing FX via receiptCount. Financial source table now includes actual received totals only for financial roles.
+
+CSV rechecks role and binds actor ID/role, normalized complete query and saved DB/FX snapshot version, with120s expiry, explicit50000-row refusal and existing csvCell formula escaping. Financial exports use declared minor units. UI uses real model fixtures only in isolated browser tests; runtime service reads Prisma, not fixture data.
+
+## Evidence accepted
+
+- MAIN reports compatibility Aristotle, business Mendel including missing-FX receipt groups, regression Schrodinger, visual Ptolemy final five-size scoped PASS and supplemental Spec/FX PASS. These are producer review verdicts; no separate compatibility/business/visual report files were discovered in this local evidence directory, and this gatekeeper does not claim to have read absent reports.
+- Independently read final browser-regression.md, browser-final.log:17 Node tests PASS including parent/16 leaf scenarios. browser-visual-final.log:6PASS including parent/five viewports,11 intentionally skipped. browser-targeted-final.log:3PASS including parent/two latest cases,15 intentionally skipped;1366 geometry and final OWNER/MANAGER receipts column covered. No claim that incremental targeted runs are complete suite reruns.
+- Browser final summary:15 full-run sessions, five visual and three targeted sessions; errors/violations0. Independently recomputed all124 current frontend source hashes against browser-source-manifest.json: no differences. Final1366 CSS HTTP/source/runtime identity and amount containment recorded by regression role. Isolated3596 browser server stopped by producer; reviewer did not run browser/tests.
+- DAG tooling log:45PASS,0fail/skip.
+- Fresh final-byte quality-release.log contains API1207PASS + WEB501PASS + DB26PASS =1734PASS, one deliberately opt-in browser skip, all typechecks and Nest/Next build completion. MAIN explicitly supplies captured session87742 EXIT0. Earlier quality-final-frozen receipt is not substituted for this final-byte run.
+- MAIN restored build-generated next-env.d.ts to HEAD with no product changes after quality. Independently read post-restore-exit-receipt.json dated2026-10-18T15:02:29.6746302Z: actual WEB tsc command exit0, git diff --check exit0, nextEnvRestoredToHead:true. MAIN confirms completed toolc2c0a0 EXIT0. post-restore-final-typecheck.log empty as expected on successful tsc; post-restore-final-diff.log contains only LF/CRLF notices, no whitespace errors. This closes the earlier pending cleanup gates; reviewer performs no Git/build/test action.
+- Read docs/ui/sales-statistics-implementation-report.md and updated canonical CHAT_HANDOFF.md. Local/synthetic evidence is explicitly separated from installed or actual business-data proof. Verification placeholders are to be finalized by MAIN with accepted receipt counts/verdict. No production financial result, live RBAC/provider acquisition or deployment proof claimed.
+
+Only this private release.md is written by gatekeeper. Final implementation report now records actual quality/review/browser results and local evidence boundaries; canonical handoff records implementation and verification, with final gate outcome supplied here for MAIN's routine documentation closure. No additional tests/source changes, production access, migrations or approval workflow requested. **FINAL LOCAL gate PASS:1734 units +1expected opt-in skip, types/Nest/Next PASS, separately fulfilled browser regression/targeted/visual evidence, DAG45PASS, restored ambient WEB tsc/diff EXIT0.** No pending mandatory verification remains. This is not installed/live financial or official-provider proof, nor deployment authorization.

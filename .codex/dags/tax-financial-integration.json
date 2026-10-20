@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "task": {
+    "id": "tax-financial-integration",
+    "title": "Local tax financial integration",
+    "description": "Native isolated workers; no Git commits authorized; INTEGRATOR-only patch merge",
+    "base_ref": "HEAD",
+    "max_fix_cycles": 3,
+    "fix_cycles": 0
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "title": "plan",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "INTEGRATOR",
+      "kind": "planning",
+      "depends_on": [],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "backend",
+      "title": "backend",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/api/src/finance",
+        "apps/api/src/taxes",
+        "apps/api/src/app.module.ts",
+        "apps/api/tests/tax-integration*.test.mjs"
+      ],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "order-settings",
+      "title": "order-settings",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/settings-workspace.tsx",
+        "apps/web/components/taxes/tax-order-panel.tsx",
+        "apps/web/components/taxes/tax-settings-panel.tsx"
+      ],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "finance-ui",
+      "title": "finance-ui",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/web/components/finance-workspace.tsx",
+        "apps/web/components/finance-report-charts.tsx",
+        "apps/web/components/taxes/finance-tax-tab.tsx",
+        "apps/web/components/taxes/tax-finance-panel.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/finance-report.ts",
+        "apps/web/lib/tax-accounting.ts",
+        "apps/web/lib/tax-integration-contract.ts"
+      ],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "integrate",
+      "title": "integrate",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "INTEGRATOR",
+      "kind": "integration",
+      "depends_on": [
+        "backend",
+        "order-settings",
+        "finance-ui"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "compatibility",
+      "title": "compatibility",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "COMPATIBILITY",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "regression",
+      "title": "regression",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "REGRESSION",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "business",
+      "title": "business",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "BUSINESS",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "visual",
+      "title": "visual",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "VISUAL",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "standards",
+      "title": "standards",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "spec",
+      "title": "spec",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "release",
+      "description": "User-requested local tax financial integration; no commits/deploy/production mutations",
+      "agent": "RELEASE",
+      "kind": "review",
+      "depends_on": [
+        "compatibility",
+        "regression",
+        "business",
+        "visual",
+        "standards",
+        "spec"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "acceptance_criteria": [
+        "Mandatory attached TZ and approved PNG; preserve existing contracts"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": false,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    }
+  ]
+}

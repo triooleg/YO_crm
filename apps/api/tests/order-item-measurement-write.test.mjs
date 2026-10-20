@@ -24,6 +24,7 @@ const compile = path => ts.transpileModule(readFileSync(new URL(path, import.met
 const ordersModule = { exports: {} };
 const orderRequire = specifier => {
   if (specifier === "@nestjs/common") return common;
+  if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   if (specifier === "../prisma.service") return { PrismaService: class {} };
   if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: () => 0, buildPaymentConversion: () => ({}), ExchangeRatesService: class {}, EXCHANGE_RATE_ADVISORY_LOCK: "exchange", parseExchangeRateCache: () => ({}) };
   if (specifier === "../communications/inbound-routing") return { presentClientContact: value => value };
@@ -81,7 +82,7 @@ function fixture({ order = {}, athlete = {}, failAudit = false } = {}) {
         update: async ({ data }) => { draft.order = { ...draft.order, ...data }; return structuredClone(draft.order); },
       },
       athlete: { findFirst: async ({ where }) => where.id === "athlete-1" && where.clientId === "client-1" && athlete.exists !== false ? { id: "athlete-1", firstName: "Anna" } : null },
-      measurement: { create: async ({ data }) => { const value = { id: "measurement-new", ...data }; draft.measurements.push(value); return value; } },
+      measurement: { findFirst: async ({where}) => where.id === "measurement-old" && where.athleteId === "athlete-1" ? {id:"measurement-old",athleteId:"athlete-1",definitionVersion:null} : null, create: async ({ data }) => { const value = { id: "measurement-new", ...data }; draft.measurements.push(value); return value; } },
       orderItem: { update: async ({ where, data }) => { const index = draft.order.items.findIndex(item => item.id === where.id); draft.order.items[index] = { ...draft.order.items[index], ...data }; return structuredClone(draft.order.items[index]); } },
       orderItemInstance: {
         findMany: async ({ where }) => structuredClone(draft.instances.filter(instance => instance.orderItemId === where.orderItemId)),
@@ -158,7 +159,7 @@ test("foreign item and foreign athlete ownership fail closed", async () => {
 
 test("measurements outside the 0.5 cm step are rejected before the transaction", async () => {
   const target = fixture();
-  await assert.rejects(() => target.service.addItemMeasurement("order-1", "item-1", { ...dto, m2: 65.25 }, { id: "owner-1" }), BadRequestException);
+  await assert.rejects(() => target.service.addItemMeasurement("order-1", "item-1", { ...dto, m2: 65.25 }, { id: "owner-1" }), error => /шагом 0,5 см/.test(error.message));
   assert.deepEqual(target.state.locks, []);
 });
 

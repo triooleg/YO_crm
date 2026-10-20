@@ -1,10 +1,10 @@
-import { assertAssignmentMutable } from "./order-assignment-eligibility";
+import { assertAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { ArchiveOrderAthleteDto, ArchiveOrderMeasurementDto, AssignOrderMeasurementsDto, CreateOrderAthleteDto, CreateOrderSnapshotDto, MeasurementUsageQueryDto } from './order-measurement-assignments.dto';
 import { compositionToken } from './order-composition';
-import { createMeasurementData } from '../clients/measurement-data';
+import { createMeasurementData,inheritMeasurementDefinition,assertKnownMeasurementDefinition } from '../clients/measurement-data';
 
 @Injectable()
 export class OrderMeasurementAssignmentsService {
@@ -34,8 +34,14 @@ export class OrderMeasurementAssignmentsService {
       const order=await this.lockContext(tx,orderId);
       await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${athleteId} FOR UPDATE`;
       if(!await tx.athlete.findFirst({where:{id:athleteId,clientId:order.clientId,archivedAt:null},select:{id:true}}))throw new ConflictException('Спортсменка не принадлежит клиенту или архивирована');
-      const {operationKey,...fields}=input,data=createMeasurementData(athleteId,fields);
-      const requestHash=compositionToken({kind:'MEASUREMENT',actorId:actor.id,data});
+      const {operationKey,...fields}=input;
+      const definitionVersion=await inheritMeasurementDefinition(tx,athleteId,input.sourceMeasurementId);
+      const data=createMeasurementData(athleteId,fields,definitionVersion);
+      const legacyHashData:Record<string,unknown>={...data};
+      delete legacyHashData.definitionVersion;
+      legacyHashData.values={...(data.values as Record<string,unknown>),...Object.fromEntries(Object.entries(fields).filter(([key,value])=>/^m([1-9]|1[0-7])$/.test(key)&&value===null))};
+      const hashData=definitionVersion==null&&!input.sourceMeasurementId?legacyHashData:data;
+      const requestHash=compositionToken({kind:'MEASUREMENT',actorId:actor.id,data:hashData,...(input.sourceMeasurementId?{sourceMeasurementId:input.sourceMeasurementId}:{})});
       const previous=await tx.orderCompositionOperation.findUnique({where:{orderId_operationKey:{orderId,operationKey}}});
       if(previous){
         if(previous.requestHash!==requestHash)throw new ConflictException('Ключ создания уже использован для другого запроса');
@@ -74,8 +80,14 @@ export class OrderMeasurementAssignmentsService {
         await tx.$queryRaw`SELECT "id" FROM "Athlete" WHERE "id" = ${input.athleteId} FOR UPDATE`;
         if (!await tx.athlete.findFirst({ where: { id: input.athleteId, clientId: order.clientId, archivedAt: null }, select: { id: true } })) throw new ConflictException('Спортсменка не принадлежит клиенту заказа или архивирована');
       }
-      if (input.measurementId && !await tx.measurement.findFirst({ where: { id: input.measurementId, athleteId: input.athleteId!, archivedAt: null }, select: { id: true } })) throw new ConflictException('Версия мерок не принадлежит спортсменке или архивирована');
+      let newDefinition: string | null = null;
+      if (input.measurementId) {
+        const snapshot=await tx.measurement.findFirst({where:{id:input.measurementId,athleteId:input.athleteId!,archivedAt:null},select:{id:true,definitionVersion:true}});
+        if(!snapshot)throw new ConflictException('Версия мерок не принадлежит спортсменке или архивирована');
+        newDefinition = assertKnownMeasurementDefinition(snapshot.definitionVersion);
+      }
       const instances = [];
+      const plans = [];
       for (const target of [...input.targets].sort((a, b) => a.id.localeCompare(b.id))) {
         const expectedUpdatedAt = new Date(target.expectedUpdatedAt);
         if (!Number.isFinite(expectedUpdatedAt.getTime())) throw new BadRequestException('Некорректная версия экземпляра');
@@ -83,14 +95,20 @@ export class OrderMeasurementAssignmentsService {
         if (!current) throw new NotFoundException('Активный экземпляр заказа не найден');
         if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) throw new ConflictException('Экземпляр уже изменён другим пользователем');
         const standardHeight = input.standardHeight === undefined ? current.standardHeight : input.standardHeight;
-        if (current.athleteId === input.athleteId && current.measurementId === input.measurementId && current.standardHeight === standardHeight) { instances.push(current); continue; }
+        if (current.athleteId === input.athleteId && current.measurementId === input.measurementId && current.standardHeight === standardHeight) { plans.push({current,standardHeight,expectedUpdatedAt,confirmation:null,noop:true}); continue; }
         assertAssignmentMutable(order,current);
+        const confirmation = await assertParentBodyProductionChange(tx,current,newDefinition,current.athleteId !== input.athleteId || current.measurementId !== input.measurementId,input);
+        plans.push({current,standardHeight,expectedUpdatedAt,confirmation,noop:false});
+      }
+      // Validate the complete mixed selection before issuing its first write.
+      for (const {current,standardHeight,expectedUpdatedAt,confirmation,noop} of plans) {
+        if (noop) {instances.push(current);continue;}
         const data = { athleteId: input.athleteId, measurementId: input.measurementId, standardHeight };
         const claimed = await tx.orderItemInstance.updateMany({ where: { id: current.id, archivedAt: null, updatedAt: expectedUpdatedAt, orderItem: { orderId, archivedAt: null, order: { clientId: order.clientId, archivedAt: null } } }, data });
         if (claimed.count !== 1) throw new ConflictException('Экземпляр уже изменён другим пользователем');
         const updated = await tx.orderItemInstance.findUniqueOrThrow({ where: { id: current.id } });
         await tx.activity.create({ data: { orderId, clientId: order.clientId, actorId: actor.id, type: 'ORDER_ITEM_INSTANCE_MEASUREMENTS_ASSIGNED', summary: `Назначены спортсменка и мерки экземпляру №${current.ordinal}`, metadata: { instanceId: current.id, orderItemId: current.orderItemId, before: { athleteId: current.athleteId, measurementId: current.measurementId, standardHeight: current.standardHeight }, after: data } } });
-        await tx.auditLog.create({ data: { actorId: actor.id, action: 'UPDATE', entityType: 'OrderItemInstance', entityId: current.id, before: current, after: updated } });
+        await tx.auditLog.create({ data: { actorId: actor.id, action: 'UPDATE', entityType: 'OrderItemInstance', entityId: current.id, before: current, after: { ...updated, ...(confirmation ? {productionConfirmation:confirmation} : {}) } } });
         instances.push(updated);
       }
       return { instances };
@@ -139,7 +157,7 @@ export class OrderMeasurementAssignmentsService {
         AND:[{OR:[{measurementId:null},{measurement:{athlete:{clientId:context.clientId}}}]}]
       },select:{id:true,ordinal:true,standardHeight:true,productionStatus:true,archivedAt:true,
         athlete:{select:{id:true,firstName:true,lastName:true,archivedAt:true}},
-        measurement:{select:{id:true,athleteId:true,measuredAt:true,values:true,archivedAt:true}},
+        measurement:{select:{id:true,athleteId:true,measuredAt:true,values:true,definitionVersion:true,archivedAt:true}},
         orderItem:{select:{id:true,name:true,sku:true,notes:true,designNumber:true,priceMinor:true,archivedAt:true,order:{select:{id:true,number:true,currency:true,archivedAt:true}}}}
       }});
       if(!current)throw new NotFoundException('Исторический экземпляр клиента не найден');
