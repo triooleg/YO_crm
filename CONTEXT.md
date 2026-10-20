@@ -437,3 +437,13 @@ and periods use Kyiv, with original currency/date/rate evidence preserved.
 See [ADR0009](docs/decisions/0009-fop-tax-ledger-and-cash-expenses.md) and the
 [approved implementation plan](docs/plans/fop-tax-accounting.md). The module is
 internal accounting support, not a tax declaration or bank-payment integration.
+
+## Canonical Website Checkout
+
+A direct-authoritative website purchase identified by canonical site account and
+immutable numeric checkout ID, separate from buyer identity and KeyCRM order ID.
+Reserved `yo-checkout:v1:<account>:<id>` records from KeyCRM are held for the direct
+writer; they never create a second Order/Payment/tax source. Order receipt capture
+uses the installed native tax ledger and retains manual confirmation/FX rules.
+See ADR0010 and `docs/integrations/website-orders.md`. A held provider snapshot is
+private reconciliation evidence, not another sale or a customer-facing error.

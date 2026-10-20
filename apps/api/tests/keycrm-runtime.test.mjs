@@ -25,6 +25,7 @@ function loadKeycrmService(imageHooks = {}) {
   const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
   const localRequire = (specifier) => {
+    if (specifier === "./website-checkout-correlation") return loadTargetModule("keycrm/website-checkout-correlation.ts");
     if (specifier === "../prisma.service") return { PrismaService: class PrismaService {} };
     if (specifier === "../secret-box") return { decryptSecret: value => value, encryptSecret: value => value };
     if (specifier === "./keycrm-client") return { KeycrmClient: class KeycrmClient {}, KEYCRM_API_URL: "https://openapi.keycrm.app/v1" };

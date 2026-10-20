@@ -12,6 +12,7 @@ const object=(value:unknown):Record<string,unknown>=>value&&typeof value==='obje
 
 /** Order provenance only. Never inspect client channels, payment methods or fulfilment type. */
 export function classifyOrderSource(order:OriginRecord):OrderSource {
+ if(order.sourceSystem==='YOLEOTARD_WEBSITE'&&order.sourceAccount&&order.externalId&&order.sourceLinkMode==='IMPORTED'&&object(order.externalData).contractVersion===1)return 'WEBSITE';
  if(order.sourceSystem==='KEYCRM'&&order.externalId&&order.sourceAccount){
   if(order.activities?.some(event=>event.type==='ORDER_CREATED')||order.sourceLinkMode==='MATCHED_EXISTING'||(order.activities?.length??0)>100)return 'UNKNOWN';
   const events=order.activities?.filter(event=>['KEYCRM_ORDER_IMPORTED','KEYCRM_ORDER_SYNCED'].includes(event.type))??[];

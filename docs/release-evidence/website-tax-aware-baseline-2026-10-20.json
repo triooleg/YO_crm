@@ -1,0 +1,15 @@
+{
+  "baseCommit": "029366f8c69b9d026186247379dd7472ffe0f5bc",
+  "deployedSnapshot": "7156988d4a7c3493e5816749698658089a6d5ba0406aa42140a656fed7a45408",
+  "archiveSha256": "91a988dd60e98f904e405b64a22181381ad5dad2d00b322f70b713c7cb1f16c1",
+  "fileCount": 1097,
+  "allGitBlobsExact": true,
+  "serverNotContacted": true,
+  "anchorMeaning": "New local Git anchor of last verified installed source, not a claim this SHA was deployed",
+  "originalGitAncestor": "a80a9b3ff3c7e803915a9e91964366aac1085382",
+  "installedApiImage": "sha256:eeda78b3b9723eb03989d4a6b7721d09ba1a73d3a8b17008383b7c8dcf93ebd6",
+  "installedWebImage": "sha256:b1ab0a3de258e947e4a037fee8d99c5bf6299eac25a139c35916fbfc015cc996",
+  "installedReceiptTime": "2026-10-20T16:52:00.418716+00:00",
+  "liveInventoryRequeried": false,
+  "freshInventoryRequiredBeforeDeployment": true
+}

@@ -1,0 +1,116 @@
+{
+  "contractVersion": 1,
+  "sourceAccount": "shop.example.invalid",
+  "order": {
+    "externalId": "518",
+    "externalNumber": "",
+    "orderedAt": "2026-10-20T12:00:00+00:00",
+    "checkoutMode": "card",
+    "paymentStatus": "paid",
+    "currency": "EUR",
+    "notes": "YOleotard website card order",
+    "sourceUrl": "https://shop.example.invalid/"
+  },
+  "customer": {
+    "fullName": "Synthetic Buyer",
+    "email": "buyer@example.invalid",
+    "phone": "",
+    "country": "UA",
+    "city": "Kyiv",
+    "addressLine1": "Synthetic street 1",
+    "addressLine2": "",
+    "postalCode": "01001"
+  },
+  "delivery": {
+    "amountMinor": 1000,
+    "serviceName": "",
+    "addressText": "Synthetic street 1, Kyiv, 01001, UA"
+  },
+  "totals": {
+    "itemsMinor": 15000,
+    "discountMinor": 2000,
+    "deliveryMinor": 1000,
+    "cardFeeMinor": 480,
+    "chargedMinor": 16480
+  },
+  "items": [
+    {
+      "externalId": "518:item-1:101:fit-blue",
+      "productId": "101",
+      "sku": "101",
+      "name": "Synthetic blue leotard",
+      "quantity": 1,
+      "unitPriceMinor": 10000,
+      "originalPriceMinor": 12000,
+      "discountMinor": 2000,
+      "imageUrl": "https://cdn.example.invalid/101.jpg",
+      "selectedServices": [
+        {
+          "key": "size_adaptation",
+          "label": "Size adaptation",
+          "priceMinor": 1000
+        }
+      ],
+      "reductions": {
+        "waist": 2
+      },
+      "adjustedMeasurements": {
+        "waist": [
+          60.5,
+          61
+        ]
+      },
+      "properties": {
+        "configurationKey": "fit-blue",
+        "selectedServices": [
+          {
+            "key": "size_adaptation",
+            "label": "Size adaptation",
+            "priceMinor": 1000
+          }
+        ],
+        "reductionsCm": {
+          "waist": 2
+        },
+        "adjustedMeasurementsCm": {
+          "waist": [
+            60.5,
+            61
+          ]
+        }
+      },
+      "notes": "Fit waist -2 cm"
+    },
+    {
+      "externalId": "518:item-2:202:standard",
+      "productId": "202",
+      "sku": "202",
+      "name": "Synthetic plain leotard",
+      "quantity": 1,
+      "unitPriceMinor": 5000,
+      "originalPriceMinor": 5000,
+      "discountMinor": 0,
+      "imageUrl": "",
+      "selectedServices": [],
+      "reductions": [],
+      "adjustedMeasurements": [],
+      "properties": {
+        "configurationKey": "standard",
+        "selectedServices": [],
+        "reductionsCm": [],
+        "adjustedMeasurementsCm": []
+      },
+      "notes": ""
+    }
+  ],
+  "payment": {
+    "externalId": "518:monobank:synthetic-invoice",
+    "provider": "monobank",
+    "reference": "synthetic-invoice",
+    "amountMinor": 16480,
+    "currency": "EUR",
+    "status": "paid",
+    "receivedAt": "2026-10-20T12:05:00+00:00",
+    "notes": "Card fee EUR 4.80"
+  }
+}

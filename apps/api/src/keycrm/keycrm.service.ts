@@ -1,4 +1,5 @@
 import type { TaxesService } from "../taxes/taxes.service";
+import { rejectWebsiteCheckoutCorrelation, websiteCheckoutReviewMayApply, WEBSITE_CHECKOUT_SYSTEM } from "./website-checkout-correlation";
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { OrderType, Prisma, type Client, type User } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -212,7 +213,13 @@ export class KeycrmService {
   }
 
   async issues(runId: string) {
-    const issues = await this.prisma.keycrmSyncIssue.findMany({ where: { runId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const storedIssues = await this.prisma.keycrmSyncIssue.findMany({ where: { runId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const issues = storedIssues.map(issue => {
+      const details = jsonObject(issue.details);
+      if (details.kind !== "WEBSITE_CHECKOUT_HOLD") return issue;
+      const { keycrmPayload: _serverOnly, ...visible } = details;
+      return { ...issue, details: visible as Prisma.JsonObject };
+    });
     const sourceIds = issues.flatMap((issue) => {
       const details = jsonObject(issue.details);
       return details.kind === "CLIENT_MERGE_SUGGESTION" && typeof details.importedClientId === "string" ? [details.importedClientId] : [];
@@ -396,6 +403,7 @@ export class KeycrmService {
   }
 
   private async previewOrder(order: NormalizedKeycrmOrder, runId: string) {
+    if (await rejectWebsiteCheckoutCorrelation(this.prisma, { connectionKey: order.sourceAccount, orderedAt: order.orderedAt, raw: order.externalData }, runId, order.externalId)) return "SKIPPED" as const;
     await this.recordClientMergeSuggestion(this.prisma, order, runId, null);
     const existing = await this.prisma.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } }, select: { externalUpdatedAt: true, sourceLinkMode: true, currency: true, number: true } });
     if (!existing) {
@@ -424,6 +432,14 @@ export class KeycrmService {
     let importedModelImagePath: string | null = null;
     const replacedImagePaths = new Set<string>();
     if (mainExternalImageUrl) {
+      if (websiteCheckoutReviewMayApply({ connectionKey: order.sourceAccount, orderedAt: order.orderedAt, raw: order.externalData })) {
+        const held = await this.prisma.$transaction(async tx => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+          await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `${SOURCE_SYSTEM}:${order.sourceAccount}:${order.externalId}`);
+          return rejectWebsiteCheckoutCorrelation(tx, { connectionKey: order.sourceAccount, orderedAt: order.orderedAt, raw: order.externalData }, runId, order.externalId);
+        });
+        if (held) return "SKIPPED" as const;
+      }
       try {
         importedModelImagePath = await materializeKeycrmOrderImage(mainExternalImageUrl);
       } catch (error) {
@@ -440,6 +456,7 @@ export class KeycrmService {
       const result = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `${SOURCE_SYSTEM}:${order.sourceAccount}:${order.externalId}`);
+      if (await rejectWebsiteCheckoutCorrelation(tx, { connectionKey: order.sourceAccount, orderedAt: order.orderedAt, raw: order.externalData }, runId, order.externalId)) return "SKIPPED" as const;
       if (importedModelImagePath) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `KEYCRM_IMAGE:${importedModelImagePath}`);
       const discoveredExternalLink = await tx.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       const needsImageRepair = Boolean(discoveredExternalLink && shouldReplaceImportedImage(discoveredExternalLink.modelImagePath, importedModelImagePath));
@@ -852,7 +869,7 @@ export class KeycrmService {
     if (!clients.length) return { order: null, ambiguous: false };
     const dayStart = new Date(order.orderedAt); dayStart.setUTCHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart); dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-    const orders = await db.order.findMany({ where: { clientId: clients.length === 1 ? clients[0] : { in: clients }, archivedAt: null, priceMinor: order.priceMinor, currency: order.currency, createdAt: { gte: dayStart, lt: dayEnd }, OR: [{ sourceSystem: null }, { sourceSystem: { not: SOURCE_SYSTEM } }] }, orderBy: { createdAt: "asc" }, take: 2 });
+    const orders = await db.order.findMany({ where: { clientId: clients.length === 1 ? clients[0] : { in: clients }, archivedAt: null, priceMinor: order.priceMinor, currency: order.currency, createdAt: { gte: dayStart, lt: dayEnd }, OR: [{ sourceSystem: null }, { sourceSystem: { notIn: [SOURCE_SYSTEM, WEBSITE_CHECKOUT_SYSTEM] } }] }, orderBy: { createdAt: "asc" }, take: 2 });
     return orders.length > 1 ? { order: null, ambiguous: true } : { order: orders[0] ?? null, ambiguous: false };
   }
 
