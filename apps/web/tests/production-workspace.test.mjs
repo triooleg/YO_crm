@@ -39,6 +39,21 @@ test("перемещение, изменение длительности, ог�
   assert.match(styles, /\.production-flow-bar\.locked/);
 });
 
+test("даты слота и плановой отправки сохраняются локально без перезагрузки очереди", () => {
+  assert.match(workspace, /function saveDeadline/);
+  assert.match(workspace, /`\/api\/orders\/\$\{order\.id\}\/deadline`/);
+  assert.match(workspace, /const confirmed = saved\.requiredDeliveryAt \|\| requiredDeliveryAt/);
+  assert.match(workspace, /deadlineSaveQueues\.current\.get\(order\.id\)/);
+  assert.match(workspace, /deadlineSaveVersions\.current\.get\(order\.id\) === version/);
+  assert.match(workspace, /confirmedDeadlines\.current\.get\(order\.id\)/);
+  assert.match(planner, /onSaveDeadline/);
+  assert.match(planner, /canEdit \? <label>/);
+  assert.match(planner, /value=\{order\.requiredDeliveryAt \? productionIso\(order\.requiredDeliveryAt\) : ""\}/);
+  const saveSlot = workspace.slice(workspace.indexOf("function saveSlot"), workspace.indexOf("async function deleteSlot"));
+  assert.ok(saveSlot.length > 0);
+  assert.doesNotMatch(saveSlot, /await load\(\)/);
+});
+
 test("календарь имеет компактные строки, закреплённую шапку и синхронную прокрутку", () => {
   assert.match(styles, /\.production-board-scroll\{[^}]*overflow:auto/);
   assert.match(styles, /\.production-calendar-header\{position:sticky;top:0/);

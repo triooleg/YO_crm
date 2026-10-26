@@ -3,14 +3,21 @@ import assert from 'node:assert/strict';
 import {readFileSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {loadTargetModule} from './website-test-loader.mjs';
 import {websiteDatabase} from './fixtures/website-orders-database.mjs';
 
 const fixture=JSON.parse(readFileSync(new URL('./fixtures/checkout-v518.json',import.meta.url),'utf8'));
 const {parseWebsiteOrder}=loadTargetModule('website-orders/website-orders-contract.ts');
 const {WebsiteOrdersService}=loadTargetModule('website-orders/website-orders.service.ts');
-const source='D:/Projects/CheckoutV2/yoleotard-checkout-invoice/includes/class-yo-checkout-yocrm.php';
+// Exact source bytes pinned by the existing oracle; never read a mutable sibling project.
+const source=fileURLToPath(new URL('./fixtures/checkout-v518-source.php',import.meta.url));
 const php=spawnSync('php',['--version'],{encoding:'utf8',timeout:10000});
+
+test('checked-in Checkout source retains the original oracle SHA even without a PHP runtime',()=>{
+ assert.equal(existsSync(source),true,'Pinned PHP source fixture is required');
+ assert.equal(createHash('sha256').update(readFileSync(source)).digest('hex'),fixture.sourceSha256);
+});
 
 test('Checkout 5.1.8 fixture preserves actual colon identities, optional empties and PHP array shapes',()=>{
  const bank=fixture.cases.find(c=>c.name==='unpaid-bank').payload;
@@ -31,7 +38,7 @@ test('Checkout 5.1.8 fixture preserves actual colon identities, optional empties
 });
 
 for(const example of fixture.cases){
- test(`actual PHP build_payload matches complete saved synthetic oracle: ${example.name}`,{skip:!existsSync(source)||php.status!==0},()=>{
+ test(`pinned actual PHP build_payload matches complete saved synthetic oracle: ${example.name}`,{skip:php.status!==0},()=>{
   assert.equal(createHash('sha256').update(readFileSync(source)).digest('hex'),fixture.sourceSha256,'Plugin source changed: review and regenerate oracle explicitly');
   const result=spawnSync('php',['-r',fixture.phpHarness,source],{input:JSON.stringify(example.input),encoding:'utf8',timeout:10000,maxBuffer:1024*1024});
   assert.equal(result.status,0,result.stderr);assert.equal(result.stderr,'');

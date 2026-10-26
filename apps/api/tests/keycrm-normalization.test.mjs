@@ -45,7 +45,7 @@ test("заказ нормализуется вместе с клиентом, т
     payments: [{ id: 5, amount: 165, actual_currency: "EUR", payment_method_id: 8, status: "paid", payment_date: "2026-09-16 11:25:00" }],
     shipping: { shipping_address_country: "United Arab Emirates", shipping_address_city: "Dubai", shipping_receive_point: "Office 2", recipient_full_name: "Veronika", recipient_phone: "+971500000000", tracking_code: "TRACK-1", shipping_date_actual: "2026-09-30T00:00:00.000000Z" },
     custom_fields: [
-      { id: 1, uuid: "OR_1", name: "Номер макету", type: "number", value: 486 },
+      { id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: 486 },
       { id: 2, uuid: "OR_1001", name: "Початок виробництва", type: "date", value: "2026-09-20" },
       { id: 5, uuid: "OR_1004", name: "Очікувана дата доставки", type: "date", value: "2026-09-30" },
     ],
@@ -53,7 +53,7 @@ test("заказ нормализуется вместе с клиентом, т
 
   assert.equal(order.externalId, "675");
   assert.equal(order.sourceAccount, "connection-a");
-  assert.equal(order.number, "KC-675");
+  assert.equal(order.number, "YO-675");
   assert.equal(order.priceMinor, 33000);
   assert.equal(order.depositRequiredMinor, 16500);
   assert.equal(order.paymentStatus, "PARTIALLY_PAID");
@@ -68,8 +68,20 @@ test("заказ нормализуется вместе с клиентом, т
   assert.equal(order.delivery.recipientPhone, "+971500000000");
   assert.equal(order.shippingStatus, "NOT_READY");
   assert.equal(order.customFields[0].name, "Номер макету");
+  assert.equal(order.designNumber, 486);
   assert.equal(order.production.startsAt?.toISOString(), "2026-09-20T00:00:00.000Z");
   assert.equal(order.production.requiredDeliveryAt?.toISOString(), "2026-09-30T00:00:00.000Z");
+});
+
+test("номер макета читается только из стабильного UUID и нулевое значение считается незаполненным", () => {
+  const base = { id: 23, source_id: 1, created_at: "2026-01-02 03:04:05", grand_total: 10, buyer: { id: 1, full_name: "Client" } };
+  assert.equal(normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: 493 }] }, options).designNumber, 493);
+  assert.equal(normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: 0 }] }, options).designNumber, null);
+  assert.equal(normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: "   " }] }, options).designNumber, null);
+  assert.equal(normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: " 0 " }] }, options).designNumber, null);
+  assert.equal(normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OTHER", name: "Номер макету", type: "number", value: 493 }] }, options).designNumber, null);
+  assert.throws(() => normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "number", value: 12.5 }] }, options), /целым положительным числом/);
+  assert.throws(() => normalizeKeycrmOrder({ ...base, custom_fields: [{ id: 1, uuid: "OR_1003", name: "Номер макету", type: "text", value: 0 }] }, options), /тип number/);
 });
 
 test("производственные даты используют UUID или точное имя с явным fallback и строгим date-контрактом", () => {

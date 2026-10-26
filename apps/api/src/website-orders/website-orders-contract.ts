@@ -46,13 +46,19 @@ function json(value:unknown,depth=0):Json|undefined {
  return Object.fromEntries(Object.entries(v).map(([k,v])=>[k,json(v,depth+1)])) as Json;
 }
 
+/** One canonical account grammar for ingestion and scoped website credentials. */
+export function normalizeWebsiteSourceAccount(value:unknown):string {
+ const account=text(value,253,true)!.toLowerCase();
+ if(!/^(?=.{1,253}$)[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,63}$/.test(account))invalid();
+ return account;
+}
+
 /** Checkout v1 sends net item prices; discountMinor is informational. Charge includes delivery and card surcharge. */
 export function parseWebsiteOrder(input:unknown):WebsiteOrder {
  const p=object(input);fields(p,['contractVersion','sourceAccount','order','customer','delivery','totals','items','payment']);
  const raw=json(p)!;
  if(p.contractVersion!==1||Buffer.byteLength(JSON.stringify(raw))>262144)invalid();
- const sourceAccount=text(p.sourceAccount,253,true)!.toLowerCase();
- if(!/^(?=.{1,253}$)[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,63}$/.test(sourceAccount))invalid();
+ const sourceAccount=normalizeWebsiteSourceAccount(p.sourceAccount);
  const o=object(p.order);fields(o,['externalId','externalNumber','orderedAt','updatedAt','checkoutMode','paymentStatus','currency','notes','sourceUrl']);
  if(typeof o.checkoutMode!=='string'||typeof o.paymentStatus!=='string'||!['card','bank_invoice'].includes(o.checkoutMode)||!['paid','unpaid'].includes(o.paymentStatus))invalid();
  const order:WebsiteOrder['order']={externalId:id(o.externalId)!,externalNumber:text(o.externalNumber,100),orderedAt:date(o.orderedAt),updatedAt:o.updatedAt==null?undefined:date(o.updatedAt),checkoutMode:o.checkoutMode as 'card'|'bank_invoice',paymentStatus:o.paymentStatus as 'paid'|'unpaid',currency:currency(o.currency),notes:text(o.notes,8000),sourceUrl:publicUrl(o.sourceUrl)};

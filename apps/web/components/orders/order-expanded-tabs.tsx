@@ -4,7 +4,8 @@ import { OrderFinancialInformation, OrderCostComposition } from "./order-financi
 import { orderTaxPresentation, type OrderPriceEstimate } from "../../lib/order-tax-presentation";
 import { taxIntegrationOrderUi as taxUi } from "../../lib/i18n";
 import { orderSourceUi as sourceUi } from "../../lib/i18n";
-import { sourceLabel } from "../../lib/order-source";
+import { sourceLabel, orderDisplayNumber, websiteItemName } from "../../lib/order-source";
+import { orderImageUrl } from "../../lib/order-composition-view";
 
 import "../../app/designs-instances.css";
 import { HistoricalInstance } from "./historical-instance";
@@ -42,6 +43,7 @@ import { measurementFieldLabels, MeasurementPanel } from "../measurement-panel";
 import { basicMeasurementNumbers, additionalMeasurementNumbers } from "../measurement-definition";
 import { OrderExpenseEditor } from "./order-expense-editor";
 import { InvoiceEditor } from "../invoice-editor";
+import { OrderInvoiceDocuments } from "../invoice-workflow";
 import type { Order } from "../orders-workspace";
 
 export type Athlete = NonNullable<Order["athlete"]> & {
@@ -205,7 +207,7 @@ const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE
 export function OrderExpandedTabs(props: Props) {
   const { order } = props;
   const [activeTab, setActiveTab] = useState("details");
-  const [financeDesignEditor,setFinanceDesignEditor]=useState<{action:'ADD'|'EDIT';itemId?:string}>();
+  const [designEditor,setDesignEditor]=useState<{action:'ADD'|'EDIT';itemId?:string}>();
   const [historyInstanceId,setHistoryInstanceId] = useState<string>();
   const [focusInstanceId,setFocusInstanceId] = useState<string>();
   const [focusAthleteId,setFocusAthleteId] = useState<string>();
@@ -247,6 +249,8 @@ export function OrderExpandedTabs(props: Props) {
   };
   const openMeasurements = (instance:OrderItemInstanceView) => {setFocusInstanceId(instance.id);setFocusAthleteId(instance.athlete?.id);setActiveTab("measurements");};
   const items = expandedOrderItems(order);
+  const persistedItems=items.filter(item=>Boolean(item.persistedItemId));
+  const primaryItem=persistedItems.find(item=>Boolean(item.modelImagePath))??persistedItems.find(item=>Boolean(orderImageUrl(item,order.sourceSystem)))??persistedItems[0];
   const tabPanelId = `order-tab-panel-${order.id}`;
   const tabs = [
     { key: "details", label: ui.tabs.details, icon: "details" },
@@ -275,29 +279,28 @@ export function OrderExpandedTabs(props: Props) {
       }))}
     />
     <section id={tabPanelId} aria-labelledby={`order-tab-${order.id}-${activeTab}`} className={`orders-order-tab-panel orders-order-tab-${activeTab}`} role="tabpanel">
-      {activeTab === "details" && <OrderDetailsTab {...props} items={items} />}
+      {activeTab === "details" && <OrderDetailsTab {...props} items={items} onEditDesign={()=>setDesignEditor(primaryItem?{action:'EDIT',itemId:primaryItem.id}:{action:'ADD'})} />}
       {activeTab === "designs" && historyInstanceId && <HistoricalInstance key={`${order.id}-${historyInstanceId}`} contextOrderId={order.id} instanceId={historyInstanceId} bridge={props.measurementActions??props.financeActions} onClose={closeHistorical} renderMeasurements={measurement=><MeasurementGrid measurement={measurement}/>}/>}
       {activeTab === "designs" && <DesignsInstancesTab order={order} items={items} bridge={props.financeActions} compositionBridge={props.compositionActions} focusInstanceId={focusInstanceId} onMeasurements={openMeasurements} />}
       {activeTab === "measurements" && <OrderMeasurementsTab {...props} items={items} focusAthleteId={focusAthleteId} focusInstanceId={focusInstanceId} onOpenInstance={openInstance} />}
       {activeTab === "client" && <OrderClientTab {...props} items={items} />}
-      {activeTab === "finance" && <TaxOrderPanel orderId={order.id} role={props.taxRole ?? ""} refreshKey={order.updatedAt} renderFinance={estimate => <OrderFinanceTab {...props} items={items} priceEstimate={estimate} onAddDesign={()=>setFinanceDesignEditor({action:'ADD'})} onEditItem={itemId=>setFinanceDesignEditor({action:'EDIT',itemId})} />}/>}
+      {activeTab === "finance" && <TaxOrderPanel orderId={order.id} role={props.taxRole ?? ""} refreshKey={order.updatedAt} renderFinance={estimate => <OrderFinanceTab {...props} items={items} priceEstimate={estimate} onAddDesign={()=>setDesignEditor({action:'ADD'})} onEditItem={itemId=>setDesignEditor({action:'EDIT',itemId})} />}/>}
       {activeTab === "production" && <OrderProductionTab {...props} items={items} />}
       {activeTab === "delivery" && <OrderDeliveryTab {...props} items={items} targetShipmentId={targetShipmentId} />}
       {activeTab === "notes" && <OrderNotesTab {...props} />}
       {activeTab === "history" && <OrderHistoryTab order={order} />}
     </section>
-    {financeDesignEditor&&props.financeActions&&<CompositionEditor key={`${financeDesignEditor.action}-${financeDesignEditor.itemId??'new'}`} order={order} action={financeDesignEditor.action} item={items.find(item=>item.id===financeDesignEditor.itemId)} bridge={props.compositionActions??props.financeActions} onClose={()=>setFinanceDesignEditor(undefined)}/>}
+    {designEditor&&(props.compositionActions??props.financeActions)&&<CompositionEditor key={`${designEditor.action}-${designEditor.itemId??'new'}`} order={order} action={designEditor.action} item={items.find(item=>item.id===designEditor.itemId)} bridge={(props.compositionActions??props.financeActions)!} onClose={()=>setDesignEditor(undefined)}/>}
   </>;
 }
 
-function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliveryContact, onCustomerWishes, onUploadFile }: Props & { items: ExpandedOrderItem[] }) {
+function OrderDetailsTab({ order, items, compositionActions, financeActions, onEditDesign, onClient, onDelivery, onDeliveryContact, onCustomerWishes, onUploadFile }: Props & { items: ExpandedOrderItem[]; onEditDesign:()=>void }) {
   const timeline = orderTimelinePresentation(order);
   const paidMinor = paid(order);
-  const recent = order.activities.slice(0, 4);
   return <div className="orders-tab-details-approved">
-    <TabCard title={ui.primaryInformation} action={<CrmButton tone="secondary" size="compact-xs" onClick={onEdit}>{ui.edit}</CrmButton>}>
+    <TabCard title={ui.primaryInformation} action={<CrmButton tone="secondary" size="compact-xs" disabled={!(compositionActions??financeActions)} onClick={onEditDesign}>{ui.edit}</CrmButton>}>
       <FieldGrid>
-        <Field label={ui.orderNumber} value={order.number} /><Field label={sourceUi.filter} value={sourceLabel(order.orderSource)} />
+        <Field label={ui.orderNumber} value={orderDisplayNumber(order)} /><Field label={sourceUi.filter} value={sourceLabel(order.orderSource)} />
         <Field label={ui.orderTypeName} value={orderTypeLabel(order.type)} />
         <Field label={ui.createdAt} value={formatDate(order.createdAt)} />
         <Field label={ui.source} value={orderLabel("source", order.client.source)} />
@@ -341,9 +344,6 @@ function OrderDetailsTab({ order, items, onClient, onEdit, onDelivery, onDeliver
       <div className="orders-stage-list"><Stage icon="finance" label={ui.payment} value={orderLabel("payment", order.paymentStatus)} /><Stage icon="production" label={ui.tabs.production} value={timeline.productionCompleted ? ui.productionFulfilled : orderLabel("production", timeline.productionStatus)} /><Stage icon="delivery" label={ui.tabs.delivery} value={timeline.partial ? `${ui.shippingPartial}${["LOST","RETURNED"].includes(timeline.shippingStatus) ? ` · ${orderLabel("shipping",timeline.shippingStatus)}` : ""}` : timeline.shippingStatus === "SHIPPED" ? ui.shippingSent : orderLabel("shipping", timeline.shippingStatus)} /></div>
     </TabCard>
     <OrderFilesCard className="orders-tab-span-4" order={order} onUpload={onUploadFile} />
-    <TabCard className="orders-tab-span-full" title={ui.latestActions}>
-      {recent.length ? <ActivityList activities={recent} /> : <EmptyState text={ui.noHistory} />}
-    </TabCard>
   </div>;
 }
 
@@ -480,7 +480,7 @@ function ClientPreferencesForm({ preferences, onCancel, onSubmit }: { preference
   return <form className="orders-client-preferences-form" onSubmit={submit}><p>{ui.clientPreferencesHint}</p><CrmTextarea data-autofocus highlighted value={value} onChange={(event) => setValue(event.currentTarget.value)} autosize minRows={8} maxRows={18} spellCheck={false} aria-label={ui.clientPreferences} />{error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}<footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onCancel}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer></form>;
 }
 
-function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, compositionActions, onVoidPayment }: Props & { items: ExpandedOrderItem[]; priceEstimate?: OrderPriceEstimate }) {
+function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinance, onPayment, onCurrency, onAddDesign, onEditItem, onCreateNote, onUpdateNote, financeActions, compositionActions, onVoidPayment, taxRole }: Props & { items: ExpandedOrderItem[]; priceEstimate?: OrderPriceEstimate }) {
   const paidMinor = paid(order), percentage = paidMinor === null ? null : order.priceMinor ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
   const paymentHistory = order.paymentHistory ?? order.payments;
   const priceView = orderTaxPresentation(order, items, priceEstimate);
@@ -490,6 +490,9 @@ function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinanc
   const [discountOpen, setDiscountOpen] = useState(false);
   const [expenseOpen,setExpenseOpen]=useState(false);
   const [error, setError] = useState("");
+  // This bridge supplies the strict detail refresh: failed reads preserve the
+  // existing order and reject, allowing the saved invoice row to remain visible.
+  const refreshInvoiceDocuments = compositionActions?.onSaved;
   return <div className="orders-tab-finance-approved tax-order-finance">
     {expenseOpen&&expenseActions&&<OrderExpenseEditor orderId={order.id} orderNumber={order.number} currency={order.currency} actions={expenseActions} onClose={()=>setExpenseOpen(false)} />}
     <div className="orders-finance-reference-main">
@@ -497,19 +500,21 @@ function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinanc
       <div className="orders-finance-scroll"><div className="orders-finance-table"><header><span>{ui.position}</span><span>{ui.quantity}</span><span>{ui.unitPrice}</span><span>{ui.total}</span><span /></header>{items.map((item, index) => <div key={item.id}><span><b>{index + 1}</b><ItemThumb item={item} /><span className="orders-finance-item-description"><strong>{item.name}</strong><small>{disciplineLabel(item.discipline || undefined)}</small></span></span><span>{item.quantity} {ui.pieces}</span><span>{money(item.priceMinor, order.currency)}</span><strong>{money(item.priceMinor * item.quantity, order.currency)}</strong><CrmActionIcon aria-label={`${ui.financeEditPosition}: ${item.name}`} onClick={() => item.persistedItemId && onEditItem(item.persistedItemId)} disabled={!item.persistedItemId}>···</CrmActionIcon></div>)}</div></div>
       <h4 className="orders-finance-subheading">{ui.financeAdditionalServices}</h4>
       {order.taxMinor ? <MoneyRow label={ui.financeTax} value={order.taxMinor} currency={order.currency} /> : null}
+      {order.websiteCardFeeMinor ? <MoneyRow label={ui.financeWebsiteCardFee} value={order.websiteCardFeeMinor} currency={order.currency} /> : null}
       {order.giftWrapMinor ? <MoneyRow label={ui.financeGiftWrap} value={order.giftWrapMinor} currency={order.currency} /> : null}
-      {!order.taxMinor && !order.giftWrapMinor && <p className="orders-finance-empty-line">{ui.financeNoAdditionalServices}</p>}
+      {!order.taxMinor && !order.websiteCardFeeMinor && !order.giftWrapMinor && <p className="orders-finance-empty-line">{ui.financeNoAdditionalServices}</p>}
       <h4 className="orders-finance-subheading">{ui.shippingPaidByClient}</h4>
       <MoneyRow label={ui.shippingPaidByClient} value={order.deliveryMinor || 0} currency={order.currency} />
-      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />
+      {order.sourceSystem==='YOLEOTARD_WEBSITE' ? (order.discountMinor ? <Text size="xs" c="dimmed">{ui.financeWebsiteDiscountIncluded}: {money(order.discountMinor,order.currency)}</Text> : null) : <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />}
       <CrmButton tone="secondary" size="compact-sm" onClick={onAddDesign}>＋ {ui.financeAddPosition}</CrmButton>
     </TabCard>
     <TabCard className="orders-finance-summary" title={ui.orderTotal}>
       <MoneyRow label={taxUi.lineAmounts} value={priceView.productsMinor} currency={order.currency} />
       {order.taxMinor ? <MoneyRow label={ui.financeTax} value={order.taxMinor} currency={order.currency} /> : null}
+      {order.websiteCardFeeMinor ? <MoneyRow label={ui.financeWebsiteCardFee} value={order.websiteCardFeeMinor} currency={order.currency} /> : null}
       {order.giftWrapMinor ? <MoneyRow label={ui.financeGiftWrap} value={order.giftWrapMinor} currency={order.currency} /> : null}
       <MoneyRow label={taxUi.clientDelivery} value={order.deliveryMinor ?? null} currency={order.currency} />
-      <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />
+      {order.sourceSystem==='YOLEOTARD_WEBSITE' ? (order.discountMinor ? <Text size="xs" c="dimmed">{ui.financeWebsiteDiscountIncluded}: {money(order.discountMinor,order.currency)}</Text> : null) : <MoneyRow label={ui.discount} value={-(order.discountMinor || 0)} currency={order.currency} tone="danger" onEdit={compositionActions ? () => setDiscountOpen(true) : undefined} />}
       <MoneyRow label={ui.total} value={order.priceMinor} currency={order.currency} strong />
       <MoneyRow label={ui.paid} value={paidMinor} currency={order.currency} tone="success" />
       <MoneyRow label={ui.balance} value={balance(order)} currency={order.currency} tone="danger" />
@@ -529,17 +534,17 @@ function OrderFinanceTab({ priceEstimate, expenseActions, order, items, onFinanc
         <div className="orders-finance-scroll"><div className="orders-finance-expenses"><header><span>{ui.financeDate}</span><span>{ui.method}</span><span>{ui.financeAmount}</span><span>{ui.financeStatus}</span><span>{ui.tracking}</span></header>{order.expenses?.map(expense => { const shipment=order.orderShipments?.find(entry=>entry.atelierExpense?.id===expense.id); return <div key={expense.id}><span>{formatDate(expense.incurredAt)}</span><span>{shipment ? shipmentMethodLabel(shipment) : expense.category.name}</span><b>{money(expense.amountMinor,expense.currency)}</b><span>—</span><span>{shipment?.trackingNumber || "—"}</span></div>; })}</div></div>
         {!order.expenses?.length && <EmptyState text={ui.noShippingExpenses} compact />}<small className="orders-finance-footnote">{ui.financeExpensesHint}</small>
       </TabCard>
-      <TabCard title={ui.invoices} action={financeActions && <CrmButton tone="secondary" size="compact-xs" onClick={()=>setInvoiceOpen(true)}>＋ {ui.financeCreateInvoice}</CrmButton>}>
-        <div className="orders-finance-scroll"><div className="orders-finance-invoices"><header><span>{ui.invoiceNumber}</span><span>{ui.financeDate}</span><span>{ui.financeAmount}</span><span>{ui.financeStatus}</span><span>{ui.financeActionsLabel}</span></header>{order.invoices.map(invoice=><div className="orders-invoice-row" key={invoice.id}><strong>{invoice.number}</strong><span>{formatDate(invoice.issueDate)}</span><b>{money(invoice.totalMinor, invoice.currency || order.currency)}</b><span>{ui.financeInvoiceStatuses[invoice.status as keyof typeof ui.financeInvoiceStatuses] || ui.notSpecified}</span><span className="orders-invoice-actions"><ActionIcon component="a" variant="subtle" href={`/api/finance/invoices/${invoice.id}/document`} target="_blank" rel="noreferrer" aria-label={`${ui.financeViewInvoice}: ${invoice.number}`}><TabIcon name="file"/></ActionIcon><ActionIcon component="a" variant="subtle" href={`/api/finance/invoices/${invoice.id}/document?download=1`} aria-label={`${ui.financeDownloadInvoice}: ${invoice.number}`}>↓</ActionIcon></span></div>)}</div></div>{!order.invoices.length && <EmptyState text={ui.noInvoices} compact />}
-      </TabCard>
     </div>
+      <OrderInvoiceDocuments order={order} invoices={order.invoices} additionalDocumentCount={order.documents?.length || 0} request={financeActions?.request} onSaved={refreshInvoiceDocuments} canConfigure={taxRole === "OWNER" || taxRole === "ADMIN"} canArchive={["OWNER", "ADMIN", "ACCOUNTANT"].includes(taxRole || "")} legacyCreate={financeActions ? () => setInvoiceOpen(true) : undefined}>
+        {!!order.documents?.length && <div className="orders-finance-documents">{order.documents.map(document=><div key={document.id}><strong>{document.title}</strong><span>{formatDate(document.createdAt)}</span><span>{ui.financeDocumentKinds[document.kind as keyof typeof ui.financeDocumentKinds] || ui.financeDocumentKinds.CUSTOM}</span><span className="orders-invoice-actions"><ActionIcon component="a" variant="subtle" href={`/api/finance/documents/${document.id}/document`} target="_blank" rel="noreferrer" aria-label={`${ui.financeViewDocument}: ${document.title}`}><TabIcon name="file"/></ActionIcon><ActionIcon component="a" variant="subtle" href={`/api/finance/documents/${document.id}/document?download=1`} aria-label={`${ui.financeDownloadDocument}: ${document.title}`}>↓</ActionIcon></span></div>)}</div>}
+      </OrderInvoiceDocuments>
     </div>
     <div className="orders-finance-summary-strip"><SummaryMetric label={ui.financeTotalPositions} value={String(items.length)}/><SummaryMetric label={ui.orderTotal} value={money(order.priceMinor,order.currency)}/><SummaryMetric label={ui.paid} value={money(paidMinor,order.currency)}/><SummaryMetric label={ui.balance} value={money(balance(order),order.currency)}/><SummaryMetric label={ui.financeLastPayment} value={latestPayment ? formatDate(latestPayment.receivedAt) : ui.notSpecified}/></div>
     <Accordion className="orders-finance-tax-information" variant="separated"><Accordion.Item value="information"><Accordion.Control>{taxUi.financialInformation}</Accordion.Control><Accordion.Panel><OrderFinancialInformation order={order} items={items} estimate={priceEstimate}/><OrderCostComposition order={order} items={items} estimate={priceEstimate}/></Accordion.Panel></Accordion.Item></Accordion>
     {error && <CrmAlert onClose={()=>setError("")}>{error}</CrmAlert>}
     {voidTarget && onVoidPayment && <PaymentVoidDialog payment={voidTarget.payment} expectedOrderUpdatedAt={voidTarget.orderUpdatedAt} onVoid={onVoidPayment} onClose={()=>setVoidTarget(undefined)}/>}
     {discountOpen && compositionActions && <OrderDiscountEditor orderId={order.id} discountMinor={order.discountMinor || 0} currency={order.currency} bridge={compositionActions} onClose={() => setDiscountOpen(false)} />}
-    {invoiceOpen && financeActions && <InvoiceEditor order={order} request={financeActions.request} close={()=>setInvoiceOpen(false)} done={()=>{setInvoiceOpen(false);void financeActions.onSaved().catch(reason=>setError(reason instanceof Error ? reason.message : ui.financeMutationFailed));}}/>}
+    {invoiceOpen && financeActions && <InvoiceEditor nonInvoiceOnly order={order} request={financeActions.request} close={()=>setInvoiceOpen(false)} done={()=>{setInvoiceOpen(false);void financeActions.onSaved().catch(reason=>setError(reason instanceof Error ? reason.message : ui.financeMutationFailed));}}/>}
   </div>;
 }
 
@@ -843,7 +848,7 @@ export function expandedOrderItems(order: ExpandedOrderView): ExpandedOrderItem[
   if (order.items.length) return order.items.filter(item=>!item.archivedAt).map((item, index) => {
     const athlete = item.athlete || (order.items.length === 1 && index === 0 ? order.athlete as Athlete | undefined : undefined);
     const measurement = ownedMeasurement(item.measurement, athlete) || (order.items.length === 1 && index === 0 ? ownedMeasurement(order.measurement, athlete) : undefined);
-    return { ...item, instances:item.instances?.filter(instance=>!instance.archivedAt), persistedItemId: item.id, athlete, measurement, measurementHistory: item.measurementHistory?.length ? item.measurementHistory : athlete?.measurements ?? (order.items.length === 1 ? order.measurementHistory : []) };
+    return { ...item, name:websiteItemName(order,item.name), instances:item.instances?.filter(instance=>!instance.archivedAt), persistedItemId: item.id, athlete, measurement, measurementHistory: item.measurementHistory?.length ? item.measurementHistory : athlete?.measurements ?? (order.items.length === 1 ? order.measurementHistory : []) };
   });
   return [{ id: order.id, persistedItemId: undefined, name: order.notes || ui.item, quantity: 1, priceMinor: order.priceMinor, productionStatus: order.productionStatus, modelImagePath: order.modelImagePath, athlete: order.athlete as Athlete | undefined, measurement: ownedMeasurement(order.measurement, order.athlete as Athlete | undefined), measurementHistory: order.measurementHistory ?? [] }];
 }

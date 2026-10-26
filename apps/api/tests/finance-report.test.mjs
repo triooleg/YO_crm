@@ -77,6 +77,24 @@ test('half-open months, void/archive exclusions, current debt cohort and forecas
   assert.equal(result.debtMinor,19000);
   assert.equal(result.forecastMinor,9000);
 });
+test('archived orders contribute no payments, expenses, invoices, debt or source analytics',()=>{
+  const archivedOrder=order({id:'archived',number:'YO-ARCHIVED',archivedAt:now,priceMinor:50000});
+  const archivedExpense={...expense('archived-expense',700),orderId:'archived',order:{number:'YO-ARCHIVED'}};
+  const archivedInvoice={id:'archived-invoice',number:'INV-ARCHIVED',orderId:'archived',order:{number:'YO-ARCHIVED',clientId:'c',client:{displayName:'Клиент'}},issueDate:now,currency:'EUR',totalMinor:5000,status:'ISSUED'};
+  const result=build(base({
+    orders:[order(),archivedOrder],
+    payments:[payment('active-payment',2000),payment('archived-payment',5000,'EUR',undefined,{orderId:'archived'})],
+    expenses:[expense('active-expense',1000),archivedExpense],
+    invoices:[archivedInvoice],
+    orderSources:{o:'MANUAL',archived:'WEBSITE'},
+  }));
+  assert.equal(result.current.receivedMinor,2000);
+  assert.equal(result.current.expensesMinor,1000);
+  assert.equal(result.current.resultMinor,1000);
+  assert.equal(result.sourceAnalytics.websiteReceivedMinor,0);
+  assert.equal(result.invoiceCount,0);
+  assert.equal(result.table.rows.some(row=>row.id==='archived'),false);
+});
 test('missing applied evidence and stale/missing/unsupported rates never become zero',()=>{
   assert.throws(()=>build(base({payments:[payment('p',100,'USD')]})),/применён/);
   assert.throws(()=>report.buildFinanceReport(base({expenses:[expense('e',100,'USD')]}),{month:'2026-10',currency:'EUR'},{provider:'NBU',cache:null},now),/курс/);

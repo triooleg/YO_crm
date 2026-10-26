@@ -1,0 +1,39 @@
+.invoice-template-settings{min-width:0}
+.invoice-template-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.invoice-template-header h2{font-size:18px}
+.invoice-template-header p,.invoice-template-preview-panel p,.invoice-template-code-hint{font-size:13px;color:var(--muted);line-height:1.5}
+.invoice-template-list{display:grid;gap:12px;margin-top:16px}
+.invoice-template-list article{display:flex;justify-content:space-between;gap:16px;padding:16px;border:1px solid var(--line);border-radius:var(--mantine-radius-md);background:var(--mantine-color-body);min-width:0}
+.invoice-template-summary{display:grid;gap:5px;min-width:0}
+.invoice-template-summary strong{font-size:15px;overflow-wrap:anywhere}
+.invoice-template-summary span,.invoice-template-summary small{font-size:12px;color:var(--muted)}
+.invoice-template-summary code{font-size:11px;overflow-wrap:anywhere;color:var(--violet)}
+.invoice-template-actions{display:flex;flex-direction:column;gap:12px;align-items:flex-end;justify-content:center}
+.invoice-template-editor-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:24px}
+.invoice-template-editor-fields{min-width:0}
+.invoice-template-fieldset{border:0;padding:0;margin:0 0 16px;min-width:0}
+.invoice-template-fieldset:disabled{opacity:.8}
+.invoice-template-variables{margin-top:16px;border:1px solid var(--line);border-radius:var(--mantine-radius-md);padding:12px}
+.invoice-template-variables summary{cursor:pointer;font-weight:600}
+.invoice-template-variables code{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.invoice-template-variables .document-field-group{display:grid;gap:8px;margin-top:16px}
+.invoice-template-token-list{display:flex;flex-wrap:wrap;gap:6px;font-size:11px;max-height:100px;overflow:auto}
+.invoice-template-token-list code{padding:3px 5px;background:var(--violet-soft);border-radius:4px}
+.invoice-template-preview-panel{min-width:0;padding:16px;border:1px solid var(--line);border-radius:var(--mantine-radius-md);background:var(--paper)}
+.invoice-template-preview-panel h3{margin:0;font-size:15px}
+.invoice-template-preview-panel iframe{width:100%;height:640px;border:1px solid var(--line);margin-top:12px;border-radius:var(--mantine-radius-sm);background:white}
+.invoice-template-preview-panel a{display:block;font-size:13px;margin-top:12px;color:var(--violet)}
+.invoice-template-preview-empty{display:grid;place-items:center;min-height:240px;padding:24px;text-align:center;color:var(--muted);font-size:13px}
+.invoice-template-readonly{padding:12px;background:var(--violet-soft);font-size:13px;border-radius:var(--mantine-radius-md)}
+.invoice-template-footer{position:sticky;bottom:0;background:var(--mantine-color-body);padding:16px 0 4px;border-top:1px solid var(--line);margin-top:20px;z-index:2}
+.invoice-template-code{position:relative;isolation:isolate;margin-top:12px}
+.invoice-template-code pre,.invoice-template-code .invoice-template-code-input{margin:0;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace!important;tab-size:2;white-space:pre;overflow:auto;height:380px;padding:12px!important;border:1px solid var(--mantine-color-default-border);border-radius:var(--mantine-radius-sm);letter-spacing:normal}
+.invoice-template-code pre{position:absolute;inset:0;pointer-events:none;background:var(--mantine-color-body);color:var(--ink);z-index:-1}
+.invoice-template-code .invoice-template-code-input{background:transparent;color:transparent;caret-color:var(--ink);resize:none;-webkit-text-fill-color:transparent}
+.invoice-template-code .invoice-template-code-input::selection{background:var(--mantine-color-violet-2)}
+.invoice-template-code .json-key{color:var(--mantine-color-violet-8)}
+.invoice-template-code .json-string{color:var(--mantine-color-teal-8)}
+.invoice-template-code .json-number{color:var(--mantine-color-blue-8)}
+.invoice-template-code .json-literal{color:var(--mantine-color-grape-8)}
+@media(max-width:850px){.invoice-template-editor-grid{grid-template-columns:minmax(0,1fr)}.invoice-template-list article{flex-direction:column}.invoice-template-actions{align-items:flex-start}.invoice-template-header{flex-direction:column}.invoice-template-preview-panel iframe{height:440px}.invoice-template-modal .mantine-Modal-body{padding:12px}.invoice-template-code .invoice-template-code-input,.invoice-template-code pre{height:320px}}
+@media(forced-colors:active){.invoice-template-code pre{display:none}.invoice-template-code .invoice-template-code-input{color:CanvasText;-webkit-text-fill-color:CanvasText;caret-color:CanvasText}}

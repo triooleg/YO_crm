@@ -7,7 +7,7 @@ const rootPackage = JSON.parse(readFileSync(resolve(process.cwd(), "../../packag
 const config: NextConfig = {
   output: "standalone",
   env: {
-    NEXT_PUBLIC_CRM_VERSION: process.env.CRM_VERSION ?? rootPackage.version,
+    NEXT_PUBLIC_CRM_VERSION: rootPackage.version,
     NEXT_PUBLIC_CRM_COMMIT: process.env.CRM_COMMIT ?? "development",
   },
   async headers() {

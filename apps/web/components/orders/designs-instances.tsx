@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { ActionIcon, Alert, Badge, Button, Checkbox, FileInput, Group, Menu, Modal, NumberInput, Select, Table, Textarea, TextInput, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Checkbox, Drawer, FileInput, Group, Menu, Modal, NumberInput, Popover, Select, Table, Textarea, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { designsInstancesUi as d, ordersDashboardUi as ui, dataEvidenceUi } from '../../lib/i18n';
 import { moneyLabel } from '../../lib/finance-report';
 import { orderSettlement } from '../../lib/order-settlement.mjs';
@@ -22,7 +22,7 @@ export function DesignsInstancesTab({order,items,bridge,compositionBridge,onMeas
  return <div className="designs-instances"><header className="designs-instances-heading"><div><h3>{d.title}</h3><p>{d.subtitle}</p></div><Button size="sm" radius="sm" leftSection={<DesignActionSymbol name="plus"/>} disabled={!bridge} onClick={()=>setEditor({action:'ADD'})}>{d.add}</Button></header>
  {items.length?items.map((item,index)=>{const pieces=activeInstances(item),groups=sizeGroups(item),open=expanded.includes(item.id);return <article className="design-instance-card" key={item.id}>
   <div className="design-instance-summary"><Badge circle>{index+1}</Badge><div className="design-instance-image">{item.modelImagePath||item.externalImageUrl?<DesignThumbnail src={item.modelImagePath?`/api/orders/images/${item.modelImagePath}`:item.externalImageUrl!} name={item.name}/>:<span>{d.noData}</span>}</div>
-  <div className="design-instance-name"><h4>{item.name}</h4><span>{(ui.disciplines as Record<string,string>)[item.discipline??order.discipline??'missing']??ui.disciplines.missing}</span><small>{d.sku}: {item.sku||'—'} · {d.number}: {item.designNumber??'—'}</small><p>{item.notes||'—'}</p></div>
+  <div className="design-instance-name"><h4>{item.name}</h4><span>{(ui.disciplines as Record<string,string>)[item.discipline??order.discipline??'missing']??ui.disciplines.missing}</span><div className="design-instance-identifiers"><small>{d.sku}: {item.sku||'—'}</small><small>{d.number}: <DesignNumberEditor order={order} item={item} bridge={compositionBridge??bridge}/></small></div><p>{item.notes||'—'}</p></div>
   <div className="design-instance-sizes"><strong>{d.sizes}</strong><Group gap={6}>{groups.length?groups.map(([label,list])=><Button key={label} size="xs" radius="sm" variant="light" aria-expanded={open&&filter[item.id]===label} onClick={()=>{setExpanded(v=>v.includes(item.id)?v:[...v,item.id]);setFilter(v=>({...v,[item.id]:label}));}}>{label} × {list.length}</Button>):<span>{d.legacy}</span>}{bridge&&item.persistedItemId&&<Button size="xs" radius="sm" variant="default" leftSection={<DesignActionSymbol name="plus"/>} onClick={()=>setEditor({action:'QUANTITY',item,quantity:item.quantity+1})}>{d.addPiece}</Button>}</Group><Group gap={6}><Button size="xs" variant="subtle" aria-expanded={open} onClick={()=>{setExpanded(v=>v.includes(item.id)?v.filter(id=>id!==item.id):[...v,item.id]);setFilter(v=>({...v,[item.id]:''}));}}>{ui.instances} ({pieces.length})</Button></Group></div>
   <div className="design-instance-money">{[[d.unitPrice,moneyLabel(item.priceMinor,order.currency)],[d.count,item.quantity],[d.total,moneyLabel(item.priceMinor*item.quantity,order.currency)]].map(([label,value])=><div key={label}><small>{label}</small><b>{value}</b></div>)}</div>
   <div className="design-instance-actions"><Tooltip label={d.edit}><ActionIcon size="xl" radius="sm" variant="outline" aria-label={d.edit} disabled={!bridge||!item.persistedItemId} onClick={()=>setEditor({action:'EDIT',item})}><DesignActionSymbol name="edit"/></ActionIcon></Tooltip><Tooltip label={d.archive}><ActionIcon size="xl" radius="sm" variant="outline" color="red" aria-label={d.archive} disabled={!bridge||!item.persistedItemId} onClick={()=>setEditor({action:'ARCHIVE',item})}><DesignActionSymbol name="archive"/></ActionIcon></Tooltip><Menu position="bottom-end" withinPortal><Menu.Target><ActionIcon size="xl" radius="sm" variant="default" aria-label={`${d.actions}: ${item.name}`} disabled={!bridge||!item.persistedItemId}><DesignActionSymbol name="more"/></ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item onClick={()=>setEditor({action:'DUPLICATE',item})}>{d.duplicate}</Menu.Item><Menu.Item onClick={()=>setEditor({action:'QUANTITY',item})}>{d.quantity}</Menu.Item></Menu.Dropdown></Menu></div></div>
@@ -32,6 +32,41 @@ export function DesignsInstancesTab({order,items,bridge,compositionBridge,onMeas
  {editor&&bridge&&<CompositionEditor key={`${editor.action}-${editor.item?.id??'new'}`} {...editor} order={order} bridge={compositionBridge??bridge} onClose={()=>setEditor(undefined)}/>}
  {assignment&&bridge&&<InstanceMeasurementDrawer key={assignment.id} order={order} items={items} instance={assignment} bridge={bridge} onClose={()=>setAssignment(undefined)}/>}
  </div>;
+}
+
+export function DesignNumberEditor({order,item,bridge,ariaLabel,prefix='',className}:{order:ExpandedOrderView;item:ExpandedOrderItem;bridge?:DesignsBridge;ariaLabel?:string;prefix?:string;className?:string}){
+ const [opened,setOpened]=useState(false),[value,setValue]=useState<number|string>(item.designNumber??''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
+ const committed=useRef(false),operationKey=useRef('');
+ const canEdit=Boolean(bridge&&item.persistedItemId);
+ const reset=()=>{setError('');setAttempted(false);setValue(item.designNumber??'');committed.current=false;operationKey.current='';};
+ const close=()=>{if(busy)return;setOpened(false);reset();};
+ const toggle=()=>{if(!canEdit)return;if(opened){close();return;}reset();operationKey.current=crypto.randomUUID();setOpened(true);};
+ async function submit(event:React.FormEvent<HTMLFormElement>){
+  event.preventDefault();
+  if(!bridge||!item.persistedItemId||busy)return;
+  const nextNumber=value===''?null:Number(value);
+  if(nextNumber!==null&&(!Number.isSafeInteger(nextNumber)||nextNumber<1||nextNumber>2_147_483_647)){setError(d.numberInvalid);return;}
+  if(!operationKey.current)operationKey.current=crypto.randomUUID();
+  setBusy(true);setError('');setAttempted(true);
+  try{
+   if(!committed.current){
+    await bridge.request(`/orders/${order.id}/items/${item.persistedItemId}/design-number`,{method:'PATCH',body:JSON.stringify({designNumber:nextNumber,expectedDesignNumber:item.designNumber??null,operationKey:operationKey.current})});
+    committed.current=true;
+   }
+   await bridge.onSaved();setOpened(false);
+  }catch(reason){setError(reason instanceof Error?reason.message:d.error);}
+  finally{setBusy(false);}
+ }
+ const label=String(item.designNumber??d.addNumber);
+ if(!canEdit)return <span className={className}>{prefix}{item.designNumber??'—'}</span>;
+ return <Popover opened={opened} onChange={setOpened} position="bottom-start" withinPortal trapFocus returnFocus>
+  <Popover.Target><UnstyledButton type="button" className={['design-number-link',className].filter(Boolean).join(' ')} aria-label={ariaLabel??`${d.editNumber}: ${item.name}`} aria-expanded={opened} onClick={toggle}>{prefix}{label}</UnstyledButton></Popover.Target>
+  <Popover.Dropdown className="design-number-popover"><form onSubmit={submit}>
+   <NumberInput data-autofocus autoFocus label={d.number} placeholder={d.numberPlaceholder} value={value} min={1} max={2_147_483_647} allowDecimal={false} allowNegative={false} hideControls disabled={busy||attempted} onChange={setValue}/>
+   {error&&<Alert color="red">{error}</Alert>}
+   <Group justify="flex-end" gap="xs"><Button type="button" variant="default" disabled={busy} onClick={close}>{d.cancel}</Button><Button type="submit" loading={busy}>{d.save}</Button></Group>
+  </form></Popover.Dropdown>
+ </Popover>;
 }
 
 function DesignThumbnail({src,name}:{src:string;name:string}){const [failed,setFailed]=useState(false);useEffect(()=>setFailed(false),[src]);return failed?<span>{d.noData}</span>:<img src={src} alt={name} onError={()=>setFailed(true)}/>;}
@@ -71,13 +106,17 @@ export function CompositionEditor({order,action,item,quantity:initialQuantity,ar
  }catch(reason){setError(reason instanceof Error?reason.message:d.error);}finally{flight.current=false;setBusy(false);}}
  async function apply(){const frozen=prepared.current;if(flight.current||!frozen||frozen.preview.blockers.length)return;flight.current=true;setBusy(true);setError('');frozen.attempted=true;setApplyAttempted(true);try{if(!frozen.committed){await bridge.request(`/orders/${order.id}/composition/apply`,{method:'POST',body:JSON.stringify({command:frozen.command,expectedToken:frozen.preview.token,operationKey:frozen.operationKey})});frozen.committed=true;}await bridge.onSaved();onClose();}catch(reason){setError(reason instanceof Error?reason.message:d.error);}finally{flight.current=false;setBusy(false);}}
  const title=({ADD:d.add,EDIT:d.edit,DUPLICATE:d.duplicate,QUANTITY:d.quantity,ARCHIVE:d.archive})[action];
- return <Modal opened onClose={()=>{if(!busy)onClose();}} title={title} centered size="lg" closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{disabled:busy}}><div className="design-composition-editor"><fieldset disabled={busy||applyAttempted} onChange={edit}>
- {['ADD','EDIT','DUPLICATE'].includes(action)&&<><TextInput label={d.name} value={name} onChange={e=>{edit();setName(e.currentTarget.value);}} required/><Select label={d.sport} value={discipline} onChange={v=>{edit();setDiscipline(v);}} clearable data={Object.entries(ui.disciplines).filter(([key])=>key!=='missing').map(([value,label])=>({value,label}))}/><TextInput label={d.sku} value={sku} onChange={e=>setSku(e.currentTarget.value)}/><NumberInput label={d.number} value={number} min={1} allowDecimal={false} onChange={v=>{edit();setNumber(v);}}/><Textarea label={d.notes} value={notes} onChange={e=>setNotes(e.currentTarget.value)}/><TextInput label={d.unitPrice} value={price} onChange={e=>setPrice(e.currentTarget.value)} inputMode="decimal" required/><DesignPhotoInput item={item} file={file} onChange={v=>{edit();setFile(v);}}/></>}
+ const designForm=['ADD','EDIT','DUPLICATE'].includes(action);
+ const close=()=>{if(!busy&&!applyAttempted)onClose();};
+ const content=<div className="design-composition-editor"><p className="design-composition-order">{order.number}</p><fieldset disabled={busy||applyAttempted} onChange={edit}>
+ {designForm&&<><TextInput data-autofocus label={d.sku} value={sku} onChange={e=>setSku(e.currentTarget.value)}/><TextInput label={d.name} value={name} onChange={e=>{edit();setName(e.currentTarget.value);}} required/><TextInput label={`${d.unitPrice}, ${order.currency}`} value={price} onChange={e=>setPrice(e.currentTarget.value)} inputMode="decimal" required/><NumberInput label={d.number} value={number} min={1} allowDecimal={false} onChange={v=>{edit();setNumber(v);}}/><Select label={d.sport} value={discipline} onChange={v=>{edit();setDiscipline(v);}} clearable data={Object.entries(ui.disciplines).filter(([key])=>key!=='missing').map(([value,label])=>({value,label}))}/><Textarea label={d.notes} value={notes} onChange={e=>setNotes(e.currentTarget.value)} autosize minRows={3} maxRows={7}/><DesignPhotoInput item={item} file={file} onChange={v=>{edit();setFile(v);}}/></>}
  {action!=='ARCHIVE'&&action!=='EDIT'&&<NumberInput label={d.count} value={quantity} min={1} max={1000} allowDecimal={false} onChange={v=>{edit();setQuantity(v);}}/>}
  {action==='DUPLICATE'&&<Checkbox label={d.copyAssignments} checked={copy} onChange={e=>{edit();setCopy(e.currentTarget.checked);}}/>}
  {action==='ARCHIVE'&&<Alert color="orange">{item?.name} · {item?.quantity} · {moneyLabel((item?.quantity??0)*(item?.priceMinor??0),order.currency)}<p>{d.archiveHint}</p></Alert>}
  {shrink>0&&item&&<div><p>{d.selectArchive} ({selected.length}/{shrink})</p>{activeInstances(item).map(instance=><Checkbox key={instance.id} label={`${order.items.findIndex(row=>row.id===item.id)+1}.${instance.ordinal} · ${instance.athlete?.firstName??d.unassigned}`} checked={selected.includes(instance.id)} onChange={e=>{edit();const checked=e.currentTarget.checked;setSelected(v=>checked?[...v,instance.id]:v.filter(id=>id!==instance.id));}}/>)}</div>}
  </fieldset>{error&&<Alert color="red">{error}</Alert>}
  {preview&&<><Table><Table.Thead><Table.Tr><Table.Th/><Table.Th>{d.before}</Table.Th><Table.Th>{d.after}</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{(['quantity','totalMinor','depositRequiredMinor','paidMinor','balanceMinor','overpaymentMinor'] as const).map(key=><Table.Tr key={key}><Table.Th>{({quantity:d.pieces,totalMinor:d.total,depositRequiredMinor:d.deposit,paidMinor:d.paid,balanceMinor:d.balance,overpaymentMinor:d.overpayment})[key]}</Table.Th><Table.Td>{key==='quantity'?preview.before[key]:preview.before[key]==null?dataEvidenceUi.unavailable:moneyLabel(preview.before[key]!,preview.currency)}</Table.Td><Table.Td>{key==='quantity'?preview.after[key]:preview.after[key]==null?dataEvidenceUi.unavailable:moneyLabel(preview.after[key]!,preview.currency)}</Table.Td></Table.Tr>)}</Table.Tbody></Table>{preview.warnings.map((message,i)=><Alert color="orange" key={i}>{message}</Alert>)}{preview.blockers.map((message,i)=><Alert color="red" key={i}>{message}</Alert>)}{(preview.after.overpaymentMinor??0)>0&&<Alert color="orange">{d.noRefund}</Alert>}</>}
- <Group justify="flex-end"><Button variant="default" disabled={busy} onClick={onClose}>{d.cancel}</Button>{preview&&<Button variant="default" disabled={busy||applyAttempted} onClick={()=>void prepare()}>{d.preview}</Button>}{preview?<Button loading={busy} disabled={preview.blockers.length>0} onClick={()=>void apply()}>{d.confirm}</Button>:<Button loading={busy} disabled={!valid} onClick={()=>void prepare()}>{d.preview}</Button>}</Group></div></Modal>;
+ <Group className="design-composition-actions" justify="flex-end"><Button variant="default" disabled={busy||applyAttempted} onClick={close}>{d.cancel}</Button>{preview&&<Button variant="default" disabled={busy||applyAttempted} onClick={()=>void prepare()}>{d.preview}</Button>}{preview?<Button loading={busy} disabled={preview.blockers.length>0} onClick={()=>void apply()}>{d.confirm}</Button>:<Button loading={busy} disabled={!valid} onClick={()=>void prepare()}>{d.preview}</Button>}</Group></div>;
+ if(designForm)return <Drawer opened onClose={close} title={title} position="right" size="min(520px, 100%)" closeOnEscape={!busy&&!applyAttempted} closeOnClickOutside={!busy&&!applyAttempted} closeButtonProps={{disabled:busy||applyAttempted,'aria-label':ui.close}} trapFocus returnFocus classNames={{content:'design-composition-drawer',header:'design-composition-drawer-header',body:'design-composition-drawer-body'}}>{content}</Drawer>;
+ return <Modal opened onClose={close} title={title} centered size="lg" closeOnEscape={!busy&&!applyAttempted} closeOnClickOutside={!busy&&!applyAttempted} closeButtonProps={{disabled:busy||applyAttempted}}>{content}</Modal>;
 }

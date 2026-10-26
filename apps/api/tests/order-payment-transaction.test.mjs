@@ -32,12 +32,14 @@ const orderRequire = specifier => {
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: (...args) => persistDetailsImpl(...args) };
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./order-design-number") return { ORDER_DESIGN_NUMBER_ERROR: {}, OrderDesignNumberError: class extends Error {}, persistOrderDesignNumber: async () => ({}) };
   if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: type => !["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"].includes(type), resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({ metadata: async () => ({}), jpeg: () => ({ toBuffer: async () => Buffer.alloc(0) }) });
-  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   return nativeRequire(specifier);
 };

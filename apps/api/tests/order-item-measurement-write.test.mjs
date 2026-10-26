@@ -24,6 +24,7 @@ const compile = path => ts.transpileModule(readFileSync(new URL(path, import.met
 const ordersModule = { exports: {} };
 const orderRequire = specifier => {
   if (specifier === "@nestjs/common") return common;
+  if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   if (specifier === "../prisma.service") return { PrismaService: class {} };
   if (specifier === "../finance/exchange-rates") return { appliedPaymentMinor: () => 0, buildPaymentConversion: () => ({}), ExchangeRatesService: class {}, EXCHANGE_RATE_ADVISORY_LOCK: "exchange", parseExchangeRateCache: () => ({}) };
@@ -38,12 +39,13 @@ const orderRequire = specifier => {
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistAddedOrderItem: async () => ({}), persistOrderItemDetails: async () => ({}), reconcileOrderItemInstances };
+  if (specifier === "./order-design-number") return { ORDER_DESIGN_NUMBER_ERROR: {}, OrderDesignNumberError: class extends Error {}, persistOrderDesignNumber: async () => ({}) };
   if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: () => true, resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
-  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });

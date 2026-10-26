@@ -9,7 +9,7 @@ test('composition requires server preview and explicit instance IDs before apply
  const order:any={id:'design-order',number:'QA-DESIGN',currency:'EUR',type:'CUSTOM_ORDER',priceMinor:50000,depositRequiredMinor:25000,paymentStatus:'UNPAID',productionStatus:'NOT_SCHEDULED',shippingStatus:'NOT_READY',salesStatus:'NEW_LEAD',createdAt:'2026-10-15T12:00:00Z',client:{id:'client-design',displayName:'QA',source:'INSTAGRAM',athletes:[]},payments:[],activities:[],invoices:[],items:[{id:'design-1',name:'QA design',quantity:5,priceMinor:10000,instances}]};
  await page.route('**/api/**',async route=>{
   const r=route.request(),p=new URL(r.url()).pathname;
-  if(r.method()==='POST'){calls.push({path:p,body:r.postDataJSON()});if(p.endsWith('/preview'))return route.fulfill({json:{token:'server-token',currency:'EUR',before:{quantity:5,totalMinor:50000,depositRequiredMinor:25000,paidMinor:0,balanceMinor:50000,overpaymentMinor:0},after:{quantity:4,totalMinor:40000,depositRequiredMinor:20000,paidMinor:0,balanceMinor:40000,overpaymentMinor:0},warnings:[],blockers:[]}});return route.fulfill({json:{operationId:'op-1'}});}
+  if(r.method()==='POST'&&p.includes('/composition/')){calls.push({path:p,body:r.postDataJSON()});if(p.endsWith('/preview'))return route.fulfill({json:{token:'server-token',currency:'EUR',before:{quantity:5,totalMinor:50000,depositRequiredMinor:25000,paidMinor:0,balanceMinor:50000,overpaymentMinor:0},after:{quantity:4,totalMinor:40000,depositRequiredMinor:20000,paidMinor:0,balanceMinor:40000,overpaymentMinor:0},warnings:[],blockers:[]}});return route.fulfill({json:{operationId:'op-1'}});}
   const result=p==='/api/auth/me'?{user:{role:'OWNER',displayName:'QA'}}:p==='/api/branding'?{}:p==='/api/communications/unread-count'?{unreadCount:0}:p==='/api/orders'?buildOrderListPage([order],Object.fromEntries(new URL(r.url()).searchParams),new Date('2026-10-15T12:00:00Z')):p==='/api/orders/design-order'?order:[];
   return route.fulfill({json:result});
  });
@@ -34,12 +34,14 @@ async function assignmentFixture(page:Page){
  const values=Object.fromEntries(Array.from({length:17},(_,i)=>[`m${i+1}`,50+i/2]));
  const athlete={id:'athlete-1',firstName:'QA athlete',updatedAt:'2026-10-15T12:00:00Z',measurements:[{id:'measurement-1',athleteId:'athlete-1',measuredAt:'2026-10-01T12:00:00Z',values},{id:'measurement-2',athleteId:'athlete-1',measuredAt:'2026-10-14T12:00:00Z',values:{...values,m1:60}}]};
  const instances=Array.from({length:6},(_,i)=>({id:`piece-${i}`,ordinal:i+1,updatedAt:'2026-10-15T12:00:00Z',productionStatus:'NOT_SCHEDULED',standardHeight:i<2?134:140,athlete,measurement:athlete.measurements[0]}));
- const order:any={id:'design-order',number:'QA-DESIGN',compositionManaged:true,currency:'EUR',type:'CUSTOM_ORDER',priceMinor:60000,depositRequiredMinor:30000,paymentStatus:'UNPAID',productionStatus:'NOT_SCHEDULED',shippingStatus:'NOT_READY',salesStatus:'NEW_LEAD',createdAt:'2026-10-15T12:00:00Z',client:{id:'client-design',displayName:'QA',source:'INSTAGRAM',athletes:[athlete]},payments:[],activities:[],invoices:[],items:[{id:'design-1',name:'QA design',quantity:6,priceMinor:10000,instances}]};
+ const order:any={id:'design-order',number:'QA-DESIGN',orderSource:'INSTAGRAM',compositionManaged:true,currency:'EUR',type:'CUSTOM_ORDER',priceMinor:60000,depositRequiredMinor:30000,paymentStatus:'UNPAID',productionStatus:'NOT_SCHEDULED',shippingStatus:'NOT_READY',salesStatus:'NEW_LEAD',createdAt:'2026-10-15T12:00:00Z',client:{id:'client-design',displayName:'QA',source:'INSTAGRAM',athletes:[athlete]},payments:[],activities:[],invoices:[],items:[{id:'design-1',name:'QA design',sku:'SKU-QA',designNumber:271,quantity:6,priceMinor:10000,instances}]};
  await page.route('**/api/**',async route=>{
   const r=route.request(),u=new URL(r.url()),p=u.pathname;
   if(r.method()!=='GET'){
    calls.push({path:p,body:r.postDataJSON()});
    if(p.endsWith('/instances/assign')){for(const target of r.postDataJSON().targets){const piece=instances.find(i=>i.id===target.id)!;piece.measurement=athlete.measurements.find(m=>m.id===r.postDataJSON().measurementId)!;}return route.fulfill({json:{count:r.postDataJSON().targets.length}});}
+   if(p.endsWith('/design-number')){const item=order.items.find((candidate:any)=>p.includes(`/items/${candidate.id}/`));item.designNumber=r.postDataJSON().designNumber;return route.fulfill({json:{item}});}
+   if(p.endsWith('/source')){order.orderSource=r.postDataJSON().source;return route.fulfill({json:{orderSource:order.orderSource}});}
    return route.fulfill({status:409,json:{message:'QA conflict: draft preserved'}});
   }
   const result=p==='/api/auth/me'?{user:{role:'OWNER',displayName:'QA'}}:p==='/api/branding'?{}:p==='/api/communications/unread-count'?{unreadCount:0}:p==='/api/orders'?buildOrderListPage([order],Object.fromEntries(u.searchParams),new Date('2026-10-15T12:00:00Z')):p==='/api/orders/design-order'?order:p.endsWith('/measurements/usage')?{rows:[{orderId:order.id,orderNumber:order.number,orderItemId:'design-1',designName:'QA design',instanceId:'piece-1',ordinal:2,measurementId:'measurement-1',measuredAt:'2026-10-01T12:00:00Z',productionStatus:'NOT_SCHEDULED',archived:false}],total:1,page:1,pageSize:20}:[];
@@ -48,17 +50,133 @@ async function assignmentFixture(page:Page){
  return {calls,order};
 }
 
-test('design photo editor shows current image and clearly selects a replacement',async({page})=>{
+test('design photo editor shows current image and clearly selects a replacement',async({page},info)=>{
  const {order}=await assignmentFixture(page);order.items[0].modelImagePath='current-design.png';
  await page.route('**/api/orders/images/**',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')}));
  await page.goto('/?section=orders&orderId=design-order&tab=designs');
  await page.getByRole('button',{name:'Редактировать дизайн',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+ await expect(dialog).toHaveClass(/design-composition-drawer/);
+ await expect(dialog.getByText('QA-DESIGN',{exact:true})).toBeVisible();
+ await expect.poll(()=>dialog.evaluate(element=>Math.round(window.innerWidth-element.getBoundingClientRect().right))).toBe(0);
  await expect(dialog.getByRole('img',{name:'Текущее фото дизайна',exact:true})).toHaveAttribute('src','/api/orders/images/current-design.png');
  await expect(dialog.getByText('Выберите фото для загрузки', {exact:true})).toBeVisible();
  await dialog.locator('input[type=file]').setInputFiles({name:'replacement.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=','base64')});
  await expect(dialog.getByRole('img',{name:'Новое фото дизайна',exact:true})).toHaveAttribute('src',/^blob:/);
  await expect(dialog).toContainText('replacement.png');
+ await dialog.screenshot({path:info.outputPath('design-edit-drawer-desktop.png')});
+});
+
+test('adding a design uses the same right-side editor',async({page},info)=>{
+ await assignmentFixture(page);
+ await page.setViewportSize({width:390,height:844});
+ await page.goto('/?section=orders&orderId=design-order&tab=designs');
+ await page.getByRole('button',{name:'Добавить дизайн',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Добавить дизайн',exact:true});
+ await expect(dialog).toHaveClass(/design-composition-drawer/);
+ await expect(dialog.getByText('QA-DESIGN',{exact:true})).toBeVisible();
+ await expect(dialog.getByLabel('Артикул',{exact:true})).toBeFocused();
+ await expect.poll(()=>dialog.evaluate(element=>Math.round(window.innerWidth-element.getBoundingClientRect().right))).toBe(0);
+ await dialog.screenshot({path:info.outputPath('design-add-drawer-mobile.png')});
+});
+
+test('primary information edit opens the same design composition drawer',async({page},info)=>{
+ const {order}=await assignmentFixture(page);order.items[0].modelImagePath='current-design.png';
+ for(const size of [{width:1920,height:1080},{width:1366,height:768}]){
+  await page.setViewportSize(size);
+  await page.goto('/?section=orders&orderId=design-order');
+  const details=page.locator('.orders-tab-details-approved');
+  await details.getByRole('button',{name:'Изменить',exact:true}).first().click();
+  const dialog=page.getByRole('dialog',{name:'Редактировать дизайн',exact:true});
+  await expect(dialog).toHaveClass(/design-composition-drawer/);
+  await expect(dialog.getByRole('textbox',{name:'Артикул',exact:true})).toHaveValue('SKU-QA');
+  await expect(dialog.getByRole('textbox',{name:'Название дизайна',exact:true})).toHaveValue('QA design');
+  await expect(dialog.getByRole('textbox',{name:'Номер дизайна',exact:true})).toHaveValue('271');
+  await expect(dialog.getByRole('button',{name:'Предварительный расчёт',exact:true})).toBeVisible();
+  await dialog.screenshot({path:info.outputPath(`primary-information-design-editor-${size.width}x${size.height}.png`)});
+  await page.keyboard.press('Escape');
+ }
+ delete order.items[0].modelImagePath;
+ order.sourceSystem='KEYCRM';
+ order.items.push({id:'design-2',name:'Not primary',quantity:1,priceMinor:10000,externalImageUrl:'https://provider.example/design.png',instances:[]});
+ await page.reload();
+ await page.locator('.orders-tab-details-approved').getByRole('button',{name:'Изменить',exact:true}).first().click();
+ await expect(page.getByRole('dialog',{name:'Редактировать дизайн',exact:true}).getByRole('textbox',{name:'Название дизайна',exact:true})).toHaveValue('QA design');
+ await page.keyboard.press('Escape');
+ order.items=[];
+ delete order.compositionManaged;
+ await page.setViewportSize({width:390,height:844});
+ await page.reload();
+ await page.locator('.orders-tab-details-approved').getByRole('button',{name:'Изменить',exact:true}).first().click();
+ await expect(page.getByRole('dialog',{name:'Добавить дизайн',exact:true})).toHaveClass(/design-composition-drawer/);
+});
+
+test('details omits the duplicate latest-actions block at approved widths',async({page},info)=>{
+ const {order}=await assignmentFixture(page);
+ order.activities=[{id:'activity-1',type:'ORDER_UPDATED',createdAt:'2026-10-15T12:00:00Z',metadata:{}}];
+ for(const size of [{width:1920,height:1080},{width:1366,height:768},{width:390,height:844}]){
+  await page.setViewportSize(size);
+  await page.goto('/?section=orders&orderId=design-order');
+  const details=page.locator('.orders-tab-details-approved');
+  await expect(details).toBeVisible();
+  await expect(details.getByText('Последние действия',{exact:true})).toHaveCount(0);
+  await expect(details.locator(':scope > .orders-approved-card')).toHaveCount(7);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await details.screenshot({path:info.outputPath(`details-without-latest-actions-${size.width}x${size.height}.png`)});
+  if(size.width===390){
+   await details.locator(':scope > .orders-approved-card').last().scrollIntoViewIfNeeded();
+   await page.screenshot({path:info.outputPath('details-without-latest-actions-390x844-lower.png')});
+  }
+ }
+ await page.getByRole('tab',{name:'История',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'История заказа',exact:true})).toBeVisible();
+ await expect(page.locator('.orders-approved-activities > div')).toHaveCount(1);
+});
+
+test('order source is editable from the expanded identity and keeps the chosen system value',async({page},info)=>{
+ const {order,calls}=await assignmentFixture(page);
+ await page.goto('/?section=orders&orderId=design-order');
+ await page.getByRole('checkbox',{name:'Выбрать заказ',exact:true}).check();
+ await expect(page.getByText('Выбрано: 1',{exact:true})).toBeVisible();
+ const trigger=page.getByRole('button',{name:'Изменить источник заказа: Instagram',exact:true});
+ await expect(trigger).toBeVisible();await trigger.click();
+ await page.getByRole('combobox',{name:'Источник заказа',exact:true}).click();
+ await page.getByRole('option',{name:'WhatsApp',exact:true}).click();
+  await page.locator('.orders-order-identity').screenshot({path:info.outputPath('order-source-editor.png')});
+  await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Изменить источник заказа: WhatsApp',exact:true})).toBeVisible();
+ await expect(page.getByText('Выбрано: 1',{exact:true})).not.toBeVisible();
+ expect(calls.find(call=>call.path.endsWith('/source'))?.body).toMatchObject({source:'WHATSAPP',expectedSource:'INSTAGRAM'});
+ expect(order.client.source).toBe('INSTAGRAM');
+});
+
+test('order source retry reuses its operation key after a lost response',async({page})=>{
+  const {order}=await assignmentFixture(page);const attempts:any[]=[];
+  await page.route('**/api/orders/design-order/source',async route=>{
+    const body=route.request().postDataJSON();attempts.push(body);order.orderSource=body.source;
+    if(attempts.length===1)return route.abort('connectionreset');
+    return route.fulfill({json:{orderSource:order.orderSource}});
+  });
+  await page.goto('/?section=orders&orderId=design-order');
+  await page.getByRole('button',{name:'Изменить источник заказа: Instagram',exact:true}).click();
+  await page.getByRole('combobox',{name:'Источник заказа',exact:true}).click();
+  await page.getByRole('option',{name:'WhatsApp',exact:true}).click();
+  const save=page.getByRole('button',{name:'Сохранить',exact:true});
+  await save.click();await expect(save).toBeEnabled();await save.click();
+  await expect(page.getByRole('button',{name:'Изменить источник заказа: WhatsApp',exact:true})).toBeVisible();
+  expect(attempts).toHaveLength(2);expect(attempts[1].operationKey).toBe(attempts[0].operationKey);
+});
+
+test('order source cancel and Escape restore the saved value on mobile',async({page},info)=>{
+  await assignmentFixture(page);await page.setViewportSize({width:390,height:844});
+  await page.goto('/?section=orders&orderId=design-order');
+  const trigger=page.getByRole('button',{name:'Изменить источник заказа: Instagram',exact:true});
+  await trigger.click();const select=page.getByRole('combobox',{name:'Источник заказа',exact:true});await select.click();
+  await page.getByRole('option',{name:'WhatsApp',exact:true}).click();
+  await page.screenshot({path:info.outputPath('order-source-editor-mobile.png')});
+  await page.getByRole('button',{name:'Отмена',exact:true}).click();
+  await trigger.click();await expect(select).toHaveValue('Instagram');
+  await page.keyboard.press('Escape');await expect(trigger).toBeFocused();
 });
 
 test('saving design keeps the mounted order, open pieces and tab while refreshing server totals',async({page})=>{
@@ -91,6 +209,49 @@ test('saving design keeps the mounted order, open pieces and tab while refreshin
  await expect(page.getByRole('tab',{name:/Дизайны/})).toHaveAttribute('aria-selected','true');
  expect(await page.evaluate(()=>(window as any).__sameDocument)).toBe(true);
  expect(await page.evaluate(()=>(window as any).__originalDesignCard.isConnected)).toBe(true);
+});
+
+test('design identifiers are stacked and the primary number is editable below the order photo',async({page},info)=>{
+ const {order,calls}=await assignmentFixture(page);
+ order.items[0].designNumber=null;
+ order.items.push({id:'design-2',name:'Priority design',sku:'SKU-PRIORITY',designNumber:902,quantity:1,priceMinor:10000,modelImagePath:'priority-design.png',instances:[]});
+ await page.route('**/api/orders/images/priority-design.png',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640" viewBox="0 0 480 640"><rect width="480" height="640" fill="#f3edff"/><path d="M150 70 210 105h60l60-35 75 150-80 80-28 270H183l-28-270-80-80Z" fill="#7545ef"/><path d="M210 105h60l28 105-58 70-58-70Z" fill="#ff4c93"/><circle cx="240" cy="365" r="42" fill="#fff" opacity=".7"/></svg>'}));
+ for(const width of [1920,1366,390]){
+  order.items[0].designNumber=null;order.items[1].designNumber=902;
+  await page.setViewportSize({width,height:width===390?844:900});
+  await page.goto('/?section=orders&orderId=design-order&tab=designs');
+  await page.getByRole('tab',{name:/Дизайны/}).click();
+  const headerNumber=page.getByRole('button',{name:'Изменить номер дизайна: Priority design (Выбранный заказ)',exact:true});
+  const previewButton=page.getByRole('button',{name:'Просмотр изображения: Priority design',exact:true});
+  await expect(previewButton.locator('img')).toHaveAttribute('src','/api/orders/images/priority-design.png');
+  await previewButton.click();
+  const previewDialog=page.getByRole('dialog',{name:'Просмотр изображения: Priority design',exact:true});
+  await expect(previewDialog.getByRole('img',{name:'Дизайн заказа',exact:true})).toHaveAttribute('src','/api/orders/images/priority-design.png');
+  await previewDialog.screenshot({path:info.outputPath(`design-image-preview-${width}.png`)});
+  await previewDialog.getByRole('button',{name:'Закрыть просмотр',exact:true}).click();
+  await expect(previewDialog).not.toBeVisible();
+  await expect(previewButton).toBeFocused();
+  await expect(headerNumber).toHaveText('№ 902');
+  expect(Number.parseFloat(await headerNumber.evaluate(element=>getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(12);
+  await headerNumber.click();
+  const input=page.getByRole('textbox',{name:'Номер дизайна',exact:true});await expect(input).toHaveValue('902');
+  await input.fill('903');await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+  await expect(headerNumber).toHaveText('№ 903');
+  expect(calls.at(-1)?.body).toMatchObject({designNumber:903,expectedDesignNumber:902});
+  const blankNumber=page.getByRole('button',{name:'Изменить номер дизайна: QA design',exact:true});
+  await expect(blankNumber).toHaveText('Добавить');await blankNumber.click();await expect(input).toHaveValue('');
+  await input.fill('271');await page.getByRole('button',{name:'Сохранить',exact:true}).click();await expect(blankNumber).toHaveText('271');
+  expect(calls.at(-1)?.body).toMatchObject({designNumber:271,expectedDesignNumber:null});
+  const cards=page.locator('.design-instance-card');await expect(cards).toHaveCount(2);
+  const cardBox=await cards.first().boundingBox();expect(cardBox&&cardBox.x<width&&cardBox.x+cardBox.width>0).toBe(true);
+  const rows=cards.first().locator('.design-instance-identifiers small');await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('Артикул: SKU-QA');await expect(rows.nth(1)).toContainText('Номер дизайна: 271');
+  expect(Number.parseFloat(await blankNumber.evaluate(element=>getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(13);
+  const [skuBox,numberBox]=await Promise.all([rows.nth(0).boundingBox(),rows.nth(1).boundingBox()]);
+  expect(skuBox&&numberBox&&Math.abs(skuBox.x-numberBox.x)<1&&numberBox.y>=skuBox.y+skuBox.height).toBe(true);
+  await page.locator('.orders-approved-expanded').screenshot({path:info.outputPath(`design-identifiers-${width}.png`)});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ }
 });
 
 test('changing sport saves asynchronously without remounting the expanded order',async({page})=>{
@@ -362,7 +523,7 @@ for(const action of ['ADD','DUPLICATE'] as const)test(`${action} retry after com
  if(action==='ADD')await page.getByRole('button',{name:'Добавить дизайн',exact:true}).click();
  else{await page.getByRole('button',{name:'Действия: QA design',exact:true}).click();await page.getByRole('menuitem',{name:'Дублировать дизайн',exact:true}).click();}
  const modal=page.getByRole('dialog');
- if(action==='ADD'){await modal.getByRole('textbox',{name:'Название дизайна',exact:true}).fill('Retry design');await modal.getByRole('textbox',{name:'Цена за единицу',exact:true}).fill('100');}
+ if(action==='ADD'){await modal.getByRole('textbox',{name:'Название дизайна',exact:true}).fill('Retry design');await modal.getByRole('textbox',{name:/^Цена за единицу/}).fill('100');}
  await modal.getByRole('button',{name:'Предварительный расчёт',exact:true}).click();
  await modal.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
  await expect(modal.getByRole('alert')).toBeVisible();
@@ -390,7 +551,7 @@ for(const action of ['ADD','DUPLICATE'] as const)test(`${action} parent refresh 
  if(action==='ADD')await page.getByRole('button',{name:'Добавить дизайн',exact:true}).click();
  else{await page.getByRole('button',{name:'Действия: QA design',exact:true}).click();await page.getByRole('menuitem',{name:'Дублировать дизайн',exact:true}).click();}
  const modal=page.getByRole('dialog');
- if(action==='ADD'){await modal.getByRole('textbox',{name:'Название дизайна',exact:true}).fill('Refresh design');await modal.getByRole('textbox',{name:'Цена за единицу',exact:true}).fill('100');}
+ if(action==='ADD'){await modal.getByRole('textbox',{name:'Название дизайна',exact:true}).fill('Refresh design');await modal.getByRole('textbox',{name:/^Цена за единицу/}).fill('100');}
  await modal.getByRole('button',{name:'Предварительный расчёт',exact:true}).click();
  await modal.getByRole('button',{name:'Подтвердить изменение',exact:true}).click();
  await expect(modal).toContainText('QA refresh failure');

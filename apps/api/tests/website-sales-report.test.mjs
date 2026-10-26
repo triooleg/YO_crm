@@ -48,5 +48,5 @@ test('all currencies value each original receipt exactly once, with void, partia
  const cancelled=data();cancelled.orders[0].salesStatus='CANCELLED';cancelled.orders[0].paymentStatus='REFUNDED';assert.equal(build(cancelled).sourceAnalytics.websiteReceivedMinor,4000);
  cancelled.payments=cancelled.payments.map(x=>x.orderId==='web'?{...x,voidedAt:now}:x);assert.equal(build(cancelled).sourceAnalytics.websiteReceivedMinor,0);
  assert.throws(()=>build(data(),{source:'FACEBOOK_CLIENT_CHANNEL'}));
- const old=data();old.orders=[];assert.equal(build(old).sourceAnalytics.websiteReceivedMinor,4000);
+ const old=data();old.orders=[];assert.equal(build(old).sourceAnalytics.websiteReceivedMinor,0);
 });

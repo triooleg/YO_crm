@@ -14,7 +14,8 @@ export function orderAssignedAthleteCount(order:OrderCompositionView){
 export function orderDesignCount(order:OrderCompositionView){const items=active(order);return items.length?new Set(items.map((item,index)=>item.id??`legacy-${index}`)).size:managed(order)?0:1;}
 export function orderDesignImagePaths(order:OrderCompositionView){
   const items=active(order);if(!items.length&&managed(order))return [];
-  const paths=items.flatMap(item=>{const image=orderImageUrl(item,order.sourceSystem);return image?[image]:[];});
+  const prioritized=[...items.filter(item=>item.modelImagePath),...items.filter(item=>!item.modelImagePath)];
+  const paths=prioritized.flatMap(item=>{const image=orderImageUrl(item,order.sourceSystem);return image?[image]:[];});
   if(order.modelImagePath&&!managed(order))paths.unshift(`/api/orders/images/${order.modelImagePath}`);
   else if(!paths.length&&!managed(order)){const image=orderImageUrl(order,order.sourceSystem);if(image)paths.push(image);}
   return [...new Set(paths)];

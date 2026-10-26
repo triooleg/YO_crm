@@ -1,12 +1,17 @@
-# Website checkout API — tax-aware release candidate
+# Website checkout API — tax-aware integration
+
+As of 2026-10-21, the website endpoint and OWNER-managed database API keys are
+installed in CRM 0.9.0, exact source snapshot
+`99444c64bb764787a7cc63fe05b3629366e79eed47fe59a6562a36f46aa09b39`.
+The additive key migration is applied. Key management is described in
+[key management](website-api-key-management.md) and ADR0011. An active database
+key authorizes only its bound source account; the legacy environment token and
+its allowlist keep their original behavior.
 
 Endpoint: `POST /api/integrations/website/orders` under `https://crm.yoleotard.com`.
-The candidate is local: no production endpoint installation or push is claimed.
-Base commit `029366f8c69b9d026186247379dd7472ffe0f5bc` anchors all1097 exact Git blobs
-from last verified installed CRM0.9.0 snapshot
-`7156988d4a7c3493e5816749698658089a6d5ba0406aa42140a656fed7a45408`.
-It preserves the installed tax/parent/statistics/finance/single-order import code.
-No tax policy, ledger schema, migration, production data or passwords changed.
+The 0.9.2 candidate replaces the 0.9.1 duplicate-email rule with full-contact
+matching, described below. Earlier base-commit and source-map preparation notes
+in this document describe historical setup; they are not the current installed version.
 
 ## Configuration
 
@@ -29,7 +34,7 @@ Generate a shared token locally with
 `node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"`.
 Copy it directly into protected API runtime and WordPress Checkout → CRM settings.
 Never log, commit, screenshot or include it in request bodies. Empty/invalid
-server token or empty account allowlist disables ingestion503; wrong Bearer401,
+server token or empty account allowlist disables **legacy-token** ingestion503; wrong Bearer401,
 unlisted source403. Source accounts are stable lowercase ASCII DNS hostnames.
 Portainer Compose passes all3 variables; normal Compose retains env_file.
 
@@ -106,8 +111,27 @@ are preserved: capture does NOT automatically confirm gross/date evidence or
 reopen closed periods. Accounting start/policies/rates remain unchanged.
 
 Payment amount/currency/date cannot be overwritten/voided/downgraded by replay.
-Client contacts normalize and merge redirects resolve; ambiguous identities fail
-closed. Nonempty manual client fields and compatible delivery/item overrides stay.
+Client contacts normalize and merge redirects resolve. An existing client is
+reused only when every stable contact supplied by checkout (email and/or phone)
+matches that same resolved client. Local and international Ukrainian phone
+forms match in both directions. A split or partial contact match creates a
+separate WEBSITE client with the complete buyer snapshot; multiple complete
+matches fail closed. An existing website order stays pinned to its client, so
+this rule does not silently repair a previously misassigned order. No clients
+or orders are merged. Nonempty manual client fields and compatible delivery/item
+overrides stay. An unchanged replay does not mutate business history.
+
+For a new direct website order, CRM assigns immutable `Order.number` as
+`YO-<integer>`. Allocation is serialized with a PostgreSQL advisory transaction
+lock and continues the greatest historical `KC-<integer>` or `YO-<integer>`
+business number, including archived orders. Legacy `WEB-<local WordPress id>`
+values, the current WordPress `externalNumber`, and technical WordPress
+`externalId` never advance that business sequence. Replays retain the same CRM
+order and number. Historical `KC-<integer>` order numbers are migrated once to
+the equivalent `YO-<integer>` number after collision checks; order identities,
+relations and financial records remain unchanged. The source card fee remains in `externalData` and is
+projected read-only as an already-included part of the customer price. It does
+not populate `Order.taxMinor`, create a second payment or change FOP tax bases.
 Dispatched/archived/terminal orders and assigned/produced/shipped pieces are
 protected. Source-line removal returns409; history is never deleted. Physical
 instance shrink archives only unused pieces, old identities never reactivate.
@@ -123,6 +147,13 @@ Errors: `{ok:false,code:WEBSITE_...,message:<bounded static Russian text>}`.
 are returned/logged by this endpoint. Body identity owns idempotency, independent
 of the optional plugin Idempotency-Key header. Transient retries retain the same
 identity/payload;409 requires review.
+
+Every newly created website order also receives a review marker. The staff
+Orders navigation shows the active unread count and a persistent Russian
+notification linking to the exact order. Closing or opening the order records an
+audited acknowledgement. Archived orders are excluded from notifications,
+order-list KPI totals and the website-source count; they remain in immutable
+history and in the business-number allocator so numbers are never reused.
 
 ```bash
 curl --fail-with-body -X POST https://crm.yoleotard.com/api/integrations/website/orders \

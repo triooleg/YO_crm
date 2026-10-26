@@ -65,10 +65,14 @@ const productionOrder = {
   },
 };
 
-async function mockWorkspaceApi(page: Page, options: { trackedProductionOrder?: boolean; lockedProductionSlot?: boolean; productionLoadError?: boolean; shippedProductionOrder?: boolean; legacyShippedProductionOrder?: boolean; shippedWithoutTracking?: boolean; denseProduction?: boolean } = {}) {
+async function mockWorkspaceApi(page: Page, options: { role?: string; trackedProductionOrder?: boolean; lockedProductionSlot?: boolean; productionLoadError?: boolean; slotSaveError?: boolean; deadlineSaveError?: boolean; holdFirstDeadlineSave?: boolean; shippedProductionOrder?: boolean; legacyShippedProductionOrder?: boolean; shippedWithoutTracking?: boolean; denseProduction?: boolean } = {}) {
   const shippingUpdates: unknown[] = [];
   const slotUpdates: unknown[] = [];
+  const deadlineUpdates: unknown[] = [];
   const slotDeletes: unknown[] = [];
+  let productionLoads = 0;
+  let releaseFirstDeadlineSave = () => {};
+  const firstDeadlineBarrier = new Promise<void>((resolve) => { releaseFirstDeadlineSave = resolve; });
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -89,7 +93,21 @@ async function mockWorkspaceApi(page: Page, options: { trackedProductionOrder?: 
     }
     if (request.method() === "PATCH" && pathname === "/api/orders/production-hold/production-slot") {
       slotUpdates.push(request.postDataJSON());
+      if (options.slotSaveError) {
+        await route.fulfill({ status: 400, json: { message: "Проверочная ошибка даты" } });
+        return;
+      }
       await route.fulfill({ json: request.postDataJSON() });
+      return;
+    }
+    if (request.method() === "PATCH" && pathname === "/api/orders/production-hold/deadline") {
+      deadlineUpdates.push(request.postDataJSON());
+      if (options.holdFirstDeadlineSave && deadlineUpdates.length === 1) await firstDeadlineBarrier;
+      if (options.deadlineSaveError) {
+        await route.fulfill({ status: 400, json: { message: "Проверочная ошибка плановой отправки" } });
+        return;
+      }
+      await route.fulfill({ json: { ...productionOrder, ...request.postDataJSON() } });
       return;
     }
     if (request.method() === "DELETE" && pathname === "/api/orders/production-hold/production-slot") {
@@ -101,10 +119,12 @@ async function mockWorkspaceApi(page: Page, options: { trackedProductionOrder?: 
       await route.fulfill({ json: {} });
       return;
     }
+    if (request.method() === "GET" && pathname === "/api/orders/production") productionLoads++;
     const responses = new Map<string, unknown>([
-      ["/api/auth/me", auth],
+      ["/api/auth/me", options.role ? { user: { ...auth.user, role: options.role } } : auth],
       ["/api/branding", {}],
       ["/api/communications/unread-count", { unreadCount: 0 }],
+      ["/api/orders/website-notifications", []],
       ["/api/shipping", { orders: shippingOrders, carriers: [{ carrier: "NOVA_GLOBAL", label: "Nova Global", enabled: true }, { carrier: "DHL", label: "DHL", enabled: true }] }],
       ["/api/orders/production", [{
         ...productionOrder,
@@ -155,7 +175,7 @@ async function mockWorkspaceApi(page: Page, options: { trackedProductionOrder?: 
     }
     await route.fulfill({ json: responses.get(pathname) });
   });
-  return { shippingUpdates, slotUpdates, slotDeletes, consoleErrors };
+  return { shippingUpdates, slotUpdates, deadlineUpdates, slotDeletes, consoleErrors, productionLoads: () => productionLoads, releaseFirstDeadlineSave };
 }
 
 for (const viewport of [
@@ -566,7 +586,7 @@ for (const viewport of [
 
   test(`Производство использует общий статус и сохраняет даты слота: ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    const { slotUpdates, consoleErrors } = await mockWorkspaceApi(page);
+    const { slotUpdates, deadlineUpdates, consoleErrors } = await mockWorkspaceApi(page);
     await page.goto("/?section=production");
 
     await page.locator(".production-order-summary").first().click();
@@ -577,9 +597,110 @@ for (const viewport of [
     await expect.poll(() => slotUpdates.length).toBe(1);
     expect(slotUpdates[0]).toMatchObject({ startsAt: productionDate(2) });
 
+    const plannedShipping = page.getByLabel("Плановая отправка", { exact: true });
+    await expect(plannedShipping).toBeVisible();
+    await plannedShipping.fill(productionDate(26));
+    await expect.poll(() => deadlineUpdates.length).toBe(1);
+    expect(deadlineUpdates[0]).toEqual({ requiredDeliveryAt: productionDate(26) });
+
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     expect(consoleErrors).toEqual([]);
     await status.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`mantine-production-${viewport.width}x${viewport.height}.png`), fullPage: false });
   });
 }
+
+test("даты производства и отправки пересчитываются без перезагрузки очереди", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const api = await mockWorkspaceApi(page);
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  await expect(page.locator(".production-order-details")).toBeVisible();
+  const initialLoads = api.productionLoads();
+  const pageToken = await page.evaluate(() => {
+    const token = crypto.randomUUID();
+    (window as typeof window & { __productionPageToken?: string }).__productionPageToken = token;
+    return token;
+  });
+
+  await page.getByLabel("Дата начала", { exact: true }).fill(productionDate(2));
+  await expect.poll(() => api.slotUpdates.length).toBe(1);
+  await expect(page.getByLabel("Дата начала", { exact: true })).toHaveValue(productionDate(2));
+
+  await page.getByLabel("Плановая отправка", { exact: true }).fill(productionDate(26));
+  await expect.poll(() => api.deadlineUpdates.length).toBe(1);
+  expect(api.deadlineUpdates[0]).toEqual({ requiredDeliveryAt: productionDate(26) });
+  await expect(page.getByLabel("Плановая отправка", { exact: true })).toHaveValue(productionDate(26));
+  await expect(page.locator(".production-order-summary").first()).toContainText(new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${productionDate(26)}T00:00:00`)));
+  expect(api.productionLoads()).toBe(initialLoads);
+  expect(await page.evaluate(() => (window as typeof window & { __productionPageToken?: string }).__productionPageToken)).toBe(pageToken);
+  await expect(page.locator(".production-order-details")).toBeVisible();
+  expect(api.consoleErrors).toEqual([]);
+});
+
+test("ошибка сохранения даты откатывает поле без перезагрузки очереди", async ({ page }) => {
+  const api = await mockWorkspaceApi(page, { deadlineSaveError: true });
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  const initialLoads = api.productionLoads();
+  const plannedShipping = page.getByLabel("Плановая отправка", { exact: true });
+  await expect(plannedShipping).toHaveValue(productionDate(25));
+  await plannedShipping.fill(productionDate(26));
+  await expect(page.locator(".crm-alert")).toContainText("Проверочная ошибка плановой отправки");
+  await expect(plannedShipping).toHaveValue(productionDate(25));
+  expect(api.productionLoads()).toBe(initialLoads);
+  await expect(page.locator(".production-order-details")).toBeVisible();
+});
+
+test("производственная роль видит плановую отправку без недоступного редактирования", async ({ page }) => {
+  const api = await mockWorkspaceApi(page, { role: "PRODUCTION" });
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  await expect(page.getByLabel("Плановая отправка", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".production-details-dates")).toContainText("Плановая отправка");
+  await expect(page.locator(".production-details-dates")).toContainText("25");
+  expect(api.deadlineUpdates).toEqual([]);
+});
+
+test("быстрые изменения плановой отправки сохраняются последовательно и последнее значение побеждает", async ({ page }) => {
+  const api = await mockWorkspaceApi(page, { holdFirstDeadlineSave: true });
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  const initialLoads = api.productionLoads();
+  const plannedShipping = page.getByLabel("Плановая отправка", { exact: true });
+  await plannedShipping.fill(productionDate(26));
+  await expect.poll(() => api.deadlineUpdates.length).toBe(1);
+  await plannedShipping.fill(productionDate(27));
+  await page.waitForTimeout(50);
+  expect(api.deadlineUpdates).toHaveLength(1);
+  api.releaseFirstDeadlineSave();
+  await expect.poll(() => api.deadlineUpdates.length).toBe(2);
+  expect(api.deadlineUpdates).toEqual([{ requiredDeliveryAt: productionDate(26) }, { requiredDeliveryAt: productionDate(27) }]);
+  await expect(plannedShipping).toHaveValue(productionDate(27));
+  expect(api.productionLoads()).toBe(initialLoads);
+});
+
+test("две ошибки плановой отправки возвращают последнее подтверждённое сервером значение", async ({ page }) => {
+  const api = await mockWorkspaceApi(page, { deadlineSaveError: true, holdFirstDeadlineSave: true });
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  const plannedShipping = page.getByLabel("Плановая отправка", { exact: true });
+  await plannedShipping.fill(productionDate(26));
+  await expect.poll(() => api.deadlineUpdates.length).toBe(1);
+  await plannedShipping.fill(productionDate(27));
+  api.releaseFirstDeadlineSave();
+  await expect.poll(() => api.deadlineUpdates.length).toBe(2);
+  await expect(plannedShipping).toHaveValue(productionDate(25));
+});
+
+test("ошибка даты производства откатывает слот без перезагрузки очереди", async ({ page }) => {
+  const api = await mockWorkspaceApi(page, { slotSaveError: true });
+  await page.goto("/?section=production");
+  await page.locator(".production-order-summary").first().click();
+  const initialLoads = api.productionLoads();
+  const start = page.getByLabel("Дата начала", { exact: true });
+  await start.fill(productionDate(2));
+  await expect(page.locator(".crm-alert")).toContainText("Проверочная ошибка даты");
+  await expect(start).toHaveValue(productionDate(1));
+  expect(api.productionLoads()).toBe(initialLoads);
+});

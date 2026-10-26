@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { parseExchangeRateCache, type ExchangeRateCache } from "./exchange-rates";
 import { assertValuationVersion, buildFinanceReport, createReportConverter, financePeriod, financeReportCsv, normalizeFinanceQuery, type FinanceReportQuery, type FinanceValuation } from "./finance-report-model";
+import { presentInvoice } from "./invoice-number";
 import { TaxesService } from '../taxes/taxes.service';
 import { monthsBetween } from '../taxes/tax-math';
 import { fiscalTaxTable, projectFiscalReport, unavailableFiscalReport, type FiscalLedger } from './finance-fiscal-model';
@@ -11,10 +12,10 @@ import { appendFiscalCsv, fiscalTaxCsv } from './finance-fiscal-csv';
 import type { HistoricalRate } from '../taxes/historical-nbu.service';
 
 const BATCH_SIZE = 500;
-const orderSelect = { ...orderOriginSelect, id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
+const orderSelect = { ...orderOriginSelect, id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, archivedAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
 const paymentSelect = { id: true, orderId: true, amountMinor: true, currency: true, receivedAt: true, method: true, notes: true, appliedAmountMinor: true, appliedCurrency: true } satisfies Prisma.PaymentSelect;
 const expenseSelect = { id: true, categoryId: true, category: { select: { name: true } }, amountMinor: true, currency: true, incurredAt: true, orderId: true, order: { select: { number: true } }, notes: true, orderShipment: { select: { id: true } } } satisfies Prisma.ExpenseSelect;
-const invoiceSelect = { id: true, number: true, orderId: true, order: { select: { number: true, clientId: true, client: { select: { displayName: true } } } }, issueDate: true, dueDate: true, totalMinor: true, currency: true, status: true } satisfies Prisma.InvoiceSelect;
+const invoiceSelect = { id: true, number: true, documentOptions: true, orderId: true, order: { select: { number: true, clientId: true, client: { select: { displayName: true } } } }, issueDate: true, dueDate: true, totalMinor: true, currency: true, status: true } satisfies Prisma.InvoiceSelect;
 
 async function readBatches<T extends { id: string }>(read: (cursor: string | undefined) => Promise<T[]>) {
   const result: T[] = []; let cursor: string | undefined;
@@ -58,18 +59,18 @@ export class FinanceReportService {
     const now = new Date(), query = normalizeFinanceQuery(input, now), from = financePeriod(query.month, -Math.max(query.range - 1, 1)), end = financePeriod(query.month, 1);
     const snapshot = await this.prisma.$transaction(async tx => {
       const valuation = await this.valuation(tx); assertValuationVersion(query, valuation, now);
-      // Cash rows are independent of order archive status; settlement needs every active order payment.
+      // Archived orders retain immutable history but are outside every active finance projection.
       const orders = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { archivedAt: null }, select: orderSelect }));
-      const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, OR: [{ order: { archivedAt: null } }, { receivedAt: { gte: from, lt: end } }] }, select: paymentSelect }));
-      const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end } }, select: expenseSelect }));
-      const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
-      const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end } } } }] }, select: { id: true, name: true, active: true } }));
+      const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null } }, select: paymentSelect }));
+      const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
+      const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, order: { archivedAt: null }, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
+      const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] } } }] }, select: { id: true, name: true, active: true } }));
       const orderSources=Object.fromEntries(orders.map(order=>[order.id,classifyOrderSource(order)]));
       const missingIds=[...new Set([...payments.map(row=>row.orderId),...invoices.map(row=>row.orderId),...expenses.map(row=>row.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
       Object.assign(orderSources,await loadOrderSourceMap(tx,missingIds));
       // Taxes have their own rows/statuses. Legacy fields always use their established projection.
       const legacyQuery = query.tab === 'taxes' ? { ...query, tab: 'payments', status: undefined } : query;
-      const result = buildFinanceReport({ orderSources, orders, payments, expenses, invoices, categories }, legacyQuery, valuation, now, query.tab === 'taxes' ? false : exportAll);
+      const result = buildFinanceReport({ orderSources, orders, payments, expenses, invoices: invoices.map(presentInvoice), categories }, legacyQuery, valuation, now, query.tab === 'taxes' ? false : exportAll);
       let ledger: FiscalLedger = { months: [], links: [], unavailable: true };
       let fiscalOrders = orders;
       let fiscalPayments = payments, fiscalExpenses = expenses;
@@ -83,14 +84,14 @@ export class FinanceReportService {
           ledger = { months, links };
           // Extra Kyiv boundary reads belong only to the new fiscal projection.
           const fiscalFrom = new Date(from.getTime() - 86400000);
-          const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, receivedAt: { gte: fiscalFrom, lt: from } }, select: paymentSelect }));
-          const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: from } }, select: expenseSelect }));
+          const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, receivedAt: { gte: fiscalFrom, lt: from } }, select: paymentSelect }));
+          const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: from }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
           fiscalPayments = [...payments, ...precedingPayments]; fiscalExpenses = [...expenses, ...precedingExpenses];
           const extraOriginIds = [...new Set([...precedingPayments.map(p=>p.orderId), ...precedingExpenses.map(e=>e.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
           Object.assign(orderSources, await loadOrderSourceMap(tx, extraOriginIds));
           const taxOrderIds = [...new Set([...months.flatMap(m => m.entries.map(e => e.orderId)), ...fiscalPayments.map(p => p.orderId), ...fiscalExpenses.map(e => e.orderId)].filter((id): id is string => Boolean(id)))].filter(id => !orders.some(o => o.id === id));
           if (taxOrderIds.length) {
-            const historical = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { id: { in: taxOrderIds } }, select: orderSelect }));
+            const historical = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { id: { in: taxOrderIds }, archivedAt: null }, select: orderSelect }));
             fiscalOrders = [...orders, ...historical];
             Object.assign(orderSources, Object.fromEntries(historical.map(o => [o.id, classifyOrderSource(o)])));
           }
@@ -125,7 +126,7 @@ export class FinanceReportService {
       const order = await tx.order.findFirst({ where: { id }, select: { id: true, number: true, priceMinor: true, depositRequiredMinor: true, currency: true, requiredDeliveryAt: true, archivedAt: true, client: { select: { displayName: true, country: true, language: true } }, payments: { where: { voidedAt: null }, orderBy: [{ receivedAt: "desc" }, { id: "asc" }], select: { ...paymentSelect, reference: true, sourceSystem: true } }, invoices: { where: { archivedAt: null }, orderBy: [{ issueDate: "desc" }, { id: "asc" }] } } });
       if (!order) throw new NotFoundException("Заказ не найден");
       const convert = createReportConverter(normalized.currency, valuation, now);
-      return { ...order, displayCurrency: normalized.currency, payments: order.payments.map(payment => ({ ...payment, displayAmountMinor: convert(payment.amountMinor, payment.currency) })) };
+      return { ...order, ...(order.invoices ? { invoices: order.invoices.map(presentInvoice) } : {}), displayCurrency: normalized.currency, payments: order.payments.map(payment => ({ ...payment, displayAmountMinor: convert(payment.amountMinor, payment.currency) })) };
     }, { isolationLevel: "RepeatableRead" });
   }
 

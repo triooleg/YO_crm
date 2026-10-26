@@ -81,7 +81,11 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
   const convert = createReportConverter(query.currency, valuation, now);
   const start = financePeriod(query.month), end = financePeriod(query.month, 1), previousStart = financePeriod(query.month, -1);
   const inside = (value: DateValue, from = start, to = end) => new Date(value) >= from && new Date(value) < to;
-  const payments = [...new Map(sources.payments.filter(payment => !payment.voidedAt).map(payment=>[payment.id,payment])).values()], expenses = sources.expenses.filter(expense => !expense.archivedAt);
+  const activeOrders = sources.orders.filter(order => !order.archivedAt), activeOrderIds = new Set(activeOrders.map(order => order.id));
+  const belongsToActiveOrder = (orderId?: string | null) => !orderId || activeOrderIds.has(orderId);
+  const payments = [...new Map(sources.payments.filter(payment => !payment.voidedAt && belongsToActiveOrder(payment.orderId)).map(payment=>[payment.id,payment])).values()];
+  const expenses = sources.expenses.filter(expense => !expense.archivedAt && belongsToActiveOrder(expense.orderId));
+  const invoices = sources.invoices.filter(invoice => !invoice.archivedAt && activeOrderIds.has(invoice.orderId));
   const cash = (from: Date, to: Date) => {
     const receivedMinor = sum(payments.filter(payment => inside(payment.receivedAt, from, to)).map(payment => convert(payment.amountMinor, payment.currency)));
     const expensesMinor = sum(expenses.filter(expense => inside(expense.incurredAt, from, to)).map(expense => convert(expense.amountMinor, expense.currency)));
@@ -107,7 +111,7 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
   const byOrder = new Map<string, Payment[]>();
   for (const payment of payments) { if(!payment.orderId)continue; const list = byOrder.get(payment.orderId) || []; list.push(payment); byOrder.set(payment.orderId, list); }
   const isDebtCohort = (order: Order) => !["CANCELLED", "COMPLETED"].includes(order.salesStatus) && order.paymentStatus !== "REFUNDED" && order.shippingStatus !== "RETURNED";
-  const allOrderRows = [...new Map(sources.orders.map(order=>[order.id,order])).values()].filter(order => !order.archivedAt && (isDebtCohort(order) || byOrder.get(order.id)?.some(payment => inside(payment.receivedAt)))).map(order => {
+  const allOrderRows = [...new Map(activeOrders.map(order=>[order.id,order])).values()].filter(order => isDebtCohort(order) || byOrder.get(order.id)?.some(payment => inside(payment.receivedAt))).map(order => {
     const orderPayments = byOrder.get(order.id) || [], latest = [...orderPayments].sort((left, right) => new Date(right.receivedAt).getTime() - new Date(left.receivedAt).getTime() || right.id.localeCompare(left.id))[0];
     const originalPaidMinor = sum(orderPayments.map(payment => {
       if (payment.currency === order.currency) return payment.amountMinor;
@@ -124,7 +128,7 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
     return { orderSource:origin(order.id), id: order.id, orderId: order.id, number: order.number, clientId: order.clientId, clientName: order.client.displayName, date: latest ? iso(latest.receivedAt) : null, amountMinor, paidMinor, balanceMinor, status: originalBalanceMinor === 0 ? "PAID" : originalPaidMinor > 0 ? "PARTIAL" : "UNPAID", method: latest?.method || null, notes: latest?.notes || null, originalCurrency: order.currency, originalAmountMinor: order.priceMinor, originalPaidMinor, originalBalanceMinor, roundingDifferenceMinor: originalPaidMinor <= order.priceMinor ? amountMinor - paidMinor - balanceMinor : 0, forecastDate, forecastSource: forecastDate ? order.requiredDeliveryAt ? "deadline" : "production" : null, activeDebt, receivedInMonth };
   }).filter((row): row is NonNullable<typeof row> => row !== null);
   const debtRows = allOrderRows.filter(order => order.activeDebt && order.originalBalanceMinor > 0), upcoming = debtRows.filter(order => order.forecastDate).sort((left, right) => left.forecastDate!.localeCompare(right.forecastDate!) || left.id.localeCompare(right.id));
-  const invoiceRows = sources.invoices.filter(invoice => !invoice.archivedAt && inside(invoice.issueDate) && (query.tab === "invoices" || invoice.status !== "CANCELLED")).map(invoice => ({ orderSource:origin(invoice.orderId), id: invoice.id, orderId: invoice.orderId, number: invoice.number, orderNumber: invoice.order.number, clientId: invoice.order.clientId, clientName: invoice.order.client.displayName, date: iso(invoice.issueDate), dueDate: invoice.dueDate ? iso(invoice.dueDate) : null, status: invoice.status, amountMinor: convert(invoice.totalMinor, invoice.currency), paidMinor: invoice.status === "PAID" ? convert(invoice.totalMinor, invoice.currency) : null, balanceMinor: invoice.status === "PAID" ? 0 : null, originalAmountMinor: invoice.totalMinor, originalCurrency: invoice.currency }));
+  const invoiceRows = invoices.filter(invoice => inside(invoice.issueDate) && (query.tab === "invoices" || invoice.status !== "CANCELLED")).map(invoice => ({ orderSource:origin(invoice.orderId), id: invoice.id, orderId: invoice.orderId, number: invoice.number, orderNumber: invoice.order.number, clientId: invoice.order.clientId, clientName: invoice.order.client.displayName, date: iso(invoice.issueDate), dueDate: invoice.dueDate ? iso(invoice.dueDate) : null, status: invoice.status, amountMinor: convert(invoice.totalMinor, invoice.currency), paidMinor: invoice.status === "PAID" ? convert(invoice.totalMinor, invoice.currency) : null, balanceMinor: invoice.status === "PAID" ? 0 : null, originalAmountMinor: invoice.totalMinor, originalCurrency: invoice.currency }));
   const activeInvoices = invoiceRows.filter(invoice => invoice.status !== "CANCELLED");
   let rows: Record<string, unknown>[] = query.tab === "expenses" ? expenseRows : query.tab === "invoices" ? invoiceRows : query.scope === "forecast" ? upcoming : allOrderRows.filter(order => order.receivedInMonth || (order.activeDebt && order.originalBalanceMinor > 0));
   const search = query.search?.trim().toLocaleLowerCase("ru-RU");

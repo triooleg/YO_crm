@@ -62,6 +62,8 @@ test("повторная синхронизация опирается на вн
   assert.match(service, /После переноса заказов токен KeyCRM нельзя удалить/);
   assert.match(service, /decryptSecret\(encryptedCurrentToken\) !== candidateToken/);
   assert.match(service, /client-merge-global/);
+  assert.match(service, /nextOrderNumber\(tx\)/);
+  assert.doesNotMatch(service, /number:\s*order\.number/);
   assert.match(service, /DEPOSIT_BELOW_CONFIRMED_SLOT/);
   assert.match(service, /before: existing \?\? undefined, after: persisted/);
   assert.match(service, /leaseOwner: null, leaseUntil: null/);

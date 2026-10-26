@@ -1,4 +1,5 @@
 "use client";
+import { WebsiteApiKeysPanel } from "./website-api-keys-panel";
 import { TaxSettingsPanel } from "./taxes/tax-settings-panel";
 import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
 import { Badge, Modal, Progress, SegmentedControl, Tabs } from "@mantine/core";
@@ -7,6 +8,7 @@ import { taxIntegrationOrderUi as taxUi, settingsUi, summaryFormatUi } from "../
 import { CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextarea, CrmTextInput } from "./crm/settings-controls";
 import { type CrmTab } from "./crm/tab-list";
 import { canReadTaxes } from "../lib/tax-accounting";
+import { DocumentTemplateSettings } from "./document-template-settings";
 const AI_MODEL_OPTIONS = ["gpt-4.1-mini", "gpt-4.1", "gpt-5-mini"] as const;
 type Setting = { key: string; section: string; value: unknown };
 type AiData = {
@@ -326,14 +328,14 @@ function KeycrmSettings(){
     <Modal opened={rollbackOpen} onClose={()=>setRollbackOpen(false)} title={ui.rollbackDialogTitle} centered closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{ "aria-label": ui.close, disabled: busy }}><p>{ui.rollbackConsequences}</p><dl className="keycrm-confirm-details"><div><dt>{ui.rollbackRunId}</dt><dd>{current?.id||"—"}</dd></div></dl><div className="phase2-warning" role="note">{ui.rollbackAuditNotice}</div><div className="settings-actions"><CrmButton tone="secondary" type="button" onClick={()=>setRollbackOpen(false)} disabled={busy}>{ui.cancel}</CrmButton><CrmButton type="button" onClick={()=>void rollbackRun()} disabled={busy}>{ui.rollbackConfirmAction}</CrmButton></div></Modal>
   </div>
 }
-type SettingsSection = "account" | "finance" | "communications" | "keycrm" | "ai" | "production" | "interface" | "taxes";
+type SettingsSection = "account" | "finance" | "invoice-templates" | "communications" | "keycrm" | "ai" | "production" | "interface" | "taxes";
 export function SettingsWorkspace({role}:{role:string}) {
   const [section, setSection] = useState<SettingsSection | null>(null);
   useEffect(() => {
     const sync = () => {
       const tab = new URLSearchParams(window.location.search).get('tab');
       const common = ['finance', 'communications', 'ai'];
-      const allowed = [...common, ...(canReadTaxes(role) ? ['taxes'] : []), ...(role === 'OWNER' ? ['account'] : []), ...(['OWNER', 'ADMIN'].includes(role) ? ['keycrm', 'production', 'interface'] : [])];
+      const allowed = [...common, ...(canReadTaxes(role) ? ['taxes'] : []), ...(role === 'OWNER' ? ['account'] : []), ...(['OWNER', 'ADMIN'].includes(role) ? ['keycrm', 'production', 'interface', 'invoice-templates'] : [])];
       setSection(allowed.includes(tab ?? '') ? tab as SettingsSection : role === 'OWNER' ? 'account' : 'finance');
     };
     sync(); window.addEventListener('popstate', sync);
@@ -350,6 +352,7 @@ export function SettingsWorkspace({role}:{role:string}) {
   const tabs: CrmTab[] = [
     ...(role==="OWNER"?[{value:"account",label:settingsUi.accountTab,panelId:"settings-account-panel",tabId:"settings-account-tab"}]:[]),
     {value:"finance",label:settingsUi.finance,panelId:"settings-finance-panel",tabId:"settings-finance-tab"},
+    ...(['OWNER','ADMIN'].includes(role)?[{value:"invoice-templates",label:settingsUi.documentTemplatesTitle,panelId:"settings-invoice-templates-panel",tabId:"settings-invoice-templates-tab"}]:[]),
     ...(canReadTaxes(role)?[{value:"taxes",label:taxUi.taxes,panelId:"settings-taxes-panel",tabId:"settings-taxes-tab"}]:[]),
     {value:"communications",label:settingsUi.communications,panelId:"settings-communications-panel",tabId:"settings-communications-tab"},
     ...((role==="OWNER"||role==="ADMIN")?[{value:"keycrm",label:settingsUi.keycrmTab,panelId:"settings-keycrm-panel",tabId:"settings-keycrm-tab"}]:[]),
@@ -374,6 +377,8 @@ export function SettingsWorkspace({role}:{role:string}) {
         <AccountSettings />
       ) : section === "finance" ? (
         <><FinanceSettings canManageExchangeRates={role==="OWNER"||role==="ADMIN"}/>{canReadTaxes(role) && <CrmButton tone="secondary" onClick={() => selectSection("taxes")}>{taxUi.settingsLink}</CrmButton>}</>
+      ) : section === "invoice-templates" && ['OWNER','ADMIN'].includes(role) ? (
+        <section id="settings-invoice-templates-panel" role="tabpanel" aria-labelledby="settings-invoice-templates-tab"><DocumentTemplateSettings /></section>
       ) : section === "communications" ? (
         <CommunicationsSettings />
       ) : section === "keycrm" ? (
@@ -428,6 +433,7 @@ function AccountSettings(){
       {error&&<div className="phase2-error" role="alert">{error}</div>}{message&&<div className="settings-success" role="status">{message}</div>}
       <CrmButton type="submit" disabled={saving}>{saving?settingsUi.accountSaving:settingsUi.accountSave}</CrmButton>
     </form>
+    <WebsiteApiKeysPanel />
   </section>
 }
 function FinanceSettings({canManageExchangeRates}:{canManageExchangeRates:boolean}) {
@@ -517,6 +523,7 @@ function FinanceSettings({canManageExchangeRates}:{canManageExchangeRates:boolea
           {settingsUi.save}
         </CrmButton>
       </form>
+      <DocumentTemplateSettings />
       <ExchangeRateSettings canManage={canManageExchangeRates}/>
       <section className="settings-card muted-card">
         <h2>{settingsUi.otherSections}</h2>

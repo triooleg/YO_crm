@@ -221,6 +221,13 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum OrderDocumentKind {
+  INVOICE
+  ORDER_SUMMARY
+  CUSTOMER_CARD
+  CUSTOM
+}
+
 enum PaymentMethod {
   CARD
   BANK_TRANSFER
@@ -295,6 +302,8 @@ model User {
   parentMeasurementInvitations MeasurementInvitation[] @relation("ParentMeasurementInvitationIssuer")
   parentMeasurementAssignments MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetActor")
   parentMeasurementEvents MeasurementPublicEvent[] @relation("ParentMeasurementEventActor")
+  createdWebsiteApiKeys WebsiteApiKey[] @relation("WebsiteApiKeyCreator")
+  revokedWebsiteApiKeys WebsiteApiKey[] @relation("WebsiteApiKeyRevoker")
 }
 
 model Session {
@@ -509,6 +518,8 @@ model Order {
   externalNumber         String?
   externalUpdatedAt      DateTime?
   externalData           Json?
+  websiteNoticeAt        DateTime?
+  websiteReviewedAt      DateTime?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
   archivedAt           DateTime?
@@ -526,6 +537,7 @@ model Order {
   tags                 OrderTag[]
 
   invoices   Invoice[]
+  documents  OrderDocument[]
   expenses   Expense[]
   shipment   Shipment?
   orderShipments OrderShipment[]
@@ -535,6 +547,7 @@ model Order {
   @@index([salesStatus, archivedAt])
   @@index([requiredDeliveryAt])
   @@index([clientId, createdAt])
+  @@index([websiteReviewedAt, websiteNoticeAt, archivedAt])
 }
 
 model OrderFile {
@@ -1445,6 +1458,10 @@ model Invoice {
   items      Json
   notes      String?
   totalMinor Int
+  templateKey     String?
+  templateSnapshot Json?
+  dataSnapshot     Json?
+  documentOptions  Json?
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
   archivedAt DateTime?
@@ -1452,6 +1469,38 @@ model Invoice {
 
   @@index([orderId, createdAt])
   @@index([issueDate, status])
+}
+
+model DocumentTemplate {
+  id         String            @id @default(cuid())
+  name       String
+  kind       OrderDocumentKind @default(INVOICE)
+  language   String            @default("en")
+  active     Boolean           @default(true)
+  config     Json
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  archivedAt DateTime?
+
+  @@index([kind, active, archivedAt])
+  @@index([name])
+}
+
+model OrderDocument {
+  id               String            @id @default(cuid())
+  orderId          String
+  templateKey      String?
+  kind             OrderDocumentKind
+  title            String
+  language         String            @default("en")
+  templateSnapshot Json
+  dataSnapshot     Json
+  createdAt        DateTime          @default(now())
+  archivedAt       DateTime?
+  order             Order             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@index([kind, createdAt])
 }
 
 model ProductionSlot {
@@ -1811,4 +1860,24 @@ model HistoricalNbuRate {
  createdAt DateTime @default(now()) @db.Timestamptz(3)
  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
  @@id([currency,incomeDate])
+}
+
+model WebsiteApiKey {
+  id String @id @default(cuid())
+  name String @db.VarChar(100)
+  selector String @unique @db.VarChar(16)
+  digest Bytes @unique
+  digestVersion String @default("sha256-v1")
+  sourceAccount String @db.VarChar(253)
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+  revokedAt DateTime?
+  createdById String
+  revokedById String?
+  rotatedFromId String?
+  createdBy User @relation("WebsiteApiKeyCreator",fields:[createdById],references:[id],onDelete:Restrict)
+  revokedBy User? @relation("WebsiteApiKeyRevoker",fields:[revokedById],references:[id],onDelete:Restrict)
+  rotatedFrom WebsiteApiKey? @relation("WebsiteApiKeyRotation",fields:[rotatedFromId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  rotations WebsiteApiKey[] @relation("WebsiteApiKeyRotation")
+  @@index([createdAt,id])
 }

@@ -11,9 +11,9 @@ test('order/settings integration through real React UI and browser navigation', 
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'), web = resolve(root, 'apps/web');
   const out = resolve(root, '.local/tax-integration-order-settings/browser'); await mkdir(out, { recursive: true });
   await writeFile(resolve(out, 'loader.cjs'), `const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(source){return ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText}`);
-  await writeFile(resolve(out, 'css-loader.cjs'), 'module.exports=function(){return ""}');
-  const fixture = { id: 'synthetic-order', number: 'TEST-400', currency: 'EUR', priceMinor: 40000, deliveryMinor: 3000, taxMinor: 3800, giftWrapMinor: 500, discountMinor: 500, depositRequiredMinor: 20000, updatedAt: '2026-10-19T10:00:00Z', createdAt: '2026-05-01T10:00:00Z', type: 'CUSTOM', source: 'FACEBOOK', salesStatus: 'CONFIRMED', productionStatus: 'NOT_SCHEDULED', shippingStatus: 'NOT_READY', paymentStatus: 'PARTIAL', client: { id: 'synthetic-client', displayName: 'Тест Клиент', firstName: 'Тест', lastName: 'Клиент', athletes: [], files: [] }, items: [{ id: 'synthetic-item', name: 'Тестовый костюм', quantity: 1, priceMinor: 35000, instances: [] }], payments: [{ id: 'synthetic-payment', amountMinor: 20000, currency: 'EUR', method: 'BANK_TRANSFER', receivedAt: '2026-05-03T10:00:00Z', notes: 'Реальная тестовая оплата', canVoid: true }], invoices: [{ id: 'synthetic-invoice', number: 'INV-TEST', totalMinor: 40000, currency: 'EUR', issueDate: '2026-05-01', status: 'DRAFT' }], expenses: [{ id: 'synthetic-expense', amountMinor: 1500, currency: 'UAH', incurredAt: '2026-05-03', category: { id: 'delivery', name: 'Перевозчик' } }], notesStructured: [], activities: [], orderShipments: [], files: [] };
-  await writeFile(resolve(out, 'entry.tsx'), `import React from 'react';import{createRoot}from'react-dom/client';import{MantineProvider}from'@mantine/core';import{yoleotardTheme}from'${resolve(web, 'lib/mantine-theme').replaceAll('\\', '/')}';import{SettingsWorkspace}from'${resolve(web, 'components/settings-workspace').replaceAll('\\', '/')}';import{OrderExpandedTabs}from'${resolve(web, 'components/orders/order-expanded-tabs').replaceAll('\\', '/')}';const q=new URLSearchParams(location.search), role=q.get('role')||'OWNER',order=${JSON.stringify(fixture)};window.actions=[];const action=(name)=>(...args)=>{window.actions.push({name,args});return Promise.resolve()};const bridge={request:async(path,init)=>{window.actions.push({name:'request',path,method:init?.method});return[]},onSaved:action('saved')};const props=new Proxy({order,taxRole:role,financeActions:bridge,compositionActions:bridge,expenseActions:bridge,statusPending:false,...Object.fromEntries(['onPayment','onCurrency','onVoidPayment','onFinance','onAddDesign','onEditItem','onEdit','onMeasurements','onUpdateInstance','onUpdateClientPreferences','onCreateNote','onUpdateNote'].map(name=>[name,action(name)]))},{get:(target,key)=>key in target?target[key]:typeof key==='string'&&key.startsWith('on')?action(key):undefined});createRoot(document.getElementById('app')).render(<MantineProvider theme={yoleotardTheme}>{q.get('section')==='orders'?<div className="orders-table-scroll"><table className="orders-dashboard-table"><tbody><tr className="orders-expanded-row"><td><div className="orders-approved-expanded"><OrderExpandedTabs {...props}/></div></td></tr></tbody></table></div>:<SettingsWorkspace role={role}/>}</MantineProvider>);`);
+  await writeFile(resolve(out, 'css-loader.cjs'), `module.exports=function(source){return ${JSON.stringify("if(typeof document!=='undefined'){const style=document.createElement('style');style.textContent=")}+JSON.stringify(source)+${JSON.stringify(";document.head.appendChild(style)}")}}`);
+  const fixture = { id: 'synthetic-order', number: 'TEST-400', currency: 'EUR', priceMinor: 40000, deliveryMinor: 3000, taxMinor: 3800, giftWrapMinor: 500, discountMinor: 500, depositRequiredMinor: 20000, updatedAt: '2026-10-19T10:00:00Z', createdAt: '2026-05-01T10:00:00Z', type: 'CUSTOM', source: 'FACEBOOK', salesStatus: 'CONFIRMED', productionStatus: 'NOT_SCHEDULED', shippingStatus: 'NOT_READY', paymentStatus: 'PARTIAL', client: { id: 'synthetic-client', displayName: 'Тест Клиент', firstName: 'Тест', lastName: 'Клиент', athletes: [], files: [] }, items: [{ id: 'synthetic-item', name: 'Тестовый костюм', quantity: 1, priceMinor: 35000, designNumber: null, instances: [] }], payments: [{ id: 'synthetic-payment', amountMinor: 20000, currency: 'EUR', method: 'BANK_TRANSFER', receivedAt: '2026-05-03T10:00:00Z', notes: 'Реальная тестовая оплата', canVoid: true }], invoices: [{ id: 'synthetic-invoice', number: 'INV-TEST', totalMinor: 40000, currency: 'EUR', issueDate: '2026-05-01', status: 'DRAFT' }], expenses: [{ id: 'synthetic-expense', amountMinor: 1500, currency: 'UAH', incurredAt: '2026-05-03', category: { id: 'delivery', name: 'Перевозчик' } }], notesStructured: [], activities: [], orderShipments: [], files: [] };
+  await writeFile(resolve(out, 'entry.tsx'), `import React from 'react';import{createRoot}from'react-dom/client';import{MantineProvider}from'@mantine/core';import{yoleotardTheme}from'${resolve(web, 'lib/mantine-theme').replaceAll('\\', '/')}';import{SettingsWorkspace}from'${resolve(web, 'components/settings-workspace').replaceAll('\\', '/')}';import{OrderExpandedTabs}from'${resolve(web, 'components/orders/order-expanded-tabs').replaceAll('\\', '/')}';const q=new URLSearchParams(location.search), role=q.get('role')||'OWNER',order=${JSON.stringify(fixture)};if(q.has('designNumber'))order.items[0].designNumber=Number(q.get('designNumber'));window.actions=[];const action=(name)=>(...args)=>{window.actions.push({name,args});return Promise.resolve()};const bridge={request:async(path,init)=>{window.actions.push({name:'request',path,method:init?.method,body:init?.body?JSON.parse(init.body):undefined});return[]},onSaved:action('saved')};const props=new Proxy({order,taxRole:role,financeActions:bridge,compositionActions:bridge,expenseActions:bridge,statusPending:false,...Object.fromEntries(['onPayment','onCurrency','onVoidPayment','onFinance','onAddDesign','onEditItem','onEdit','onMeasurements','onUpdateInstance','onUpdateClientPreferences','onCreateNote','onUpdateNote'].map(name=>[name,action(name)]))},{get:(target,key)=>key in target?target[key]:typeof key==='string'&&key.startsWith('on')?action(key):undefined});createRoot(document.getElementById('app')).render(<MantineProvider theme={yoleotardTheme}>{q.get('section')==='orders'?<div className="orders-table-scroll"><table className="orders-dashboard-table"><tbody><tr className="orders-expanded-row"><td><div className="orders-approved-expanded"><OrderExpandedTabs {...props}/></div></td></tr></tbody></table></div>:<SettingsWorkspace role={role}/>}</MantineProvider>);`);
   const webpack = require('next/dist/compiled/webpack/webpack').webpack;
   await new Promise((accept, reject) => webpack({ mode: 'development', devtool: false, entry: resolve(out, 'entry.tsx'), output: { path: out, filename: 'bundle.js' }, resolve: { extensions: ['.tsx', '.ts', '.mjs', '.js'], modules: [resolve(web, 'node_modules'), 'node_modules'] }, module: { rules: [{ test: /\.tsx?$/, use: resolve(out, 'loader.cjs') }, { test: /\.css$/, use: resolve(out, 'css-loader.cjs') }] } }, (error, stats) => error || stats.hasErrors() ? reject(error ?? Error(stats.toString({ all: false, errors: true }))) : accept()));
   const layout = await readFile(resolve(web, 'app/layout.tsx'), 'utf8');
@@ -35,7 +35,9 @@ test('order/settings integration through real React UI and browser navigation', 
       if (url.pathname === '/api/finance/taxes/policies/preview') { if (previewDelay) await new Promise(resolve => setTimeout(resolve, previewDelay)); return send({ previewRevision, fieldSignature: 'synthetic-signature', affectedPeriods: [{ month: '2026-11', state: 'OPEN', used: false }, { month: '2026-12', state: 'CLOSED', used: true }], publicationBlocked: previewBlocked, reasons: previewBlocked ? [{ code: 'USED_POLICY_CONFLICT', month: '2026-12' }] : [] }); }
       if (url.pathname === '/api/finance/taxes/policies') return send(settings);
       if (url.pathname.startsWith('/api/finance/taxes/orders/')) { await orderResponseGate; return send({ orderId: fixture.id, incomplete: false, entries: [], estimate, completeness: { incomplete: false, missing: [], accruedUahMinor: 60000 } }, failOrder ? 503 : 200); }
+      if (url.pathname === '/api/orders/synthetic-order/items/synthetic-item/design-number' && req.method === 'PATCH') return send({ id: 'synthetic-item', designNumber: calls.at(-1)?.body?.designNumber ?? null });
       if (url.pathname === '/api/finance/settings') return send([]);
+      if (url.pathname === '/api/finance/document-templates' || url.pathname === '/api/finance/document-field-definitions') return send([]);
       if (url.pathname === '/api/ai-assistant/settings') return send({ enabled: false, allowClientContext: false, model: 'gpt-4.1-mini', defaultLanguage: 'ru', tone: 'Спокойный', systemPrompt: 'Синтетическая инструкция', connected: false, apiKeySource: 'none' });
       if (url.pathname === '/api/ai-control/status') return send({ serverPolicy: { aiEnabled: false, provider: 'disabled', analysisModel: 'none', replyModel: 'none', embeddingModel: 'none' }, effective: { masterEnabled: false, mode: 'OFF', autoReplies: false, serverBlocked: true }, settings: [], worker: { running: false }, outbox: { status: 'healthy', queued: 0 }, lastSuccessfulRun: null, statistics24h: { messagesQueued: 0, analysesCompleted: 0, failed: 0, retryCount: 0, averageLatencyMs: 0, inputTokens: 0, outputTokens: 0, estimatedCostMinor: 0, automaticRepliesSent: 0 } });
       if (url.pathname === '/api/finance/exchange-rates') return send({ provider: 'NBU', supportedPairs: ['EUR/UAH'], officialUrl: 'https://bank.gov.ua/', cache: null });
@@ -220,10 +222,46 @@ test('order/settings integration through real React UI and browser navigation', 
     await expect(page.locator('.orders-finance-calculation').getByText('Подарочная упаковка', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /Добавить позицию/ })).toBeEnabled();
     await expect(page.getByRole('button', { name: '＋ Добавить расход', exact: true })).toBeEnabled();
-    await expect(page.getByRole('button', { name: '＋ Создать инвойс', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: '＋ Создать документ', exact: true })).toBeEnabled();
     await expect(page.locator('.orders-finance-bottom')).toHaveCount(0);
     for (const title of ['Финансовые заметки', 'Быстрые действия', 'Напоминания']) await expect(page.getByRole('heading', { name: title, exact: true })).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: 'Финансовые заметки', exact: true })).toHaveCount(0);
+  });
+  await t.test('blank design number opens an inline editor and saves through the audited item route', async () => {
+    await page.goto(`${base}/?section=orders&orderId=synthetic-order&tab=designs`);
+    const editNumber = page.getByRole('button', { name: 'Изменить номер дизайна: Тестовый костюм', exact: true });
+    await expect(editNumber).toHaveText('Добавить');
+    await editNumber.click();
+    await page.getByRole('textbox', { name: 'Номер дизайна', exact: true }).fill('493');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Номер дизайна', exact: true })).toHaveCount(0);
+    const write = await page.evaluate(() => window.actions.findLast(action => action.path === '/orders/synthetic-order/items/synthetic-item/design-number' && action.method === 'PATCH'));
+    assert.equal(write?.body?.designNumber, 493);
+    assert.equal(write?.body?.expectedDesignNumber, null);
+    assert.match(write?.body?.operationKey ?? '', /^[0-9a-f-]{36}$/);
+    assert.deepEqual(Object.keys(write?.body ?? {}).sort(), ['designNumber', 'expectedDesignNumber', 'operationKey']);
+  });
+  await t.test('existing design number stays editable, prefilled and visually bounded on desktop and mobile', async () => {
+    for (const [width,height] of [[1920,1080],[1366,768],[390,844]]) {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${base}/?section=orders&orderId=synthetic-order&tab=designs&designNumber=271`);
+      const editNumber=page.getByRole('button',{name:'Изменить номер дизайна: Тестовый костюм',exact:true});
+      await expect(editNumber).toHaveText('271');await editNumber.click();
+      const input=page.getByRole('textbox',{name:'Номер дизайна',exact:true});await expect(input).toHaveValue('271');
+      const box=await page.locator('.design-number-popover').boundingBox();assert.ok(box&&box.x>=0&&box.x+box.width<=width,`popover ${width}: ${JSON.stringify(box)}`);
+      await page.waitForTimeout(250);
+      await page.screenshot({path:resolve(out,`design-number-${width}.png`),fullPage:true});
+      await page.keyboard.press('Escape');await expect(input).toHaveCount(0);await expect(editNumber).toBeFocused();
+    }
+  });
+  await t.test('existing design number can be cleared explicitly', async () => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto(`${base}/?section=orders&orderId=synthetic-order&tab=designs&designNumber=271`);
+    await page.getByRole('button',{name:'Изменить номер дизайна: Тестовый костюм',exact:true}).click();
+    await page.getByRole('textbox',{name:'Номер дизайна',exact:true}).fill('');
+    await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    const write=await page.evaluate(()=>window.actions.findLast(action=>action.path==='/orders/synthetic-order/items/synthetic-item/design-number'&&action.method==='PATCH'));
+    assert.equal(write?.body?.designNumber,null);assert.equal(write?.body?.expectedDesignNumber,271);
   });
   await t.test('desktop tablet mobile layouts retain nine tabs and all existing finance actions', async () => {
     for (const width of [1920, 1366, 768, 390]) {
@@ -232,6 +270,12 @@ test('order/settings integration through real React UI and browser navigation', 
       await expect(page.locator('.orders-finance-summary')).toContainText(/400,00/);
       await expect(page.getByText('INV-TEST', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Финансовые заметки', exact: true })).toHaveCount(0);
+      if(width>=1366){
+        const geometry=await page.locator('.orders-finance-reference-main').evaluate(root=>{const children=[...root.children].slice(0,3).map(element=>element.getBoundingClientRect().width),scrollbars=[...root.querySelectorAll('.orders-finance-scroll')].filter(element=>element.scrollWidth>element.clientWidth+1).map(element=>({content:element.firstElementChild?.className,client:element.clientWidth,scroll:element.scrollWidth}));return {children,scrollbars};});
+        assert.ok(Math.abs(geometry.children[0]/geometry.children[1]-2)<.08,`left/summary ratio ${width}: ${JSON.stringify(geometry)}`);
+        assert.ok(Math.abs(geometry.children[2]/geometry.children[1]-2)<.08,`side/summary ratio ${width}: ${JSON.stringify(geometry)}`);
+        assert.deepEqual(geometry.scrollbars,[],`finance has no horizontal table bars ${width}: ${JSON.stringify(geometry)}`);
+      }
       await page.screenshot({ path: resolve(out, `order-${width}-compact.png`), fullPage: true });
       await openFinancialInformation();
       await expect(page.locator('.tax-order-price-total')).toContainText(/400,00/);
@@ -239,7 +283,7 @@ test('order/settings integration through real React UI and browser navigation', 
       await expect(page.getByRole('heading',{name:'Состав полной стоимости',exact:true})).toBeVisible();
       assert.ok(await page.locator('.tax-order-price-total .tax-order-price-value').evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 18), `readable amount ${width}`);
       await expect(page.getByText('INV-TEST', { exact: true })).toBeVisible();
-      if(width===390){const fit=await page.locator('.tax-order-finance').evaluate(el=>({panel:el.getBoundingClientRect().width,frame:el.closest('.orders-approved-expanded').getBoundingClientRect().width}));assert.ok(fit.panel<=fit.frame+1,`expanded finance constrained to mobile frame: ${JSON.stringify(fit)}`);const clipped=await page.locator('.orders-order-tab-finance').evaluate(root=>[...root.querySelectorAll('p')].filter(el=>el.clientWidth>0&&el.scrollWidth>el.clientWidth+1&&!el.closest('.orders-finance-scroll')).map(el=>el.textContent));assert.deepEqual(clipped,[],'ordinary finance text wraps within the mobile panel');}
+      if(width===390){const fit=await page.locator('.tax-order-finance').evaluate(el=>({panel:el.getBoundingClientRect().width,frame:el.closest('.orders-approved-expanded').getBoundingClientRect().width}));assert.ok(fit.panel<=fit.frame+1,`expanded finance constrained to mobile frame: ${JSON.stringify(fit)}`);const clipped=await page.locator('.orders-order-tab-finance').evaluate(root=>[...root.querySelectorAll('p')].filter(el=>el.clientWidth>0&&el.scrollWidth>el.clientWidth+1&&!el.closest('.orders-finance-scroll')).map(el=>el.textContent));assert.deepEqual(clipped,[],'ordinary finance text wraps within the mobile panel');const itemName=await page.locator('.orders-finance-item-description strong').evaluate(element=>({width:element.getBoundingClientRect().width,height:element.getBoundingClientRect().height}));assert.ok(itemName.width>70&&itemName.height<50,`mobile item name stays readable: ${JSON.stringify(itemName)}`);}
       await expect(page.locator('a[href="/api/finance/invoices/synthetic-invoice/document"]')).toBeVisible();
       await expect(page.locator('a[href="/api/finance/invoices/synthetic-invoice/document?download=1"]')).toBeVisible();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `order overflow ${width}`);

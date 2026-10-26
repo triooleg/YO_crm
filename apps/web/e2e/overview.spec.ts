@@ -13,7 +13,7 @@ async function overviewFixture(page:Page,role='OWNER',options:{failTasks?:boolea
   if(path==='/api/communications/unread-count')return output({unreadCount:3});
   if(path==='/api/overview/orders'){
    if(options.delayOrders)await options.delayOrders;
-   return output({month:url.searchParams.get('month'),currency:url.searchParams.get('currency'),today:'2026-10-15',counts:{total:24,previousTotal:18,work:8,ready:5,overdue:2,requiresVerification:1,awaitingPayment:3},ring:{total:24,excluded:0,segments:[{key:'new',count:4},{key:'work',count:8},{key:'ready',count:5},{key:'awaiting',count:3},{key:'completed',count:4}]},trend:Array.from({length:Number(url.searchParams.get('range')||6)},(_,index)=>({month:moveFinanceMonth(url.searchParams.get('month')!,index-Number(url.searchParams.get('range')||6)+1),orders:24-index,clients:12-index})),recent:[{id:'order-1',number:'QA-101',clientName:'Synthetic client',modelImagePath:null,salesStatus:'IN_PRODUCTION',createdAt:'2026-10-12',amountMinor:33000,originalAmountMinor:33000,originalCurrency:'EUR'}],valuationError:null});
+   return output({month:url.searchParams.get('month'),currency:url.searchParams.get('currency'),today:'2026-10-15',counts:{total:24,previousTotal:18,work:8,ready:5,overdue:2,requiresVerification:1,awaitingPayment:3},ring:{total:24,excluded:0,segments:[{key:'new',count:4},{key:'work',count:8},{key:'ready',count:5},{key:'awaiting',count:3},{key:'completed',count:4}]},trend:Array.from({length:Number(url.searchParams.get('range')||6)},(_,index)=>({month:moveFinanceMonth(url.searchParams.get('month')!,index-Number(url.searchParams.get('range')||6)+1),orders:24-index,clients:12-index})),recent:[{id:'order-1',number:'QA-101',clientName:'Synthetic client',orderSource:'INSTAGRAM',modelImagePath:null,salesStatus:'IN_PRODUCTION',createdAt:'2026-10-12',amountMinor:33000,originalAmountMinor:33000,originalCurrency:'EUR'}],valuationError:null});
   }
   if(path==='/api/overview/tasks'){
    if(failTasks){failTasks=false;return route.fulfill({status:503,json:{message:'Задачи временно недоступны'}})}
@@ -37,6 +37,7 @@ test('overview renders seven real aggregate KPI and independent working panels w
  await expect(page.locator('.overview-kpi')).toHaveCount(7);
  await expect(page.getByRole('heading',{name:'Мои задачи',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Последние сообщения',exact:true})).toBeVisible();
+ await expect(page.locator('.overview-recent-orders').getByRole('img',{name:'Instagram'})).toBeVisible();
  await expect(page.locator('.overview-kpis')).toContainText('3 123,68'.replace(' ','\u00a0'));
  await expect.poll(()=>new Set(calls.filter(call=>call.path.startsWith('/api/overview/')||call.path==='/api/finance/report').map(call=>call.path)).size).toBe(5);
  expect(calls.filter(call=>call.method!=='GET')).toEqual([]);

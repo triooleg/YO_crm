@@ -2,13 +2,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const [shell, css, config, rootPackage, compose, portainerCompose, changelog, releaseWorkflow, i18n] = await Promise.all([
+const [shell, css, config, rootPackage, compose, portainerCompose, webDockerfile, changelog, releaseWorkflow, i18n] = await Promise.all([
   readFile(new URL("../components/crm-shell.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/crm-shell.css", import.meta.url), "utf8"),
   readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../package.json", import.meta.url), "utf8"),
   readFile(new URL("../../../docker-compose.yml", import.meta.url), "utf8"),
   readFile(new URL("../../../docker-compose.portainer.yml", import.meta.url), "utf8"),
+  readFile(new URL("../../../docker/web.Dockerfile", import.meta.url), "utf8"),
   readFile(new URL("../../../CHANGELOG.md", import.meta.url), "utf8"),
   readFile(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8"),
   readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
@@ -44,7 +45,7 @@ test("журнал раскрывает только актуальную вер
   assert.match(i18n, /Свернуть версию/);
 });
 
-test("каждая сборка имеет журнал изменений и GitHub Release", () => {
+test("исторический журнал сохранён, публикация GitHub Release остаётся отдельным workflow", () => {
   assert.match(changelog, /## \[0\.1\.6\]/);
   assert.match(changelog, /## \[0\.1\.5\]/);
   assert.match(changelog, /## \[0\.1\.4\]/);
@@ -58,11 +59,34 @@ test("каждая сборка имеет журнал изменений и Gi
 });
 
 test("релизная версия едина для интерфейса и Docker-сборки", () => {
-  assert.equal(JSON.parse(rootPackage).version, "0.9.0");
+  const version = JSON.parse(rootPackage).version;
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  const releases = i18n.slice(i18n.indexOf('export const releaseHistoryUi'));
+  assert.equal(releases.match(/version: "([\d.]+)"/)?.[1], version,
+    "Под логотипом и в первой записи журнала должна быть одна версия");
+  assert.equal(changelog.match(/^## \[([\d.]+)\]/m)?.[1], version,
+    "Текущая версия должна первой присутствовать в CHANGELOG");
   assert.match(config, /\.\.\/\.\.\/package\.json/);
-  assert.match(compose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.9\.0\}"/);
-  assert.match(portainerCompose, /CRM_VERSION:\s*"\$\{CRM_VERSION:-0\.9\.0\}"/);
+  assert.match(config, /NEXT_PUBLIC_CRM_VERSION:\s*rootPackage\.version/);
+  assert.doesNotMatch(config, /NEXT_PUBLIC_CRM_VERSION:\s*process\.env\.CRM_VERSION/);
+  assert.doesNotMatch(compose, /CRM_VERSION:/);
+  assert.doesNotMatch(portainerCompose, /CRM_VERSION:/);
   assert.match(compose, /CRM_COMMIT:/);
+  assert.match(portainerCompose, /CRM_COMMIT:/);
+  assert.match(webDockerfile, /ARG CRM_COMMIT/);
+  assert.match(webDockerfile, /ENV CRM_COMMIT=\$CRM_COMMIT/);
+  assert.doesNotMatch(webDockerfile, /CRM_VERSION/);
+  assert.match(config, /NEXT_PUBLIC_CRM_COMMIT:\s*process\.env\.CRM_COMMIT/);
+});
+
+test("в журнал включены выпущенные после 0.9.2 инвойсы и производственные даты", () => {
+  const releases = i18n.slice(i18n.indexOf('export const releaseHistoryUi'));
+  const latest = releases.slice(0, releases.indexOf('version: "0.9.2"'));
+  assert.match(latest, /инвойс/iu);
+  assert.match(latest, /без перезагрузки/iu);
+  assert.match(latest, /26\.10\.2026/);
+  assert.match(latest, /архив/iu);
+  assert.match(i18n, /commit: "Идентификатор сборки"/);
 });
 
 test("журнал 0.1.50 описывает исправление второго знака при вводе мерок", () => {

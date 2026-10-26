@@ -10,6 +10,7 @@ test('website HTTPS images display without resurrecting archived or managed-empt
  assert.deepEqual(orderDesignImagePaths({...website,compositionManaged:true,items:[]}),[]);
  assert.deepEqual(orderDesignImagePaths({...website,items:[{...website.items[0],archivedAt:'2026-10-20'}]}),[]);
  assert.deepEqual(orderDesignImagePaths({...website,items:[{...website.items[0],modelImagePath:'staff.jpg'}]}),['/api/orders/images/staff.jpg']);
+ assert.deepEqual(orderDesignImagePaths({...website,items:[{id:'external',quantity:1,externalImageUrl:image},{id:'local',quantity:1,modelImagePath:'staff.jpg'}]}),['/api/orders/images/staff.jpg',image]);
  for(const sourceSystem of ['KEYCRM','OTHER',undefined])assert.deepEqual(orderDesignImagePaths({...website,sourceSystem}),[]);
  for(const externalImageUrl of ['http://website.example/a','javascript:alert(1)','//website.example/a','https://user:password@website.example/a','invalid'])assert.deepEqual(orderDesignImagePaths({...website,items:[{quantity:1,externalImageUrl}],externalImageUrl}),[]);
 });

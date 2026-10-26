@@ -70,6 +70,27 @@ test('one fiscal report reconciles specified result, excludes linked tax cash on
   assert.equal(JSON.stringify(source), before);
 });
 
+test('archived orders are excluded from fiscal cash, tax rows and pending reconciliation while monthly obligations remain', async () => {
+  const { projectFiscalReport, fiscalTaxTable } = load('finance/finance-fiscal-model.ts');
+  const source = data();
+  source.orders[0].archivedAt = now;
+  source.expenses = source.expenses.map(row => ({ ...row, orderId: 'o', order: { number: '400EUR' } }));
+  source.ledger.months[2].entries.push(entry('monthly-esv',190234,{rootId:'monthly-esv-root',paymentId:null,orderId:null,component:'ESV',snapshot:{month:'2026-10'}}));
+  source.ledger.months[2].pendingStatuses=[{rootId:'root',paymentId:'p',status:'RECEIPT_CONFIRMATION_REQUIRED'}];
+  source.ledger.months[2].incomplete=true;
+  const report=await projectFiscalReport(source,{month:'2026-10',currency:'EUR',range:3},rate,now);
+  assert.equal(report.current.receivedMinor,0);
+  assert.equal(report.current.ordinaryExpensesMinor,0);
+  assert.equal(report.current.accruedTaxesMinor,3805);
+  assert.equal(report.current.resultAfterAccrualMinor,-3805);
+  assert.deepEqual(report.rows.map(row=>row.id),['monthly-esv']);
+  assert.equal(fiscalTaxTable(report,{}).total,1);
+  assert.equal(report.missing.some(row=>row.code==='TAX_CALCULATION_INCOMPLETE'),false);
+  assert.equal(report.taxSummary.accruedMinor,190234);
+  assert.equal(report.taxSummary.paidMinor,null);
+  assert.equal(report.taxSummary.incomplete,true);
+});
+
 test('tax component/date/source filters page and export the same fiscal rows without filtering global KPI', async () => {
   const { projectFiscalReport, fiscalTaxTable } = load('finance/finance-fiscal-model.ts');
   const source = data(); source.ledger.months[2].entries.push(entry('military', 10000, { component: 'MILITARY' }));
@@ -81,6 +102,35 @@ test('tax component/date/source filters page and export the same fiscal rows wit
   assert.equal(r.current.websiteReceivedMinor, 468368);
   assert.equal(r.sourceAnalytics.breakdown.find(x => x.source === 'WEBSITE').amountMinor, 468368);
   assert.equal(r.taxScope.mode, 'GLOBAL_FOP');
+});
+
+test('fully reversed voided receipt is absent from active tax table and export while ledger totals stay intact', async () => {
+  const { projectFiscalReport, fiscalTaxTable } = load('finance/finance-fiscal-model.ts');
+  const source = data(); source.payments = []; source.expenses = [];
+  source.ledger.months[2].entries = [
+    entry('unified-final', 72960, { rootId: 'unified-root', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: null } } }),
+    entry('unified-reverse', -72960, { rootId: 'unified-root', kind: 'REVERSE', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: '2026-10-23T07:23:53.674Z' } } }),
+    entry('military-final', 14592, { rootId: 'military-root', component: 'MILITARY', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: null } } }),
+    entry('military-reverse', -14592, { rootId: 'military-root', component: 'MILITARY', kind: 'REVERSE', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: '2026-10-23T07:23:53.674Z' } } }),
+  ];
+  const report = await projectFiscalReport(source, { month: '2026-10', currency: 'UAH', range: 3 }, rate, now);
+  assert.equal(report.rows.length, 4);
+  assert.equal(report.current.accruedTaxesMinor, 0);
+  assert.equal(fiscalTaxTable(report, {}).total, 0);
+  assert.equal(fiscalTaxTable(report, {}, true).rows.length, 0);
+});
+
+test('active and partially reversed receipt histories remain visible in the tax table', async () => {
+  const { projectFiscalReport, fiscalTaxTable } = load('finance/finance-fiscal-model.ts');
+  const source = data(); source.payments = []; source.expenses = [];
+  source.ledger.months[2].entries = [
+    entry('active-final', 10000, { rootId: 'active-root', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: null } } }),
+    entry('active-correction', -10000, { rootId: 'active-root', kind: 'ADJUST', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: null } } }),
+    entry('partial-final', 10000, { rootId: 'partial-root', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: null } } }),
+    entry('partial-reverse', -9000, { rootId: 'partial-root', kind: 'REVERSE', snapshot: { incomeDate: '2026-10-21', receiptConfirmed: true, originalPayment: { voidedAt: '2026-10-23T07:23:53.674Z' } } }),
+  ];
+  const report = await projectFiscalReport(source, { month: '2026-10', currency: 'UAH', range: 3 }, rate, now);
+  assert.equal(fiscalTaxTable(report, {}).total, 4);
 });
 
 test('current monthly ESV uses the latest available presentation rate without changing UAH liability', async () => {

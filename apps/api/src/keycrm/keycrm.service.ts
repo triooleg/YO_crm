@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret } from "../secret-box";
 import { KeycrmClient, KEYCRM_API_URL } from "./keycrm-client";
-import { normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-normalizer";
+import { KEYCRM_DESIGN_NUMBER_FIELD_UUID, normalizeKeycrmOrder, type NormalizedKeycrmOrder } from "./keycrm-normalizer";
 import { materializeKeycrmOrderImage, removeMaterializedKeycrmOrderImage } from "./keycrm-image";
 import { hasUsableDeliveryAddress, keycrmCostumeCount, keycrmProductionDurationDays, matchedShippingCarrier, nextDepositRequired, normalizedPhoneDigits } from "./keycrm-sync-policy";
 import { requiresProduction, subtractUtcDays } from "../orders/production-rules";
@@ -15,6 +15,7 @@ import { appliedPaymentMinor } from "../finance/exchange-rates";
 import type { CreateKeycrmSyncRunDto, UpdateKeycrmSettingsDto } from "./keycrm.dto";
 import { keycrmShipmentWriteMode, keycrmShippingFinanceWrite, selectKeycrmProviderShipment } from "./keycrm-shipment-policy";
 import { updateProductionStatusGraph } from "../orders/production-status-graph";
+import { nextOrderNumber } from "../website-orders/website-order-number";
 
 const SECTION = "integration.keycrm";
 const SOURCE_SYSTEM = "KEYCRM";
@@ -405,7 +406,7 @@ export class KeycrmService {
   private async previewOrder(order: NormalizedKeycrmOrder, runId: string) {
     if (await rejectWebsiteCheckoutCorrelation(this.prisma, { connectionKey: order.sourceAccount, orderedAt: order.orderedAt, raw: order.externalData }, runId, order.externalId)) return "SKIPPED" as const;
     await this.recordClientMergeSuggestion(this.prisma, order, runId, null);
-    const existing = await this.prisma.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } }, select: { externalUpdatedAt: true, sourceLinkMode: true, currency: true, number: true } });
+    const existing = await this.prisma.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } }, select: { id: true, externalUpdatedAt: true, sourceLinkMode: true, currency: true, number: true } });
     if (!existing) {
       const match = await this.findPotentialMatch(this.prisma, order);
       if (match.ambiguous) {
@@ -421,6 +422,14 @@ export class KeycrmService {
     if (existing.currency !== order.currency) {
       await this.prisma.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "ORDER_CURRENCY_CHANGED", message: `KeyCRM передал валюту ${order.currency}, но заказ ${existing.number} и его история сохранены в ${existing.currency}. Заказ будет пропущен без изменений.` } });
       return "SKIPPED" as const;
+    }
+    if (order.designNumber) {
+      const [missingDesignNumber, conflictingDesignNumber] = await Promise.all([
+        this.prisma.orderItem.findFirst({ where: { orderId: existing.id, archivedAt: null, designNumber: null }, select: { id: true } }),
+        this.prisma.orderItem.findFirst({ where: { orderId: existing.id, archivedAt: null, AND: [{ designNumber: { not: null } }, { designNumber: { not: order.designNumber } }] }, select: { id: true, designNumber: true } }),
+      ]);
+      if (conflictingDesignNumber) await this.prisma.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "DESIGN_NUMBER_CONFLICT", message: `Номер дизайна ${conflictingDesignNumber.designNumber} сохранён; KeyCRM передал ${order.designNumber}. Требуется ручная проверка.`, details: { itemId: conflictingDesignNumber.id, currentDesignNumber: conflictingDesignNumber.designNumber, keycrmDesignNumber: order.designNumber, keycrmFieldUuid: KEYCRM_DESIGN_NUMBER_FIELD_UUID } } });
+      if (missingDesignNumber) return "UPDATED" as const;
     }
     if (!order.externalUpdatedAt) return "SKIPPED" as const;
     if (order.externalUpdatedAt && (!existing.externalUpdatedAt || order.externalUpdatedAt > existing.externalUpdatedAt)) return "UPDATED" as const;
@@ -460,8 +469,9 @@ export class KeycrmService {
       if (importedModelImagePath) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `KEYCRM_IMAGE:${importedModelImagePath}`);
       const discoveredExternalLink = await tx.order.findUnique({ where: { sourceSystem_sourceAccount_externalId: { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: order.externalId } } });
       const needsImageRepair = Boolean(discoveredExternalLink && shouldReplaceImportedImage(discoveredExternalLink.modelImagePath, importedModelImagePath));
-      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && !order.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
-      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && order.externalUpdatedAt && discoveredExternalLink.externalUpdatedAt && order.externalUpdatedAt <= discoveredExternalLink.externalUpdatedAt && !needsImageRepair) return "SKIPPED" as const;
+      const needsDesignNumberRepair = Boolean(discoveredExternalLink && order.designNumber && await tx.orderItem.findFirst({ where: { orderId: discoveredExternalLink.id, archivedAt: null, designNumber: null }, select: { id: true } }));
+      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && !order.externalUpdatedAt && !needsImageRepair && !needsDesignNumberRepair) return "SKIPPED" as const;
+      if (discoveredExternalLink && !discoveredExternalLink.archivedAt && order.externalUpdatedAt && discoveredExternalLink.externalUpdatedAt && order.externalUpdatedAt <= discoveredExternalLink.externalUpdatedAt && !needsImageRepair && !needsDesignNumberRepair) return "SKIPPED" as const;
       const match = discoveredExternalLink ? { order: null, ambiguous: false } : await this.findPotentialMatch(tx, order);
       if (match.ambiguous) {
         await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "AMBIGUOUS_EXISTING_ORDER", message: "Найдено несколько подходящих клиентов или заказов. Заказ KeyCRM пропущен без изменения данных." } });
@@ -522,9 +532,8 @@ export class KeycrmService {
       let persisted;
       let manualDiscountOverride = false;
       if (!existing) {
-        const numberCollision = await tx.order.findUnique({ where: { number: order.number }, select: { id: true } });
-        if (numberCollision) throw new Error(`Номер ${order.number} уже занят заказом без связи KeyCRM`);
-        persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number: order.number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
+        const number = await nextOrderNumber(tx);
+        persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {
         const manualPriceOverride = preserveComposition || Boolean(await tx.activity.findFirst({ where: { orderId: existing.id, OR: [{ type: "ORDER_DETAILS_UPDATED", metadata: { path: ["priceChanged"], equals: true } }, { type: "ORDER_ITEM_DETAILS_UPDATED", metadata: { path: ["manualOverride"], equals: true } }] }, select: { id: true } }));
@@ -571,6 +580,21 @@ export class KeycrmService {
           await reconcileOrderItemInstances(tx, createdItem, createdItem.quantity);
           await tx.auditLog.create({ data: { actorId, action: "CREATE", entityType: "OrderItem", entityId: createdItem.id, after: createdItem } });
         }
+      }
+      if (order.designNumber) {
+        const activeDesigns = await tx.orderItem.findMany({ where: { orderId: persisted.id, archivedAt: null } });
+        const changedDesignIds: string[] = [];
+        for (const design of activeDesigns) {
+          if (design.designNumber === order.designNumber) continue;
+          if (design.designNumber !== null && design.designNumber !== undefined) {
+            await tx.keycrmSyncIssue.create({ data: { runId, externalOrderId: order.externalId, code: "DESIGN_NUMBER_CONFLICT", message: `Номер дизайна ${design.designNumber} сохранён; KeyCRM передал ${order.designNumber}. Требуется ручная проверка.`, details: { itemId: design.id, currentDesignNumber: design.designNumber, keycrmDesignNumber: order.designNumber, keycrmFieldUuid: KEYCRM_DESIGN_NUMBER_FIELD_UUID } } });
+            continue;
+          }
+          const updatedDesign = await tx.orderItem.update({ where: { id: design.id }, data: { designNumber: order.designNumber } });
+          changedDesignIds.push(design.id);
+          await tx.auditLog.create({ data: { actorId, action: "UPDATE", entityType: "OrderItem", entityId: design.id, before: design, after: updatedDesign } });
+        }
+        if (changedDesignIds.length) await tx.activity.create({ data: { clientId, orderId: persisted.id, type: "KEYCRM_DESIGN_NUMBER_IMPORTED", summary: "Номер дизайна перенесён из KeyCRM", metadata: { designNumber: order.designNumber, itemIds: changedDesignIds, keycrmFieldUuid: KEYCRM_DESIGN_NUMBER_FIELD_UUID } } });
       }
       for (const payment of order.payments) {
         const identity = { sourceSystem: SOURCE_SYSTEM, sourceAccount: order.sourceAccount, externalId: payment.externalId };

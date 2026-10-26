@@ -4,6 +4,7 @@ import test from "node:test";
 
 const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
 const i18n = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
+const styles = await readFile(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 
 test("selected orders expose a confirmed archive action", () => {
   assert.match(dashboard, /selectedIds\.size > 0[\s\S]*?ui\.archiveSelected/);
@@ -13,6 +14,7 @@ test("selected orders expose a confirmed archive action", () => {
   assert.match(dashboard, /orderIds: \[\.\.\.selectedIds\]/);
   assert.match(i18n, /archiveSelected: "Удалить выбранные"/);
   assert.match(i18n, /archiveOrdersHint: "Заказы будут перемещены в архив/);
+  assert.match(styles, /\.orders-selection \.crm-button \.mantine-Button-label\{color:#fff!important\}/);
 });
 
 test("archive action is limited to owner and administrator", () => {

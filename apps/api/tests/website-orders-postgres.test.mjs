@@ -79,7 +79,8 @@ test('actual website Nest HTTP / PostgreSQL43 transactional receipts, tax captur
   const {PrismaModule}=loadWebsiteRuntime('prisma.module.ts');
   const {TaxesModule}=loadWebsiteRuntime('taxes/taxes.module.ts');
   const {WebsiteOrdersModule}=loadWebsiteRuntime('website-orders/website-orders.module.ts');
-  const {websiteOrdersSecurity,websiteOrdersBodyError}=loadWebsiteRuntime('website-orders/website-orders-security.ts');
+  const {createWebsiteOrdersSecurity,websiteOrdersBodyError}=loadWebsiteRuntime('website-orders/website-orders-security.ts');
+  const {WebsiteApiKeysService}=loadWebsiteRuntime('website-api-keys/website-api-keys.service.ts');
   const history=new HistoricalNbuService(db),taxes=new TaxesService(db,history);
   owner=await db.user.create({data:{email:`owner-${runPrefix}@example.invalid`,passwordHash:'synthetic-only-not-login',displayName:'Synthetic owner',role:'OWNER'}});
   const command=async values=>({operationKey:randomUUID(),expectedRevision:(await taxes.settings(owner)).revision,...values});
@@ -95,7 +96,7 @@ test('actual website Nest HTTP / PostgreSQL43 transactional receipts, tax captur
   class HttpTestModule{}Module({imports:[WebsiteOrdersModule]})(HttpTestModule);
   const logger=Object.fromEntries(['log','error','warn','debug','verbose','fatal'].map(k=>[k,(...args)=>logs.push(args.map(x=>typeof x==='string'?x:String(x)).join(' '))]));
   app=await NestFactory.create(HttpTestModule,{logger,bodyParser:false,abortOnError:false});app.setGlobalPrefix('api');
-  app.use('/api/integrations/website/orders',websiteOrdersSecurity,json({limit:'256kb'}),websiteOrdersBodyError);
+  app.use('/api/integrations/website/orders',createWebsiteOrdersSecurity(app.get(WebsiteApiKeysService)),json({limit:'256kb'}),websiteOrdersBodyError);
   app.useGlobalPipes(new ParentMeasurementsValidationPipe());await app.listen(0,'127.0.0.1');
   const {KeycrmService}=loadWebsiteRuntime('keycrm/keycrm.service.ts');
   keycrm=new KeycrmService(db,taxes);
@@ -136,7 +137,7 @@ test('actual website Nest HTTP / PostgreSQL43 transactional receipts, tax captur
   await t.test('simultaneous first paid HTTP deliveries and exact replay create one order/receipt and exactly2 ROOT+2 SOURCE',async()=>{
    const p=payload('concurrent-paid'),orderCountBefore=await db.order.count(),clientCountBefore=await db.client.count(),responses=await Promise.all([request(p),request(p)]);
    assert.ok(responses.every(r=>r.status===200&&r.body.ok===true));assert.equal(new Set(responses.map(r=>r.body.orderId)).size,1);assert.equal(responses.filter(r=>r.body.created).length,1);
-   const order=await canonical(p.order.externalId);assert.equal(await db.order.count(),orderCountBefore+1);assert.equal(await db.client.count(),clientCountBefore+1);assert.equal(await db.orderItem.count({where:{orderId:order.id}}),2);assert.equal(order.priceMinor,21500);assert.equal(order.taxMinor,0);
+   const order=await canonical(p.order.externalId);assert.equal(await db.order.count(),orderCountBefore+1);assert.equal(await db.client.count(),clientCountBefore+1);assert.equal(await db.orderItem.count({where:{orderId:order.id}}),2);assert.equal(order.priceMinor,21500);assert.equal(order.taxMinor,0);assert.equal(order.externalData.totals.cardFeeMinor,500);
    await taxEvidence(order);const before=await counts();assert.equal((await request(p)).status,200);assert.deepEqual(await counts(),before);
   });
   await t.test('unpaid then paid source evidence retains order/client/line identity and never double-captures',async()=>{
@@ -150,6 +151,17 @@ test('actual website Nest HTTP / PostgreSQL43 transactional receipts, tax captur
    for(const id of ['same-day-a','same-day-b']){assert.equal((await request(payload(id))).status,200);await taxEvidence(await canonical(id));}
    assert.equal(await db.order.count(),before+2);assert.equal(await db.client.count(),clientBefore);
    const orders=await db.order.findMany({where:{externalId:{in:[idFor('same-day-a'),idFor('same-day-b')]}}});assert.equal(orders.length,2);assert.equal(orders[0].clientId,orders[1].clientId);
+  });
+  await t.test('split email and phone history creates a separate complete website client without merging',async()=>{
+   const email=`duplicate-${runPrefix}@example.invalid`;
+   const linked=await db.client.create({data:{firstName:'Virginie',displayName:'Virginie',email,phone:'+33660279848'}});
+   const oldBuyer=await db.client.create({data:{firstName:'Oleh',displayName:'Oleh',phone:'+380932354616'}});
+   await db.keycrmClientLink.create({data:{connectionKey,keycrmBuyerId:900000000+Number(BigInt(runPrefix)%1000000000n),clientId:linked.id}});
+   const clientsBefore=await db.client.count(),p=payload('split-contact',{email});p.customer.fullName='Oleh';p.customer.phone='0932354616';
+   const responses=await Promise.all([request(p),request(p)]);assert.ok(responses.every(response=>response.status===200));assert.equal(new Set(responses.map(response=>response.body.orderId)).size,1);
+   const order=await canonical(p.order.externalId);assert.notEqual(order.clientId,linked.id);assert.notEqual(order.clientId,oldBuyer.id);assert.equal(await db.client.count(),clientsBefore+1);await taxEvidence(order);
+   assert.equal((await db.client.findUniqueOrThrow({where:{id:linked.id}})).phone,'+33660279848');assert.equal((await db.client.findUniqueOrThrow({where:{id:oldBuyer.id}})).email,null);
+   const next=payload('split-contact-second',{email});next.customer.fullName='Oleh';next.customer.phone='0932354616';const second=await request(next);assert.equal(second.status,200);assert.equal(second.body.clientId,order.clientId);
   });
   for(const kind of ['payment','source','tax-audit'])await t.test(`actual PostgreSQL ${kind} INSERT failure rolls back client/order/payment/tax/activity atomically`,async()=>{
    const before=await counts(),table=await installFailure(kind);

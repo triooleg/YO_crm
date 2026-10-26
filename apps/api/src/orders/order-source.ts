@@ -1,4 +1,4 @@
-import {BadRequestException} from '@nestjs/common';
+import {BadRequestException,ConflictException,NotFoundException} from '@nestjs/common';
 import type {Prisma} from '@prisma/client';
 
 export const ORDER_SOURCES=['WEBSITE','MANUAL','INSTAGRAM','FACEBOOK','CHAT','WHATSAPP','VIBER','EMAIL','OTHER','UNKNOWN'] as const;
@@ -12,6 +12,9 @@ const object=(value:unknown):Record<string,unknown>=>value&&typeof value==='obje
 
 /** Order provenance only. Never inspect client channels, payment methods or fulfilment type. */
 export function classifyOrderSource(order:OriginRecord):OrderSource {
+ const override=order.activities?.find(event=>event.type==='ORDER_SOURCE_OVERRIDDEN');
+ const overridden=object(override?.metadata).source;
+ if(typeof overridden==='string'&&ORDER_SOURCES.includes(overridden as OrderSource))return overridden as OrderSource;
  if(order.sourceSystem==='YOLEOTARD_WEBSITE'&&order.sourceAccount&&order.externalId&&order.sourceLinkMode==='IMPORTED'&&object(order.externalData).contractVersion===1)return 'WEBSITE';
  if(order.sourceSystem==='KEYCRM'&&order.externalId&&order.sourceAccount){
   if(order.activities?.some(event=>event.type==='ORDER_CREATED')||order.sourceLinkMode==='MATCHED_EXISTING'||(order.activities?.length??0)>100)return 'UNKNOWN';
@@ -44,7 +47,32 @@ export function normalizeOrderSourceFilter(value?:string):OrderSourceFilter {
 }
 export function matchesOrderSource(source:OrderSource,filter:OrderSourceFilter){return !filter||(filter==='NON_WEBSITE'?source!=='WEBSITE':source===filter);}
 
-export const orderOriginSelect={id:true,sourceSystem:true,sourceAccount:true,sourceLinkMode:true,externalId:true,externalData:true,activities:{where:{type:{in:['KEYCRM_ORDER_IMPORTED','KEYCRM_ORDER_SYNCED','ORDER_CREATED']}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:101,select:{type:true,metadata:true}}} satisfies Prisma.OrderSelect;
+type SourceOverrideCommand={source:OrderSource;expectedSource:OrderSource;operationKey?:string};
+type SourceOverrideTx={
+ $executeRawUnsafe:(sql:string,key:string)=>Promise<unknown>;
+ order:{findFirst:(args:any)=>Promise<({id:string;clientId:string;number:string;archivedAt:Date|null}&OriginRecord)|null>};
+ activity:{create:(args:any)=>Promise<unknown>};
+ auditLog:{findFirst?:(args:any)=>Promise<{before:unknown;after:unknown}|null>;create:(args:{data:any})=>Promise<unknown>};
+};
+
+export async function persistOrderSourceOverride(tx:SourceOverrideTx,orderId:string,command:SourceOverrideCommand,actorId:string,classify:(order:OriginRecord)=>OrderSource=classifyOrderSource){
+ const requestId=command.operationKey?`order-source:${command.operationKey}`:undefined;
+ const replayResult=(replay:{before:unknown;after:unknown})=>{const before=object(replay.before),after=object(replay.after);if(before.orderSource!==command.expectedSource||after.orderSource!==command.source)throw new ConflictException('Ключ операции уже использован для другого изменения источника');return{orderSource:command.source};};
+ if(requestId){const replay=await tx.auditLog.findFirst?.({where:{requestId,entityType:'Order',entityId:orderId}});if(replay)return replayResult(replay);}
+ await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',orderId);
+ if(requestId){const replay=await tx.auditLog.findFirst?.({where:{requestId,entityType:'Order',entityId:orderId}});if(replay)return replayResult(replay);}
+ const order=await tx.order.findFirst({where:{id:orderId,archivedAt:null},select:{id:true,clientId:true,number:true,archivedAt:true,sourceSystem:true,sourceAccount:true,sourceLinkMode:true,externalId:true,externalData:true,activities:{where:{type:{in:['ORDER_SOURCE_OVERRIDDEN','KEYCRM_ORDER_IMPORTED','KEYCRM_ORDER_SYNCED','ORDER_CREATED']}},orderBy:[{type:'desc'},{createdAt:'desc'},{id:'desc'}],take:101,select:{type:true,metadata:true}}}});
+ if(!order)throw new NotFoundException('Заказ не найден');
+ const current=classify(order);
+ if(current!==command.expectedSource)throw new ConflictException('Источник заказа уже изменён другим пользователем');
+ const after={orderSource:command.source};
+ if(current===command.source){await tx.auditLog.create({data:{actorId,requestId,action:'NOOP',entityType:'Order',entityId:orderId,before:{orderSource:current},after}});return after;}
+ await tx.activity.create({data:{orderId,clientId:order.clientId,actorId,type:'ORDER_SOURCE_OVERRIDDEN',summary:`Источник заказа изменён: ${current} → ${command.source}`,metadata:{source:command.source,previousSource:current}}});
+ await tx.auditLog.create({data:{actorId,requestId,action:'UPDATE',entityType:'Order',entityId:orderId,before:{orderSource:current},after}});
+ return after;
+}
+
+export const orderOriginSelect={id:true,sourceSystem:true,sourceAccount:true,sourceLinkMode:true,externalId:true,externalData:true,activities:{where:{type:{in:['ORDER_SOURCE_OVERRIDDEN','KEYCRM_ORDER_IMPORTED','KEYCRM_ORDER_SYNCED','ORDER_CREATED']}},orderBy:[{type:'desc'},{createdAt:'desc'},{id:'desc'}],take:101,select:{type:true,metadata:true}}} satisfies Prisma.OrderSelect;
 
 /** Narrow server-only projection. Provider payloads/names never enter public read DTOs. */
 export async function loadOrderSourceMap(db:Pick<Prisma.TransactionClient,'order'>,ids?:string[]) {

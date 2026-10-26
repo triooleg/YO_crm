@@ -10,7 +10,7 @@ export function loadTargetModule(path){
  const filename=resolve(fileURLToPath(new URL('../src/',import.meta.url)),path);
  if(modules.has(filename))return modules.get(filename).exports;
  const module={exports:{}};modules.set(filename,module);
- const source=ts.transpileModule(readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText;
+ const source=ts.transpileModule(readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,emitDecoratorMetadata:true,esModuleInterop:true}}).outputText;
  const localRequire=name=>{
   if(name.startsWith('.')){
    const target=resolve(dirname(filename),name+'.ts');

@@ -7,7 +7,7 @@ import { allocation, allow, assertTaxExpenseMutable, audit, cas, config, entry, 
 import { policyImpactPreview } from './tax-policy-preview';
 import type { TaxPolicyPreviewInput, TaxOrderEstimate, TaxOrderCompleteness } from '../finance/finance-fiscal.types';
 export type Command={operationKey:string;expectedRevision:number};
-export type CaptureOptions={createIfMissing?:boolean};
+export type CaptureOptions={createIfMissing?:boolean;receiptConfirmed?:boolean;evidence?:string;confirmedByRole?:string};
 type CashData={payments:{amountMinor:number;currency:string;receivedAt:Date}[];expenses:{id:string;amountMinor:number;currency:string;incurredAt:Date}[];links:{expenseId:string}[]};
 export type Totals={accruedMinor:number;paidMinor:number;allocatedMinor:number;debtMinor:number;creditMinor:number};
 const monetary=['FINALIZE','REVERSE','RESTORE','ADJUST'];
@@ -92,14 +92,16 @@ export class TaxesService {
   let targets=roots;
   if(!targets.length){const period=await this.period(tx,incomeDate.slice(0,7));const policy=period.snapshot.policy as TaxPolicy;targets=[];
    for(const comp of ['UNIFIED','MILITARY'] as Component[]){if((comp==='UNIFIED'&&policy.unifiedMode==='FIXED')||(comp==='MILITARY'&&policy.group===2))continue;
-    const sourceKey=`payment:${p.id}:${comp}`;targets.push(await entry(tx,{periodId:period.id,policyId:policy.id,paymentId:p.id,orderId:p.orderId,component:comp,kind:'ROOT',sourceKey,operationKey:'root:'+sourceKey,snapshot:{incomeDate,originalAmountMinor:p.amountMinor,originalCurrency:p.currency,policy,receiptConfirmed:false}}, {sourceKey}));
+    const sourceKey=`payment:${p.id}:${comp}`;targets.push(await entry(tx,{periodId:period.id,policyId:policy.id,paymentId:p.id,orderId:p.orderId,component:comp,kind:'ROOT',sourceKey,operationKey:'root:'+sourceKey,snapshot:{incomeDate,originalAmountMinor:p.amountMinor,originalCurrency:p.currency,policy,receiptConfirmed:options.receiptConfirmed===true&&['OWNER','ADMIN','ACCOUNTANT'].includes(options.confirmedByRole??''),confirmedByRole:options.confirmedByRole??null,evidence:options.evidence??null}}, {sourceKey}));
    }
   }
   for(const root of targets){
    const previous=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='SOURCE' ORDER BY sequence DESC LIMIT 1`,root.id);
    const state={amountMinor:p.amountMinor,currency:p.currency,receivedAt:p.receivedAt.toISOString(),voidedAt:p.voidedAt?.toISOString()??null,orderId:p.orderId};
    if(previous?.snapshot.stateHash===hash(state))continue;
-   const source=await entry(tx,{...this.rootFields(root),kind:'SOURCE',operationKey:'source:'+randomUUID(),snapshot:{state,stateHash:hash(state),incomeDate,reason:captureReason,receiptConfirmed:false,attempt:0,nextRetryAt:null}},state);
+   const confirmedByRole=['OWNER','ADMIN','ACCOUNTANT'].includes(options.confirmedByRole??'')?options.confirmedByRole:null;
+   const receiptConfirmed=options.receiptConfirmed===true&&confirmedByRole!==null;
+   const source=await entry(tx,{...this.rootFields(root),kind:'SOURCE',operationKey:'source:'+randomUUID(),snapshot:{state,stateHash:hash(state),incomeDate,reason:captureReason,receiptConfirmed,confirmedByRole,evidence:options.evidence??null,attempt:0,nextRetryAt:null}},state);
    await audit(tx,actorId,'TAX_CAPTURE',source.id,{rootId:root.id,paymentId,reason:captureReason});
   }
  }
@@ -122,6 +124,9 @@ export class TaxesService {
  private async root(tx:Tx,id:string){const r=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE id=$1 AND kind='ROOT'`,id);if(!r)throw new NotFoundException('Начисление не найдено');return r;}
  private async source(tx:Tx,rootId:string){return one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='SOURCE' ORDER BY sequence DESC LIMIT 1`,rootId);}
  private async finalForSource(tx:Tx,id:string){return one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "snapshot"->>'sourceId'=$1 AND snapshot->>'lifecycle'='true' AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') ORDER BY sequence DESC LIMIT 1`,id);}
+ private async trustedReceiptSource(tx:Tx,source:TaxEntry){
+  return source.snapshot.receiptConfirmed===true&&['OWNER','ADMIN','ACCOUNTANT'].includes(source.snapshot.confirmedByRole);
+ }
  private async activeAllocations(tx:Tx,rootId?:string,linkId?:string){return rows<TaxAllocation>(tx,`SELECT a.* FROM "TaxExpenseAllocation" a WHERE a.kind='ALLOCATE' AND ($1::text IS NULL OR a."rootId"=$1) AND ($2::text IS NULL OR a."linkId"=$2) AND NOT EXISTS(SELECT 1 FROM "TaxExpenseAllocation" r WHERE r."reversesId"=a.id AND r.kind='REVERSE_ALLOCATION') ORDER BY a."expenseId",a.id`,rootId??null,linkId??null);}
  private async releaseAllocations(tx:Tx,rootId:string|undefined,linkId:string|undefined,actorId:string|undefined,why:string,operationKey:string){const allocs=await this.activeAllocations(tx,rootId,linkId);for(const a of allocs){await lockExpense(tx,a.expenseId);await allocation(tx,{...a,id:undefined,kind:'REVERSE_ALLOCATION',reversesId:a.id,operationKey:operationKey+':'+a.id,snapshot:{reason:why,actorId:actorId??null}}, {id:a.id,why,operationKey});}return allocs;}
  private async balance(tx:Tx,rootId:string){const r=await one(tx,`SELECT COALESCE(SUM("amountMinor"),0)::bigint AS total FROM "TaxEntry" WHERE "rootId"=$1 AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST')`,rootId);return Number(r?.total??0);}
@@ -192,8 +197,8 @@ export class TaxesService {
    return true;
   });
  }
- async reconcilePending(now=new Date(),limit=20){
-  const candidates=await rows<TaxEntry>(this.prisma,`SELECT s.* FROM "TaxEntry" s JOIN "TaxEntry" r ON r.id=s."rootId" JOIN "TaxPeriod" p ON p.id=r."periodId" WHERE s.kind='SOURCE' AND p.state='OPEN' AND s.snapshot->'state'->>'voidedAt' IS NULL AND NOT EXISTS(SELECT 1 FROM "TaxEntry" review WHERE review.kind='RESOLVE' AND review.snapshot->>'manualReviewFor'=s.id) AND COALESCE((SELECT (retry.snapshot->>'nextRetryAt')::timestamptz FROM "TaxEntry" retry WHERE retry.kind='RESOLVE' AND retry.snapshot ? 'retryFor' AND retry.snapshot->>'currency'=s.snapshot->'state'->>'currency' AND retry.snapshot->>'incomeDate'=s.snapshot->>'incomeDate' ORDER BY retry.sequence DESC LIMIT 1),'-infinity'::timestamptz)<=$2::timestamptz AND s.id=(SELECT z.id FROM "TaxEntry" z WHERE z."rootId"=s."rootId" AND z.kind='SOURCE' ORDER BY z.sequence DESC LIMIT 1) AND NOT EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."snapshot"->>'sourceId'=s.id AND e.snapshot->>'lifecycle'='true' AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST')) ORDER BY s.sequence LIMIT $1`,Math.max(1,Math.min(50,limit)),now);
+ async reconcilePending(now=new Date(),limit=20,paymentId?:string){
+  const candidates=await rows<TaxEntry>(this.prisma,`SELECT s.* FROM "TaxEntry" s JOIN "TaxEntry" r ON r.id=s."rootId" JOIN "TaxPeriod" p ON p.id=r."periodId" WHERE s.kind='SOURCE' AND p.state='OPEN' AND ($3::text IS NULL OR s."paymentId"=$3) AND s.snapshot->'state'->>'voidedAt' IS NULL AND NOT EXISTS(SELECT 1 FROM "TaxEntry" review WHERE review.kind='RESOLVE' AND review.snapshot->>'manualReviewFor'=s.id) AND COALESCE((SELECT (retry.snapshot->>'nextRetryAt')::timestamptz FROM "TaxEntry" retry WHERE retry.kind='RESOLVE' AND retry.snapshot ? 'retryFor' AND retry.snapshot->>'currency'=s.snapshot->'state'->>'currency' AND retry.snapshot->>'incomeDate'=s.snapshot->>'incomeDate' ORDER BY retry.sequence DESC LIMIT 1),'-infinity'::timestamptz)<=$2::timestamptz AND s.id=(SELECT z.id FROM "TaxEntry" z WHERE z."rootId"=s."rootId" AND z.kind='SOURCE' ORDER BY z.sequence DESC LIMIT 1) AND (NOT EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."snapshot"->>'sourceId'=s.id AND e.snapshot->>'lifecycle'='true' AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST')) OR (s.snapshot->>'reason'='CREATE' AND s.snapshot->>'receiptConfirmed'='true' AND s.snapshot->>'confirmedByRole' IN('OWNER','ADMIN','ACCOUNTANT') AND NOT EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."snapshot"->>'sourceId'=s.id AND e.snapshot->>'lifecycle'='true' AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') AND e.snapshot->>'receiptConfirmed'='true'))) ORDER BY s.sequence LIMIT $1`,Math.max(1,Math.min(50,limit)),now,paymentId??null);
   const rates=new Map<string,HistoricalRate|Error>();let finalized=0,retried=0,deferred=0;
   for(const source of candidates){
    // A void is a reconciliation request, never automatic proof of legal refund.
@@ -202,16 +207,18 @@ export class TaxesService {
    if(retry?.snapshot.nextRetryAt&&new Date(retry.snapshot.nextRetryAt)>now)continue;
    const previous=await one<TaxEntry>(this.prisma,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND snapshot->>'lifecycle'='true' AND snapshot ? 'originalPayment' ORDER BY sequence DESC LIMIT 1`,source.rootId);
    const raw=previous?.snapshot.originalPayment,state=source.snapshot.state;
+   const trustedManual=await this.trustedReceiptSource(this.prisma,source);
    const reuse=raw&&raw.amountMinor===state.amountMinor&&raw.currency===state.currency&&raw.receivedAt===state.receivedAt&&raw.orderId===state.orderId;
    const currency=state.currency,date=reuse?previous!.snapshot.incomeDate:source.snapshot.incomeDate,rateKey=currency+':'+date;
    let rate:HistoricalRate|Error|undefined=reuse?previous!.snapshot.rate:rates.get(rateKey);if(!rate){try{rate=await this.nbu.rate(currency,date);}catch(e){rate=e instanceof Error?e:new Error('НБУ недоступен');}rates.set(rateKey,rate);}
    if(rate instanceof Error){await this.prisma.$transaction(async tx=>{await lockConfig(tx);if((await this.source(tx,source.rootId!))?.id!==source.id||await this.finalForSource(tx,source.id))return;const currentRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND snapshot->>'retryFor'=$2 ORDER BY sequence DESC LIMIT 1`,source.rootId,source.id);if(currentRetry?.snapshot.nextRetryAt&&new Date(currentRetry.snapshot.nextRetryAt)>now)return;const dateRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot ? 'retryFor' AND snapshot->>'currency'=$1 AND snapshot->>'incomeDate'=$2 ORDER BY sequence DESC LIMIT 1`,currency,date);const shared=dateRetry?.snapshot.nextRetryAt&&new Date(dateRetry.snapshot.nextRetryAt)>now;const attempt=shared?Number(dateRetry!.snapshot.attempt):Number(dateRetry?.snapshot.attempt??0)+1,nextRetryAt=shared?dateRetry!.snapshot.nextRetryAt:new Date(now.getTime()+Math.min(24*60*60*1000,60000*2**Math.min(attempt-1,10))).toISOString();await entry(tx,{...this.rootFields(await this.root(tx,source.rootId!)),kind:'RESOLVE',operationKey:`retry:${source.id}:${attempt}`,snapshot:{retryFor:source.id,attempt,nextRetryAt,incomeDate:date,currency,error:'NBU_UNAVAILABLE'}},{sourceId:source.id,attempt,nextRetryAt});await audit(tx,undefined,'TAX_RETRY',source.id,{attempt,nextRetryAt,incomeDate:date});});retried++;continue;}
    const evidence=rate;
    try {
-    const applied=await this.prisma.$transaction(async tx=>{await lockConfig(tx);if((await this.source(tx,source.rootId!))?.id!==source.id||await this.finalForSource(tx,source.id)||await one(tx,`SELECT id FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot->>'manualReviewFor'=$1`,source.id))return false;
+    const applied=await this.prisma.$transaction(async tx=>{await lockConfig(tx);const currentFinal=await this.finalForSource(tx,source.id);if((await this.source(tx,source.rootId!))?.id!==source.id||(currentFinal&&!(trustedManual&&currentFinal.snapshot.receiptConfirmed!==true))||await one(tx,`SELECT id FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot->>'manualReviewFor'=$1`,source.id))return false;
      const root=await this.root(tx,source.rootId!);
-     if(reuse)await this.finalize(tx,root,source,evidence,{grossMinor:previous!.snapshot.grossMinor,incomeDate:previous!.snapshot.incomeDate,receiptConfirmed:previous!.snapshot.receiptConfirmed,evidence:previous!.snapshot.evidence},'reconcile:'+source.id);
-     else await this.finalize(tx,root,source,evidence,{receiptConfirmed:false},'reconcile:'+source.id);
+     const operationKey=currentFinal&&trustedManual?'reconcile-confirmed:'+source.id:'reconcile:'+source.id;
+     if(reuse)await this.finalize(tx,root,source,evidence,{grossMinor:previous!.snapshot.grossMinor,incomeDate:previous!.snapshot.incomeDate,receiptConfirmed:trustedManual||previous!.snapshot.receiptConfirmed===true,evidence:trustedManual?(source.snapshot.evidence??'MANUAL_CRM_ENTRY'):previous!.snapshot.evidence},operationKey);
+     else await this.finalize(tx,root,source,evidence,{receiptConfirmed:trustedManual,evidence:trustedManual?(source.snapshot.evidence??'MANUAL_CRM_ENTRY'):undefined},operationKey);
      return true;
     });
     if(applied)finalized++;
@@ -224,10 +231,11 @@ export class TaxesService {
   }
   return {examined:candidates.length,finalized,retried,deferred};
  }
+ async reconcilePayment(paymentId:string,now=new Date()){return this.reconcilePending(now,2,paymentId);}
  async report(query:{from?:string;to?:string},actor:Actor){allow(actor);const from=monthKey(query.from??kyivDate(new Date()).slice(0,7)),to=monthKey(query.to??from);try{monthsBetween(from,to);}catch{throw new BadRequestException('Неверный интервал отчёта');}const frozen=await this.prisma.$transaction(async tx=>({report:await this.reportIn(tx,from,to),cash:await this.cashData(tx,from,to)}),{isolationLevel:'RepeatableRead',timeout:30000});return {...frozen.report,results:await this.financialResults(from,to,frozen.report.totals.accruedMinor,frozen.report.incomplete,frozen.cash)};}
  private async cashData(tx:Tx,from:string,to:string):Promise<CashData>{
   const end=new Date(to+'-01T00:00:00Z');end.setUTCMonth(end.getUTCMonth()+1);const range={gte:new Date(Date.parse(from+'-01T00:00:00Z')-86400000),lt:end};
-  const payments=await tx.payment.findMany({where:{voidedAt:null,receivedAt:range},select:{amountMinor:true,currency:true,receivedAt:true}}),expenses=await tx.expense.findMany({where:{archivedAt:null,incurredAt:range},select:{id:true,amountMinor:true,currency:true,incurredAt:true}}),links=await rows<{expenseId:string}>(tx,`SELECT "expenseId" FROM "TaxExpenseAllocation" WHERE kind='PAYMENT_LINK'`);return {payments,expenses,links};
+  const payments=await tx.payment.findMany({where:{voidedAt:null,receivedAt:range,order:{archivedAt:null}},select:{amountMinor:true,currency:true,receivedAt:true}}),expenses=await tx.expense.findMany({where:{archivedAt:null,incurredAt:range,OR:[{orderId:null},{order:{archivedAt:null}}]},select:{id:true,amountMinor:true,currency:true,incurredAt:true}}),links=await rows<{expenseId:string}>(tx,`SELECT "expenseId" FROM "TaxExpenseAllocation" WHERE kind='PAYMENT_LINK'`);return {payments,expenses,links};
  }
  private async financialResults(from:string,to:string,accrued:number,taxIncomplete:boolean,data:CashData){
   const {payments,expenses,links}=data,linked=new Set(links.map(l=>l.expenseId)),cache=new Map<string,HistoricalRate|Error>();
@@ -239,11 +247,11 @@ export class TaxesService {
  }
  private async reportIn(tx:Tx,from:string,to:string){
   const periods=await rows<TaxPeriod>(tx,`SELECT * FROM "TaxPeriod" WHERE month>=$1 AND month<=$2 ORDER BY month`,from,to),ids=periods.map(p=>p.id);
-  const entries=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e JOIN "TaxPeriod" p ON p.id=e."periodId" WHERE p.month>=$1 AND p.month<=$2 ORDER BY e.sequence`,from,to);
-  const settlements=await rows<TaxAllocation>(tx,`SELECT * FROM "TaxExpenseAllocation" ORDER BY sequence`),expenses=await tx.expense.findMany({where:{id:{in:settlements.filter(x=>x.kind==='PAYMENT_LINK').map(x=>x.expenseId)}}}),expenseMap=new Map(expenses.map(e=>[e.id,e]));
+  const entries=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e JOIN "TaxPeriod" p ON p.id=e."periodId" LEFT JOIN "TaxEntry" r ON r.id=COALESCE(e."rootId",e.id) LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE p.month>=$1 AND p.month<=$2 AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,from,to);
+  const settlements=await rows<TaxAllocation>(tx,`SELECT * FROM "TaxExpenseAllocation" ORDER BY sequence`),expenses=await tx.expense.findMany({where:{id:{in:settlements.filter(x=>x.kind==='PAYMENT_LINK').map(x=>x.expenseId)},archivedAt:null,OR:[{orderId:null},{order:{archivedAt:null}}]}}),expenseMap=new Map(expenses.map(e=>[e.id,e]));
   const components=Object.fromEntries(COMPONENTS.map(c=>[c,{accruedMinor:0,paidMinor:0,allocatedMinor:0,debtMinor:0,creditMinor:0}])) as Record<Component,Totals>;
   const rootIds=new Set(entries.map(e=>e.rootId??e.id));const related=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=ANY($1::text[]) AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') ORDER BY sequence`,[...rootIds]);const reversed=new Set(settlements.filter(a=>a.kind==='REVERSE_ALLOCATION').map(a=>a.reversesId));
-  const active=settlements.filter(a=>a.kind==='ALLOCATE'&&!reversed.has(a.id));
+  const active=settlements.filter(a=>a.kind==='ALLOCATE'&&!reversed.has(a.id)&&Boolean(a.rootId&&rootIds.has(a.rootId)));
   for(const comp of COMPONENTS){const t=components[comp];t.accruedMinor=sum(entries.filter(e=>e.component===comp&&monetary.includes(e.kind)).map(e=>e.amountMinor??0));t.allocatedMinor=0;t.debtMinor=0;
    for(const rootId of rootIds){const events=related.filter(e=>e.rootId===rootId&&e.component===comp),lots:{periodId:string;amount:number}[]=[];
     for(const event of events){let amount=event.amountMinor??0;if(amount>=0)lots.push({periodId:event.periodId,amount});else{let reduction=-amount;for(let i=lots.length-1;i>=0&&reduction;i--){const l=lots[i]!,n=Math.min(l.amount,reduction);l.amount-=n;reduction-=n;}}}
@@ -262,7 +270,7 @@ export class TaxesService {
    const source=await this.source(tx,root.id);if(!source){pendingCount++;pendingStatuses.push({rootId:root.id,status:'SOURCE_MISSING'});continue;}const finalized=await this.finalForSource(tx,source.id);if(!finalized||!finalized.snapshot.receiptConfirmed){pendingCount++;const retry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND (snapshot->>'retryFor'=$2 OR snapshot->>'manualReviewFor'=$2) ORDER BY sequence DESC LIMIT 1`,root.id,source.id);pendingStatuses.push({rootId:root.id,paymentId:root.paymentId,sourceId:source.id,status:finalized?'RECEIPT_CONFIRMATION_REQUIRED':retry?.snapshot.manualReviewFor?(retry.snapshot.reviewReason==='CLOSED_PERIOD'?'CLOSED_PERIOD_RECONCILIATION_REQUIRED':'MANUAL_RECONCILIATION_REQUIRED'):source.snapshot.state?.voidedAt?'LEGAL_REFUND_RECONCILIATION':retry?'NBU_RETRY_PENDING':'VALUATION_PENDING',incomeDate:retry?.snapshot.incomeDate??source.snapshot.incomeDate,attempt:retry?.snapshot.attempt??0,nextRetryAt:retry?.snapshot.nextRetryAt??null,reviewReason:retry?.snapshot.reviewReason??null,closedPeriods:retry?.snapshot.closedPeriods??[]});}
   }
   const startDate=from+'-01',endDate=new Date(to+'-01T00:00:00Z');endDate.setUTCMonth(endDate.getUTCMonth()+1);
-  const uncaptured=await tx.payment.findMany({where:{voidedAt:null,receivedAt:{gte:new Date(Date.parse(startDate+'T00:00:00Z')-86400000),lt:endDate}},select:{id:true,receivedAt:true}});
+  const uncaptured=await tx.payment.findMany({where:{voidedAt:null,order:{archivedAt:null},receivedAt:{gte:new Date(Date.parse(startDate+'T00:00:00Z')-86400000),lt:endDate}},select:{id:true,receivedAt:true}});
   const policies=await rows<TaxPolicy>(tx,`SELECT * FROM "TaxPolicy" WHERE state='PUBLISHED' ORDER BY "effectiveFrom"`);let unappliedBackfillCount=0;
   for(const payment of uncaptured){const date=kyivDate(payment.receivedAt);if(date<ACCOUNTING_START||date.slice(0,7)<from||date.slice(0,7)>to)continue;const policy=policies.filter(p=>p.effectiveFrom<=date).at(-1);if(!policy)continue;const expected=policy.group===3?['UNIFIED','MILITARY']:[];
    if(expected.some(c=>!entries.some(e=>e.paymentId===payment.id&&e.component===c&&e.kind==='ROOT'))){unappliedBackfillCount++;pendingStatuses.push({paymentId:payment.id,status:'APPROVED_BACKFILL_REQUIRED',incomeDate:date});}
@@ -275,10 +283,10 @@ export class TaxesService {
    const valued=[...latest.values()].filter(e=>!e.snapshot.originalPayment.voidedAt&&!e.snapshot.excludedBeforeStart);if(!valued.length)continue;
    const policiesUsed=new Set(valued.map(e=>e.snapshot.valuationPolicy?.id??e.policyId));for(const policyId of policiesUsed){const es=valued.filter(e=>(e.snapshot.valuationPolicy?.id??e.policyId)===policyId),policy=es[0]!.snapshot.valuationPolicy??period.snapshot.policy,baseMinor=sum(es.map(e=>e.baseMinor??0)),receiptRoundedMinor=sum(es.map(e=>e.snapshot.targetMinor??0)),aggregateRoundedMinor=percentMinor(baseMinor,comp==='UNIFIED'?policy.unifiedRateBps:policy.militaryRateBps);roundingReconciliation.push({month:period.month,component:comp,policyId,baseMinor,receiptRoundedMinor,aggregateRoundedMinor,differenceMinor:receiptRoundedMinor-aggregateRoundedMinor});}
   }
-  const subsequentCorrections=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "originalPeriodId"=ANY($1::text[]) AND kind IN('ADJUST','REVERSE','RESTORE') ORDER BY sequence`,ids);
+  const subsequentCorrections=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e LEFT JOIN "TaxEntry" r ON r.id=e."rootId" LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE e."originalPeriodId"=ANY($1::text[]) AND e.kind IN('ADJUST','REVERSE','RESTORE') AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,ids);
   const totals=Object.fromEntries(['accruedMinor','paidMinor','allocatedMinor','debtMinor','creditMinor'].map(k=>[k,sum(COMPONENTS.map(c=>components[c][k as keyof Totals]))])) as Totals;
-  const visibleLinks=new Set(settlements.filter(a=>a.kind==='PAYMENT_LINK'&&((kyivDate(expenseMap.get(a.expenseId)?.incurredAt??a.incurredAt).slice(0,7)>=from&&kyivDate(expenseMap.get(a.expenseId)?.incurredAt??a.incurredAt).slice(0,7)<=to)||active.some(x=>x.linkId===a.id&&rootIds.has(x.rootId!)))).map(a=>a.id));
-  return {currency:'UAH' as const,accountingStartDate:ACCOUNTING_START,from,to,incomplete:pendingCount>0,pendingCount,pendingStatuses,unappliedBackfillCount,roundingReconciliation,totals,components,periods,entries,settlements:settlements.filter(a=>visibleLinks.has(a.id)||visibleLinks.has(a.linkId!)),settlementOptions:settlements.filter(a=>a.kind==='PAYMENT_LINK'&&!expenseMap.get(a.expenseId)?.archivedAt),subsequentCorrections,coverageIncomplete:from<ACCOUNTING_START.slice(0,7),declarationReady:false};
+  const visibleLinks=new Set(settlements.filter(a=>a.kind==='PAYMENT_LINK'&&expenseMap.has(a.expenseId)&&((kyivDate(expenseMap.get(a.expenseId)!.incurredAt).slice(0,7)>=from&&kyivDate(expenseMap.get(a.expenseId)!.incurredAt).slice(0,7)<=to)||active.some(x=>x.linkId===a.id))).map(a=>a.id));
+  return {currency:'UAH' as const,accountingStartDate:ACCOUNTING_START,from,to,incomplete:pendingCount>0,pendingCount,pendingStatuses,unappliedBackfillCount,roundingReconciliation,totals,components,periods,entries,settlements:settlements.filter(a=>visibleLinks.has(a.id)||visibleLinks.has(a.linkId!)),settlementOptions:settlements.filter(a=>a.kind==='PAYMENT_LINK'&&expenseMap.has(a.expenseId)),subsequentCorrections,coverageIncomplete:from<ACCOUNTING_START.slice(0,7),declarationReady:false};
  }
  /** Internal read seam for the finance snapshot. Never creates a period or runs catch-up. */
  async readReportIn(tx:Tx,month:string){
@@ -317,7 +325,7 @@ export class TaxesService {
  },{isolationLevel:'RepeatableRead',timeout:30000});}
  private async previewIn(tx:Tx,from:string,to:string){
   dateOnly(from);dateOnly(to);if(from<ACCOUNTING_START||to<from)fail('Неверный период исторического заполнения');
-  const all=await tx.payment.findMany({where:{voidedAt:null,receivedAt:{gte:new Date(Date.parse(from+'T00:00:00Z')-86400000),lt:new Date(Date.parse(to+'T00:00:00Z')+86400000)}},orderBy:{id:'asc'}});
+  const all=await tx.payment.findMany({where:{voidedAt:null,order:{archivedAt:null},receivedAt:{gte:new Date(Date.parse(from+'T00:00:00Z')-86400000),lt:new Date(Date.parse(to+'T00:00:00Z')+86400000)}},orderBy:{id:'asc'}});
   const payments=all.filter(p=>{const date=kyivDate(p.receivedAt);return date>=from&&date<=to;});
   const roots=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='ROOT' AND "paymentId"=ANY($1::text[])`,payments.map(p=>p.id));
   const policies=await rows<TaxPolicy>(tx,`SELECT * FROM "TaxPolicy" WHERE state='PUBLISHED' ORDER BY "effectiveFrom"`);const missing=payments.filter(p=>policies.filter(policy=>policy.effectiveFrom<=kyivDate(p.receivedAt)).at(-1)?.group===3&&!roots.some(r=>r.paymentId===p.id));return {payments:missing,allPayments:payments,policies,token:hash({from,to,revision:(await config(tx)).revision,payments:payments.map(p=>({id:p.id,amountMinor:p.amountMinor,currency:p.currency,receivedAt:p.receivedAt,voidedAt:p.voidedAt})),rootIds:roots.map(r=>r.id).sort()})};

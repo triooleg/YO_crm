@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { websiteCheckoutMarker, WEBSITE_CHECKOUT_SYSTEM } from '../keycrm/website-checkout-correlation';
 import type { Prisma, Client } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
@@ -8,6 +7,7 @@ import { parcelHasDispatchEvidence, shippingEvidence } from '../orders/order-shi
 import { appliedPaymentMinor } from '../finance/exchange-rates';
 import { parseWebsiteOrder, type WebsiteOrder } from './website-orders-contract';
 import { WebsiteOrderError } from './website-orders-errors';
+import { nextWebsiteOrderNumber } from './website-order-number';
 
 export const WEBSITE_SYSTEM=WEBSITE_CHECKOUT_SYSTEM;
 type Tx=Prisma.TransactionClient;
@@ -15,13 +15,16 @@ const json=(value:unknown)=>JSON.parse(JSON.stringify(value)) as Prisma.InputJso
 const fingerprint=(value:unknown):string=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
 function conflict(code='WEBSITE_ORDER_CONFLICT'):never{throw new WebsiteOrderError(code,409);}
 const scopes=()=>String(process.env.WEBSITE_ORDERS_SOURCE_ACCOUNTS??'').split(',').map(v=>v.trim().toLowerCase()).filter(Boolean);
+const normalizedTitle=(name:string)=>name.replace(/\\?u201c/g,'“').replace(/\\?u201d/g,'”');
 
 @Injectable()
 export class WebsiteOrdersService {
  constructor(private readonly prisma:PrismaService,private readonly taxes:TaxesService,private readonly allowedAccounts=scopes){}
- async ingest(input:unknown){
+ async ingest(input:unknown,authorizedSourceAccount?:string){
   const p=parseWebsiteOrder(input);
-  const allowed=this.allowedAccounts();if(!allowed.length)throw new WebsiteOrderError('WEBSITE_DISABLED',503);
+  // Only the authenticated controller supplies this in-process scope. Legacy callers
+  // retain the original environment allowlist; payload fields cannot grant access.
+  const allowed=authorizedSourceAccount===undefined?this.allowedAccounts():[authorizedSourceAccount];if(!allowed.length)throw new WebsiteOrderError('WEBSITE_DISABLED',503);
   if(!allowed.includes(p.sourceAccount))throw new WebsiteOrderError('WEBSITE_SOURCE_NOT_ALLOWED',403);
   return this.prisma.$transaction(async tx=>{
    // Same lock as canonical client merge and KeyCRM import: no duplicate contacts across writers.
@@ -38,16 +41,17 @@ export class WebsiteOrdersService {
     if(existing.currency!==p.order.currency||previous.order.orderedAt!==p.order.orderedAt||existing.type!=='READY_MODEL')conflict();
     if(existing.externalUpdatedAt&&(!p.order.updatedAt||new Date(p.order.updatedAt)<existing.externalUpdatedAt))conflict();
     if(existing.priceMinor!==previous.totals.chargedMinor||existing.deliveryMinor!==previous.totals.deliveryMinor||existing.discountMinor!==previous.totals.discountMinor||existing.depositRequiredMinor!==0)conflict();
+    if(existing.externalNumber&&p.order.externalNumber&&existing.externalNumber!==p.order.externalNumber)conflict();
    }
    const clientId=await this.resolveClient(tx,p,existing?.clientId);
    await this.rejectOtherProvider(tx,p);
    const client=await this.client(tx,p,clientId);
    const image=p.items.find(i=>i.imageUrl)?.imageUrl;
-   const accountHash=createHash('sha256').update(p.sourceAccount).digest('hex').slice(0,12);
    const manualDelivery=existing&&previous&&Object.entries(this.delivery(previous)).some(([k,v])=>((existing as Record<string,unknown>)[k]??null)!==(v??null));
    if(manualDelivery)warnings.push('LOCAL_DELIVERY_PRESERVED');
-   const common={priceMinor:p.totals.chargedMinor,depositRequiredMinor:0,deliveryMinor:p.totals.deliveryMinor,discountMinor:p.totals.discountMinor,externalUpdatedAt:p.order.updatedAt?new Date(p.order.updatedAt):null,externalNumber:p.order.externalNumber,externalData:json(p.raw),externalImageUrl:image,...(manualDelivery?{}:this.delivery(p)),...(!existing||(existing.buyerComment??null)===(previous?.order.notes??null)?{buyerComment:p.order.notes}:{} )};
-   let order=existing?await tx.order.update({where:{id:existing.id},data:common}):await tx.order.create({data:{...identity,...common,number:`WEB-${accountHash}-${p.order.externalId}`,clientId:client.id,type:'READY_MODEL',sourceLinkMode:'IMPORTED',taxMinor:0,currency:p.order.currency,createdAt:new Date(p.order.orderedAt)}});
+   const common={priceMinor:p.totals.chargedMinor,depositRequiredMinor:0,deliveryMinor:p.totals.deliveryMinor,discountMinor:p.totals.discountMinor,externalUpdatedAt:p.order.updatedAt?new Date(p.order.updatedAt):null,externalNumber:p.order.externalNumber??existing?.externalNumber,externalData:json(p.raw),externalImageUrl:image,...(manualDelivery?{}:this.delivery(p)),...(!existing||(existing.buyerComment??null)===(previous?.order.notes??null)?{buyerComment:p.order.notes}:{} )};
+   const websiteNumber=existing?.number??await nextWebsiteOrderNumber(tx);
+   let order=existing?await tx.order.update({where:{id:existing.id},data:common}):await tx.order.create({data:{...identity,...common,number:websiteNumber,clientId:client.id,type:'READY_MODEL',sourceLinkMode:'IMPORTED',taxMinor:0,currency:p.order.currency,createdAt:new Date(p.order.orderedAt),websiteNoticeAt:new Date(),websiteReviewedAt:null}});
    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',order.id);
    await this.items(tx,order.id,p,previous,warnings);
    const paymentStatus=await this.payment(tx,order.id,p,order.clientId);
@@ -72,8 +76,8 @@ export class WebsiteOrdersService {
    const identity={sourceSystem:WEBSITE_SYSTEM,sourceAccount:p.sourceAccount,externalId:JSON.stringify([p.order.externalId,item.externalId])};
    const before=await tx.orderItem.findUnique({where:{sourceSystem_sourceAccount_externalId:identity}});
    if(before&&(before.orderId!==orderId))conflict('WEBSITE_ITEM_CONFLICT');
-   const data=this.itemData(p,item),old=previous?.items.find(i=>i.externalId===item.externalId);
-   if(before&&old){const oldData=this.itemData(previous!,old);const manual=Object.entries(oldData).some(([k,v])=>fingerprint((before as Record<string,unknown>)[k]??null)!==fingerprint(v??null));
+   const data=this.itemData(p,item),old=previous?.items.find(i=>i.externalId===item.externalId);data.name=normalizedTitle(data.name);
+   if(before&&old){const oldData=this.itemData(previous!,old);const manual=Object.entries(oldData).some(([k,v])=>k==='name'?(before.name!==v&&before.name!==normalizedTitle(String(v))):fingerprint((before as Record<string,unknown>)[k]??null)!==fingerprint(v??null));
     if(manual){if(before.quantity!==item.quantity||before.priceMinor!==item.unitPriceMinor)conflict('WEBSITE_ITEM_CONFLICT');warnings.push('LOCAL_ITEM_PRESERVED');continue;}}
    if(before&&item.quantity<before.quantity)await this.shrink(tx,before.id,item.quantity);
    const saved=before?await tx.orderItem.update({where:{id:before.id},data}):await tx.orderItem.create({data:{...data,...identity,orderId}});
@@ -112,12 +116,22 @@ export class WebsiteOrdersService {
  }
  private async resolveClient(tx:Tx,p:WebsiteOrder,pinnedId?:string){
   const email=p.customer.email??null,phone=p.customer.phone?.replace(/\D/g,'')??null;
-  const candidates=await tx.$queryRawUnsafe<{id:string}[]>('SELECT id FROM "Client" WHERE ($1::text IS NOT NULL AND lower(trim(coalesce(email,\'\')))=$1) OR ($2::text IS NOT NULL AND regexp_replace(coalesce(phone,\'\'),\'[^0-9]\',\'\',\'g\')=$2) ORDER BY id',email,phone);
-  const resolved=new Set<string>();
-  for(const candidate of candidates){let id=candidate.id;const seen=new Set<string>();for(;;){if(seen.has(id))conflict('WEBSITE_CLIENT_CONFLICT');seen.add(id);const redirect=await tx.clientMergeRedirect.findUnique({where:{sourceClientId:id}});if(!redirect)break;id=redirect.targetClientId;}resolved.add(id);}
-  if(pinnedId){if(resolved.size&&!resolved.has(pinnedId))conflict('WEBSITE_CLIENT_CONFLICT');resolved.add(pinnedId);}
-  if(resolved.size>1)conflict('WEBSITE_CLIENT_CONFLICT');
-  return [...resolved][0];
+  // Country is optional in the website contract. Permit the Ukrainian national
+  // and +380 forms when absent, but never override an explicit foreign country.
+  const country=(p.customer.country??'').trim().toLowerCase();
+  const ua=!country||['ua','ukraine','україна','украина'].includes(country);
+  const uaPhone=ua&&phone?.length===10&&phone.startsWith('0')?`38${phone}`:null;
+  const localPhone=ua&&phone?.length===12&&phone.startsWith('380')?phone.slice(2):null;
+  const phones=new Set([phone,uaPhone,localPhone].filter((value):value is string=>!!value));
+  const candidates=await tx.$queryRawUnsafe<{id:string;email:string|null;phone:string|null}[]>('SELECT id, email, phone FROM "Client" WHERE ($1::text IS NOT NULL AND lower(trim(coalesce(email,\'\')))=$1) OR ($2::text IS NOT NULL AND regexp_replace(coalesce(phone,\'\'),\'[^0-9]\',\'\',\'g\')=$2) OR ($3::text IS NOT NULL AND regexp_replace(coalesce(phone,\'\'),\'[^0-9]\',\'\',\'g\')=$3) OR ($4::text IS NOT NULL AND regexp_replace(coalesce(phone,\'\'),\'[^0-9]\',\'\',\'g\')=$4) ORDER BY id',email,phone,uaPhone,localPhone);
+  const matches=new Map<string,{email:boolean;phone:boolean}>();
+  for(const candidate of candidates){let id=candidate.id;const seen=new Set<string>();for(;;){if(seen.has(id))conflict('WEBSITE_CLIENT_CONFLICT');seen.add(id);const redirect=await tx.clientMergeRedirect.findUnique({where:{sourceClientId:id}});if(!redirect)break;id=redirect.targetClientId;}const found=matches.get(id)??{email:false,phone:false};found.email||=!!email&&candidate.email?.trim().toLowerCase()===email;found.phone||=!!candidate.phone&&phones.has(candidate.phone.replace(/\D/g,''));matches.set(id,found);}
+  const full=[...matches].filter(([,found])=>(!email||found.email)&&(!phone||found.phone)).map(([id])=>id);
+  if(full.length>1)conflict('WEBSITE_CLIENT_CONFLICT');
+  if(pinnedId){if(full.length!==1||full[0]!==pinnedId)conflict('WEBSITE_CLIENT_CONFLICT');return pinnedId;}
+  // Partial contacts identify no person. Import a fresh website snapshot so no
+  // customer's history is assigned to another person sharing email or phone.
+  return full[0];
  }
  private async client(tx:Tx,p:WebsiteOrder,clientId?:string){
   const fields={firstName:p.customer.fullName,displayName:p.customer.fullName,email:p.customer.email,phone:p.customer.phone,country:p.customer.country,city:p.customer.city,address:[p.customer.addressLine1,p.customer.addressLine2].filter(Boolean).join('\n')||undefined,postalCode:p.customer.postalCode};

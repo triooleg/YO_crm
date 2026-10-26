@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "task": {
+    "id": "website-api-keys",
+    "title": "CheckoutV2 website API key management",
+    "description": "Local auth and additive schema approved, then exact reviewed snapshot deployed under separate human authorization. No commits/push or real key/order creation. Installed acceptance and post-release documentation recorded in CHAT_HANDOFF.md.",
+    "base_ref": "cff6bd91a4033cd36524854068fdc93196c5295e",
+    "max_fix_cycles": 3,
+    "fix_cycles": 0,
+    "evidence": ".local/website-api-keys/quality-final-result.json",
+    "no_commit_reason": "Implementation and deployment were authorized; Git commit/push was not requested.",
+    "result": "INSTALLED_RELEASE_ACCEPTED",
+    "release_evidence": ".local/website-api-keys-deploy/installed-release-final.json"
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "title": "plan",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "ARCHITECT",
+      "kind": "analysis",
+      "depends_on": [],
+      "affected_paths": [
+        "docs/plans/website-api-keys.md"
+      ],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "backend",
+      "title": "backend",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/api/src/website-api-keys",
+        "packages/database/prisma",
+        "apps/api/tests/website-api-keys"
+      ],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "frontend",
+      "title": "frontend",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "plan"
+      ],
+      "affected_paths": [
+        "apps/web/components/website-api-keys-panel.tsx",
+        "apps/web/lib/i18n.ts"
+      ],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "integrate",
+      "title": "integrate",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "INTEGRATOR",
+      "kind": "integration",
+      "depends_on": [
+        "backend",
+        "frontend"
+      ],
+      "affected_paths": [
+        "apps/api/src/website-orders",
+        "apps/api/src/main.ts"
+      ],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "test",
+      "title": "test",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "TESTER",
+      "kind": "test",
+      "depends_on": [
+        "integrate"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "compatibility",
+      "title": "compatibility",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "regression",
+      "title": "regression",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "TESTER",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "security",
+      "title": "security",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "SECURITY",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "visual",
+      "title": "visual",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "UI-QA",
+      "kind": "review",
+      "depends_on": [
+        "test"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "release",
+      "description": "Implement and verify approved scoped website API key contract locally",
+      "agent": "RELEASE-GATEKEEPER",
+      "kind": "review",
+      "depends_on": [
+        "compatibility",
+        "regression",
+        "security",
+        "visual"
+      ],
+      "affected_paths": [],
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Preserve legacy auth and all economic contracts",
+        "No plaintext secret storage or repeat reveal",
+        "Human-approved local scope only"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "human_approval": true,
+      "approved_at": "2026-10-21",
+      "context_strategy": [
+        "targeted_search"
+      ]
+    }
+  ]
+}

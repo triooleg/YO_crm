@@ -1,0 +1,13 @@
+# CRM v0.9.1 — website client reuse release evidence
+
+The website paid-order path now selects an existing CRM client only when the email and a single active KeyCRM identity resolve without conflicting order history. Ambiguous identities fail closed; an already linked order keeps its client. The deployed source is the exact frozen 1148-file snapshot `e038de83e94015c5f5ad17a9fea7c60dd888a4f983a5df72341517702ffc0696`. No payment values or Prisma schema changed in this release.
+
+Local `pnpm quality:check`, typechecks and builds passed. API tests: 1656 passed, 7 skipped; web: 626 passed, 7 skipped; database: 26 passed. Focused native PostgreSQL HTTP tests: 13 passed. The repository's mandatory compatibility, regression, business/security, visual and independent release checks passed. Synthetic browser visual checks covered 1920, 1366 and 390 pixel widths.
+
+Before the switch, FULL backup `20261021T073743Z-pre-v091-64120e72` passed checksum and catalog checks and an actual isolated PostgreSQL 16 restore. The deployed API and web images are `sha256:a81552135c30f8445d1f26f3559864439fb498b89427a9c5c97261d8968ec777` and `sha256:17e62c88d5e55e94babef45624fc9dd290c9989757c32eb79970ede42c553fe5`. PostgreSQL and Redis remained unchanged. There was no migration, seed, historical recalculation, manual order/payment change or credential rotation.
+
+Technical installation checks at 08:03 UTC passed: source snapshot, images, health, 44 migrations and one existing website API key verified; public root, health and parent-measurement routes returned HTTP 200; direct ports 3500/4500 remained inaccessible. A real browser reload showed CRM v0.9.1 with zero warning/error console entries. Bounded startup/post-switch logs through 08:17 UTC had zero ERROR/WARN/FATAL/UNHANDLED markers.
+
+**Business acceptance blocked:** The WordPress purchases report showed #22725 as paid, but at 08:11 and 08:17 UTC no matching website order, KeyCRM order #705 or checkout source marker was in CRM. The independent post-switch reviewer therefore blocked end-to-end release acceptance. This deployment fixes the reported client selection conflict; it does not prove an earlier exhausted WordPress finalizer retried. Use a supported idempotent retry and then verify one CRM order, the intended client, and the existing payment exactly once. Do not manually duplicate the order or payment.
+
+Private local receipts and screenshots remain in `.local/v091-deploy-release-r3/` and `.local/ui-visual-v091-20261021/`. The old application root is retained on the server for source recovery; tax/history-aware services must be rolled forward rather than restoring an old database.

@@ -32,3 +32,11 @@ test('unknown delivery or unsafe items remain unallocated without a residual gue
   assert.equal(view.deliveryMinor, null); assert.equal(view.allocated, false);
   assert.equal(orderTaxPresentation({ priceMinor: 40000, currency: 'EUR' }, [{ priceMinor: Number.MAX_SAFE_INTEGER, quantity: 2 }]).productsMinor, null);
 });
+test('website card fee is already inside the charged EUR price', () => {
+  const view = orderTaxPresentation({priceMinor:28878,currency:'EUR',deliveryMinor:300,taxMinor:0,websiteCardFeeMinor:578,giftWrapMinor:0,discountMinor:0},[{priceMinor:28000,quantity:1}]);
+  assert.equal(view.allocated,true);assert.equal(view.totalMinor,28878);assert.equal(view.productsMinor+view.deliveryMinor+578,28878);
+});
+test('website checkout discount is already netted into item prices',()=>{
+ const view=orderTaxPresentation({sourceSystem:'YOLEOTARD_WEBSITE',priceMinor:21500,currency:'EUR',deliveryMinor:1000,taxMinor:0,websiteCardFeeMinor:500,giftWrapMinor:0,discountMinor:1000},[{priceMinor:10000,quantity:2}]);
+ assert.equal(view.allocated,true);assert.equal(view.totalMinor,21500);
+});

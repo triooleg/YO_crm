@@ -7,7 +7,8 @@ import { AppModule } from "./app.module";
 import { parentMeasurementsSecurityMiddleware,setParentMeasurementsHeaders } from './parent-measurements/parent-measurements-security';
 import { ParentMeasurementsValidationPipe } from './parent-measurements/parent-measurements-validation.pipe';
 
-import { websiteOrdersSecurity, websiteOrdersBodyError } from "./website-orders/website-orders-security";
+import { createWebsiteOrdersSecurity, websiteOrdersBodyError } from "./website-orders/website-orders-security";
+import { WebsiteApiKeysService } from './website-api-keys/website-api-keys.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -23,7 +24,17 @@ async function bootstrap() {
     response.status(status).json({message:status===413?'Слишком большой запрос формы':'Не удалось обработать запрос формы'});
   };
   app.use('/api/public/parent-measurements',parentBodyErrors);
-  app.use("/api/integrations/website/orders", websiteOrdersSecurity, json({limit:"256kb"}), websiteOrdersBodyError);
+  app.use("/api/integrations/website/orders", createWebsiteOrdersSecurity(app.get(WebsiteApiKeysService)), json({limit:"256kb"}), websiteOrdersBodyError);
+  app.use('/api/auth/website-api-keys',(_request:Request,response:import('express').Response,next:import('express').NextFunction)=>{
+    response.setHeader('Cache-Control','no-store');
+    response.setHeader('Referrer-Policy','no-referrer');
+    next();
+  },json({limit:'16kb'}));
+  const keyBodyErrors:ErrorRequestHandler=(error,_request,response,next)=>{
+    if(!error){next();return;}
+    response.status(error.status===413?413:400).json({message:'Не удалось обработать запрос управления ключами'});
+  };
+  app.use('/api/auth/website-api-keys',keyBodyErrors);
   app.use("/api/communications/attachments", json({ limit: "24mb" }));
   app.use(json({ limit: "8mb", verify: (request: Request & { rawBody?: Buffer }, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
   app.use(urlencoded({ extended: true, limit: "8mb" }));

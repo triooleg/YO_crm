@@ -7,6 +7,7 @@ import { OrderPanel } from "./order-panel";
 import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
 import { clientAthleteUi, clientMergeUi, clientWorkspaceUi, overviewContextUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
+import { orderDisplayNumber } from "../lib/order-source";
 import { ClientAvatar } from "./client-avatar";
 import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
 import { CrmTabList } from "./crm/tab-list";
@@ -39,6 +40,9 @@ type Athlete = {
 type Order = {
   id: string;
   number: string;
+  sourceSystem?:string;
+  externalNumber?:string|null;
+  externalId?:string|null;
   salesStatus: string;
   priceMinor: number;
   currency: string;
@@ -759,7 +763,7 @@ function OrderLine({ o, focused = false }: { o: Order; focused?: boolean }) {
         />
       )}
       <div>
-        <strong>{o.number}</strong>
+        <strong title={o.number}>{orderDisplayNumber(o)}</strong>
         <small>
           {new Intl.NumberFormat("ru-RU", {
             style: "currency",

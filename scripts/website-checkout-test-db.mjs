@@ -39,14 +39,14 @@ export async function openWebsiteTestDatabase(value){
   const names=await db.$queryRawUnsafe('SELECT current_database() AS name');
   assert.ok(names.length===1&&names[0].name==='website_checkout_rc_test','DATABASE_IDENTITY');
   const migrations=await db.$queryRawUnsafe('SELECT migration_name,checksum,finished_at,rolled_back_at FROM "_prisma_migrations" ORDER BY migration_name');
-  assert.equal(migrations.length,43,'SCHEMA43_REQUIRED');
+  assert.equal(migrations.length,48,'SCHEMA48_REQUIRED');
   for(const row of migrations){
    assert.ok(row.finished_at&&!row.rolled_back_at,'FINISHED_MIGRATION_REQUIRED');
    const bytes=readFileSync(resolve(ROOT,'packages/database/prisma/migrations',row.migration_name,'migration.sql'));
    assert.ok(createHash('sha256').update(bytes).digest('hex')===row.checksum,'FRESH_MIGRATION_SOURCE_CHECKSUM');
   }
   const [catalog]=await db.$queryRawUnsafe("SELECT count(*)::text AS n FROM pg_tables WHERE schemaname='public'");
-  assert.equal(catalog.n,'71','EXPECTED_SYNTHETIC_SCHEMA_TABLES');
+  assert.equal(catalog.n,'74','EXPECTED_SYNTHETIC_SCHEMA_TABLES');
   return db;
  }catch{await db.$disconnect();throw Error('WEBSITE_TEST_DATABASE_PREFLIGHT_FAILED');}
 }

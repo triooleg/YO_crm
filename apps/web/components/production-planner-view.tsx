@@ -255,11 +255,13 @@ function OrderSummary({ order, onSelect, onPreview }: { order: ProductionOrderVi
   </button>;
 }
 
-export function ProductionOrderDetails({ order, onClose, onOpenOrder, onSaveSlot, onDeleteSlot }: {
+export function ProductionOrderDetails({ order, onClose, onOpenOrder, onSaveSlot, onSaveDeadline, canEdit, onDeleteSlot }: {
   order: ProductionOrderView;
   onClose: () => void;
   onOpenOrder?: () => void;
   onSaveSlot: (slot: ProductionSlotView) => void;
+  onSaveDeadline: (requiredDeliveryAt: string) => void;
+  canEdit: boolean;
   onDeleteSlot: () => void;
 }) {
   const image = productionOrderImage(order);
@@ -280,7 +282,7 @@ export function ProductionOrderDetails({ order, onClose, onOpenOrder, onSaveSlot
     <section className="production-details-dates"><h3>{productionUi.productionPeriod}</h3>{order.productionSlot ? <>
       <label>{productionUi.startDate}<input type="date" value={productionIso(order.productionSlot.startsAt)} onChange={(event) => onSaveSlot({ ...order.productionSlot!, startsAt: event.currentTarget.value })}/></label>
       <label>{productionUi.endDate}<input type="date" value={productionIso(order.productionSlot.endsAt)} onChange={(event) => onSaveSlot({ ...order.productionSlot!, endsAt: event.currentTarget.value })}/></label>
-    </> : <p>{productionUi.noProductionSlot}</p>}<dl><div><dt>{productionUi.plannedShipping}</dt><dd>{formatDate(order.requiredDeliveryAt)}</dd></div><div><dt>{productionUi.actualShipping}</dt><dd>{order.shippedAt ? formatDate(order.shippedAt) : order.partiallyShipped ? productionUi.shippingPartial : order.hasTrackingNumber ? productionUi.shippingConfirmedByTracking : formatDate(null)}</dd></div><div><dt>{productionUi.remaining}</dt><dd>{remaining === null ? "—" : `${remaining} ${productionUi.daysShort}`}</dd></div></dl>{productionCompleted ? <Badge color="green" variant="light" radius="xl">{productionUi.productionFulfilled}</Badge> : <CrmStatusBadge domain="production" status={productionStatusForDisplay(order)}/>}</section>
+    </> : <p>{productionUi.noProductionSlot}</p>}{canEdit ? <label>{productionUi.plannedShipping}<input type="date" value={order.requiredDeliveryAt ? productionIso(order.requiredDeliveryAt) : ""} onChange={(event) => onSaveDeadline(event.currentTarget.value)}/></label> : <dl><div><dt>{productionUi.plannedShipping}</dt><dd>{formatDate(order.requiredDeliveryAt)}</dd></div></dl>}<dl><div><dt>{productionUi.actualShipping}</dt><dd>{order.shippedAt ? formatDate(order.shippedAt) : order.partiallyShipped ? productionUi.shippingPartial : order.hasTrackingNumber ? productionUi.shippingConfirmedByTracking : formatDate(null)}</dd></div><div><dt>{productionUi.remaining}</dt><dd>{remaining === null ? "—" : `${remaining} ${productionUi.daysShort}`}</dd></div></dl>{productionCompleted ? <Badge color="green" variant="light" radius="xl">{productionUi.productionFulfilled}</Badge> : <CrmStatusBadge domain="production" status={productionStatusForDisplay(order)}/>}</section>
     <section className="production-details-notes"><h3>{productionUi.orderNotes}</h3><p>{order.notes || productionUi.noNotes}</p><h3>{productionUi.orderImages} ({images.length})</h3><div>{images.map((name) => <img key={name} src={`/api/orders/images/${name}`} alt={productionUi.modelImage}/>)}{!images.length && <small>{productionUi.noImages}</small>}</div></section>
     <section className="production-details-actions"><h3>{productionUi.selectedOrder}</h3>{onOpenOrder && <CrmButton onClick={onOpenOrder}>{productionUi.openOrder}</CrmButton>}{order.productionSlot && <CrmButton tone="secondary" onClick={() => onSaveSlot({ ...order.productionSlot!, locked: !order.productionSlot!.locked })}>{order.productionSlot.locked ? productionUi.unlockSlot : productionUi.lockSlot}</CrmButton>}{order.productionSlot && <CrmButton color="red" tone="secondary" onClick={onDeleteSlot}>{productionUi.deleteSlot}</CrmButton>}</section>
   </aside>;

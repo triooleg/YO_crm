@@ -53,7 +53,7 @@ export default function RootLayout({
       </head>
       <body>
         <MantineProvider theme={yoleotardTheme} forceColorScheme="light">
-          <Notifications position="top-right" autoClose={3000} limit={3} containerWidth={360} />
+          <Notifications className="crm-notifications" position="top-right" autoClose={3000} limit={3} containerWidth={360} />
           {children}
         </MantineProvider>
       </body>

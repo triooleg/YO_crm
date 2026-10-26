@@ -6,6 +6,7 @@ const dashboard = await readFile(new URL("../components/orders-dashboard.tsx", i
 const tabs = await readFile(new URL("../components/orders/order-expanded-tabs.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/orders-dashboard.css", import.meta.url), "utf8");
 const i18n = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8");
+const invoices = await readFile(new URL("../components/invoice-workflow.tsx", import.meta.url), "utf8");
 
 test("утверждённая таблица объединяет модель и спорт и сохраняет отдельные доменные колонки", () => {
   assert.match(dashboard, /const DEFAULT_COLUMNS: ColumnId\[\] = \["client", "model", "quantity", "deadline", "payment", "production", "delivery", "status", "created", "menu"\]/);
@@ -31,6 +32,25 @@ test("раскрытый заказ использует обзорную пан
   assert.match(css, /\.orders-order-tabs/);
 });
 
+test("в шапке выбранного заказа источник показан один раз без дублирующего текстового бейджа", () => {
+  const start = dashboard.indexOf('className="orders-order-identity"');
+  const end = dashboard.indexOf('className="orders-order-flow"', start);
+  assert.ok(start >= 0 && end > start);
+  const identity = dashboard.slice(start, end);
+  assert.doesNotMatch(identity, /<OrderSourceBadge/);
+  assert.equal((identity.match(/<OrderSourceEditor /g) ?? []).length, 1);
+  assert.doesNotMatch(identity, /<OrderChannelIcon channel=\{order\.client\.source\}/);
+  assert.match(identity, /sourceLabel\(order\.orderSource\?\?'UNKNOWN'\)/);
+});
+
+test("номер основного дизайна показан под фотографией выбранного заказа", () => {
+  assert.match(dashboard, /className="orders-order-identity-media"/);
+  assert.match(dashboard, /const primaryItem = items\.find\(item=>Boolean\(item\.modelImagePath\)\)/);
+  assert.match(dashboard, /primaryItem&&<DesignNumberEditor order=\{order\} item=\{primaryItem\} bridge=\{compositionActions\}/);
+  assert.match(dashboard, /prefix="№ " className="orders-order-design-number"/);
+  assert.match(css, /\.orders-order-design-number\{/);
+});
+
 test("смена статуса обновляет локальное состояние без повторной загрузки списка", () => {
   const source = dashboard.match(/async function changeStatus\([\s\S]*?\r?\n  }\r?\n  async function changeDeadline/)?.[0] ?? "";
   assert.match(source, /await request\(`\/orders\/\$\{order\.id\}\/statuses`/);
@@ -43,7 +63,7 @@ test("смена статуса обновляет локальное состо
 test("срок готовности не подменяет плановую отправку, а инвойс сохраняет собственную валюту", () => {
   assert.match(dashboard, /label=\{ui\.plannedShipping\} value=\{ui\.notSpecifiedFeminine\}/);
   assert.doesNotMatch(dashboard + tabs, /label=\{ui\.plannedShipping\} value=\{deliveryDate\(order\)\}/);
-  assert.match(tabs, /money\(invoice\.totalMinor, invoice\.currency \|\| order\.currency\)/);
+  assert.match(invoices, /moneyLabel\(invoice\.totalMinor, invoice\.currency \|\| order\.currency\)/);
 });
 
 test("активная Mantine-вкладка получает утверждённое визуальное состояние", () => {
@@ -60,9 +80,10 @@ test("номер выбранного заказа остаётся одност
   assert.match(css, /\.orders-order-identity h2\{[^}]*white-space:nowrap/);
 });
 
-test("нижние блоки деталей следуют утверждённой сетке три карточки и история на всю строку", () => {
+test("нижние блоки деталей содержат три карточки без дублирования последних действий", () => {
   assert.match(css, /\.orders-tab-details-approved>\.orders-approved-card\.orders-tab-span-4\{grid-column:span 4/);
-  assert.match(css, /\.orders-tab-details-approved>\.orders-approved-card\.orders-tab-span-full\{grid-column:1\/-1/);
+  assert.doesNotMatch(tabs, /className="orders-tab-span-full" title=\{ui\.latestActions\}/);
+  assert.doesNotMatch(tabs, /const recent = order\.activities\.slice\(0, 4\)/);
 });
 
 test("раскрытая карточка ограничена viewport и получает одноколоночную мобильную раскладку", () => {

@@ -46,7 +46,7 @@ export class OverviewService {
         FROM "Client" WHERE "archivedAt" IS NULL AND "createdAt">=${trendStart} AND "createdAt"<${end}
         GROUP BY 1 ORDER BY 1
       `);
-      const recent=await tx.order.findMany({where:{archivedAt:null},take:5,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,number:true,priceMinor:true,currency:true,salesStatus:true,createdAt:true,modelImagePath:true,client:{select:{displayName:true}},items:{where:{archivedAt:null,modelImagePath:{not:null}},take:1,orderBy:{id:'asc'},select:{modelImagePath:true}}}});
+      const recent=await tx.order.findMany({where:{archivedAt:null},take:5,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,number:true,priceMinor:true,currency:true,salesStatus:true,createdAt:true,sourceSystem:true,modelImagePath:true,externalImageUrl:true,client:{select:{displayName:true}},items:{where:{archivedAt:null,OR:[{modelImagePath:{not:null}},{externalImageUrl:{not:null}}]},orderBy:{id:'asc'},select:{modelImagePath:true,externalImageUrl:true}}}});
       const settings=await tx.appSetting.findMany({where:{section:'finance',key:{in:['exchangeRateProvider','exchangeRateCache']}},select:{key:true,value:true}});
       const provider=settings.find(setting=>setting.key==='exchangeRateProvider')?.value==='ECB'?'ECB':'NBU';
       let cache:ExchangeRateCache|null=null;
@@ -56,7 +56,10 @@ export class OverviewService {
       const recentRows=recent.map(order=>{
         let amountMinor:number|null=null;
         try{amountMinor=convert(order.priceMinor,order.currency);}catch(error){valuationError=error instanceof Error?error.message:'Курс валют недоступен';}
-        return {id:order.id,number:order.number,clientName:order.client.displayName,modelImagePath:order.modelImagePath??order.items[0]?.modelImagePath??null,salesStatus:order.salesStatus,createdAt:order.createdAt.toISOString(),amountMinor,originalAmountMinor:order.priceMinor,originalCurrency:order.currency};
+        const orderSource=orderSources[order.id]??'UNKNOWN';
+        const localImage=order.modelImagePath??order.items.find(item=>item.modelImagePath)?.modelImagePath??null;
+        const websiteImage=order.sourceSystem==='YOLEOTARD_WEBSITE'?(order.externalImageUrl??order.items.find(item=>item.externalImageUrl)?.externalImageUrl??null):null;
+        return {id:order.id,number:order.number,clientName:order.client.displayName,orderSource,modelImagePath:localImage??websiteImage,salesStatus:order.salesStatus,createdAt:order.createdAt.toISOString(),amountMinor,originalAmountMinor:order.priceMinor,originalCurrency:order.currency};
       });
       return {sourceAnalytics,month,currency:query.currency,today:financeBusinessDay(now),counts:{total:period.length,previousTotal:sources.filter(order=>order.createdAt>=previousStart&&order.createdAt<start).length,work:states.filter(row=>row.state.work).length,ready:states.filter(row=>row.state.ready).length,overdue:states.filter(row=>row.state.overdue).length,requiresVerification:states.filter(row=>row.state.requiresVerification).length,awaitingPayment:states.filter(row=>row.state.unpaid).length},ring:{total:ringTotal,excluded:period.length-ringTotal,segments},trend:Array.from({length:query.range},(_,index)=>{
         const from=financePeriod(month,index-query.range+1),to=financePeriod(month,index-query.range+2),key=from.toISOString().slice(0,7);

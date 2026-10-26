@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, IsUUID, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import { Transform, Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
+import { ORDER_SOURCES, type OrderSource } from "./order-source";
 
 export class UploadModelImageDto {
   @ApiProperty() @IsString() @Length(1, 150) name!: string;
@@ -67,6 +68,12 @@ export class UpdateOrderItemDetailsDto {
   @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() expectedModelImagePath!: string | null;
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @ValidateIf((_, value) => value !== null) @IsInt() @Min(1) @Max(2_147_483_647) designNumber?: number | null;
   @ApiPropertyOptional({ nullable: true }) @ValidateIf((input, value) => input.designNumber !== undefined && value !== null) @IsInt() @Min(1) @Max(2_147_483_647) expectedDesignNumber?: number | null;
+}
+
+export class UpdateOrderItemDesignNumberDto {
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsInt() @Min(1) @Max(2_147_483_647) designNumber!: number | null;
+  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsInt() @Min(1) @Max(2_147_483_647) expectedDesignNumber!: number | null;
+  @ApiProperty() @IsUUID("4") operationKey!: string;
 }
 
 export class AddOrderItemDto {
@@ -150,6 +157,11 @@ export class UpdateOrderCurrencyDto {
 }
 export class UpdateOrderDisciplineDto {
  @ApiProperty({ enum: Discipline }) @IsEnum(Discipline) discipline!: Discipline;
+}
+export class UpdateOrderSourceDto {
+ @ApiProperty({ enum: ORDER_SOURCES }) @IsString() @IsIn(ORDER_SOURCES) source!: OrderSource;
+ @ApiProperty({ enum: ORDER_SOURCES }) @IsString() @IsIn(ORDER_SOURCES) expectedSource!: OrderSource;
+ @ApiProperty() @IsUUID("4") operationKey!: string;
 }
 export class UpdateOrderBuyerCommentDto {
  @ApiProperty({ nullable: true }) @ValidateIf((_, value) => value !== null) @IsString() @MaxLength(5000) buyerComment!: string | null;

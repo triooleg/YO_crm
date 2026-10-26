@@ -21,7 +21,7 @@ test("корневой интерфейс CRM использует единый 
   assert.match(layout, /@mantine\/core\/styles\.css/);
   assert.match(layout, /@mantine\/notifications\/styles\.css/);
   assert.match(layout, /import \{ Notifications \} from "@mantine\/notifications"/);
-  assert.match(layout, /<Notifications position="top-right" autoClose=\{3000\} limit=\{3\} containerWidth=\{360\}/);
+  assert.match(layout, /<Notifications className="crm-notifications" position="top-right" autoClose=\{3000\} limit=\{3\} containerWidth=\{360\}/);
   assert.match(layout, /<ColorSchemeScript forceColorScheme="light" \/>/);
   assert.match(layout, /<MantineProvider theme=\{yoleotardTheme\} forceColorScheme="light">/);
   assert.match(theme, /primaryColor:\s*"yoleotard"/);

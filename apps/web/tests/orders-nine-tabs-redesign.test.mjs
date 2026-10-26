@@ -74,6 +74,18 @@ test("существующие действия остаются колбэка�
   assert.doesNotMatch(tabs, /fetch\(/);
 });
 
+test("номер дизайна редактируется отдельно даже когда значение ещё не задано", () => {
+  assert.match(designs, /function DesignNumberEditor\b/);
+  assert.match(designs, /className="design-instance-identifiers"/);
+  assert.match(designs, /<small>\{d\.sku\}: \{item\.sku\|\|'—'\}<\/small><small>\{d\.number\}: <DesignNumberEditor/);
+  assert.match(designs, /<Popover\.Target>/);
+  assert.match(designs, /item\.designNumber\?\?d\.addNumber/);
+  assert.match(designs, /`\/orders\/\$\{order\.id\}\/items\/\$\{item\.persistedItemId\}\/design-number`/);
+  assert.match(designs, /expectedDesignNumber:item\.designNumber\?\?null/);
+  assert.match(designs, /designNumber:nextNumber/);
+  assert.match(designs, /operationKey:operationKey\.current/);
+});
+
 test("производство меняется по физическим экземплярам и показывает только укрупнённые статусы", () => {
   assert.match(tabs, /INSTANCE_PRODUCTION_STATUSES = \["NOT_SCHEDULED", "SCHEDULED", "SEWING", "READY", "ON_HOLD", "CANCELLED"\]/);
   assert.match(tabs, /onUpdateInstance\(instance\.id,\{productionStatus:event\.currentTarget\.value,expectedUpdatedAt:instance\.updatedAt\}\)/);

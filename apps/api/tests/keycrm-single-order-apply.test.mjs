@@ -190,7 +190,7 @@ for (const mutation of ['same', 'other target', 'other mode', 'other preview', '
 // real service/normalizer/reconciliation functions. Unknown query shapes fail.
 function installBusinessDb(h) {
   const state = {
-    order: [{ id: 'unrelated-999', number: 'YO-999', priceMinor: 7700, currency: 'EUR', salesStatus: 'CONFIRMED', clientId: 'unrelated-client' }],
+    order: [{ id: 'website-708', number: 'YO-708', priceMinor: 7700, currency: 'EUR', salesStatus: 'CONFIRMED', clientId: 'unrelated-client', sourceSystem: 'YOLEOTARD_WEBSITE' }],
     client: [{ id: 'unrelated-client', displayName: 'Untouched', archivedAt: null }],
     payment: [{ id: 'unrelated-receipt', orderId: 'unrelated-999', amountMinor: 7700, currency: 'EUR', voidedAt: null }],
     orderItem: [], orderItemInstance: [], keycrmClientLink: [], keycrmSyncMutation: [],
@@ -258,7 +258,8 @@ function installBusinessDb(h) {
 
 test('public APPLY creates only selected order, item/instance/payment/audit/rollback evidence and replay adds no duplicates', async t => {
   const h = harness(t, { detail: rawOrder(675, {
-    products: [{ id: 91, name: 'Synthetic item', price: '100.00', quantity: 1 }],
+    products: [{ id: 91, name: 'Synthetic item A', price: '50.00', quantity: 1 }, { id: 92, name: 'Synthetic item B', price: '50.00', quantity: 1 }],
+    custom_fields: [{ id: 1003, uuid: 'OR_1003', name: 'Номер макету', type: 'number', value: 493 }],
     payments: [{ id: 5, amount: '50.00', actual_currency: 'EUR', payment_method_id: 8,
       status: 'paid', payment_date: '2026-10-02 10:00:00' }],
     payment_status: 'part_paid',
@@ -273,11 +274,13 @@ test('public APPLY creates only selected order, item/instance/payment/audit/roll
   assert.equal(result.createdCount, 1); assert.equal(result.failedCount, 0); assert.equal(result.scannedCount, 1);
   const imported = db.state.order.find(row => row.externalId === '675');
   assert.ok(imported); assert.equal(imported.priceMinor, 10000); assert.equal(imported.currency, 'EUR');
+  assert.equal(imported.number, 'YO-709', 'KeyCRM continues the shared sequence instead of reusing provider id 675');
   assert.equal(imported.depositRequiredMinor, 5000); assert.equal(imported.paymentStatus, 'DEPOSIT_PAID');
   assert.equal(imported.sourceSystem, 'KEYCRM'); assert.equal(imported.sourceAccount, 'synthetic-connection');
   assert.equal(db.state.order.length, 2); assert.equal(db.state.client.length, 2);
-  assert.equal(db.state.orderItem.length, 1); assert.equal(db.state.orderItem[0].externalId, '675:91');
-  assert.equal(db.state.orderItemInstance.length, 1);
+  assert.equal(db.state.orderItem.length, 2); assert.equal(db.state.orderItem[0].externalId, '675:91');
+  assert.deepEqual(db.state.orderItem.map(item => item.designNumber), [493, 493]);
+  assert.equal(db.state.orderItemInstance.length, 2);
   const receipt = db.state.payment.find(row => row.orderId === imported.id);
   assert.equal(receipt.amountMinor, 5000); assert.equal(receipt.currency, 'EUR'); assert.equal(receipt.externalId, '5');
   assert.equal(db.state.payment.length, 2); db.assertUntouched();
@@ -295,5 +298,34 @@ test('public APPLY creates only selected order, item/instance/payment/audit/roll
   const replay = await h.step(secondApply.id);
   assert.equal(replay.status, 'COMPLETED'); assert.equal(replay.skippedCount, 1); assert.equal(replay.createdCount, 0);
   assert.deepEqual(db.state, beforeReplay); db.assertUntouched();
+
+  for (const item of db.state.orderItem) item.designNumber = null;
+  db.state.orderItem.push({ id: 'archived-design', orderId: imported.id, name: 'Historical design', quantity: 1, priceMinor: 1, designNumber: null, archivedAt: new Date('2026-10-03T00:00:00Z') });
+  const repairPreview = await preview(h), repairPreviewResult = await h.service.run(repairPreview.id);
+  assert.equal(repairPreviewResult.updatedCount, 1, 'preview exposes an unchanged linked order that still needs design-number repair');
+  const repairApply = await h.service.createRun(dto({ dryRun: false, previewRunId: repairPreview.id, orderId: 675 }), actor);
+  h.readySources(repairApply.id);
+  const auditsBeforeRepair = h.audits.length;
+  const repairResult = await h.step(repairApply.id);
+  assert.equal(repairResult.updatedCount, 1);
+  assert.deepEqual(db.state.orderItem.filter(item => !item.archivedAt).map(item => item.designNumber), [493, 493]);
+  assert.equal(db.state.orderItem.find(item => item.id === 'archived-design').designNumber, null);
+  assert.equal(h.audits.slice(auditsBeforeRepair).filter(row => row.entityType === 'OrderItem' && row.after?.designNumber === 493).length, 2);
+  assert.ok(db.state.activity.some(row => row.type === 'KEYCRM_DESIGN_NUMBER_IMPORTED' && row.orderId === imported.id));
+  const repairMutation = db.state.keycrmSyncMutation.at(-1);
+  assert.deepEqual(repairMutation.beforeSnapshot.order.items.filter(item => !item.archivedAt).map(item => item.designNumber), [null, null]);
+  assert.deepEqual(repairMutation.afterSnapshot.order.items.filter(item => !item.archivedAt).map(item => item.designNumber), [493, 493]);
+
+  db.state.orderItem.find(item => item.externalId === '675:91').designNumber = 777;
+  const conflictPreview = await preview(h), conflictPreviewResult = await h.service.run(conflictPreview.id);
+  assert.equal(conflictPreviewResult.skippedCount, 1);
+  assert.equal((await h.service.issues(conflictPreview.id)).filter(issue => issue.code === 'DESIGN_NUMBER_CONFLICT').length, 1);
+  const beforeConflictApply = clone(db.state), issueCountBeforeConflictApply = h.issues.length;
+  const conflictApply = await h.service.createRun(dto({ dryRun: false, previewRunId: conflictPreview.id, orderId: 675 }), actor);
+  h.readySources(conflictApply.id);
+  const conflictResult = await h.step(conflictApply.id);
+  assert.equal(conflictResult.skippedCount, 1);
+  assert.deepEqual(db.state, beforeConflictApply, 'unchanged provider replay must not rewrite an order with a preserved manual conflict');
+  assert.equal(h.issues.length, issueCountBeforeConflictApply, 'APPLY does not duplicate the conflict already exposed by preview');
   assert.ok(h.calls.every(url => url.pathname === '/v1/order/675'));
 });

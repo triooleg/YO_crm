@@ -3,8 +3,9 @@ import { queueParentMeasurementDraft } from "../lib/parent-measurements-message-
 import {orderCostumeQuantity,orderAssignedAthleteCount,orderDesignCount,orderDesignImagePaths,orderImageUrl} from '../lib/order-composition-view';
 
 import { orderSourceUi as sourceUi } from "../lib/i18n";
-import { parseSource, sourceOptions, sourceLabel, type OrderSourceFilter } from "../lib/order-source";
-import { OrderSourceBadge, CartIcon } from "./order-source-analytics";
+import { orderSources, parseSource, sourceOptions, sourceLabel, orderDisplayNumber, websiteItemName, type OrderSource, type OrderSourceFilter } from "../lib/order-source";
+import { ordersCsvCell } from "../lib/order-csv";
+import { CartIcon } from "./order-source-analytics";
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../lib/i18n";
@@ -14,8 +15,8 @@ import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Select, Badge, Menu, Modal, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
-import { orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi } from "../lib/i18n";
+import { Select, Badge, Menu, Modal, Popover, Radio, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { designsInstancesUi as designsUi, orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi } from "../lib/i18n";
 import { orderLabel } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
@@ -35,6 +36,7 @@ import { AthleteMeasurementWizard } from "./athlete-measurement-wizard";
 import { OrderPanel } from "./order-panel";
 import { type Order } from "./orders-workspace";
 import { expandedOrderItems, OrderExpandedTabs, type ExpandedOrderView, type OrderItemInstanceInput, type OrderNoteInput, type OrderShipmentInput } from "./orders/order-expanded-tabs";
+import { DesignNumberEditor } from "./orders/designs-instances";
 
 type ColumnId = "client" | "model" | "quantity" | "deadline" | "payment" | "production" | "delivery" | "status" | "created" | "menu";
 type SortColumnId = Exclude<ColumnId, "menu"> | "source";
@@ -43,7 +45,7 @@ type QuickFilter = "all" | "active" | "urgent" | "deposit" | "depositShortfall" 
 type OrderListPage = {items:Order[];total:number;page:number;pageSize:number;focusFound:boolean;metrics:{total:number;active:number;unpaid:number;deposit:number;urgent:number;overdue:number;ready:number;completed:number;work:number};sources:{total:number;websiteCount:number};disciplines:string[]};
 
 type OverviewContext = { filter: string; period: string };
-type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void };
+type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void; onWebsiteOrderReviewed?:()=>void };
 type Preview = { src: string; left: number; top: number; width: number };
 type OrderClientBrief = { id: string; displayName: string; country?: string };
 type OrderClientDetail = OrderClientBrief & { athletes: { id: string; firstName: string; lastName?: string; measurements: { id: string; measuredAt: string }[] }[] };
@@ -60,7 +62,7 @@ const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "E
 const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
 const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
 
-export function OrdersDashboard({ role, onNavigate }: Props) {
+export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Props) {
   const theme = useMantineTheme();
   const editableTextColor = (theme.other.crmControls as { editableTextColor: string }).editableTextColor;
   const [source,setSource]=useState<OrderSourceFilter>('');
@@ -167,6 +169,10 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     return response.json();
   }
 
+  async function acknowledgeWebsiteNotification(orderId:string){
+    try{await request(`/orders/${encodeURIComponent(orderId)}/website-notification/read`,{method:"POST"});onWebsiteOrderReviewed?.();}catch{/* Viewing the order must stay available if acknowledgement is temporarily unavailable. */}
+  }
+
   function orderListPath(query: string, context: OverviewContext | null | undefined, origin=listContext.current.source, overrides:Record<string,string>={}) {
     const params = new URLSearchParams();
     if (query.trim()) params.set("search", query.trim());
@@ -211,6 +217,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       if (contextOrder && !contextUnavailable) {
         setOrderDetails((current) => ({ ...current, [contextOrder.id]: contextOrder }));
         setExpandedId(contextOrder.id);if(paged)setNavigationTarget(contextOrder.id);
+        void acknowledgeWebsiteNotification(contextOrder.id);
       }
       if(paged)initialOrderId.current=undefined;
       setError(contextUnavailable ? overviewContextUi.orderUnavailable : "");
@@ -225,7 +232,15 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   }
 
   async function refreshOrder(orderId: string, reconcileOverview = false) {
+    const previous = orderDetails[orderId] ?? orders.find((item) => item.id === orderId);
     const detail = await request(`/orders/${orderId}`) as OrderDetail;
+    if (reconcileOverview && previous?.orderSource !== detail.orderSource) {
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        next.delete(orderId);
+        return next;
+      });
+    }
     setOrderDetails((current) => ({ ...current, [orderId]: detail }));
     setOrders((items) => items.map((item) => item.id === orderId ? detail : item));
     if (reconcileOverview && (serverPage || listContext.current.overviewContext)) await load({ background: true, propagateError: true });
@@ -245,6 +260,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       listSequence.current++;setLoading(false);previousOrderContext.current=detail;initialOrderId.current=undefined;
       setOrderDetails(current=>({...current,[orderId]:detail}));setServerPage(paged);setOrders(listed.some(order=>order.id===orderId)?listed:[...listed,detail]);
       previousListCriteria.current=undefined;setQuickFilter('all');setStatusFilter('all');setDisciplineFilter('all');setSearch('');setError('');if(paged)setPage(paged.page);setExpandedId(orderId);
+      void acknowledgeWebsiteNotification(orderId);
       setNavigationTarget(orderId);
       const url=new URL(window.location.href);url.searchParams.set('orderId',orderId);window.history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);
     }catch(reason){if(sequence===navigationSequence.current)setError((reason as Error).message);}
@@ -329,6 +345,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
     cancelPreviousOrderNavigation();
     if (expandedId === order.id) { setExpandedId(undefined); return; }
     setExpandedId(order.id);
+    void acknowledgeWebsiteNotification(order.id);
     if (orderDetails[order.id] || detailPending.has(order.id)) return;
     setDetailPending((current) => new Set(current).add(order.id));
     try { await refreshOrder(order.id); setError(""); }
@@ -582,8 +599,8 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
   async function exportOrders() {
     let exported=sorted;
     try{if(serverPage){exported=[];for(let p=1;;p++){const result=await request(orderListPath(search,overviewContext,source,{page:String(p),pageSize:'100',focusId:''})) as OrderListPage;exported.push(...result.items);if(exported.length>=result.total||!result.items.length)break;}}}catch(reason){setError((reason as Error).message);return;}
-    const rows = [[...ui.csvHeaders,sourceUi.filter], ...exported.map((order) => [order.number, order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; "),sourceLabel(order.orderSource)])];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
+    const rows = [[...ui.csvHeaders,sourceUi.filter], ...exported.map((order) => [orderDisplayNumber(order), order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; "),sourceLabel(order.orderSource)])];
+    const csv = rows.map((row) => row.map(ordersCsvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
   }
@@ -700,7 +717,7 @@ export function OrdersDashboard({ role, onNavigate }: Props) {
       <p><strong>{ui.selected}: {selectedIds.size}</strong></p>
       <div className="orders-archive-actions"><CrmButton tone="secondary" disabled={archiving} onClick={() => setArchiveOpen(false)}>{ui.archiveOrdersCancel}</CrmButton><CrmButton color="red" loading={archiving} onClick={() => void archiveSelectedOrders()}>{archiving ? ui.archiving : ui.archiveOrdersConfirm}</CrmButton></div>
     </Modal>
-    {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} style={{ left: preview.left, top: preview.top, width: preview.width }} />}
+    {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} referrerPolicy="no-referrer" style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load({ background: true }); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await refreshAfterMutation(paymentOrder.id); }} />}
@@ -734,8 +751,8 @@ function OrderDisciplineMenu({ order, onChange }: { order: Order; onChange: (ord
 
 function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onDelivery }: { id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onDelivery: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
-  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId}>{order.number}</button>{order.orderSource==='WEBSITE' ? <span className="orders-channel website" role="img" aria-label={sourceLabel('WEBSITE')} title={sourceLabel('WEBSITE')}><CartIcon/></span> : <OrderChannelIcon channel={order.client.source} />}<button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
-  if (id === "model") { const modelName = order.items[0]?.name || order.notes || ui.designMissing; return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
+  if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId} title={order.number}>{orderDisplayNumber(order)}</button>{order.orderSource==='WEBSITE' ? <span className="orders-channel website" role="img" aria-label={sourceLabel('WEBSITE')} title={sourceLabel('WEBSITE')}><CartIcon/></span> : <OrderChannelIcon channel={order.client.source} />}<button onClick={onClient} title={order.client.displayName}><strong>{order.client.displayName}</strong><small title={countryLabel(order.client.country) || ui.countryMissing}><CountryFlag country={order.client.country} />{countryLabel(order.client.country) || ui.countryMissing}</small></button></div></td>;
+  if (id === "model") { const modelName = websiteItemName(order,order.items[0]?.name || order.notes || ui.designMissing); return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
   if (id === "quantity") return <td className="orders-col orders-col-quantity" style={style}><strong>{quantitySummary(order)}</strong><small>{order.type === "GROUP_ORDER" ? `${athleteCount(order)} ${ui.groupsAthletes}` : order.type === "PAIR" ? ui.pair : ui.individualShort}</small></td>;
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") { const received = paid(order), percent = received === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={percent === null ? dataEvidenceUi.unavailable : `${percent}%`}><i style={{ width: `${percent ?? 0}%` }} /></div><small className={hasBalance(order) ? "orders-balance-line" : "orders-paid-line"}>{balance(order) === null ? dataEvidenceUi.unavailable : hasBalance(order) ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent === null ? dataEvidenceUi.unavailable : `${percent}%`}</em></td>; }
@@ -754,6 +771,7 @@ function OrderCell({ id, order, columnOrder, expanded, detailsId, statusPending,
 
 function ExpandedOrder({ taxRole, onOpenOrder, expenseActions, compositionActions, financeActions, onVoidPayment, measurementActions, order, paymentTrigger, addAthleteButtonRef, statusPending, onStatus, onClient, onEditClient, onConversation, onProduction, onFinance, onPayment, onDelivery, onDeliveryContact, onMeasurements, onAddAthlete, onBindMeasurement, onCurrency, onCustomerWishes, onManagerComment, onEdit, onAddDesign, onEditItem, onUploadFile, onImage, onCreateNote, onUpdateNote, onArchiveNote, onCreateShipment, onUpdateShipment, onUpdateInstance, onUpdateClientPreferences, onUploadClientFile }: { taxRole?:string; onOpenOrder:(id:string)=>void; expenseActions?:{request:(path:string,init?:RequestInit)=>Promise<any>;onSaved:()=>Promise<void>}; compositionActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> }; financeActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> }; onVoidPayment?: (paymentId: string, reason: string, expectedOrderUpdatedAt: string) => Promise<void>; measurementActions?: { request: (path: string, init?: RequestInit) => Promise<any>; onSaved: () => Promise<void> }; order: OrderDetail; paymentTrigger: React.RefObject<HTMLButtonElement | null>; addAthleteButtonRef: React.RefObject<HTMLButtonElement | null>; statusPending: boolean; onStatus: (field: "salesStatus" | "productionStatus", value: string) => void; onClient: () => void; onEditClient:()=>void; onConversation: () => void; onProduction: () => void; onFinance?: () => void; onPayment: () => void; onDelivery: () => void; onDeliveryContact: () => void; onMeasurements: (itemId?: string) => void; onAddAthlete?: () => void; onBindMeasurement:(itemId:string,measurementId:string,expectedMeasurementId:string|null)=>Promise<void>; onCurrency: () => void; onCustomerWishes: () => void; onManagerComment: () => void; onEdit: () => void; onAddDesign:()=>void; onEditItem: (itemId:string)=>void; onUploadFile:(file:File)=>Promise<void>; onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void>; onCreateNote:(input:OrderNoteInput)=>Promise<void>; onUpdateNote:(noteId:string,input:OrderNoteInput&{expectedUpdatedAt:string})=>Promise<void>; onArchiveNote?:(noteId:string)=>Promise<void>; onCreateShipment:(input:OrderShipmentInput)=>Promise<void>; onUpdateShipment:(shipmentId:string,input:OrderShipmentInput)=>Promise<void>; onUpdateInstance:(instanceId:string,input:OrderItemInstanceInput)=>Promise<void>; onUpdateClientPreferences:(preferences:Record<string,unknown>)=>Promise<void>; onUploadClientFile:(file:File)=>Promise<void> }) {
   const flowRef=useRef<HTMLDivElement>(null);
+  const [designPreviewOpen,setDesignPreviewOpen]=useState(false);
   useEffect(()=>{
     const flow=flowRef.current;if(!flow)return;
     const captions=[...flow.querySelectorAll<HTMLElement>(".orders-flow-caption")];
@@ -762,7 +780,9 @@ function ExpandedOrder({ taxRole, onOpenOrder, expenseActions, compositionAction
     return()=>observer.disconnect();
   },[]);
   const items = expandedOrderItems(order);
-  const primaryImage = designPaths(order)[0];
+  const primaryItem = items.find(item=>Boolean(item.modelImagePath)) ?? items.find(item=>Boolean(orderImageUrl(item,order.sourceSystem))) ?? items[0];
+  const primaryImage = primaryItem ? orderImageUrl(primaryItem,order.sourceSystem) ?? designPaths(order)[0] : designPaths(order)[0];
+  const designPreviewTitle = primaryItem ? `${ui.imagePreview}: ${primaryItem.name}` : ui.imagePreview;
   const problems = orderProblems(order);
   const paidMinor = paid(order);
   const paymentPercent = paidMinor === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(paidMinor / order.priceMinor * 100)) : 0;
@@ -772,8 +792,8 @@ function ExpandedOrder({ taxRole, onOpenOrder, expenseActions, compositionAction
   return <div className="orders-approved-expanded">
     <section className="orders-order-overview">
       <div className="orders-order-identity">
-        {primaryImage ? <img src={primaryImage} alt={ui.orderDesignAlt} /> : <span className="orders-order-identity-placeholder"><UiIcon name="image" /></span>}
-        <div><p>{ui.selectedOrder}</p><h2>{order.number}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><OrderSourceBadge source={order.orderSource}/><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small><small><OrderChannelIcon channel={order.client.source} />{orderLabel("source", order.client.source)}</small><em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
+        <div className="orders-order-identity-media">{primaryImage ? <UnstyledButton className="orders-order-image-button" onClick={()=>setDesignPreviewOpen(true)} aria-label={designPreviewTitle}><img src={primaryImage} alt={ui.orderDesignAlt} referrerPolicy="no-referrer" /></UnstyledButton> : <span className="orders-order-identity-placeholder"><UiIcon name="image" /></span>}{primaryItem&&<DesignNumberEditor order={order} item={primaryItem} bridge={compositionActions} prefix="№ " className="orders-order-design-number" ariaLabel={`${designsUi.editNumber}: ${primaryItem.name} (${ui.selectedOrder})`}/>}</div>
+        <div><p>{ui.selectedOrder}</p><h2 title={order.number}>{orderDisplayNumber(order)}{problems.length > 0 && <span>{ui.overviewWarning}</span>}</h2><strong title={order.client.displayName}><CountryFlag country={order.client.country} />{order.client.displayName}</strong><small>{countryLabel(order.client.country) || ui.countryMissing}</small>{compositionActions?<OrderSourceEditor order={order} bridge={compositionActions}/>:<small>{sourceLabel(order.orderSource??'UNKNOWN')}</small>}<em title={items[0]?.name || order.notes || ui.designMissing}>{items[0]?.name || order.notes || ui.designMissing} · {itemQuantity(order)} {ui.pieces}</em>{requiresProduction && <CrmButton size="compact-sm" onClick={onProduction}>{ui.openInProduction} →</CrmButton>}</div>
       </div>
       <div ref={flowRef} className="orders-order-flow" aria-label={`${ui.payment} → ${ui.tabs.production} → ${ui.shipping}`}>
         <article className={paidMinor !== null && paidMinor >= order.depositRequiredMinor ? "complete" : "warning"}><i><UiIcon name="check" /></i><div className="orders-flow-caption"><b>{ui.payment}</b><CrmStatusBadge domain="payment" status={order.paymentStatus}/><strong>{money(paidMinor, order.currency)} / {money(order.priceMinor, order.currency)}</strong><small>{paymentPercent === null ? dataEvidenceUi.unavailable : `${paymentPercent}%`} · {ui.balancePrefix} {money(balance(order), order.currency)}</small></div></article>
@@ -784,7 +804,19 @@ function ExpandedOrder({ taxRole, onOpenOrder, expenseActions, compositionAction
       <div className="orders-order-actions"><h3>{ui.quickActions}</h3><CrmButton ref={paymentTrigger} tone="secondary" size="compact-sm" onClick={onPayment}><UiIcon name="payment" />{ui.addPayment}</CrmButton>{requiresProduction && <CrmButton tone="secondary" size="compact-sm" onClick={onProduction}><UiIcon name="calendar" />{ui.scheduleProduction}</CrmButton>}<CrmButton tone="secondary" size="compact-sm" onClick={onConversation}><UiIcon name="chat" />{ui.openConversation}</CrmButton><CrmButton tone="secondary" size="compact-sm" aria-label={ui.editOrder} onClick={onEdit}><UiIcon name="edit" />{ui.moreActions}</CrmButton></div>
     </section>
     <OrderExpandedTabs taxRole={taxRole} onDraftMeasurementMessage={text=>{queueParentMeasurementDraft(order.client.id,text);onConversation();}} compositionActions={compositionActions} onOpenOrder={onOpenOrder} expenseActions={expenseActions} financeActions={financeActions} onVoidPayment={onVoidPayment} measurementActions={measurementActions} order={order} statusPending={statusPending} onProductionStatus={(value) => onStatus("productionStatus", value)} onClient={onClient} onEditClient={onEditClient} onFinance={onFinance} onPayment={onPayment} onProduction={onProduction} onDelivery={onDelivery} onDeliveryContact={onDeliveryContact} onMeasurements={onMeasurements} onAddAthlete={onAddAthlete} addAthleteButtonRef={addAthleteButtonRef} onBindMeasurement={onBindMeasurement} onCurrency={onCurrency} onCustomerWishes={onCustomerWishes} onManagerComment={onManagerComment} onEdit={onEdit} onAddDesign={onAddDesign} onEditItem={onEditItem} onUploadFile={onUploadFile} onImage={onImage} onCreateNote={onCreateNote} onUpdateNote={onUpdateNote} onArchiveNote={onArchiveNote} onCreateShipment={onCreateShipment} onUpdateShipment={onUpdateShipment} onUpdateInstance={onUpdateInstance} onUpdateClientPreferences={onUpdateClientPreferences} onUploadClientFile={onUploadClientFile} />
+    <Modal opened={designPreviewOpen} onClose={()=>setDesignPreviewOpen(false)} title={designPreviewTitle} aria-label={designPreviewTitle} closeButtonProps={{"aria-label":ui.closePreview}} returnFocus centered size="xl" classNames={{content:"orders-design-preview-modal",body:"orders-design-preview-body"}}>{primaryImage&&<img src={primaryImage} alt={ui.orderDesignAlt} referrerPolicy="no-referrer" />}</Modal>
   </div>;
+}
+
+function OrderSourceEditor({order,bridge}:{order:OrderDetail;bridge:{request:(path:string,init?:RequestInit)=>Promise<any>;onSaved:()=>Promise<void>}}){
+  const source=order.orderSource??'UNKNOWN',operationKey=useRef<string|null>(null),[opened,setOpened]=useState(false),[value,setValue]=useState<OrderSource>(source),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  useEffect(()=>setValue(source),[source]);
+  function changeOpened(next:boolean){if(!next&&busy)return;if(!next){setValue(source);setError('');operationKey.current=null}setOpened(next)}
+  async function save(){setBusy(true);setError('');const key=operationKey.current??crypto.randomUUID();operationKey.current=key;try{await bridge.request(`/orders/${order.id}/source`,{method:'PATCH',body:JSON.stringify({source:value,expectedSource:source,operationKey:key})});await bridge.onSaved();operationKey.current=null;setOpened(false)}catch(reason){setError(reason instanceof Error?reason.message:sourceUi.sourceError)}finally{setBusy(false)}}
+  return <Popover opened={opened} onChange={changeOpened} position="bottom-start" width={260} trapFocus returnFocus withArrow>
+    <Popover.Target><UnstyledButton className="orders-order-source-editor" onClick={()=>changeOpened(!opened)} aria-label={`${sourceUi.changeSource}: ${sourceLabel(source)}`} aria-expanded={opened}><UiIcon name="edit"/>{sourceLabel(source)}</UnstyledButton></Popover.Target>
+    <Popover.Dropdown><Select data={orderSources.map(item=>({value:item,label:sourceLabel(item)}))} value={value} onChange={next=>{if(next){operationKey.current=null;setValue(next as OrderSource)}}} label={sourceUi.filter} disabled={busy} comboboxProps={{withinPortal:false}}/>{error&&<CrmAlert onClose={()=>setError('')}>{error}</CrmAlert>}<div className="orders-order-source-actions"><CrmButton tone="secondary" size="compact-xs" disabled={busy} onClick={()=>changeOpened(false)}>{ui.cancel}</CrmButton><CrmButton size="compact-xs" loading={busy} disabled={value===source} onClick={()=>void save()}>{sourceUi.saveSource}</CrmButton></div></Popover.Dropdown>
+  </Popover>;
 }
 
 function ClientEditModal({order,request,onClose,onSaved}:{order:OrderDetail;request:(path:string,init?:RequestInit)=>Promise<unknown>;onClose:()=>void;onSaved:()=>Promise<void>}){

@@ -48,6 +48,16 @@ entity: an athlete's `discipline` records the sport when known.
 A CRM staff account with a `UserRole`. API guards and services enforce access;
 UI visibility alone is never authorization.
 
+### Website API key
+
+A named, revocable credential for the website orders integration, bound to one
+canonical `sourceAccount`. It is not a staff session and grants no general CRM
+access. OWNER creates or revokes it after current-password verification. Only
+its versioned digest and public metadata persist; the secret is returned once.
+Rotation creates a parallel credential and preserves the old key until explicit
+revocation. The existing server environment token remains an independent legacy
+fallback with its original source allowlist. See ADR0011.
+
 ## Measurements
 
 ### Measurement
@@ -103,6 +113,13 @@ The commercial and operational record identified by unique `Order.number`.
 Stored as `Order`; it belongs to one client and may reference one athlete and
 one measurement snapshot. An order has independent sales, production, payment
 and shipping statuses. Never infer one dimension solely from another.
+
+The current user-visible business number is `YO-<positive integer>` and uses
+one sequence across manual, KeyCRM and website orders. Historical canonical
+`KC-<positive integer>` numbers belong to the same sequence and are migrated
+to the equivalent `YO-` value with collision checks and audit history. A
+WordPress `WEB-` value is a technical external identity and must not advance
+the business sequence.
 
 Money is integer minor units plus an ISO currency. `priceMinor`,
 `depositRequiredMinor`, `deliveryMinor`, `discountMinor` and
@@ -283,7 +300,48 @@ status, but the current schema has no standalone refund transaction model.
 
 An order document stored as `Invoice`, with number, status, language, currency,
 issue/due dates, seller/customer/item snapshots and `totalMinor`. Invoice status
-does not replace payment status.
+does not replace payment status. New invoices may reference a document template,
+but the selected template, fields and order data are copied into immutable JSON
+snapshots when the invoice is created. Later order or template edits therefore do
+not rewrite an issued client document; editing an open invoice updates only its
+own snapshots. New template-only invoices carry `documentOptions.immutable` and
+are issued on explicit save. Their content cannot be edited through the legacy
+draft route. PDF and escaped declarative HTML artifacts are retained atomically
+with the Invoice in private, invoice-keyed `AppSetting` records; authorized reads
+return the original artifacts. Legacy invoices keep their existing renderer and
+editing rules.
+
+For new order-numbered invoices, the customer-facing number is the order number
+frozen as `documentOptions.displayNumber` with `numberSource: "ORDER"`. The SQL
+`Invoice.number` remains an independent unique registration key so multiple
+documents for one order retain separate IDs and retry/audit history. Public
+projections and download filenames use the frozen customer-facing number;
+older documents without this provenance keep their original number.
+
+When the template enables its logo, new invoice previews embed the same image
+used by the CRM header (or its built-in BrandMark fallback). The API reads only
+the local, validated branding asset, converts it to a bounded PNG and embeds it
+in the frozen HTML/PDF. Later branding changes do not alter saved documents.
+
+An Invoice Preview is an actor-scoped, expiring frozen proposal. It creates no
+Invoice or numbering reservation. Explicit save is idempotent and revalidates
+that the order and template are active while retaining the previewed contents.
+Copy creates a separate document from current order data and a selected template,
+with `sourceInvoiceId` lineage. Invoice archive hides the active-list entry and
+retains its artifact and audit history.
+
+### Document Template and Order Document
+
+`DocumentTemplate` is an administrator-managed structured layout for an invoice,
+customer card, order summary or another client-facing order document. Templates
+select keys from the server-owned public field catalogue and may store seller and
+payment text. They cannot execute HTML, JavaScript or arbitrary template code.
+
+`OrderDocument` is a generated non-invoice document linked to one active order.
+It stores the selected template and allowed order data as immutable snapshots;
+the historical document remains readable when source data changes. Invoices keep
+their established numbering, status and payment semantics and are not folded into
+this generic model.
 
 ### Official Exchange Rate
 

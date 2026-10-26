@@ -1,96 +1,69 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
-import { financeUi } from "../lib/i18n";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Checkbox, Group, Select, SimpleGrid, Switch, TextInput, Textarea } from "@mantine/core";
+import { financeUi, settingsUi, invoiceWorkflowUi } from "../lib/i18n";
 import { CrmModal } from "./crm/modal";
+import { CrmActionIcon, CrmButton } from "./crm/settings-controls";
+import { InvoiceWorkflow, InvoiceDocumentPreview, InvoiceStatusControl } from "./invoice-workflow";
 
-export type InvoiceItem = { description: string; quantity: number; amountMinor: number };
+export type InvoiceItem = { description: string; quantity: number; amountMinor: number; properties?: string[] };
+type Language = "ru" | "uk" | "en" | "fr";
+type TemplateKind = "INVOICE" | "ORDER_SUMMARY" | "CUSTOMER_CARD" | "CUSTOM";
+type TemplateConfig = { title: string; fieldKeys: string[]; showLogo: boolean; seller: { name: string; address: string }; payment: { receiver: string; iban: string; bic: string; instructions: string } };
+type DocumentTemplate = { id: string; name: string; kind: TemplateKind; language: Language; active: boolean; builtIn: boolean; config: TemplateConfig };
+type FieldDefinition = { key: string; group: keyof typeof financeUi.fieldGroups; label: Record<Language, string>; kind: string };
+type FieldResponse = { definitions: FieldDefinition[]; snapshot: { items?: Array<{ description: string; quantity: number; amountMinor: number; properties?: string[] }> } };
 export type FinanceInvoice = {
   id: string; number: string; status: string; language: string; currency?: string;
   totalMinor: number; issueDate: string; dueDate?: string;
   seller?: { name: string; address?: string }; customer?: { name: string; address?: string };
-  items?: InvoiceItem[]; notes?: string;
+  items?: InvoiceItem[]; notes?: string; templateKey?: string; templateSnapshot?: TemplateConfig; documentOptions?: { title?: string; fieldKeys?: string[] };
 };
-type EditorOrder = {
-  id: string; priceMinor: number; currency: string; requiredDeliveryAt?: string;
-  client: { displayName: string; country?: string; language?: string };
-};
-type Props = {
-  order: EditorOrder; invoice?: FinanceInvoice;
-  request: (path: string, init?: RequestInit) => Promise<any>;
-  close: () => void; done: () => void;
-};
+type EditorOrder = { id: string; priceMinor: number; currency: string; requiredDeliveryAt?: string; client: { displayName: string; country?: string; language?: string } };
+type Props = { order: EditorOrder; invoice?: FinanceInvoice; request: (path: string, init?: RequestInit) => Promise<any>; close: () => void; done: () => void; nonInvoiceOnly?: boolean; canManageStatus?: boolean };
 
-export function InvoiceEditor({ order, invoice, request, close, done }: Props) {
+export function InvoiceEditor(props: Props) {
+  const immutable = Boolean(props.invoice?.documentOptions && (props.invoice.documentOptions as Record<string, unknown>).immutable);
+  if (immutable && props.invoice) return <InvoiceDocumentPreview title={`${invoiceWorkflowUi.invoice} ${props.invoice.number}`} number={props.invoice.number} language={props.invoice.language} currency={props.invoice.currency || props.order.currency} totalMinor={props.invoice.totalMinor} issueDate={props.invoice.issueDate} documentUrl={`/api/finance/invoices/${encodeURIComponent(props.invoice.id)}/document`} onClose={props.close} statusControl={props.canManageStatus ? <InvoiceStatusControl invoice={props.invoice} request={props.request} done={props.done}/> : undefined}/>;
+  return <LegacyInvoiceEditor {...props}/>;
+}
+
+export function NewTemplateInvoice({ order, request, close, done }: Props) { return <InvoiceWorkflow order={order} request={request} close={close} done={done}/>; }
+
+function LegacyInvoiceEditor({ order, invoice, request, close, done, nonInvoiceOnly }: Props) {
   const [items, setItems] = useState<InvoiceItem[]>(invoice?.items?.length ? invoice.items : [{ description: financeUi.defaultProduct, quantity: 1, amountMinor: order.priceMinor }]);
-  const [seller, setSeller] = useState(invoice?.seller?.name || "Yoleotard");
-  const [sellerAddress, setSellerAddress] = useState(invoice?.seller?.address || financeUi.defaultCountry);
-  const [customer, setCustomer] = useState(invoice?.customer?.name || order.client.displayName);
-  const [customerAddress, setCustomerAddress] = useState(invoice?.customer?.address || order.client.country || "");
-  const [notes, setNotes] = useState(invoice?.notes || "");
-  const [issueDate, setIssueDate] = useState((invoice?.issueDate || new Date().toISOString()).slice(0, 10));
-  const [dueDate, setDueDate] = useState(invoice?.dueDate?.slice(0, 10) || order.requiredDeliveryAt?.slice(0, 10) || "");
-  const [language, setLanguage] = useState(invoice?.language || order.client.language || "ru");
-  const [status, setStatus] = useState(invoice?.status || "DRAFT");
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]), [definitions, setDefinitions] = useState<FieldDefinition[]>([]), [templateKey, setTemplateKey] = useState(invoice?.templateKey || "builtin-invoice-en-sepa"), [fieldKeys, setFieldKeys] = useState<string[]>(invoice?.documentOptions?.fieldKeys || invoice?.templateSnapshot?.fieldKeys || []);
+  const [seller, setSeller] = useState(invoice?.seller?.name || "Yoleotard"), [sellerAddress, setSellerAddress] = useState(invoice?.seller?.address || financeUi.defaultCountry), [customer, setCustomer] = useState(invoice?.customer?.name || order.client.displayName), [customerAddress, setCustomerAddress] = useState(invoice?.customer?.address || order.client.country || "");
+  const [showLogo, setShowLogo] = useState(invoice?.templateSnapshot?.showLogo ?? true), [documentTitle, setDocumentTitle] = useState(invoice?.documentOptions?.title || invoice?.templateSnapshot?.title || "INVOICE");
+  const [notes, setNotes] = useState(invoice?.notes || ""), [issueDate, setIssueDate] = useState((invoice?.issueDate || new Date().toISOString()).slice(0, 10)), [dueDate, setDueDate] = useState(invoice?.dueDate?.slice(0, 10) || order.requiredDeliveryAt?.slice(0, 10) || ""), [language, setLanguage] = useState<Language>((invoice?.language as Language) || (order.client.language as Language) || "en"), [status, setStatus] = useState(invoice?.status || "DRAFT");
+  const [saving, setSaving] = useState(false), [previewing, setPreviewing] = useState(false), [saveError, setSaveError] = useState(""), [previewUrl, setPreviewUrl] = useState("");
+  const selectedTemplate = templates.find(item => item.id === templateKey), selectedKind = selectedTemplate?.kind || "INVOICE", groups = useMemo(() => Object.keys(financeUi.fieldGroups) as FieldDefinition["group"][], []), contentLocked = Boolean(invoice?.templateSnapshot && invoice.status !== "DRAFT");
 
-  useEffect(() => {
-    if (invoice) return;
-    request("/finance/settings").then((settings: { key: string; value: unknown }[]) => {
-      for (const item of settings) {
-        if (item.key === "sellerName" && typeof item.value === "string") setSeller(item.value);
-        if (item.key === "sellerAddress" && typeof item.value === "string") setSellerAddress(item.value);
-      }
-    }).catch(() => {});
-  }, [invoice, request]);
+useEffect(() => { let cancelled = false; Promise.all([request("/finance/document-templates"), request(`/finance/document-fields/${encodeURIComponent(order.id)}`), request("/finance/settings").catch(() => [])]).then(([templateRows, fieldRows, settings]: [DocumentTemplate[], FieldResponse, { key: string; value: unknown }[]]) => { if (cancelled) return; const available = templateRows.filter(item => !nonInvoiceOnly || item.kind !== "INVOICE"); setTemplates(available.filter(item => item.active || item.id === invoice?.templateKey)); setDefinitions(fieldRows.definitions); const initial = available.find(item => item.id === templateKey) || available.find(item => item.active && (nonInvoiceOnly || item.kind === "INVOICE")); if (invoice && !fieldKeys.length && initial) setFieldKeys(initial.config.fieldKeys); if (!invoice) { const sourceItems = fieldRows.snapshot.items || [], properties = sourceItems.flatMap(item => [...(sourceItems.length > 1 ? [item.description] : []), ...(item.properties || [])]).filter(Boolean).slice(0, 20); setItems([{ description: financeUi.defaultProduct, quantity: 1, amountMinor: order.priceMinor, properties }]); if (initial) applyTemplate(initial); for (const item of settings) { if (item.key === "sellerName" && typeof item.value === "string" && !initial?.config.seller.name) setSeller(item.value); if (item.key === "sellerAddress" && typeof item.value === "string" && !initial?.config.seller.address) setSellerAddress(item.value); } } }).catch(reason => !cancelled && setSaveError((reason as Error).message)); return () => { cancelled = true; }; }, [invoice, order.id, request, nonInvoiceOnly]);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
-  const total = items.reduce((sum, item) => sum + item.quantity * item.amountMinor, 0);
-  function updateItem(index: number, patch: Partial<InvoiceItem>) {
-    setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
-  }
+  function applyTemplate(template: DocumentTemplate) { setTemplateKey(template.id); setFieldKeys(template.config.fieldKeys); setLanguage(template.language); setDocumentTitle(template.config.title); setShowLogo(template.config.showLogo); setSeller(template.config.seller.name || "Yoleotard"); setSellerAddress(template.config.seller.address || financeUi.defaultCountry); setPreviewUrl(current => { if (current) URL.revokeObjectURL(current); return ""; }); }
+  function updateItem(index: number, patch: Partial<InvoiceItem>) { setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)); }
   function addInvoiceItem() { setItems(current => [...current, { description: "", quantity: 1, amountMinor: 0 }]); }
   function removeInvoiceItem(index: number) { setItems(current => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)); }
+  function toggleField(key: string, checked: boolean) { setFieldKeys(current => checked ? [...new Set([...current, key])] : current.filter(item => item !== key)); }
+  const documentPayload = () => ({ orderId: order.id, templateKey, fieldKeys, language, title: documentTitle, documentTitle, seller: { name: seller, address: sellerAddress }, customer: { name: customer, address: customerAddress }, showLogo, notes, issueDate: new Date(`${issueDate}T12:00:00Z`).toISOString(), dueDate: dueDate ? new Date(`${dueDate}T12:00:00Z`).toISOString() : undefined, items });
+async function preview() { setPreviewing(true); setSaveError(""); try { const savedDocument = Boolean(invoice?.id && (contentLocked || !invoice.templateSnapshot)), response = await fetch(savedDocument ? `/api/finance/invoices/${encodeURIComponent(invoice!.id)}/document` : "/api/finance/documents/preview", savedDocument ? { credentials: "include" } : { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(documentPayload()) }); if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(Array.isArray(body.message) ? body.message.join("; ") : body.message || financeUi.documentPreviewError); } const url = URL.createObjectURL(await response.blob()); setPreviewUrl(current => { if (current) URL.revokeObjectURL(current); return url; }); } catch (error) { setSaveError((error as Error).message); } finally { setPreviewing(false); } }
+async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setSaveError(""); try { const payload = documentPayload(); if (invoice?.id) await request(`/finance/invoices/${invoice.id}`, { method: "PATCH", body: JSON.stringify(contentLocked ? { status } : { language, dueDate: payload.dueDate || null, status, seller: payload.seller, customer: payload.customer, items, notes }) }); else if (selectedKind === "INVOICE") { const { title: _title, ...invoicePayload } = payload; await request("/finance/invoices", { method: "POST", body: JSON.stringify(invoicePayload) }); } else { const { items: _items, ...orderDocumentPayload } = payload; await request("/finance/documents", { method: "POST", body: JSON.stringify(orderDocumentPayload) }); } done(); } catch (error) { setSaveError((error as Error).message); } finally { setSaving(false); } }
+  const total = items.reduce((sum, item) => sum + item.quantity * item.amountMinor, 0);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault(); setSaving(true); setSaveError("");
-    try {
-      const common = {
-        language, dueDate: dueDate ? new Date(dueDate + "T12:00:00Z").toISOString() : null,
-        status, seller: { name: seller, address: sellerAddress }, customer: { name: customer, address: customerAddress }, items, notes
-      };
-      await request(invoice?.id ? "/finance/invoices/" + invoice.id : "/finance/invoices", {
-        method: invoice?.id ? "PATCH" : "POST",
-        body: JSON.stringify(invoice?.id ? common : { ...common, orderId: order.id, issueDate: new Date(issueDate + "T12:00:00Z").toISOString() })
-      });
-      done();
-    } catch (error) { setSaveError((error as Error).message); } finally { setSaving(false); }
-  }
-
-  return <CrmModal title={invoice ? financeUi.editInvoice : financeUi.invoiceEditor} close={close} busy={saving} className="invoice-editor-modal">
-    <form className="finance-form invoice-editor-form" onSubmit={submit}>
-      {saveError && <div className="phase2-error wide">{saveError}</div>}
-      <label>{financeUi.seller}<input data-autofocus required value={seller} onChange={e => setSeller(e.target.value)} /></label>
-      <label>{financeUi.sellerAddress}<input value={sellerAddress} onChange={e => setSellerAddress(e.target.value)} /></label>
-      <label>{financeUi.client}<input required value={customer} onChange={e => setCustomer(e.target.value)} /></label>
-      <label>{financeUi.customerAddress}<input value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} /></label>
-      <label>{financeUi.issueDate}<input type="date" required disabled={Boolean(invoice)} value={issueDate} onChange={e => setIssueDate(e.target.value)} /></label>
-      <label>{financeUi.dueDate}<input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></label>
-      <label>{financeUi.language}<select value={language} onChange={e => setLanguage(e.target.value)}><option value="ru">{financeUi.languageRu}</option><option value="en">{financeUi.languageEn}</option><option value="uk">{financeUi.languageUk}</option></select></label>
-      <label>{financeUi.invoiceStatus}<select value={status} disabled={!invoice} onChange={e => setStatus(e.target.value)}><option value="DRAFT">{financeUi.statusDraft}</option><option value="ISSUED">{financeUi.statusIssued}</option><option value="PAID">{financeUi.statusPaid}</option><option value="CANCELLED">{financeUi.statusCancelled}</option></select></label>
-      <div className="invoice-items wide">
-        <div className="invoice-items-title"><b>{financeUi.positions}</b><button type="button" onClick={addInvoiceItem}>{financeUi.addPosition}</button></div>
-        {items.map((item, index) => <div className="invoice-item-row" key={index}>
-          <label>{financeUi.description}<input required value={item.description} onChange={e => updateItem(index, { description: e.target.value })} /></label>
-          <label>{financeUi.quantity}<input type="number" min="1" step="1" required value={item.quantity} onChange={e => updateItem(index, { quantity: Math.max(1, Number(e.target.value)) })} /></label>
-          <label>{financeUi.unitPrice}<input type="number" min=".01" step=".01" required value={(item.amountMinor / 100).toFixed(2)} onChange={e => updateItem(index, { amountMinor: Math.round(Number(e.target.value) * 100) })} /></label>
-          <button type="button" className="invoice-remove" disabled={items.length === 1} aria-label={financeUi.removePosition} onClick={() => removeInvoiceItem(index)}>&times;</button>
-        </div>)}
-      </div>
-      <label className="wide">{financeUi.notes}<textarea value={notes} onChange={e => setNotes(e.target.value)} /></label>
-      <div className="invoice-total wide"><span>{financeUi.invoiceTotal}</span><strong>{money(total, invoice?.currency || order.currency)}</strong></div>
-      <button disabled={saving || !total} className="phase2-primary">{saving ? financeUi.saving : invoice ? financeUi.saveInvoice : financeUi.createInvoiceAction}</button>
-    </form>
-  </CrmModal>;
+  return <CrmModal title={invoice ? financeUi.editInvoice : financeUi.invoiceEditor} close={close} busy={saving || previewing} className="invoice-editor-modal"><form className="finance-form invoice-editor-form" onSubmit={submit}>
+    {saveError && <div className="phase2-error wide" role="alert">{saveError}</div>}
+    <Select className="wide" required label={financeUi.documentTemplate} value={templateKey} disabled={Boolean(invoice)} onChange={value => { const template = templates.find(item => item.id === value); if (template) applyTemplate(template); }} data={templates.map(item => ({ value: item.id, label: `${item.name} · ${settingsUi.documentTemplateKinds[item.kind]}` }))} nothingFoundMessage={financeUi.noDocumentTemplates}/>
+    <TextInput required label={financeUi.documentTitle} value={documentTitle} disabled={Boolean(invoice)} onChange={event => setDocumentTitle(event.currentTarget.value)}/><Select disabled={contentLocked} label={financeUi.language} value={language} onChange={value => value && setLanguage(value as Language)} data={[{ value: "ru", label: financeUi.languageRu }, { value: "uk", label: financeUi.languageUk }, { value: "en", label: financeUi.languageEn }, { value: "fr", label: financeUi.languageFr }]}/>
+    <TextInput required disabled={contentLocked} label={financeUi.seller} value={seller} onChange={event => setSeller(event.currentTarget.value)}/><Textarea disabled={contentLocked} label={financeUi.sellerAddress} value={sellerAddress} onChange={event => setSellerAddress(event.currentTarget.value)}/><TextInput required disabled={contentLocked} label={financeUi.customer} value={customer} onChange={event => setCustomer(event.currentTarget.value)}/><Textarea disabled={contentLocked} label={financeUi.customerAddress} value={customerAddress} onChange={event => setCustomerAddress(event.currentTarget.value)}/>
+    <TextInput type="date" required disabled={Boolean(invoice)} label={financeUi.issueDate} value={issueDate} onChange={event => setIssueDate(event.currentTarget.value)}/><TextInput type="date" disabled={contentLocked} label={financeUi.dueDate} value={dueDate} onChange={event => setDueDate(event.currentTarget.value)}/>
+    {invoice && <Select label={financeUi.invoiceStatus} value={status} onChange={value => value && setStatus(value)} data={[{ value: "DRAFT", label: financeUi.statusDraft }, { value: "ISSUED", label: financeUi.statusIssued }, { value: "PAID", label: financeUi.statusPaid }, { value: "CANCELLED", label: financeUi.statusCancelled }]}/>}<Switch className="invoice-logo-switch" checked={showLogo} disabled={Boolean(invoice)} onChange={event => setShowLogo(event.currentTarget.checked)} label={financeUi.showLogo}/>
+    <fieldset className="invoice-fields wide"><legend>{financeUi.documentFields}</legend><p>{financeUi.documentFieldsHint}</p>{groups.map(group => <div key={group}><strong>{financeUi.fieldGroups[group]}</strong><SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{definitions.filter(item => item.group === group).map(item => <Checkbox key={item.key} checked={fieldKeys.includes(item.key)} disabled={Boolean(invoice)} onChange={event => toggleField(item.key, event.currentTarget.checked)} label={item.label.ru}/>)}</SimpleGrid></div>)}</fieldset>
+    {selectedKind === "INVOICE" && <div className="invoice-items wide"><div className="invoice-items-title"><b>{financeUi.positions}</b><CrmButton type="button" tone="secondary" size="compact-xs" disabled={contentLocked} onClick={addInvoiceItem}>{financeUi.addPosition}</CrmButton></div>{items.map((item, index) => <div className="invoice-item-row" key={index}><TextInput className="invoice-item-description" required disabled={contentLocked} label={financeUi.description} value={item.description} onChange={event => updateItem(index, { description: event.currentTarget.value })}/><TextInput type="number" min="1" step="1" required disabled={contentLocked} label={financeUi.quantity} value={item.quantity} onChange={event => updateItem(index, { quantity: Math.max(1, Number(event.currentTarget.value)) })}/><TextInput type="number" min=".01" step=".01" required disabled={contentLocked} label={financeUi.unitPrice} value={(item.amountMinor / 100).toFixed(2)} onChange={e => updateItem(index, { amountMinor: Math.round(Number(e.target.value) * 100) })}/><CrmActionIcon type="button" className="invoice-remove" disabled={contentLocked || items.length === 1} aria-label={financeUi.removePosition} onClick={() => removeInvoiceItem(index)}>&times;</CrmActionIcon></div>)}</div>}
+    <Textarea className="wide" disabled={contentLocked} label={financeUi.notes} value={notes} onChange={event => setNotes(event.currentTarget.value)}/>{selectedKind === "INVOICE" && <div className="invoice-total wide"><span>{financeUi.invoiceTotal}</span><strong>{money(total, invoice?.currency || order.currency)}</strong></div>}
+    {previewUrl && <div className="invoice-preview wide"><header><strong>{financeUi.documentPreview}</strong><CrmButton type="button" tone="secondary" size="compact-xs" onClick={() => setPreviewUrl(current => { if (current) URL.revokeObjectURL(current); return ""; })}>{financeUi.documentPreviewClose}</CrmButton></header><iframe title={financeUi.documentPreview} src={previewUrl}/></div>}
+    <Group className="wide" justify="flex-end"><CrmButton type="button" tone="secondary" loading={previewing} disabled={!fieldKeys.length} onClick={() => void preview()}>{financeUi.documentPreview}</CrmButton><CrmButton type="submit" loading={saving} disabled={!fieldKeys.length || (selectedKind === "INVOICE" && !total)}>{invoice ? financeUi.saveInvoice : selectedKind === "INVOICE" ? financeUi.createInvoiceAction : financeUi.createDocumentAction}</CrmButton></Group>
+  </form></CrmModal>;
 }
 function money(value: number, currency: string) { return new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(value / 100); }
-

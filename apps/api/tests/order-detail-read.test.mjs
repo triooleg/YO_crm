@@ -27,17 +27,39 @@ const orderRequire = specifier => {
   if (specifier === "./order-model-image") return { ORDER_MODEL_IMAGE_ERROR: {}, OrderModelImageOperationError: class extends Error {}, persistOrderModelImage: async () => ({}) };
   if (specifier === "./order-details") return { ORDER_DETAILS_ERROR: {}, OrderDetailsOperationError: class extends Error {}, persistOrderDetails: async () => ({}) };
   if (specifier === "./order-item-details") return { ORDER_ITEM_DETAILS_ERROR: {}, OrderItemDetailsError: class extends Error {}, persistOrderItemDetails: async () => ({}) };
+  if (specifier === "./order-design-number") return { ORDER_DESIGN_NUMBER_ERROR: {}, OrderDesignNumberError: class extends Error {}, persistOrderDesignNumber: async () => ({}) };
   if (specifier === "./order-file-policy") return { buildOrderFileName: () => "file.pdf", decodeOrderFile: () => ({ originalName: "file.pdf", mimeType: "application/pdf", content: Buffer.from("file") }) };
   if (specifier === "./production-rules") return { DEFAULT_PRODUCTION_DURATION_DAYS: 21, DEFAULT_SHIPPING_LEAD_DAYS: 7, productionSetting: value => Number(value), productionWindow: () => ({}), requiresProduction: () => true, resolveProductionSlotTentative: () => true, violatesShippingLead: () => false };
   if (specifier === "./production-status-graph") return { updateProductionStatusGraph: async (tx, orderId, productionStatus, orderData = {}) => tx.order.update({ where: { id: orderId }, data: { ...orderData, productionStatus } }) };
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
-  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
   return nativeRequire(specifier);
 };
 vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
 const { OrdersService } = ordersModule.exports;
+
+test('order search includes the displayed external business number', async () => {
+  let where;
+  const service = new OrdersService({ order: { findMany: async query => { where = query.where; return []; } } }, {});
+  await service.list('706');
+  assert.equal(JSON.parse(JSON.stringify(where.OR)).some(term => term.externalNumber?.contains === '706'), true);
+});
+
+test('paged order metrics and website count exclude archived orders behaviorally', async () => {
+  const base = { type:'READY_MODEL', discipline:null, country:null, deliveryAddressSet:false, deliveryAddressText:null, deliveryAddressLine1:null, deliveryAddressLine2:null, deliveryCity:null, deliveryRegion:null, deliveryPostalCode:null, deliveryTrackingCode:null, requiredDeliveryAt:null, promisedProductionAt:null, priority:false, deliveryMinor:0, discountMinor:0, taxMinor:0, giftWrapMinor:0, paymentStatus:'UNPAID', modelImagePath:null, externalImageUrl:null, notes:null, buyerComment:null, managerComment:null, giftMessage:null, promocode:null, isGift:false, externalUpdatedAt:null, productionSlot:null, athlete:null, measurement:null, activities:[], files:[], invoices:[], shipment:null, orderShipments:[], expenses:[], compositionOperations:[], _count:{items:1}, currency:'EUR', priceMinor:10000, depositRequiredMinor:5000, salesStatus:'NEW_LEAD', productionStatus:'NOT_SCHEDULED', shippingStatus:'NOT_READY', client:{id:'client',displayName:'Buyer',country:null,city:null,address:null,postalCode:null,language:null,source:'WEBSITE',phone:null,email:null,facebook:null,instagram:null,whatsapp:null,updatedAt:new Date()}, items:[{id:'item',name:'Leotard',quantity:1,priceMinor:10000,productionStatus:'NOT_SCHEDULED',instances:[]}], payments:[] };
+  const active = {...base,id:'active',number:'YO-708',createdAt:new Date('2026-10-23'),archivedAt:null,sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'calendar.yoleotard.com',sourceLinkMode:'IMPORTED',externalId:'261023',externalNumber:'#22734',externalData:{contractVersion:1}};
+  const archived = {...active,id:'archived',number:'YO-707',archivedAt:new Date('2026-10-22')};
+  const rows=[active,archived];
+  const db={order:{findMany:async query=>{
+    const selected=query.where?.archivedAt===null?rows.filter(row=>row.archivedAt===null):query.where?.id?.in?rows.filter(row=>query.where.id.in.includes(row.id)):rows;
+    return structuredClone(selected);
+  }},$transaction:async run=>run(db)};
+  const result=await new OrdersService(db,{}).list(undefined,{page:'1',pageSize:'20'});
+  assert.equal(result.metrics.total,1);assert.equal(result.sources.total,1);assert.equal(result.sources.websiteCount,1);assert.deepEqual(result.items.map(order=>order.id),['active']);
+});
 
 test("single-order detail uses the established broad-order read RBAC", () => {
   assert.match(controllerSource, /@Get\(":id"\)\s+@Roles\(UserRole\.OWNER, UserRole\.ADMIN, UserRole\.MANAGER\)\s+detail\(/);

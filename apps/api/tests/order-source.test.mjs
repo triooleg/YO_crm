@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {loadTargetModule} from './overview-target-loader.mjs';
 const {classifyOrderSource,matchesOrderSource,normalizeOrderSourceFilter,CONFIRMED_WEBSITE_SOURCE,countOrderSources}=loadTargetModule('orders/order-source.ts');
 const imported=(name,extra={})=>({sourceSystem:'KEYCRM',sourceAccount:'account',externalId:'42',activities:[{type:'KEYCRM_ORDER_IMPORTED',createdAt:new Date('2026-09-01'),metadata:{keycrmOrderId:'42',sourceName:name}}],...extra});
@@ -74,4 +75,21 @@ test('server source paging counts the whole cohort and composes source, search c
 
 test('native creation plus external import is ambiguous and does not relabel historical native order',()=>{
  assert.equal(classifyOrderSource(imported('yoleotard.com',{activities:[{type:'ORDER_CREATED'},{type:'KEYCRM_ORDER_IMPORTED',metadata:{keycrmOrderId:'42',sourceName:'yoleotard.com'}}]})),'UNKNOWN');
+});
+
+test('latest explicit staff override wins without rewriting provider provenance',()=>{
+ const order=imported('Instagram',{activities:[
+  {type:'ORDER_SOURCE_OVERRIDDEN',metadata:{source:'WHATSAPP'}},
+  {type:'KEYCRM_ORDER_SYNCED',metadata:{keycrmOrderId:'42',sourceName:'Instagram'}},
+  {type:'ORDER_SOURCE_OVERRIDDEN',metadata:{source:'FACEBOOK'}},
+ ]});
+ assert.equal(classifyOrderSource(order),'WHATSAPP');
+ assert.equal(classifyOrderSource({...order,activities:[{type:'ORDER_SOURCE_OVERRIDDEN',metadata:{source:'KEYCRM'}}]}),'UNKNOWN');
+});
+
+test('explicit staff override remains inside the bounded projection after more than 101 provider events',()=>{
+ const source=readFileSync(new URL('../src/orders/order-source.ts',import.meta.url),'utf8');
+ assert.match(source,/orderBy:\[\{type:'desc'\},\{createdAt:'desc'\},\{id:'desc'\}\],take:101/);
+ const activities=[{type:'ORDER_SOURCE_OVERRIDDEN',metadata:{source:'WHATSAPP'}},...Array.from({length:120},()=>({type:'KEYCRM_ORDER_SYNCED',metadata:{keycrmOrderId:'42',sourceName:'Instagram'}}))];
+ assert.equal(classifyOrderSource({...imported('Instagram'),activities}),'WHATSAPP');
 });

@@ -7,7 +7,8 @@ import {websiteDatabase} from './fixtures/website-orders-database.mjs';
 const require=createRequire(import.meta.url),{NestFactory}=require('@nestjs/core'),{Module,ValidationPipe}=require('@nestjs/common'),{json}=require('express');
 const {WebsiteOrdersController,WebsiteOrdersExceptionFilter}=loadTargetModule('website-orders/website-orders.controller.ts');
 const {WebsiteOrdersService}=loadTargetModule('website-orders/website-orders.service.ts');
-const {WebsiteOrdersGuard,websiteOrdersSecurity,websiteOrdersBodyError}=loadTargetModule('website-orders/website-orders-security.ts');
+const {WebsiteOrdersGuard,createWebsiteOrdersSecurity,websiteOrdersBodyError}=loadTargetModule('website-orders/website-orders-security.ts');
+const {WebsiteApiKeysService}=loadTargetModule('website-api-keys/website-api-keys.service.ts');
 const {TaxesModule}=loadTargetModule('taxes/taxes.module.ts'),{TaxesService}=loadTargetModule('taxes/taxes.service.ts');
 const {WebsiteOrdersModule}=loadTargetModule('website-orders/website-orders.module.ts');
 const {PrismaModule}=loadTargetModule('prisma.module.ts'),{PrismaService}=loadTargetModule('prisma.service.ts');
@@ -18,7 +19,7 @@ test('actual HTTP bearer/JSON boundary creates and replays orders with full prop
  Reflect.defineMetadata('providers',[{provide:PrismaService,useValue:db}],PrismaModule);
  Reflect.defineMetadata('providers',[{provide:TaxesService,useValue:{capturePayment:async()=>{}}}],TaxesModule);
  class TestModule{}Module({imports:[WebsiteOrdersModule]})(TestModule);
- const app=await NestFactory.create(TestModule,{logger:false,bodyParser:false});app.setGlobalPrefix('api');app.use('/api/integrations/website/orders',websiteOrdersSecurity,json({limit:'256kb'}),websiteOrdersBodyError);app.useGlobalPipes(new ValidationPipe({whitelist:true,transform:true}));await app.listen(0,'127.0.0.1');
+ const app=await NestFactory.create(TestModule,{logger:false,bodyParser:false});app.setGlobalPrefix('api');app.use('/api/integrations/website/orders',createWebsiteOrdersSecurity(app.get(WebsiteApiKeysService)),json({limit:'256kb'}),websiteOrdersBodyError);app.useGlobalPipes(new ValidationPipe({whitelist:true,transform:true}));await app.listen(0,'127.0.0.1');
  const request=async(body,auth=token)=>fetch((await app.getUrl())+'/api/integrations/website/orders',{method:'POST',headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer '+auth}:{})},body:typeof body==='string'?body:JSON.stringify(body)});
  try{
   for(const auth of ['',token+'wrong']){const r=await request(websitePayload(),auth);assert.equal(r.status,401);assert.deepEqual(Object.keys(await r.json()).sort(),['code','message','ok']);}assert.equal(db.state.order.length,0);

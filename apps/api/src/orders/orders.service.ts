@@ -1,8 +1,9 @@
 import type { TaxesService } from "../taxes/taxes.service";
 import { createMeasurementData, inheritMeasurementDefinition } from "../clients/measurement-data";
 import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
-import {loadOrderSourceMap,matchesOrderSource} from './order-source';
+import {classifyOrderSource,loadOrderSourceMap,matchesOrderSource,persistOrderSourceOverride} from './order-source';
 import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,type OrderListReadQuery} from './order-list-read-model';
+import { presentInvoice } from "../finance/invoice-number";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
@@ -12,8 +13,9 @@ import { ProductionStatus, type Prisma, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
+import { websiteOrderCardFee } from "./website-order-fee";
 import { uploadsRoot } from "../uploads";
-import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
+import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDesignNumberDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderSourceDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
 import { archiveOrdersTransaction, OrderArchiveError, ORDER_ARCHIVE_ERROR } from "./order-archive";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
@@ -23,6 +25,7 @@ import { isOrderImageName } from "./order-image-name";
 import { ORDER_MODEL_IMAGE_ERROR, OrderModelImageOperationError, persistOrderModelImage } from "./order-model-image";
 import { ORDER_DETAILS_ERROR, OrderDetailsOperationError, persistOrderDetails } from "./order-details";
 import { ORDER_ITEM_DETAILS_ERROR, OrderItemDetailsError, persistAddedOrderItem, persistOrderItemDetails, reconcileOrderItemInstances } from "./order-item-details";
+import { ORDER_DESIGN_NUMBER_ERROR, OrderDesignNumberError, persistOrderDesignNumber } from "./order-design-number";
 import { keycrmSourceChannel } from "../keycrm/keycrm-normalizer";
 import { buildOrderFileName, decodeOrderFile } from "./order-file-policy";
 import { updateProductionStatusGraph as applyProductionStatusGraph } from "./production-status-graph";
@@ -93,6 +96,51 @@ export class OrdersService {
     };
   }
 
+  async websiteNotifications() {
+    const where: Prisma.OrderWhereInput = { archivedAt: null, websiteNoticeAt: { not: null }, websiteReviewedAt: null };
+    const [items, unreadCount] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        orderBy: [{ websiteNoticeAt: "desc" }, { createdAt: "desc" }],
+        take: 5,
+        select: {
+          id: true,
+          number: true,
+          paymentStatus: true,
+          priceMinor: true,
+          currency: true,
+          websiteNoticeAt: true,
+          client: { select: { displayName: true } },
+        },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+    return { unreadCount, items };
+  }
+
+  async reviewWebsiteNotification(orderId: string, actor: User) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', orderId);
+      const order = await tx.order.findFirst({
+        where: { id: orderId, archivedAt: null },
+        select: { id: true, websiteNoticeAt: true, websiteReviewedAt: true },
+      });
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (!order.websiteNoticeAt || order.websiteReviewedAt) return { reviewed: false };
+      const reviewedAt = new Date();
+      await tx.order.update({ where: { id: orderId }, data: { websiteReviewedAt: reviewedAt } });
+      await tx.auditLog.create({ data: {
+        actorId: actor.id,
+        action: "UPDATE",
+        entityType: "WebsiteOrderNotification",
+        entityId: orderId,
+        before: { websiteReviewedAt: null },
+        after: { websiteReviewedAt: reviewedAt.toISOString() },
+      } });
+      return { reviewed: true, reviewedAt };
+    });
+  }
+
   async list(search?: string, overview?: OrderListReadQuery) {
     const options=normalizeOrderListRead(overview??{}),paged=overview?.page!==undefined||overview?.pageSize!==undefined;
     const query=search?.trim();if((query?.length??0)>200)throw new BadRequestException('Слишком длинный поиск заказов');
@@ -100,6 +148,7 @@ export class OrdersService {
       const overviewIds=overview?.overviewFilter||overview?.period?await (await import('../overview/overview-order-model')).resolveOverviewOrderIds(db,overview):undefined;
       const where:Prisma.OrderWhereInput={ archivedAt: null, ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
         { number: { contains: query, mode: "insensitive" as const } },
+        { externalNumber: { contains: query, mode: "insensitive" as const } },
         { client: { displayName: { contains: query, mode: "insensitive" as const } } },
         { athlete: { is: { firstName: { contains: query, mode: "insensitive" as const } } } },
         { athlete: { is: { lastName: { contains: query, mode: "insensitive" as const } } } },
@@ -117,7 +166,7 @@ export class OrdersService {
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
         paymentStatus: true, shippingStatus: true, modelImagePath: true, externalImageUrl: true, notes: true,
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
-        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
+        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true, externalData: true,
         createdAt: true, productionSlot: true,
         client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
@@ -125,7 +174,7 @@ export class OrdersService {
         items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { instances: { where: { archivedAt: null }, select: { id: true, ordinal: true, updatedAt: true, productionStatus: true, standardHeight: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true } } } }, id: true, archivedAt: true, discipline: true, notes: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
         files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
-        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
+        payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, templateKey: true, documentOptions: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       } satisfies Prisma.OrderSelect;
       if(paged){
         const candidates:Prisma.OrderGetPayload<{select:typeof orderListCandidateSelect}>[]=[];let cursor:string|undefined;
@@ -135,11 +184,11 @@ export class OrdersService {
         const pageIds=result.items.map(order=>order.id);
         const rich=pageIds.length?await db.order.findMany({where:{id:{in:pageIds}},select:richSelect,take:options.pageSize}):[];
         const byId=new Map(rich.map(order=>[order.id,order]));
-        return {...result,items:pageIds.map(id=>{const order=byId.get(id)!;const {compositionOperations,_count,...visible}=order;return {...visible,compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!visible.items.length),orderSource:origins[id]??'UNKNOWN',client:presentClientContact(order.client)};})};
+        return {...result,items:pageIds.map(id=>{const order=byId.get(id)!;const {compositionOperations,_count,externalData,...visible}=order;return {...visible,...(visible.invoices?{invoices:visible.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee(order),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!visible.items.length),orderSource:origins[id]??'UNKNOWN',client:presentClientContact(order.client)};})};
       }
       const orders=await db.order.findMany({where,orderBy:[{requiredDeliveryAt:'asc'},{createdAt:'desc'}],select:richSelect});
       const origins=await loadOrderSourceMap(db,orders.map(order=>order.id));
-      return orders.map(({compositionOperations,_count,...order})=>({...order,compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!order.items.length),orderSource:origins[order.id]??'UNKNOWN',client:presentClientContact(order.client)})).filter(order=>matchesOrderSource(order.orderSource,options.source));
+      return orders.map(({compositionOperations,_count,externalData,...order})=>({...order,...(order.invoices?{invoices:order.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee({...order,externalData}),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!order.items.length),orderSource:origins[order.id]??'UNKNOWN',client:presentClientContact(order.client)})).filter(order=>matchesOrderSource(order.orderSource,options.source));
     };
     return paged?this.prisma.$transaction(read,{isolationLevel:'RepeatableRead',timeout:30000,maxWait:5000}):read(this.prisma);
   }
@@ -160,7 +209,7 @@ export class OrdersService {
         depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
         paymentStatus: true, shippingStatus: true, modelImagePath: true, externalImageUrl: true, notes: true,
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
-        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true,
+        sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true, externalData: true,
         createdAt: true, updatedAt: true, productionSlot: true,
         responsibleManager: { select: { id: true, displayName: true } },
         client: { select: {
@@ -203,7 +252,8 @@ export class OrdersService {
         notesStructured:{where:{archivedAt:null},orderBy:{createdAt:"desc"},include:{author:{select:{id:true,displayName:true}},files:true}},
         tags:{where:{archivedAt:null},orderBy:{createdAt:"asc"}},
         expenses:{where:{archivedAt:null},include:{category:true},orderBy:{incurredAt:"desc"}},
-        invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
+        invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, templateKey: true, documentOptions: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
+        documents: { where: { archivedAt: null }, select: { id: true, kind: true, title: true, language: true, createdAt: true }, orderBy: { createdAt: "desc" } },
       },
     });
     if (!order) throw new NotFoundException("Заказ не найден");
@@ -222,9 +272,9 @@ export class OrdersService {
     const athlete = legacyAthlete ? { id: legacyAthlete.id, firstName: legacyAthlete.firstName, lastName: legacyAthlete.lastName } : null;
     const presentedPaymentHistory = paymentHistory.map(({ sourceSystem, sourceAccount, externalId, ...payment }) => ({ ...payment, isImported: Boolean(sourceSystem || sourceAccount || externalId), canVoid: !payment.voidedAt && !sourceSystem && !sourceAccount && !externalId }));
     const origins=await loadOrderSourceMap(this.prisma,[order.id]);
-    const { compositionOperations, _count, ...visibleOrder } = order;
+    const { compositionOperations, _count, externalData, ...visibleOrder } = order;
     const compositionManaged = Boolean(compositionOperations?.length || _count?.items);
-    return { ...visibleOrder, compositionManaged, orderSource:origins[order.id]??'UNKNOWN', athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
+    return { ...visibleOrder, ...(order.invoices ? { invoices: order.invoices.map(presentInvoice) } : {}), websiteCardFeeMinor:websiteOrderCardFee(order), compositionManaged, orderSource:origins[order.id]??'UNKNOWN', athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
   }
 
   async productionList(orderId?: string, from?: string, to?: string, overviewFilter?: string) {
@@ -349,6 +399,9 @@ export class OrdersService {
       await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: order, after: updated } });
       return updated;
     });
+  }
+  async updateSource(orderId:string,dto:UpdateOrderSourceDto,actor:User){
+    return this.prisma.$transaction(tx=>persistOrderSourceOverride(tx,orderId,dto,actor.id,classifyOrderSource));
   }
   async updateManagerComment(orderId: string, dto: { managerComment: string | null; expectedManagerComment: string | null }, actor: User) {
     return this.prisma.$transaction(async tx => {
@@ -513,6 +566,10 @@ export class OrdersService {
       throw new ConflictException("Дизайн уже изменён другим пользователем. Обновите заказ и повторите действие");
     }
   }
+  async updateItemDesignNumber(orderId:string,itemId:string,dto:UpdateOrderItemDesignNumberDto,actor:User){
+    try{return await this.prisma.$transaction(tx=>persistOrderDesignNumber(tx,orderId,itemId,dto,actor.id));}
+    catch(error){if(!(error instanceof OrderDesignNumberError))throw error;if(error.code===ORDER_DESIGN_NUMBER_ERROR.notFound)throw new NotFoundException("Дизайн заказа не найден");if(error.code===ORDER_DESIGN_NUMBER_ERROR.operationConflict)throw new ConflictException("Ключ операции уже использован с другими данными");throw new ConflictException("Номер дизайна уже изменён другим пользователем. Обновите заказ и повторите действие");}
+  }
   async addItem(orderId:string,dto:AddOrderItemDto,actor:User){
     if(dto.modelImagePath){if(!isOrderImageName(dto.modelImagePath))throw new BadRequestException("Некорректное имя изображения заказа");try{const image=await stat(join(uploadsRoot(),"order-models",dto.modelImagePath));if(!image.isFile())throw new Error("not a file")}catch{throw new NotFoundException("Изображение заказа не найдено")}}
     try{return await this.prisma.$transaction(tx=>persistAddedOrderItem(tx,orderId,dto,actor.id))}catch(error){if(!(error instanceof OrderItemDetailsError))throw error;if(error.code===ORDER_ITEM_DETAILS_ERROR.orderNotFound)throw new NotFoundException("Заказ не найден");if(error.code===ORDER_ITEM_DETAILS_ERROR.athleteNotFound)throw new BadRequestException("Спортсмен не принадлежит клиенту этого заказа");if(error.code===ORDER_ITEM_DETAILS_ERROR.depositWouldUnconfirmProduction)throw new BadRequestException("Сначала внесите оплату до новой суммы предоплаты");if(error.code===ORDER_ITEM_DETAILS_ERROR.closed)throw new ConflictException({code:error.code,message:"Закрытый или отправленный заказ нельзя изменять через состав"});if(error.code===ORDER_ITEM_DETAILS_ERROR.unknownSettlement)throw new ConflictException({code:error.code,message:"Не удалось подтвердить сумму полученных оплат в валюте заказа"});if(error.code===ORDER_ITEM_DETAILS_ERROR.productionLocked)throw new ConflictException({code:error.code,message:"Количество нельзя изменить при закреплённом производственном слоте"});if(error.code===ORDER_ITEM_DETAILS_ERROR.totalTooLarge)throw new BadRequestException("Итоговая сумма заказа превышает допустимый предел");throw new ConflictException("Не удалось добавить дизайн")}
@@ -587,7 +644,7 @@ export class OrdersService {
     const orderBrief = await this.prisma.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { currency: true } });
     if (!orderBrief) throw new NotFoundException("Заказ не найден");
     if (currency !== orderBrief.currency) await this.exchangeRates.currentOrRefresh(actor);
-    return this.prisma.$transaction(async (tx) => {
+    const payment = await this.prisma.$transaction(async (tx) => {
       if (currency !== orderBrief.currency) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
@@ -617,9 +674,14 @@ export class OrdersService {
         await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "ProductionSlot", entityId: slot.id, before: order.productionSlot, after: slot } });
         if (updatedOrder.productionStatus !== order.productionStatus) await tx.auditLog.create({ data: { actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before: { productionStatus: order.productionStatus }, after: { productionStatus: updatedOrder.productionStatus } } });
       }
-      if (this.taxes) await this.taxes.capturePayment(tx, payment.id, "CREATE", actor.id);
+      const canConfirmTaxReceipt = ["OWNER", "ADMIN", "ACCOUNTANT"].includes(actor.role);
+      if (this.taxes) await this.taxes.capturePayment(tx, payment.id, "CREATE", actor.id, canConfirmTaxReceipt ? { receiptConfirmed: true, confirmedByRole: actor.role, evidence: "MANUAL_CRM_ENTRY" } : {});
       return payment;
     });
+    // The payment is already committed. A temporary rate problem must not create
+    // a duplicate receipt on retry; the scheduled reconciler will try again.
+    if (this.taxes) try { await this.taxes.reconcilePayment(payment.id); } catch {}
+    return payment;
   }
 
   async voidPayment(orderId: string, paymentId: string, dto: { reason: string; expectedOrderUpdatedAt: string }, actor: User) {

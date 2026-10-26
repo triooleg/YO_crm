@@ -23,6 +23,9 @@ function clearProductionContextAction() { window.history.replaceState(null, "", 
 
 export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props = {}) {
   const now = new Date(), contextOrderHandled = useRef(false), loadSequence = useRef(0);
+  const slotSaveQueues = useRef(new Map<string, Promise<void>>()), slotSaveVersions = useRef(new Map<string, number>());
+  const deadlineSaveQueues = useRef(new Map<string, Promise<void>>()), deadlineSaveVersions = useRef(new Map<string, number>());
+  const confirmedSlots = useRef(new Map<string, ProductionSlotView | undefined>()), confirmedDeadlines = useRef(new Map<string, string | undefined>());
   const [mode, setMode] = useState<ProductionRangeMode>("month");
   const [base, setBase] = useState(() => startOfCalendarWeek(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [orders, setOrders] = useState<ProductionOrderView[]>([]);
@@ -53,6 +56,8 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
       if (signal?.aborted || sequence !== loadSequence.current) return;
       if (!Number.isInteger(defaults.defaultDurationDays) || !Number.isInteger(defaults.shippingLeadDays)) { setProductionSettings(null); setError(productionUi.loadError); return; }
       const workingOrders=loadedOrders.filter(order=>order.salesStatus!=="COMPLETED");
+      confirmedSlots.current = new Map(workingOrders.map((order) => [order.id, order.productionSlot]));
+      confirmedDeadlines.current = new Map(workingOrders.map((order) => [order.id, order.requiredDeliveryAt]));
       setOrders(workingOrders); setProductionSettings(defaults);
       let contextError = "";
       if (!contextOrderHandled.current) {
@@ -99,13 +104,52 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   function setCapacityValue(value: number) { setCapacity(value); localStorage.setItem("production-capacity", String(value)); }
   function setPreviewWidthValue(value: number) { const safe = Math.max(200, Math.min(1200, Math.round(value))); setPreviewWidth(safe); localStorage.setItem(PREVIEW_WIDTH_KEY, String(safe)); }
 
-  async function saveSlot(order: ProductionOrderView, slot: ProductionSlotView) {
-    setError(""); const previous = order.productionSlot;
-    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: slot } : item));
-    const response = await fetch(`/api/orders/${order.id}/production-slot`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(slot) });
-    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.message || productionUi.saveError); setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: previous } : item)); await load(); return; }
-    const saved = await response.json() as ProductionSlotView;
-    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: saved } : item));
+  function saveSlot(order: ProductionOrderView, slot: ProductionSlotView) {
+    setError("");
+    const payload = { startsAt: slot.startsAt, endsAt: slot.endsAt, capacity: slot.capacity, tentative: slot.tentative, locked: slot.locked };
+    const version = (slotSaveVersions.current.get(order.id) ?? 0) + 1;
+    slotSaveVersions.current.set(order.id, version);
+    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: { ...slot, ...payload } } : item));
+    const operation = (slotSaveQueues.current.get(order.id) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      try {
+        const response = await fetch(`/api/orders/${order.id}/production-slot`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || productionUi.saveError); }
+        const saved = await response.json() as ProductionSlotView;
+        confirmedSlots.current.set(order.id, saved);
+        if (slotSaveVersions.current.get(order.id) === version) setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: saved } : item));
+      } catch (reason) {
+        if (slotSaveVersions.current.get(order.id) === version) {
+          setError(reason instanceof Error ? reason.message : productionUi.saveError);
+          setOrders((list) => list.map((item) => item.id === order.id ? { ...item, productionSlot: confirmedSlots.current.get(order.id) } : item));
+        }
+      }
+    });
+    slotSaveQueues.current.set(order.id, operation);
+    void operation.finally(() => { if (slotSaveQueues.current.get(order.id) === operation) slotSaveQueues.current.delete(order.id); });
+  }
+
+  function saveDeadline(order: ProductionOrderView, requiredDeliveryAt: string) {
+    setError("");
+    const version = (deadlineSaveVersions.current.get(order.id) ?? 0) + 1;
+    deadlineSaveVersions.current.set(order.id, version);
+    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, requiredDeliveryAt } : item));
+    const operation = (deadlineSaveQueues.current.get(order.id) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      try {
+        const response = await fetch(`/api/orders/${order.id}/deadline`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requiredDeliveryAt }) });
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || productionUi.deadlineSaveError); }
+        const saved = await response.json() as { requiredDeliveryAt?: string };
+        const confirmed = saved.requiredDeliveryAt || requiredDeliveryAt;
+        confirmedDeadlines.current.set(order.id, confirmed);
+        if (deadlineSaveVersions.current.get(order.id) === version) setOrders((list) => list.map((item) => item.id === order.id ? { ...item, requiredDeliveryAt: confirmed } : item));
+      } catch (reason) {
+        if (deadlineSaveVersions.current.get(order.id) === version) {
+          setError(reason instanceof Error ? reason.message : productionUi.deadlineSaveError);
+          setOrders((list) => list.map((item) => item.id === order.id ? { ...item, requiredDeliveryAt: confirmedDeadlines.current.get(order.id) } : item));
+        }
+      }
+    });
+    deadlineSaveQueues.current.set(order.id, operation);
+    void operation.finally(() => { if (deadlineSaveQueues.current.get(order.id) === operation) deadlineSaveQueues.current.delete(order.id); });
   }
 
   async function deleteSlot() {
@@ -165,6 +209,8 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
           }}
           onOpenOrder={onOpenOrder && canManageOrders ? () => onOpenOrder(selectedOrder.id) : undefined}
           onSaveSlot={(slot) => void saveSlot(selectedOrder, slot)}
+          onSaveDeadline={(value) => void saveDeadline(selectedOrder, value)}
+          canEdit={canManageOrders}
           onDeleteSlot={() => setSlotDeleteOpen(true)}
         />
       )}

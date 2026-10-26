@@ -113,13 +113,22 @@ test("Orders redesign has isolated responsive table and expanded layout", () => 
   assert.match(css, /overflow-x:auto/);
 });
 
+test("финансы заказа используют пропорцию 40/20/40 без горизонтальных полос",()=>{
+  assert.match(css,/\.orders-tab-finance-approved\{[^}]*grid-template-columns:minmax\(0,2fr\) minmax\(0,1fr\) minmax\(0,2fr\)/);
+  assert.match(css,/\.tax-order-finance \.orders-finance-reference-main\{[^}]*grid-template-columns:minmax\(0,2fr\) minmax\(0,1fr\) minmax\(0,2fr\)/);
+  assert.match(css,/\.orders-finance-scroll\{[^}]*overflow-x:visible/);
+  for(const selector of ["orders-finance-table","orders-finance-payments","orders-finance-expenses","orders-finance-invoices"]){
+    assert.match(css,new RegExp(`\\.${selector}\\{[^}]*min-width:0`));
+  }
+});
+
 test("Orders summary keeps headers aligned and exposes the canonical order number", () => {
   assert.match(dashboard, /<colgroup><col className="orders-controls"\s*\/?>\{visibleColumns\.map\(\(id\) => <col key=\{id\} className=\{`orders-col orders-col-\$\{id\}`\}\s*\/?>\)\}<\/colgroup>/);
   assert.match(css, /\.orders-dashboard-table\{[^}]*table-layout:fixed/);
   assert.match(css, /\.orders-dashboard-table thead\{[^}]*display:table-header-group!important/);
   assert.match(css, /\.orders-dashboard-table tbody\{[^}]*display:table-row-group!important/);
   assert.match(css, /tbody>tr:not\(\.orders-expanded-row\)\{display:table-row!important;grid-template-columns:none!important/);
-  assert.match(dashboard, /orders-order-number[^>]*onClick=\{onExpand\}[^>]*>\{order\.number\}/);
+  assert.match(dashboard, /orders-order-number[^>]*onClick=\{onExpand\}[^>]*>\{orderDisplayNumber\(order\)\}/);
   assert.match(dashboard, /orders-menu-button[^>]*onClick=\{onExpand\}/);
   assert.doesNotMatch(dashboard, /workspaceId|setWorkspaceId|OrderWorkspaceCard/);
   assert.doesNotMatch(dashboard, /orderListNumber\(/);

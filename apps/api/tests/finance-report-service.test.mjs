@@ -124,7 +124,7 @@ test('report crosses the 500-row boundary for every ledger without gaps or dupli
   }
 });
 
-test('cash includes archived-order receipts, settlement includes older receipts, and archived/void ledgers stay excluded', async t => {
+test('cash excludes archived-order receipts, settlement includes older active receipts, and archived/void ledgers stay excluded', async t => {
   freeze(t);
   const db = database(sources({
     order: [order(), order('archived', { archivedAt: date('2026-09-01') })],
@@ -134,7 +134,7 @@ test('cash includes archived-order receipts, settlement includes older receipts,
     expenseCategory: [{ id: 'cat', name: 'Materials', active: false, expenses: [expense()] }, { id: 'unused', name: 'Unused', active: false, expenses: [] }],
   }));
   const result = await db.service.report(query());
-  assert.equal(result.current.receivedMinor, 700);
+  assert.equal(result.current.receivedMinor, 0);
   assert.equal(result.current.expensesMinor, 1000);
   assert.equal(result.table.total, 1);
   assert.equal(result.table.rows[0].paidMinor, 3000);
@@ -161,7 +161,7 @@ test('source query predicates bound the UTC reporting window without losing life
   const paymentWhere = where('payment');
   assert.equal(matches(payment('old-active', { receivedAt: date('2020-01-01') }), paymentWhere), true);
   assert.equal(matches(payment('archived-old', { order: { archivedAt: date('2026-01-01') }, receivedAt: date('2026-07-31T23:59:59.999Z') }), paymentWhere), false);
-  assert.equal(matches(payment('archived-chart', { order: { archivedAt: date('2026-01-01') }, receivedAt: date('2026-08-01') }), paymentWhere), true);
+  assert.equal(matches(payment('archived-chart', { order: { archivedAt: date('2026-01-01') }, receivedAt: date('2026-08-01') }), paymentWhere), false);
   assert.equal(matches(payment('void', { voidedAt: date('2026-10-10') }), paymentWhere), false);
   assert.equal(matches({ active: false, expenses: [expense()] }, where('expenseCategory')), true);
   assert.equal(matches({ active: false, expenses: [expense('arch', { archivedAt: date('2026-10-10') })] }, where('expenseCategory')), false);
@@ -299,12 +299,12 @@ test('all reporting handlers enforce the finance read roles with real Nest guard
   assert.equal(headers['Cache-Control'], 'no-store');
 });
 
-test('archived cash order resolves real persisted WEBSITE provenance inside the same read-only report snapshot',async t=>{
+test('archived cash order is excluded from WEBSITE proceeds inside the same read-only report snapshot',async t=>{
  freeze(t);const {CONFIRMED_WEBSITE_SOURCE}=load('orders/order-source.ts');
  const archived=order('archived',{archivedAt:date('2026-09-01'),sourceSystem:'KEYCRM',sourceAccount:CONFIRMED_WEBSITE_SOURCE.account,externalId:'42',sourceLinkMode:'IMPORTED',externalData:{source_id:12,secret:'never public'},activities:[{id:'event',createdAt:date('2026-09-01'),type:'KEYCRM_ORDER_IMPORTED',metadata:{keycrmOrderId:'42',sourceName:'Вебсайт'}}]});
  const db=database(sources({order:[order(),archived],payment:[payment(),payment('archived-cash',{orderId:'archived',order:{archivedAt:date('2026-09-01')},amountMinor:700})],expense:[],invoice:[]}));
  const before=JSON.stringify(db.data),result=await db.service.report(query({source:'WEBSITE'}));
- assert.equal(result.sourceAnalytics.websiteReceivedMinor,700);assert.equal(result.current.receivedMinor,2700);assert.equal(result.table.total,0);
+ assert.equal(result.sourceAnalytics.websiteReceivedMinor,0);assert.equal(result.current.receivedMinor,2000);assert.equal(result.table.total,0);
  assert.ok(!JSON.stringify(result).includes('secret'));assert.ok(!JSON.stringify(result).includes('sourceName'));assert.ok(db.reads.every(read=>read.transactional));assert.equal(JSON.stringify(db.data),before);
- assert.ok(db.reads.some(read=>read.model==='order'&&read.query.where.id?.in.includes('archived')));
+ assert.ok(!db.reads.some(read=>read.model==='order'&&read.query.where.id?.in.includes('archived')));
 });

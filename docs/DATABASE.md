@@ -8,3 +8,15 @@
 - Orders reference client, athlete and optional measurement snapshot.
 - Sales, production, payment and shipping status remain separate.
 - Production uses committed Prisma migrations and `prisma migrate deploy`.
+- Client-facing invoices and generic order documents retain structured template
+  and data snapshots. `DocumentTemplate` never stores executable HTML; generated
+  fields are restricted to the API-owned allowlist.
+- Template-only invoices retain their final authoritative order total, signed
+  paid/balance projection, selected template revision and immutable content.
+  Private `AppSetting` sections `invoice-previews`, `invoice-documents` and
+  `invoice-idempotency` hold actor-scoped expiring proposals, frozen PDF/HTML
+  artifacts and replay receipts. Ordinary finance settings never expose them.
+  Invoice/artifact/replay/activity/audit writes commit in one transaction.
+  Expired unsaved proposals are cleaned in bounded batches; saved artifacts and
+  replay history are retained. Existing invoices are not rewritten and no
+  schema migration is required for this additive workflow.

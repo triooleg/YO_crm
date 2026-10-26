@@ -2,6 +2,8 @@ import { ContactChannel, OrderType, PaymentStatus, SalesStatus, ShippingStatus }
 import type { KeycrmOrder } from "./keycrm.types";
 
 const SOURCE_SYSTEM = "KEYCRM";
+export const KEYCRM_DESIGN_NUMBER_FIELD_UUID = "OR_1003";
+const PRISMA_INT_MAX = 2_147_483_647;
 
 export function keycrmMoneyToMinor(value: unknown) {
   if (value === null || value === undefined || value === "") return 0;
@@ -123,6 +125,19 @@ function customFieldDate(fields: KeycrmOrder["custom_fields"], uuid: string | un
   return { value: parsed, exactNameFallback: !uuid };
 }
 
+function customFieldPositiveInteger(fields: KeycrmOrder["custom_fields"], uuid: string, label: string) {
+  const matches = (fields ?? []).filter((field) => field.uuid === uuid);
+  if (matches.length > 1) throw new Error(`${label}: KeyCRM передал поле повторно`);
+  const field = matches[0];
+  if (!field || field.value === null || field.value === undefined) return null;
+  if (field.type !== "number") throw new Error(`${label}: ожидается тип number`);
+  const normalized = typeof field.value === "string" ? field.value.trim() : field.value;
+  if (normalized === "" || normalized === 0 || normalized === "0") return null;
+  const value = typeof normalized === "number" ? normalized : Number(normalized);
+  if (!Number.isInteger(value) || value <= 0 || value > PRISMA_INT_MAX) throw new Error(`${label}: ожидается целым положительным числом`);
+  return value;
+}
+
 function nonNegativeMoneyToMinor(value: unknown, label: string) {
   const minor = keycrmMoneyToMinor(value);
   if (minor < 0) throw new Error(`${label} не может быть отрицательной`);
@@ -156,6 +171,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
   if (!orderedAt) throw new Error("KeyCRM не передал дату создания заказа");
   const productionStart = customFieldDate(raw.custom_fields, options.productionStartFieldUuid, "Початок виробництва");
   const expectedDelivery = customFieldDate(raw.custom_fields, options.expectedDeliveryFieldUuid, "Очікувана дата доставки");
+  const designNumber = customFieldPositiveInteger(raw.custom_fields, KEYCRM_DESIGN_NUMBER_FIELD_UUID, "Номер макету");
   const productionStartsAt = productionStart.value;
   const shippingDate = keycrmDate(raw.shipping?.shipping_date ?? raw.shipping?.shipping_date_actual);
   const requiredDeliveryAt = expectedDelivery.value ?? shippingDate;
@@ -163,7 +179,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
     sourceSystem: SOURCE_SYSTEM,
     sourceAccount: options.connectionKey,
     externalId: String(raw.id),
-    number: `KC-${raw.id}`,
+    number: `YO-${raw.id}`,
     externalNumber: raw.source_uuid === null || raw.source_uuid === undefined ? null : String(raw.source_uuid),
     externalUpdatedAt: keycrmDate(raw.updated_at),
     sourceName,
@@ -186,6 +202,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
     isGift: Boolean(raw.is_gift),
     orderedAt,
     requiredDeliveryAt,
+    designNumber,
     production: { startsAt: productionStartsAt, requiredDeliveryAt, exactNameFallbacks: [productionStart.exactNameFallback ? "Початок виробництва" : null, expectedDelivery.exactNameFallback ? "Очікувана дата доставки" : null].filter((value): value is string => Boolean(value)) },
     client: {
       keycrmBuyerId: raw.buyer?.id ?? null,

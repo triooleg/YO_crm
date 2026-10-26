@@ -15,13 +15,15 @@ function harness(action,refreshFailure=false){
  function render(){cursor=0;return mod.exports.CompositionEditor(props);}
  function all(node){return !node||typeof node!=='object'?[]:Array.isArray(node)?node.flatMap(all):[node,...all(node.props?.children)];}
  function button(text){return all(render()).find(n=>n.props?.children===text&&typeof n.props?.onClick==='function');}
- async function prepare(){if(action==='ADD'){for(const [label,value]of[[labels.name,'New'],[labels.unitPrice,'10']])all(render()).find(n=>n.props?.label===label).props.onChange({currentTarget:{value}});}await button(labels.preview).props.onClick();await new Promise(setImmediate);}
+ async function prepare(){if(action==='ADD'){for(const [label,value]of[[labels.name,'New'],[labels.unitPrice,'10']])all(render()).find(n=>n.props?.label===label||String(n.props?.label??'').startsWith(`${label},`)).props.onChange({currentTarget:{value}});}await button(labels.preview).props.onClick();await new Promise(setImmediate);}
  return{prepare,button,render,all,requests,get refreshes(){return refreshes},get closed(){return closed}};
 }
 for(const action of ['ADD','DUPLICATE'])test(`${action}: unknown apply freezes editing/preview and retries the original key`,async()=>{
  const h=harness(action);await h.prepare();await h.button(labels.confirm).props.onClick();await new Promise(setImmediate);
  assert.equal(h.all(h.render()).find(n=>n.type==='fieldset').props.disabled,true);
  assert.equal(h.button(labels.preview).props.disabled,true);
+ assert.equal(h.button(labels.cancel).props.disabled,true);
+ h.button(labels.cancel).props.onClick();assert.equal(h.closed,0);
  // Even a queued preview event must not replace the pending operation.
  await h.button(labels.preview).props.onClick();await new Promise(setImmediate);
  await h.button(labels.confirm).props.onClick();await new Promise(setImmediate);

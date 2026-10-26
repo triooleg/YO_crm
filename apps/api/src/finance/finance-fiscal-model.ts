@@ -9,7 +9,7 @@ import type { FiscalExpenseRow, FiscalMissing, FiscalPeriod, FiscalReport, Fisca
 export type FiscalLedgerMonth = { month: string; entries: TaxEntry[]; periods: TaxPeriod[]; incomplete: boolean; pendingStatuses: Row[]; pendingCount?: number; totals?: { accruedMinor: number; paidMinor: number; allocatedMinor: number; debtMinor: number; creditMinor: number } };
 export type FiscalLedger = { months: FiscalLedgerMonth[]; links: { expenseId: string; component: Component }[]; unavailable?: boolean };
 export type FiscalSources = {
-  orders: { id: string; number: string; clientId: string; client: { displayName: string } }[];
+  orders: { id: string; number: string; clientId: string; client: { displayName: string }; archivedAt?: Date | string | null }[];
   orderSources?: Record<string, OrderSource>;
   payments: { id: string; orderId: string | null; amountMinor: number; currency: string; receivedAt: Date | string; voidedAt?: Date | string | null }[];
   expenses: { id: string; categoryId: string; category?: { name: string }; amountMinor: number; currency: string; incurredAt: Date | string; archivedAt?: Date | string | null; orderId?: string | null; order?: { number: string } | null; notes?: string | null; orderShipment?: { id: string } | null }[];
@@ -46,6 +46,25 @@ function validatedStoredRate(value: unknown): HistoricalRate | null {
 /** One immutable read projection. Rates are external boundary calls after the report transaction. */
 export async function projectFiscalReport(data: FiscalSources, query: FinanceReportQuery, readRate: FiscalRateReader, now = new Date(), onCashValuation?: (evidence: Record<string,unknown>) => void, exportExpenses = false): Promise<FiscalReport> {
   const month = query.month!, currency = query.currency!, today = kyivDate(now), missing: FiscalMissing[] = [];
+  const activeOrders = data.orders.filter(order => !order.archivedAt), activeOrderIds = new Set(activeOrders.map(order => order.id));
+  const belongsToActiveOrder = (orderId?: string | null) => !orderId || activeOrderIds.has(orderId);
+  const activePayments = unique(data.payments).filter(payment => !payment.voidedAt && belongsToActiveOrder(payment.orderId));
+  const activePaymentIds = new Set(activePayments.map(payment => payment.id));
+  const activeExpenses = unique(data.expenses).filter(expense => !expense.archivedAt && belongsToActiveOrder(expense.orderId));
+  const activeLedgerMonths = data.ledger.months.map(ledger => {
+    const uniqueEntries = unique(ledger.entries);
+    const entries = uniqueEntries.filter(event => belongsToActiveOrder(event.orderId));
+    const activeRootIds = new Set(entries.map(event => event.rootId ?? event.id));
+    const pendingStatuses = ledger.pendingStatuses.filter(status => {
+      if (status.orderId && !belongsToActiveOrder(status.orderId)) return false;
+      if (status.rootId && !activeRootIds.has(status.rootId)) return false;
+      if (status.paymentId && !activePaymentIds.has(status.paymentId)) return false;
+      return true;
+    });
+    const unlistedPendingCount = Math.max(0, (ledger.pendingCount ?? ledger.pendingStatuses.length) - ledger.pendingStatuses.length);
+    const pendingCount = pendingStatuses.length + unlistedPendingCount;
+    return { ...ledger, entries, pendingStatuses, pendingCount, projectionChanged: entries.length !== uniqueEntries.length || pendingStatuses.length !== ledger.pendingStatuses.length, incomplete: pendingCount > 0 || (ledger.incomplete && ledger.pendingStatuses.length === 0) };
+  });
   const presentationFx: { month: string; requestedDate: string; effectiveDate: string; provisional: boolean }[] = [];
   const rates = new Map<string, Promise<HistoricalRate | null>>(), rateFailures = new Map<string,string>(), rateStartedAt = Date.now();
   const addMissing = (code: string, m: string, rowId: string | null = null, c: string | null = null, date: string | null = null) => {
@@ -53,7 +72,7 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
   };
   // Persisted, parser-validated original-date NBU evidence remains usable when offline.
   const stored = new Map<string,HistoricalRate>();
-  for (const ledger of [...data.ledger.months].reverse()) {
+  for (const ledger of [...activeLedgerMonths].reverse()) {
     const frozenEntries = ledger.periods.flatMap(p => Array.isArray(p.closedSnapshot?.entries) ? p.closedSnapshot!.entries as TaxEntry[] : []);
     for (const event of [...ledger.entries,...frozenEntries].filter(e => monetary.has(e.kind))) {
       const r = validatedStoredRate(event.snapshot?.rate); if (!r) continue;
@@ -104,17 +123,18 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
     }
     addMissing('HISTORICAL_FX_UNAVAILABLE',m,id,failedCurrency,date); return {value:null,rate:null};
   };
-  const links = new Map(data.ledger.links.map(l => [l.expenseId, l]));
-  const orders = new Map(data.orders.map(o => [o.id, o]));
+  const activeExpenseIds = new Set(activeExpenses.map(expense => expense.id));
+  const links = new Map(data.ledger.links.filter(link => activeExpenseIds.has(link.expenseId)).map(l => [l.expenseId, l]));
+  const orders = new Map(activeOrders.map(o => [o.id, o]));
   const origin = (id: string | null) => id ? data.orderSources?.[id] ?? 'UNKNOWN' : 'UNKNOWN';
   const months = monthsBetween(monthOffset(month, -Math.max((query.range ?? 6) - 1, 1)), month);
   // Bounded, deduplicated historical lookups; prioritize current then previous months.
   const requests = new Map<string, { currency: string; date: string }>();
   const request = (c: string, date: string) => { if (c !== 'UAH' && date <= today) requests.set(c + ':' + date, { currency: c, date }); };
   for (const m of [...months].reverse()) {
-    for (const p of unique(data.payments).filter(p => !p.voidedAt && kyivDate(p.receivedAt).slice(0,7) === m)) if (p.currency !== currency) { request(p.currency,kyivDate(p.receivedAt)); request(currency,kyivDate(p.receivedAt)); }
-    for (const e of unique(data.expenses).filter(e => !e.archivedAt && kyivDate(e.incurredAt).slice(0,7) === m)) if (e.currency !== currency) { request(e.currency,kyivDate(e.incurredAt)); request(currency,kyivDate(e.incurredAt)); }
-    if (currency !== 'UAH') for (const e of unique(data.ledger.months.find(p => p.month === m)?.entries ?? []).filter(e => monetary.has(e.kind))) { const {date}=taxEventDate(e,m); if(date) request(currency,date); }
+    for (const p of activePayments.filter(p => kyivDate(p.receivedAt).slice(0,7) === m)) if (p.currency !== currency) { request(p.currency,kyivDate(p.receivedAt)); request(currency,kyivDate(p.receivedAt)); }
+    for (const e of activeExpenses.filter(e => kyivDate(e.incurredAt).slice(0,7) === m)) if (e.currency !== currency) { request(e.currency,kyivDate(e.incurredAt)); request(currency,kyivDate(e.incurredAt)); }
+    if (currency !== 'UAH') for (const e of unique(activeLedgerMonths.find(p => p.month === m)?.entries ?? []).filter(e => monetary.has(e.kind))) { const {date}=taxEventDate(e,m); if(date) request(currency,date); }
   }
   const queue = [...requests.values()]; let next = 0;
   await Promise.all(Array.from({length:Math.min(4,queue.length)},async()=>{while(next<queue.length){const r=queue[next++]!;await getRate(r.currency,r.date);}}));
@@ -123,7 +143,7 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
   const breakdowns: { month: string; breakdown: { source: string; amountMinor: number | null }[] }[] = [];
   const categoryValues = new Map<string, (number | null)[]>(), componentValues = new Map<Component, (number | null)[]>();
   for (const m of months) {
-    const ledger = data.ledger.months.find(row => row.month === m);
+    const ledger = activeLedgerMonths.find(row => row.month === m);
     const startMissing = missing.length;
     const taxPending = !ledger || ledger.incomplete || data.ledger.unavailable || m < ACCOUNTING_START.slice(0, 7);
     if (!ledger || data.ledger.unavailable) addMissing('TAX_LEDGER_UNAVAILABLE', m);
@@ -131,12 +151,12 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
     if (ledger?.incomplete) addMissing('TAX_CALCULATION_INCOMPLETE', m);
     const income: (number | null)[] = [], ordinary: (number | null)[] = [], paid: (number | null)[] = [], accrued: (number | null)[] = [];
     const sourceValues = new Map<string, (number | null)[]>(ORDER_SOURCES.map(s => [s, []]));
-    for (const p of unique(data.payments).filter(p => !p.voidedAt && kyivDate(p.receivedAt).slice(0, 7) === m)) {
+    for (const p of activePayments.filter(p => kyivDate(p.receivedAt).slice(0, 7) === m)) {
       const v = await convert(p.amountMinor, p.currency, kyivDate(p.receivedAt), m, p.id);
       onCashValuation?.({kind:'PAYMENT',id:p.id,date:kyivDate(p.receivedAt),originalAmountMinor:p.amountMinor,originalCurrency:p.currency,displayAmountMinor:v.value,displayCurrency:currency,rate:v.rate});
       income.push(v.value); sourceValues.get(origin(p.orderId))!.push(v.value);
     }
-    for (const e of unique(data.expenses).filter(e => !e.archivedAt && kyivDate(e.incurredAt).slice(0, 7) === m)) {
+    for (const e of activeExpenses.filter(e => kyivDate(e.incurredAt).slice(0, 7) === m)) {
       const v = await convert(e.amountMinor, e.currency, kyivDate(e.incurredAt), m, e.id);
       expenseValues.set(e.id,{expenseId:e.id,amountMinor:v.value,valuationDate:v.rate?.effectiveDate??kyivDate(e.incurredAt),fxEvidence:v.rate});
       onCashValuation?.({kind:links.has(e.id)?'TAX_PAYMENT':'EXPENSE',id:e.id,date:kyivDate(e.incurredAt),originalAmountMinor:e.amountMinor,originalCurrency:e.currency,displayAmountMinor:v.value,displayCurrency:currency,rate:v.rate});
@@ -153,13 +173,13 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
       accrued.push(v.value);
       if (m === month) { const values = componentValues.get(e.component) ?? []; values.push(v.value); componentValues.set(e.component, values); }
       const order = e.orderId ? orders.get(e.orderId) : undefined;
-      const receipt = e.paymentId ? data.payments.find(p => p.id === e.paymentId) : undefined;
+       const receipt = e.paymentId ? activePayments.find(p => p.id === e.paymentId) : undefined;
       const pending = ledger?.pendingStatuses.find(p => p.rootId === (e.rootId ?? e.id) || p.paymentId && p.paymentId === e.paymentId);
       const provisionalStatus = pending?.status ?? (e.paymentId && e.snapshot.receiptConfirmed === false ? 'RECEIPT_CONFIRMATION_REQUIRED' : null);
       allRows.push({ id: e.id, rootId: e.rootId, period: m, component: e.component, kind: e.kind, source: isCorrection ? 'CORRECTION' : monthly ? 'MONTHLY' : 'RECEIPT', orderId: e.orderId, paymentId: e.paymentId, clientId: order?.clientId ?? null, number: order?.number ?? null, clientName: order?.client.displayName ?? null, orderSource: origin(e.orderId), date, incomeDate: e.snapshot.incomeDate ?? null, receivedAt: receipt ? new Date(receipt.receivedAt).toISOString() : null, valuationDate: v.rate?.effectiveDate ?? date, valuationBasis: basis, uahAmountMinor: e.amountMinor, amountMinor: v.value, currency, policyId: e.policyId, status: provisionalStatus ?? (v.value === null ? 'VALUATION_PENDING' : !date ? 'DATE_EVIDENCE_MISSING' : periodMap.get(e.periodId)?.state === 'CLOSED' ? 'CLOSED' : 'CALCULATED'), incomplete: Boolean(provisionalStatus) || v.value === null || !date, evidence: { ...e.snapshot, policy: e.snapshot.valuationPolicy ?? e.snapshot.policy ?? entries.find(root => root.id === e.rootId)?.snapshot?.policy ?? periodMap.get(e.periodId)?.snapshot?.policy ?? null }, fxEvidence: v.rate });
     }
     for (const p of ledger?.pendingStatuses ?? []) {
-      const root = entries.find(e => e.id === p.rootId), payment = data.payments.find(row => row.id === (p.paymentId ?? root?.paymentId)), orderId = root?.orderId ?? payment?.orderId ?? null, order = orderId ? orders.get(orderId) : undefined;
+       const root = entries.find(e => e.id === p.rootId), payment = activePayments.find(row => row.id === (p.paymentId ?? root?.paymentId)), orderId = root?.orderId ?? payment?.orderId ?? null, order = orderId ? orders.get(orderId) : undefined;
       allRows.push({ id: String(p.draftId ?? p.rootId ?? p.paymentId ?? `${m}:${p.component ?? 'coverage'}:${p.status}`) + ':pending', rootId: p.rootId ?? null, period: m, component: p.component ?? root?.component ?? null, kind: 'PENDING', source: 'PENDING', orderId, paymentId: p.paymentId ?? root?.paymentId ?? null, clientId: order?.clientId ?? null, number: order?.number ?? null, clientName: order?.client.displayName ?? null, orderSource: origin(orderId), date: p.incomeDate ?? null, incomeDate: p.incomeDate ?? null, receivedAt: payment ? new Date(payment.receivedAt).toISOString() : null, valuationDate: null, valuationBasis: 'UNKNOWN', uahAmountMinor: null, amountMinor: null, currency, policyId: root?.policyId ?? null, status: String(p.status), incomplete: true, evidence: p, fxEvidence: null });
     }
     const receivedMinor = nullableSum(income), ordinaryExpensesMinor = nullableSum(ordinary), taxPaidMinor = nullableSum(paid), accruedTaxesMinor = taxPending || undatedAccrual ? null : nullableSum(accrued);
@@ -171,20 +191,24 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
   }
   const current = projected.find(p => p.month === month)!, previous = projected.find(p => p.month === monthOffset(month, -1))!;
   // Legacy expense tables retain UTC membership. Reuse conversions, including the Kyiv edge.
-  const exposedExpenseIds = new Set(unique(data.expenses).filter(e=>!e.archivedAt&&(kyivDate(e.incurredAt).slice(0,7)===month||new Date(e.incurredAt).toISOString().slice(0,7)===month)).map(e=>e.id));
-  for (const e of unique(data.expenses).filter(e=>exposedExpenseIds.has(e.id)&&!expenseValues.has(e.id))) {
+  const exposedExpenseIds = new Set(activeExpenses.filter(e=>(kyivDate(e.incurredAt).slice(0,7)===month||new Date(e.incurredAt).toISOString().slice(0,7)===month)).map(e=>e.id));
+  for (const e of activeExpenses.filter(e=>exposedExpenseIds.has(e.id)&&!expenseValues.has(e.id))) {
     const date=kyivDate(e.incurredAt),v=await convert(e.amountMinor,e.currency,date,date.slice(0,7),e.id);
     expenseValues.set(e.id,{expenseId:e.id,amountMinor:v.value,valuationDate:v.rate?.effectiveDate??date,fxEvidence:v.rate});
     onCashValuation?.({kind:links.has(e.id)?'TAX_PAYMENT':'EXPENSE',id:e.id,date,originalAmountMinor:e.amountMinor,originalCurrency:e.currency,displayAmountMinor:v.value,displayCurrency:currency,rate:v.rate});
   }
-  const expenseRows: FiscalExpenseRow[] = unique(data.expenses).filter(e=>!e.archivedAt&&kyivDate(e.incurredAt).slice(0,7)===month).map(e=>{
+  const expenseRows: FiscalExpenseRow[] = activeExpenses.filter(e=>kyivDate(e.incurredAt).slice(0,7)===month).map(e=>{
     const v=expenseValues.get(e.id)!,order=e.orderId?orders.get(e.orderId):undefined;
     return {id:e.id,date:kyivDate(e.incurredAt),originalTimestamp:new Date(e.incurredAt).toISOString(),valuationDate:v.valuationDate,categoryId:e.categoryId,categoryName:e.category?.name??'',orderId:e.orderId??null,number:e.order?.number??order?.number??null,clientId:order?.clientId??null,clientName:order?.client.displayName??null,orderSource:origin(e.orderId??null),notes:e.notes??null,amountMinor:v.amountMinor,originalAmountMinor:e.amountMinor,originalCurrency:e.currency,shipmentId:e.orderShipment?.id??null,fxEvidence:v.fxEvidence,isTaxPayment:links.has(e.id)};
   });
   const expenseTable=buildFiscalExpenseTable(expenseRows,query,exportExpenses);
   const recentExpenses=[...expenseRows].sort((a,b)=>b.originalTimestamp.localeCompare(a.originalTimestamp)||a.id.localeCompare(b.id)).slice(0,5);
-  const native = data.ledger.months.find(p => p.month === month), nativeIncomplete = !native || native.incomplete || Boolean(data.ledger.unavailable), totals = native?.totals;
-  const taxSummary: FiscalReport['taxSummary'] = { currency: 'UAH', accruedMinor: nativeIncomplete ? null : totals?.accruedMinor ?? null, paidMinor: totals?.paidMinor ?? null, allocatedMinor: nativeIncomplete ? null : totals?.allocatedMinor ?? null, debtMinor: nativeIncomplete ? null : totals?.debtMinor ?? null, creditMinor: totals?.creditMinor ?? null, pendingCount: native?.pendingCount ?? native?.pendingStatuses.length ?? 0, incomplete: nativeIncomplete || !totals };
+  const native = activeLedgerMonths.find(p => p.month === month), nativeIncomplete = !native || native.incomplete || Boolean(data.ledger.unavailable), totals = native?.totals;
+  const projectionChanged = Boolean(native?.projectionChanged);
+  const projectedAccrued = native ? sum(native.entries.filter(e => monetary.has(e.kind)).map(e => e.amountMinor ?? 0)) : null;
+  const taxSummary: FiscalReport['taxSummary'] = projectionChanged
+    ? { currency: 'UAH', accruedMinor: nativeIncomplete ? null : projectedAccrued, paidMinor: null, allocatedMinor: null, debtMinor: null, creditMinor: null, pendingCount: native?.pendingCount ?? 0, incomplete: true }
+    : { currency: 'UAH', accruedMinor: nativeIncomplete ? null : totals?.accruedMinor ?? null, paidMinor: totals?.paidMinor ?? null, allocatedMinor: nativeIncomplete ? null : totals?.allocatedMinor ?? null, debtMinor: nativeIncomplete ? null : totals?.debtMinor ?? null, creditMinor: totals?.creditMinor ?? null, pendingCount: native?.pendingCount ?? native?.pendingStatuses.length ?? 0, incomplete: nativeIncomplete || !totals };
   const structureRows: FiscalReport['expenseStructure']['rows'] = [...categoryValues].map(([categoryId, values]) => ({ kind: 'EXPENSE', categoryId, component: null, amountMinor: nullableSum(values), percent: null }));
   structureRows.push(...[...componentValues].map(([component, values]) => ({ kind: 'TAX' as const, categoryId: null, component, amountMinor: nullableSum(values), percent: null })));
   const totalMinor = nullableSum([current.ordinaryExpensesMinor, current.accruedTaxesMinor]);
@@ -211,7 +235,15 @@ function buildFiscalExpenseTable(allRows: FiscalExpenseRow[], query: FinanceRepo
 
 export function fiscalTaxTable(fiscal: FiscalReport, query: FinanceReportQuery, exportAll = false) {
   const search = query.search?.trim().toLocaleLowerCase('ru-RU'), sourceFilter = normalizeOrderSourceFilter(query.source);
-  const rows = fiscal.rows.filter(r => (!query.taxComponent || r.component === query.taxComponent) && (!sourceFilter || r.orderId !== null && matchesOrderSource(r.orderSource as OrderSource, sourceFilter)) && (!query.orderId || r.orderId === query.orderId) && (!query.clientId || r.clientId === query.clientId) && (!query.status || r.status === query.status) && (!query.from || r.date !== null && r.date >= query.from) && (!query.to || r.date !== null && r.date <= query.to) && (!search || [r.id, r.number, r.clientName, r.component, r.status, r.orderId, r.paymentId].some(v => v?.toLocaleLowerCase('ru-RU').includes(search))));
+  const receiptRoots = new Map<string,FiscalTaxRow[]>();
+  for (const row of fiscal.rows) if (row.source === 'RECEIPT' && row.rootId) receiptRoots.set(row.rootId,[...(receiptRoots.get(row.rootId)??[]),row]);
+  const fullyReversedVoidedRoots = new Set([...receiptRoots].filter(([,events]) => {
+    const latest = events.at(-1), original = latest?.evidence.originalPayment;
+    if (!original || typeof original !== 'object' || !(original as Record<string,unknown>).voidedAt) return false;
+    if (events.some(event => !Number.isSafeInteger(event.uahAmountMinor))) return false;
+    return events.reduce((total,event)=>total+BigInt(event.uahAmountMinor!),0n)===0n;
+  }).map(([rootId])=>rootId));
+  const rows = fiscal.rows.filter(r => !(r.rootId && fullyReversedVoidedRoots.has(r.rootId)) && (!query.taxComponent || r.component === query.taxComponent) && (!sourceFilter || r.orderId !== null && matchesOrderSource(r.orderSource as OrderSource, sourceFilter)) && (!query.orderId || r.orderId === query.orderId) && (!query.clientId || r.clientId === query.clientId) && (!query.status || r.status === query.status) && (!query.from || r.date !== null && r.date >= query.from) && (!query.to || r.date !== null && r.date <= query.to) && (!search || [r.id, r.number, r.clientName, r.component, r.status, r.orderId, r.paymentId].some(v => v?.toLocaleLowerCase('ru-RU').includes(search))));
   const key = ({ number: 'number', client: 'clientName', amount: 'amountMinor', status: 'status', category: 'component' } as const)[query.sort as 'number'] ?? 'date';
   rows.sort((a, b) => { const av = a[key], bv = b[key]; if (av === null) return bv === null ? a.id.localeCompare(b.id) : 1; if (bv === null) return -1; return (typeof av === 'number' && typeof bv === 'number' ? (av < bv ? -1 : av > bv ? 1 : 0) : String(av).localeCompare(String(bv), 'ru', { numeric: true })) * (query.direction === 'asc' ? 1 : -1) || a.id.localeCompare(b.id); });
   if (exportAll && rows.length > 50000) throw new BadRequestException('Экспорт ограничен 50 000 строками. Уточните фильтры.');

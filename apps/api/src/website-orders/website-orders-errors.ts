@@ -3,6 +3,7 @@ export class WebsiteOrderError extends Error {
 }
 export const websiteErrorMessage=(code:string)=>({
  WEBSITE_UNAUTHORIZED:'Недостаточно прав для интеграции.',
+ WEBSITE_RATE_LIMITED:'Слишком много запросов интеграции. Повторите позже.',
  WEBSITE_DISABLED:'Интеграция сайта не настроена.',
  WEBSITE_INVALID_PAYLOAD:'Некорректные данные заказа.',
  WEBSITE_TOTALS_MISMATCH:'Суммы заказа не согласованы.',

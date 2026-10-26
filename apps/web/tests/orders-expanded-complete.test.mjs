@@ -69,7 +69,7 @@ test("вкладки показывают реальные финансы дос
   assert.match(expanded, /paymentHistory\.map/);
   assert.match(expanded, /payment\.reference|paymentMethodLabel\(payment\.method\)/);
   assert.match(expanded, /payment\.notes|paymentMethodLabel\(payment\.method\)/);
-  assert.match(expanded, /order\.invoices\.map/);
+  assert.match(expanded, /OrderInvoiceDocuments order=\{order\} invoices=\{order\.invoices\}/);
   assert.match(expanded, /activities\.map/);
   assert.match(expanded, /order\.shipment\?\.trackingNumber|order\.shipment\.trackingNumber/);
   assert.match(expanded, /ui\.noFiles/);

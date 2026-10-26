@@ -120,7 +120,7 @@ function sourceDb(orders){
     return rows.slice(0,query.take).map(o=>({...o,activities:o.deadlineEvidence}));
    }
    if(query.orderBy?.[0]?.createdAt)rows=[...rows].sort((a,b)=>b.createdAt-a.createdAt||b.id.localeCompare(a.id));
-   return rows.slice(0,query.take??rows.length).map(o=>({...o,number:`YO-${o.id}`,client:{displayName:`Client ${o.id}`},modelImagePath:'model.jpg',items:[{modelImagePath:'item.jpg'}]}));
+   return rows.slice(0,query.take??rows.length).map(o=>({...o,number:`YO-${o.id}`,client:{displayName:`Client ${o.id}`},modelImagePath:o.overviewModelImagePath===undefined?'model.jpg':o.overviewModelImagePath,externalImageUrl:o.overviewExternalImageUrl??null,items:o.overviewItems??[{modelImagePath:'item.jpg',externalImageUrl:null}]}));
   }},
   appSetting:{findMany:async()=>[]},
   $queryRaw:async()=>[{month:'2026-10',count:3n}],
@@ -130,7 +130,7 @@ function sourceDb(orders){
 }
 
 test('overview service counts, exclusive ring and every target-filter ID set agree; period is original creation month',async()=>{
- const orders=[order({id:'new',payments:[{amountMinor:5000,currency:'EUR'}]}),order({id:'work',productionStatus:'SEWING'}),order({id:'ready',productionStatus:'READY'}),order({id:'awaiting'}),order({id:'completed',salesStatus:'COMPLETED'}),order({id:'sent',shippingStatus:'SHIPPED'}),order({id:'cancelled',salesStatus:'CANCELLED'}),order({id:'import',sourceSystem:'KEYCRM',createdAt:new Date('2020-01-01'),requiredDeliveryAt:new Date('2020-01-01')}),order({id:'prior',createdAt:new Date('2026-09-30T23:59:59Z'),productionStatus:'SEWING'}),order({id:'archived',archivedAt:NOW})];
+ const orders=[order({id:'new',payments:[{amountMinor:5000,currency:'EUR'}],sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'store',sourceLinkMode:'IMPORTED',externalId:'22727',externalData:{contractVersion:1}}),order({id:'work',productionStatus:'SEWING'}),order({id:'ready',productionStatus:'READY'}),order({id:'awaiting'}),order({id:'completed',salesStatus:'COMPLETED'}),order({id:'sent',shippingStatus:'SHIPPED'}),order({id:'cancelled',salesStatus:'CANCELLED'}),order({id:'import',sourceSystem:'KEYCRM',createdAt:new Date('2020-01-01'),requiredDeliveryAt:new Date('2020-01-01')}),order({id:'prior',createdAt:new Date('2026-09-30T23:59:59Z'),productionStatus:'SEWING'}),order({id:'archived',archivedAt:NOW})];
  const fixture=sourceDb(orders),result=await new OverviewService(fixture.db).orders({month:'2026-10',range:3,currency:'EUR'},NOW);
  assert.equal(result.counts.total,7);assert.equal(result.counts.previousTotal,1);
  assert.equal(result.ring.total,5);assert.equal(result.ring.excluded,2);
@@ -138,6 +138,7 @@ test('overview service counts, exclusive ring and every target-filter ID set agr
  assert.equal(result.counts.work,2);assert.equal(result.counts.requiresVerification,1);
  assert.equal(result.counts.overdue,0);assert.equal(result.trend.at(-1).clients,3);
  assert.equal(result.recent.length,5);assert.equal(result.recent[0].modelImagePath,'model.jpg');
+ assert.equal(result.recent.find(row=>row.id==='new').orderSource,'WEBSITE');
  for(const segment of result.ring.segments){
   const ids=await model.resolveOverviewOrderIds(fixture.tx,{overviewFilter:segment.key,period:'2026-10'},NOW);
   assert.equal(ids.length,segment.count);
@@ -148,6 +149,28 @@ test('overview service counts, exclusive ring and every target-filter ID set agr
  assert.equal((await model.resolveOverviewOrderIds(fixture.tx,{overviewFilter:'overdue'},NOW)).length,result.counts.overdue);
  assert.equal((await model.resolveOverviewOrderIds(fixture.tx,{overviewFilter:'unpaid'},NOW)).length,result.counts.awaitingPayment);
  assert.equal(fixture.calls[0][1].isolationLevel,'RepeatableRead');
+});
+
+test('recent website orders use their persisted external product image when no local model image exists',async()=>{
+ const image='https://yoleotard.com/wp-content/uploads/order.jpg';
+ const website=order({id:'website',sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'store',sourceLinkMode:'IMPORTED',externalId:'22733',externalData:{contractVersion:1},overviewModelImagePath:null,overviewExternalImageUrl:image,overviewItems:[{modelImagePath:null,externalImageUrl:image}]});
+ const result=await new OverviewService(sourceDb([website]).db).orders({month:'2026-10',currency:'EUR'},NOW);
+ assert.equal(result.recent[0].orderSource,'WEBSITE');
+ assert.equal(result.recent[0].modelImagePath,image);
+});
+
+test('changing the reporting source does not revoke a website order external product image',async()=>{
+ const image='https://yoleotard.com/wp-content/uploads/order.jpg';
+ const website=order({id:'website-override',sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'store',sourceLinkMode:'IMPORTED',externalId:'22735',externalData:{contractVersion:1},deadlineEvidence:[{type:'ORDER_SOURCE_OVERRIDDEN',metadata:{source:'WHATSAPP'}}],overviewModelImagePath:null,overviewExternalImageUrl:image,overviewItems:[{modelImagePath:null,externalImageUrl:image}]});
+ const result=await new OverviewService(sourceDb([website]).db).orders({month:'2026-10',currency:'EUR'},NOW);
+ assert.equal(result.recent[0].orderSource,'WHATSAPP');
+ assert.equal(result.recent[0].modelImagePath,image);
+});
+
+test('recent orders prefer a later local item image over an earlier website image',async()=>{
+ const website=order({id:'website-priority',sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'store',sourceLinkMode:'IMPORTED',externalId:'22734',externalData:{contractVersion:1},overviewModelImagePath:null,overviewExternalImageUrl:null,overviewItems:[{modelImagePath:null,externalImageUrl:'https://yoleotard.com/external.jpg'},{modelImagePath:'approved-local.jpg',externalImageUrl:null}]});
+ const result=await new OverviewService(sourceDb([website]).db).orders({month:'2026-10',currency:'EUR'},NOW);
+ assert.equal(result.recent[0].modelImagePath,'approved-local.jpg');
 });
 
 test('source batches cross 500 without gaps; invalid filters, horizons and report dates reject before database reads',async()=>{

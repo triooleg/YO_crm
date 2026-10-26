@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { WebsiteOrderError, websiteErrorMessage } from './website-orders-errors';
@@ -16,6 +16,31 @@ export function websiteOrdersSecurity(request:Request,response:Response,next:Nex
  response.setHeader('Cache-Control','no-store');
  try{authorizeWebsiteOrder(request.headers.authorization);next();}catch(error){const e=error as WebsiteOrderError;response.status(e.status).json({ok:false,code:e.code,message:websiteErrorMessage(e.code)});}
 }
+export type WebsiteOrderPrincipal={kind:'legacy'}|{kind:'key';id:string;sourceAccount:string};
+export interface WebsiteOrderAuthenticator {
+ authenticate(header:unknown,attemptKey?:string):Promise<WebsiteOrderPrincipal>;
+ authorizeSource(principal:WebsiteOrderPrincipal,sourceAccount:string):Promise<void>;
+}
+export const WEBSITE_ORDER_AUTHENTICATOR=Symbol('WEBSITE_ORDER_AUTHENTICATOR');
+// Not enumerable, serializable or writable through request JSON.
+const principals=new WeakMap<Request,WebsiteOrderPrincipal>();
+export function websiteOrderPrincipal(request:Request):WebsiteOrderPrincipal {
+ const principal=principals.get(request);
+ if(!principal)throw new WebsiteOrderError('WEBSITE_UNAUTHORIZED',401);
+ return principal;
+}
+export function createWebsiteOrdersSecurity(authenticator:Pick<WebsiteOrderAuthenticator,'authenticate'>){
+ return async(request:Request,response:Response,next:NextFunction):Promise<void>=>{
+  response.setHeader('Cache-Control','no-store');
+  try{principals.set(request,await authenticator.authenticate(request.headers.authorization,request.ip||'unknown'));next();}
+  catch(error){
+   const known=error instanceof WebsiteOrderError;
+   const code=known?error.code:'WEBSITE_DISABLED';
+   if(known&&error.status===429)response.setHeader('Retry-After','60');
+   response.status(known?error.status:503).json({ok:false,code,message:websiteErrorMessage(code)});
+  }
+ };
+}
 export const websiteOrdersBodyError:ErrorRequestHandler=(error,_request,response,next)=>{
  if(!error){next();return;}
  const large=error.status===413;
@@ -23,5 +48,10 @@ export const websiteOrdersBodyError:ErrorRequestHandler=(error,_request,response
 };
 @Injectable()
 export class WebsiteOrdersGuard implements CanActivate {
- canActivate(context:ExecutionContext){authorizeWebsiteOrder(context.switchToHttp().getRequest<Request>().headers.authorization);return true;}
+ constructor(@Inject(WEBSITE_ORDER_AUTHENTICATOR) private readonly authenticator:WebsiteOrderAuthenticator){}
+ async canActivate(context:ExecutionContext){
+  const request=context.switchToHttp().getRequest<Request>();
+  if(!principals.has(request))principals.set(request,await this.authenticator.authenticate(request.headers.authorization,request.ip||'unknown'));
+  return true;
+ }
 }

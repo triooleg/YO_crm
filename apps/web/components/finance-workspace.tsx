@@ -20,7 +20,7 @@ import { TextInput } from '@mantine/core';
 import { FinanceReportCharts } from './finance-report-charts';
 import { FinanceCategoryDialog, FinanceExpenseDialog, FinanceOrderDialog } from './finance-report-dialogs';
 import { FinanceReportTable, originalLabel, reportStatusLabel } from './finance-report-table';
-import { InvoiceEditor, type FinanceInvoice } from './invoice-editor';
+import { InvoiceEditor, NewTemplateInvoice, type FinanceInvoice } from './invoice-editor';
 import { QuickPayment } from './order-payment-dialog';
 import { CrmButton } from './crm/settings-controls';
 import { CrmTabList } from './crm/tab-list';
@@ -134,7 +134,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
       <footer className="finance-report-valuation">{taxUi.legacyValuation}: {data.valuation.provider} · {ui.effectiveDate} {financeDate(data.valuation.effectiveDate)} · {ui.fetchedAt} {financeDate(data.valuation.fetchedAt)} {data.valuation.officialUrl&&/^https:\/\//.test(data.valuation.officialUrl)&&<a href={data.valuation.officialUrl} target="_blank" rel="noopener noreferrer">{ui.source} ↗</a>}</footer>
     </>}
     {data&&expense!==undefined&&<FinanceExpenseDialog report={data} row={expense||undefined} request={request} onClose={()=>setExpense(undefined)} onSaved={()=>load(true)}/>}{data&&categoriesOpen&&<FinanceCategoryDialog categories={data.options.categories} request={request} onClose={()=>setCategoriesOpen(false)} onSaved={()=>load(true)}/>}
-    {detail&&<FinanceOrderDialog order={detail.order} row={detail.row} currency={filters.currency} onClose={()=>setDetail(undefined)}/>}{payment&&canPay&&<QuickPayment order={payment} request={request} onClose={()=>setPayment(undefined)} onSaved={async()=>{setPayment(undefined);await load(true)}}/>}{invoice&&<InvoiceEditor order={invoice.order} invoice={invoice.invoice} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/>}
+    {detail&&<FinanceOrderDialog order={detail.order} row={detail.row} currency={filters.currency} onClose={()=>setDetail(undefined)}/>}{payment&&canPay&&<QuickPayment order={payment} request={request} onClose={()=>setPayment(undefined)} onSaved={async()=>{setPayment(undefined);await load(true)}}/>}{invoice&&(invoice.invoice ? <InvoiceEditor canManageStatus={canWrite} order={invoice.order} invoice={invoice.invoice} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/> : <NewTemplateInvoice order={invoice.order} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/>)}
     {pickOrder&&<CrmModal busy={actionBusy} title={pickOrder==='payment'?ui.addPayment:ui.addInvoice} close={()=>{if(!actionBusy){actionSequence.current++;setPickOrder(undefined)}}}><Stack><Select label={ui.chooseOrder} searchable onSearchChange={setRemoteSearch} value={pickedOrder} onChange={setPickedOrder} data={orders.map(item=>({value:item.id,label:`${item.number} · ${item.clientName}`}))}/><CrmButton loading={actionBusy} disabled={!pickedOrder} onClick={()=>pickedOrder&&void orderAction(pickedOrder,pickOrder==='payment'?'payment':'invoice')}>{ui.open}</CrmButton></Stack></CrmModal>}
   </div></MantineProvider>;
 }

@@ -1,3 +1,4 @@
+import {loadTargetModule} from './overview-target-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -33,6 +34,7 @@ function harness({ failMirror = false, linked = true } = {}) {
   const require = specifier => {
     if (specifier === '../prisma.service' || specifier === './finance.dto' || specifier === './production-settings' || specifier === './invoice-pdf') return {};
     if (specifier === './exchange-rates') return { appliedPaymentMinor: () => 0 };
+    if (specifier === './invoice-number') return loadTargetModule('finance/invoice-number.ts');
     return nativeRequire(specifier);
   };
   vm.runInNewContext(javascript, { module, exports: module.exports, require, Date });
