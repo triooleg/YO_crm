@@ -212,6 +212,7 @@ enum ShippingCarrier {
   NOVA_GLOBAL
   UKRPOSHTA
   DHL
+  UPS
 }
 
 enum InvoiceStatus {
@@ -269,6 +270,7 @@ enum KeycrmSyncStatus {
 }
 
 model User {
+  shipmentNotifications ShipmentNotification[]
   id                       String                    @id @default(cuid())
   email                    String                    @unique
   passwordHash             String
@@ -318,6 +320,7 @@ model Session {
 }
 
 model Client {
+  shipmentNotifications ShipmentNotification[]
   id                      String                   @id @default(cuid())
   firstName               String
   lastName                String?
@@ -464,6 +467,7 @@ model Measurement {
 }
 
 model Order {
+  shipmentNotifications ShipmentNotification[]
   taxEntries TaxEntry[]
   measurementInvitations MeasurementInvitation[]
   id                   String           @id @default(cuid())
@@ -613,6 +617,9 @@ model OrderShipment {
   carrier             ShippingCarrier
   status              ShippingStatus  @default(NOT_READY)
   trackingNumber      String?
+  trackingUrl         String?
+  trackingRevision    Int             @default(1)
+  notifications       ShipmentNotification[]
   customerChargeMinor Int             @default(0)
   customerChargeOriginalMinor Int?
   customerChargeOriginalCurrency String?
@@ -639,6 +646,55 @@ model OrderShipment {
 
   @@index([orderId, archivedAt])
   @@index([carrier, trackingNumber])
+}
+
+// Delivery records preserve immutable approved snapshots and independent channel
+// results. Only explicit user confirmation creates these records.
+model ShipmentNotification {
+  id               String @id @default(cuid())
+  shipmentId       String
+  orderId          String
+  clientId         String
+  conversationId   String?
+  conversationExternalId String?
+  conversationChannel String?
+  emailAccountIdentity String?
+  trackingRevision Int
+  trackingNumber   String
+  trackingUrl      String
+  carrier          ShippingCarrier
+  language         String
+  content          String
+  subject          String
+  actorId          String
+  createdAt        DateTime @default(now())
+  shipment         OrderShipment @relation(fields:[shipmentId],references:[id],onDelete:Restrict)
+  order            Order @relation(fields:[orderId],references:[id],onDelete:Restrict)
+  client           Client @relation(fields:[clientId],references:[id],onDelete:Restrict)
+  conversation     Conversation? @relation(fields:[conversationId],references:[id],onDelete:Restrict)
+  actor            User @relation(fields:[actorId],references:[id],onDelete:Restrict)
+  deliveries       ShipmentNotificationDelivery[]
+  @@unique([shipmentId,trackingRevision])
+  @@index([clientId,createdAt])
+  @@index([orderId,createdAt])
+}
+
+model ShipmentNotificationDelivery {
+  id               String @id @default(cuid())
+  notificationId   String
+  channel          String
+  recipient        String
+  clientRequestId  String @unique
+  status           String @default("PENDING")
+  messageId        String?
+  sentAt           DateTime?
+  error            String?
+  startedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  notification     ShipmentNotification @relation(fields:[notificationId],references:[id],onDelete:Restrict)
+  @@unique([notificationId,channel])
+  @@index([status,updatedAt])
 }
 
 model OrderItem {
@@ -803,6 +859,7 @@ model Payment {
 }
 
 model Conversation {
+  shipmentNotifications ShipmentNotification[]
   id               String                   @id @default(cuid())
   clientId         String
   channel          ContactChannel

@@ -44,9 +44,10 @@ function loadOrdersService() {
     if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
+  if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
   };
-  vm.runInNewContext(javascript, { module, exports: module.exports, require: localRequire, Buffer, console, process, setTimeout, clearTimeout });
+  vm.runInNewContext(javascript, { module, exports: module.exports, require: localRequire, Buffer, console, process, Date, setTimeout, clearTimeout });
   return module.exports.OrdersService;
 }
 
@@ -64,6 +65,7 @@ test("manual order creation materializes one active instance per item quantity",
     athlete: { count: async () => 1 },
     measurement: { findMany: async () => [{ id: "measurement-1", athleteId: "athlete-1" }] },
     order: {
+      findMany: async () => [], // Empty persisted number history for the real shared generator.
       findFirst: async () => null,
       create: async ({ data }) => ({ id: "order-1", number: data.number, type: data.type, requiredDeliveryAt: null, ...data }),
     },

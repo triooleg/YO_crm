@@ -15,3 +15,9 @@ must report evidence, not only "looks good". If visual browser validation is
 unavailable, the change remains visually unverified and must be disclosed.
 The compatibility guardian reviews the planned scope before implementation and
 the actual final diff before the release gate.
+
+For every deployment (including rollback or a single-service release) or version
+change, also invoke mandatory `version-guardian.md` before the release gatekeeper.
+Its execution contract is `.codex/agents/version-guardian.md`. Require version
+PASS for the exact candidate artifacts; repeat installed verification after an
+authorized deployment. A predeploy PASS does not establish installed acceptance.

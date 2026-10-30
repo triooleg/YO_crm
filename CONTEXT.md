@@ -397,6 +397,15 @@ an envelope.
 reserves an operator upload before it is claimed by a message. UI refresh uses
 bounded polling; provider webhooks remain the inbound source of truth.
 
+### Shipment notification
+
+**Shipment notification**: An explicitly approved customer notice about one parcel and one version of its waybill, with independently confirmed chat and email outcomes. It is not a shipment status change or a payment.
+_Avoid_: Automatic shipment message, client-wide tracking broadcast.
+
+**Waybill revision**: A distinct version of a parcel's carrier, waybill number or verified tracking link; returning to an earlier number is still a new revision. Changes to parcel charges or delivery progress alone are not a new waybill revision.
+
+**Order delivery email**: The recipient address for delivery notices on a particular order, which can differ from the client's general contact email. A general contact address used instead requires explicit operator confirmation.
+
 ### Task, Note and Template
 
 `WorkTask` is a Kanban task that may refer to a client and source message.
@@ -505,3 +514,30 @@ writer; they never create a second Order/Payment/tax source. Order receipt captu
 uses the installed native tax ledger and retains manual confirmation/FX rules.
 See ADR0010 and `docs/integrations/website-orders.md`. A held provider snapshot is
 private reconciliation evidence, not another sale or a customer-facing error.
+
+## Backup and recovery
+
+### Backup
+
+A private recoverable snapshot represented by existing Backup metadata and durable storage artifacts. DATA protects the whole CRM PostgreSQL database and persistent uploads; FULL additionally carries portable application/compatibility material. Checksum verification, cross-store consistency, successful download, offsite replication and a restore drill are separate claims. Legacy v1/v2 archives remain supported; expanded composition is versioned explicitly.
+
+### Recovery job
+
+A queued operation carried by existing Backup metadata and executed by the external host recovery agent. The web API authorizes and audits requests but never receives Docker control or restores a live database. Backup, archive import, isolated drill and retention share exclusive execution. A production recovery plan is a request/runbook, not permission to erase or switch production data. See ADR0012.
+
+### External conversation coverage
+
+CRM messages are the locally ingested conversation history. A remote media URL is not a durable local file. Chatwoot is a separately hosted database/media system; its coverage must be declared and verified independently. Database ciphertext does not replace separately preserved encryption keys.
+
+### Workstation transfer
+
+Saving an already completed backup to the owner's computer. Manual transfer is
+an explicit download; automatic transfer is periodic retrieval by a paired computer.
+Transfer does not create a snapshot. A verified transfer proves matching bytes,
+not that the archive has been successfully restored.
+
+### Reserved backup source
+
+An archive referenced by a queued or running recovery check. Retention must
+preserve a reserved source. Once deletion has been claimed, new checks cannot
+accept that source; an interrupted deletion requires reconciliation.

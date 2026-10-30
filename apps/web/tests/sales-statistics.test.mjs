@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import * as sales from '../lib/sales-statistics.ts';
 import { parseSalesSelection, salesApiQuery, salesUrl, shiftSalesPeriod, salesMoney, salesExportFilename, salesCountrySeries } from '../lib/sales-statistics.ts';
 
+test('KPI comparison distinguishes zero base, missing values, growth, decline and neutral rounded changes', () => {
+  assert.equal(typeof sales.salesComparison, 'function');
+  assert.equal(sales.salesComparison(125, 107), 17);
+  assert.equal(sales.salesComparison(80, 100), -20);
+  assert.equal(sales.salesComparison(100, 100), 0);
+  assert.equal(sales.salesComparison(9999, 10000), 0);
+  assert.equal(Object.is(sales.salesComparison(9999, 10000), -0), false);
+  assert.equal(sales.salesComparison(0, 10), -100);
+  for (const previous of [0, null, undefined]) assert.equal(sales.salesComparison(10, previous), null);
+  assert.equal(sales.salesComparison(null, 10), null);
+});
+
 test('default is twelve calendar months through current month in Kyiv', () => {
   const state = parseSalesSelection('', new Date('2026-10-18T10:00:00Z'));
   assert.equal(state.from, '2025-11-01'); assert.equal(state.to, '2026-10-31');

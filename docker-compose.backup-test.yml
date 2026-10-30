@@ -1,33 +1,59 @@
 name: yoleotard-crm-backup-drill
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${BACKUP_TEST_POSTGRES_IMAGE:-postgres:16-alpine}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-backup_test}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-backup-test-only}
       POSTGRES_DB: ${POSTGRES_DB:-yoleotard_crm_backup_test}
-    volumes: [backup_test_postgres:/var/lib/postgresql/data]
+    pull_policy: never
+    # Same inspected, volatile resource profile as recovery-drill.
+    read_only: true
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    shm_size: 16m
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,nodev,size=512m,mode=0700
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,mode=0777
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    logging:
+      driver: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    ulimits:
+      core: 0
+      nofile: 256
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=10, -c, work_mem=4MB, -c, maintenance_work_mem=32MB, -c, statement_timeout=30000, -c, temp_file_limit=65536, -c, logging_collector=off, -c, log_statement=none]
+    security_opt: [no-new-privileges:true]
+    networks: [isolated]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-backup_test} -d ${POSTGRES_DB:-yoleotard_crm_backup_test}"]
       interval: 2s
       timeout: 3s
       retries: 30
   api:
-    build: { context: ., dockerfile: docker/api.Dockerfile }
+    image: ${BACKUP_TEST_API_IMAGE:?Supply an existing local API image ID}
+    pull_policy: never
     depends_on:
       postgres: { condition: service_healthy }
     environment:
       NODE_ENV: test
+      APP_ENV: backup-drill
       DATABASE_URL: postgresql://${POSTGRES_USER:-backup_test}:${POSTGRES_PASSWORD:-backup-test-only}@postgres:5432/${POSTGRES_DB:-yoleotard_crm_backup_test}?schema=public
       UPLOADS_DIR: /app/uploads
       BACKUP_STORAGE_PATH: /backups
     command: >
-      sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
+      sh -c "node /app/packages/database/node_modules/prisma/build/index.js migrate deploy --schema /app/packages/database/prisma/schema.prisma
       && touch /tmp/backup-test-ready
       && tail -f /dev/null"
+    networks: [isolated]
     volumes:
       - backup_test_uploads:/app/uploads
       - ${BACKUP_STORAGE_PATH:-./.local/backup-test}:/backups
 volumes:
-  backup_test_postgres:
   backup_test_uploads:
+networks:
+  isolated:
+    internal: true

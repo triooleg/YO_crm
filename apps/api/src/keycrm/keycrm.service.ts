@@ -532,7 +532,7 @@ export class KeycrmService {
       let persisted;
       let manualDiscountOverride = false;
       if (!existing) {
-        const number = await nextOrderNumber(tx);
+        const number = await nextOrderNumber(tx, order.orderedAt);
         persisted = await tx.order.create({ data: { ...common, ...(importedModelImagePath ? { modelImagePath: importedModelImagePath } : {}), sourceLinkMode: "IMPORTED", number, type: order.type, salesStatus: order.salesStatus, productionStatus: order.productionStatus, paymentStatus: order.paymentStatus, shippingStatus: order.shippingStatus, createdAt: order.orderedAt } });
         await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", persisted.id);
       } else {

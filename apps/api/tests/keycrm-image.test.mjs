@@ -16,7 +16,16 @@ function loadModule() {
     .replace('import { uploadsRoot } from "../uploads";', 'const uploadsRoot = () => process.cwd();');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", output)(require, module, module.exports);
+  const targetRequire = (name) => {
+    if (name !== '../recovery-safety') return require(name);
+    const helper = { exports: {} };
+    const code = ts.transpileModule(readFileSync(new URL('../src/recovery-safety.ts', import.meta.url), 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    new Function('module', 'exports', code)(helper, helper.exports);
+    return helper.exports;
+  };
+  new Function("require", "module", "exports", output)(targetRequire, module, module.exports);
   return module.exports;
 }
 

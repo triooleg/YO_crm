@@ -1,4 +1,5 @@
 "use client";
+import { OrderImagePreview } from "./orders/order-image-preview";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Avatar, Badge, Button, Checkbox, Loader, MantineProvider, SegmentedControl, Select, Tooltip, UnstyledButton } from '@mantine/core';
 import { orderSourceUi as sourceUi } from '../lib/i18n';
@@ -140,11 +141,11 @@ export function OverviewWorkspace({role,onNavigate,modeControl}:{role:string;onN
     </div>)}</PanelStatus>
    </article>}
    {permissions.orders&&<article className="overview-card overview-recent-orders"><header><h2>{ui.recentOrders}</h2><UnstyledButton className="overview-link" onClick={()=>void onNavigate('orders')}>{ui.allOrders} →</UnstyledButton></header><p className="overview-note overview-list-scope">{ui.now}</p>
-    <PanelStatus panel={orders}>{orders.data&&!orders.data.recent.length?<p className="overview-empty">{ui.emptyOrders}</p>:orders.data?.recent.slice(0,5).map(order=><UnstyledButton className="overview-order-row" key={order.id} onClick={()=>go(overviewTargets.order(order.id))} aria-label={`${order.number} — ${order.clientName}`}>
-     <OverviewOrderModel path={order.modelImagePath}/>
-     <span className="overview-order-identity"><span className="overview-order-heading"><b>{order.number}</b><OverviewOrderSourceIcon source={order.orderSource}/></span><Tooltip label={order.clientName}><span>{order.clientName}</span></Tooltip></span><Badge variant="light" color={order.salesStatus==='WAITING_FINAL_PAYMENT'||order.salesStatus==='WAITING_DEPOSIT'?'orange':'blue'}>{orderLabel('sales',order.salesStatus)}</Badge>
+    <PanelStatus panel={orders}>{orders.data&&!orders.data.recent.length?<p className="overview-empty">{ui.emptyOrders}</p>:orders.data?.recent.slice(0,5).map(order=><div className="overview-order-row" key={order.id} onClick={()=>go(overviewTargets.order(order.id))} aria-label={`${order.number} — ${order.clientName}`}>
+     <OverviewOrderModel path={order.modelImagePath} order={order} onOpenOrder={()=>go(overviewTargets.order(order.id))}/>
+     <UnstyledButton type="button" className="overview-order-identity"><span className="overview-order-heading"><b>{order.number}</b><OverviewOrderSourceIcon source={order.orderSource}/></span><Tooltip label={order.clientName}><span>{order.clientName}</span></Tooltip></UnstyledButton><Badge variant="light" color={order.salesStatus==='WAITING_FINAL_PAYMENT'||order.salesStatus==='WAITING_DEPOSIT'?'orange':'blue'}>{orderLabel('sales',order.salesStatus)}</Badge>
      <span className="overview-order-money"><Tooltip label={order.amountMinor===null?(orders.data?.valuationError||ui.conversionError):`${ui.original}: ${moneyLabel(order.originalAmountMinor,order.originalCurrency)}`}><b>{order.amountMinor===null?ui.unavailable:moneyLabel(order.amountMinor,currency)}</b></Tooltip><small>{financeDate(order.createdAt)}</small></span>
-    </UnstyledButton>)}</PanelStatus>{orders.data?.valuationError&&<p role="alert" className="overview-conversion-error">{orders.data.valuationError}</p>}
+    </div>)}</PanelStatus>{orders.data?.valuationError&&<p role="alert" className="overview-conversion-error">{orders.data.valuationError}</p>}
    </article>}
    {permissions.shipments&&<article className="overview-card overview-shipments"><header><h2>{ui.shipments}</h2><UnstyledButton className="overview-link" onClick={()=>go(overviewTargets.shipping())}>{ui.allShipments} →</UnstyledButton></header><p className="overview-note overview-list-scope">{ui.now}</p>
     <PanelStatus panel={shipments}>{shipments.data&&!shipments.data.rows.length?<p className="overview-empty">{ui.emptyShipments}</p>:shipments.data?.rows.slice(0,5).map(shipment=><div className="overview-shipment-row" key={shipment.id}>
@@ -169,9 +170,9 @@ export function OverviewWorkspace({role,onNavigate,modeControl}:{role:string;onN
  </section></MantineProvider>;
 }
 
-function OverviewOrderModel({path}:{path:string|null}){
+function OverviewOrderModel({path,order,onOpenOrder}:{path:string|null;order:{id:string;number:string};onOpenOrder:()=>void}){
  const [failed,setFailed]=useState(false);useEffect(()=>setFailed(false),[path]);
- return path&&!failed?<img src={imageSource(path)} alt={ui.model} referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<span className="overview-model-placeholder" title={ui.noModel}><OverviewIcon name="bag"/></span>;
+ return path&&!failed?<OrderImagePreview src={imageSource(path)} alt={ui.model} order={order} onOpenOrder={onOpenOrder} imageProps={{onError:()=>setFailed(true)}}/>:<span className="overview-model-placeholder" title={ui.noModel}><OverviewIcon name="bag"/></span>;
 }
 function OverviewOrderSourceIcon({source}:{source:OrderSource}){
  const icon:Record<OrderSource,string>={WEBSITE:'cart',MANUAL:'pencil',INSTAGRAM:'instagram',FACEBOOK:'facebook',CHAT:'message',WHATSAPP:'phone',VIBER:'phone',EMAIL:'mail',OTHER:'dots',UNKNOWN:'question'};

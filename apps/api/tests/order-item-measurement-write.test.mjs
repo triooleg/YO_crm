@@ -46,9 +46,10 @@ const orderRequire = specifier => {
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
 };
-vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
+vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module: ordersModule, exports: ordersModule.exports, require: orderRequire, Buffer, console, process, Date, setTimeout, clearTimeout });
 const { OrdersService } = ordersModule.exports;
 
 test("item measurement endpoint preserves the existing measurement-write RBAC", () => {

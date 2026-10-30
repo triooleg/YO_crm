@@ -1,3 +1,4 @@
+import { recoveryIsolationEnabled } from "../recovery-safety";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { AiJobStatus } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
@@ -29,9 +30,9 @@ export class AiJobWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AiJobWorkerService.name);
   private timer?: NodeJS.Timeout;
   constructor(private readonly prisma: PrismaService, private readonly flags: AiFeatureFlagsService, private readonly analyzer: ConversationAnalyzerService) {}
-  onModuleInit() { this.timer = setInterval(() => void this.tick(), 5_000); }
+  onModuleInit() { if (recoveryIsolationEnabled()) return; this.timer = setInterval(() => void this.tick(), 5_000); }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
-  async tick() {
+  async tick() { if (recoveryIsolationEnabled()) return;
     const effective=await this.flags.effective();
     if (!shouldProcessAiJobs({aiEnabled:effective.masterEnabled,messageAnalysisEnabled:effective.analyzeIncoming})) return;
     const staleBefore=new Date(Date.now()-5*60_000);

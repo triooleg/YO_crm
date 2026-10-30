@@ -1,3 +1,5 @@
+import { shipmentEmailAccountIdentity } from "./shipment-email-account";
+import { recoveryIsolationEnabled } from "../recovery-safety";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ImapFlow } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
@@ -26,10 +28,10 @@ export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
   private running=false;
   private backfillRunning=false;
   constructor(private readonly prisma:PrismaService,private readonly transport:EmailTransportService,private readonly communications:CommunicationsService){}
-  onModuleInit(){this.timer=setInterval(()=>void this.tick(),30_000);this.startupTimers=[setTimeout(()=>void this.backfillLegacyHtml(),2_000),setTimeout(()=>void this.tick(),5_000)]}
+  onModuleInit(){if(recoveryIsolationEnabled())return;this.timer=setInterval(()=>void this.tick(),30_000);this.startupTimers=[setTimeout(()=>void this.backfillLegacyHtml(),2_000),setTimeout(()=>void this.tick(),5_000)]}
   onModuleDestroy(){if(this.timer)clearInterval(this.timer);for(const timer of this.startupTimers)clearTimeout(timer)}
 
-  private async backfillLegacyHtml(){
+  private async backfillLegacyHtml(){if(recoveryIsolationEnabled())return;
     if(this.backfillRunning)return;this.backfillRunning=true;
     try{
       const cursorSetting=await this.prisma.appSetting.findUnique({where:{section_key:{section:"integration.email.sync",key:"legacyHtmlBackfillCursor"}}}),cursorValue=cursorSetting?.value&&typeof cursorSetting.value==="object"&&!Array.isArray(cursorSetting.value)?cursorSetting.value as Prisma.JsonObject:{};
@@ -107,7 +109,7 @@ export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
     const recipients=[...new Set(this.recipients(parsed).filter(address=>address!==own))];
     if(recipients.length!==1){await this.prisma.auditLog.create({data:{action:"EMAIL_SENT_SKIPPED",entityType:"EmailMessage",entityId:createHash("sha256").update(externalMessageId).digest("hex").slice(0,24),after:{channel:"EMAIL",reason:recipients.length?"AMBIGUOUS_RECIPIENTS":"RECIPIENT_MISSING",recipientCount:recipients.length}}});return false}
     const attachments=await this.storedAttachments(parsed,directory,written,true),attachmentFiles=attachments.map(item=>item.url.split("/").pop()).filter((name):name is string=>Boolean(name));
-    const outcome=await this.communications.receiveSentEmailMessage({externalMessageId,recipient:recipients[0]!,content,emailHtml,sentAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize});
+    const outcome=await this.communications.receiveSentEmailMessage({sourceAccountIdentity:shipmentEmailAccountIdentity(settings)||undefined,externalMessageId,recipient:recipients[0]!,content,emailHtml,sentAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize});
     if(outcome.accepted&&!outcome.retainAttachments)for(const name of attachmentFiles){await unlink(join(directory,name)).catch(()=>undefined);const index=written.indexOf(name);if(index>=0)written.splice(index,1)}
     if(outcome.accepted&&!outcome.retainRaw){await unlink(join(directory,rawPath)).catch(()=>undefined);const index=written.indexOf(rawPath);if(index>=0)written.splice(index,1)}
     return outcome.accepted
@@ -128,7 +130,7 @@ export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
       }
     }finally{lock.release()}
   }
-  async tick(){
+  async tick(){if(recoveryIsolationEnabled())return;
     if(this.running)return;this.running=true;let client:ImapFlow|undefined;
     try{
       await this.communications.retryEmailSentCleanup();

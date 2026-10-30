@@ -1,4 +1,4 @@
-export const ORDER_PAGE_SIZES = [20, 50, 100] as const;
+export const ORDER_PAGE_SIZES = [20, 30, 50, 70, 100] as const;
 export type OrderPageSize = (typeof ORDER_PAGE_SIZES)[number];
 
 export type OrderPaginationState = {

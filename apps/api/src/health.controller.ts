@@ -99,6 +99,8 @@ export class HealthController {
     const result = {
       ok: checks.every((status) => status === "up"),
       service: "yoleotard-crm-api",
+      version: process.env.CRM_VERSION || "development",
+      revision: process.env.CRM_COMMIT || "development",
       dependencies,
     };
 

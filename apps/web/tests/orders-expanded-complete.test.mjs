@@ -64,7 +64,7 @@ test("смена статуса сериализована, откатывает
 });
 
 test("вкладки показывают реальные финансы доставку историю и безопасное пустое состояние файлов", () => {
-  for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
+  for (const key of ["details", "designs", "measurements", "finance", "production", "delivery", "notes", "history"])
     assert.match(expanded, new RegExp(`key: "${key}"`));
   assert.match(expanded, /paymentHistory\.map/);
   assert.match(expanded, /payment\.reference|paymentMethodLabel\(payment\.method\)/);

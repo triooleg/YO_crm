@@ -25,3 +25,15 @@ test("заказ сайта предпочитает последователь�
   assert.match(source, /websiteItemName/);
   assert.match(source, /\(\?:YO\|WEB\)-\[1-9\]\\d\*\$/);
 });
+
+// Execute the actual shared display helper, keeping provider fallback regressions visible.
+test("годовой номер CRM сайта имеет приоритет над внешним номером", async () => {
+  const {createRequire}=await import('node:module'),{runInNewContext}=await import('node:vm');
+  const require=createRequire(import.meta.url),ts=require('typescript'),module={exports:{}};
+  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  runInNewContext(code,{module,exports:module.exports,require:id=>id.includes('i18n')?{orderSourceUi:{labels:{}}}:{}});
+  const display=module.exports.orderDisplayNumber;
+  for(const number of ['23-101','24-0002','26-707','26-26-0001'])assert.equal(display({number,sourceSystem:'YOLEOTARD_WEBSITE',externalNumber:'22732',externalId:'22732'}),number);
+  assert.equal(display({number:'YO-707',sourceSystem:'YOLEOTARD_WEBSITE',externalNumber:'22732'}),'YO-707');
+  assert.equal(display({number:'legacy',sourceSystem:'YOLEOTARD_WEBSITE',externalNumber:'22732'}),'22732');
+});

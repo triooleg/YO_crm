@@ -37,9 +37,10 @@ const orderRequire = specifier => {
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
+  if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
 };
-vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module, exports: module.exports, require: orderRequire, Buffer, console, process, setTimeout, clearTimeout });
+vm.runInNewContext(compile("../src/orders/orders.service.ts"), { module, exports: module.exports, require: orderRequire, Buffer, console, process, Date, setTimeout, clearTimeout });
 const { OrdersService } = module.exports;
 
 function harness(current = "Старое пожелание") {

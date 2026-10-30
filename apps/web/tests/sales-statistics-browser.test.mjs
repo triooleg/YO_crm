@@ -43,6 +43,7 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
       if (path === '/api/auth/me') return json({ user: { id: 'browser-staff', role, displayName: 'Browser QA', email: 'qa@example.test' } });
       if (path === '/api/branding') return json({});
       if (path === '/api/communications/unread-count') return json({ unreadCount: 0 });
+      if (path === '/api/orders/website-notifications') return json({ items: [], unreadCount: 0 });
       try {
         if (path === statsPath) return json(model.report(input));
         if (path === statsPath + '/export') return route.fulfill({ contentType: 'text/csv; charset=utf-8', headers: { 'content-disposition': 'attachment; filename="sales-statistics.csv"' }, body: model.csv(input) });
@@ -73,6 +74,79 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
     await page.getByRole('option', { name: option, exact: true }).click();
     await ready(page);
   };
+  await scenario('previous KPI numbers and neutral comparisons stay aligned with the selected report', async () => {
+    const s = await session();
+    try {
+      await s.page.goto(base.origin + startQuery); await ready(s.page);
+      await s.page.screenshot({path:resolve(artifacts,'comparison-desktop.png'),fullPage:true});
+      const cards=s.page.locator('.sales-statistics-kpi');
+      await expect(cards).toHaveCount(6);
+      for(let i=0;i<6;i++) await expect(cards.nth(i).locator('.sales-statistics-kpi-previous')).toHaveText(i===5?'0,00 €':'0');
+      for(let i=0;i<6;i++) await expect(cards.nth(i).locator('.sales-statistics-comparison')).toHaveText('—');
+    } finally {await s.finish('comparison-zero-base')}
+  });
+  await scenario('previous KPI values follow filters and currencies without overlap', async () => {
+    const s=await session();
+    try {
+      const {salesCount}=await import('../lib/sales-statistics.ts');
+      // Chromium and Node ship different ICU currency symbols for UAH.
+      const money=(value,currency)=>s.page.evaluate(({value,currency})=>value==null?'—':new Intl.NumberFormat('ru-RU',{style:'currency',currency,maximumFractionDigits:2}).format(value/100),{value,currency});
+      const verify=async()=>{
+        const report=fixtureModel().report(s.latest());
+        const cards=s.page.locator('.sales-statistics-kpi');
+        for(const [i,key] of ['orders','pieces','countries','clients','repeatOrders','amountMinor'].entries()){
+          await expect(cards.nth(i).locator('.sales-statistics-kpi-previous')).toHaveText(i===5?await money(report.previous[key],report.query.currency):salesCount(report.previous[key]));
+          await expect(cards.nth(i).locator('strong')).toHaveText(i===5?await money(report.current[key],report.query.currency):salesCount(report.current[key]));
+        }
+      };
+      await s.page.goto(base.origin+'?section=overview&view=statistics&from=2026-10-01&to=2026-10-31&currency=EUR');await ready(s.page);await verify();
+      await expect(s.page.locator('.sales-statistics-kpi-previous').first()).toHaveText('7');
+      await expect(s.page.locator('.sales-statistics-kpi-previous').nth(1)).toHaveText('42');
+      await expect(s.page.locator('.sales-statistics-kpi-previous').nth(5)).toHaveText('5 973,41 €');
+      await expect(s.page.locator('.sales-statistics-kpi .sales-statistics-comparison')).toHaveCount(6);
+      await expect(s.page.locator('.sales-statistics-kpi .sales-statistics-comparison').first()).toHaveText('0%');
+      for(const currency of ['USD','UAH','EUR']) {await select(s.page,'Валюта отчёта',currency);await verify()}
+      for(const [width,height] of [[1920,1080],[1366,768],[820,1180],[390,844],[320,800]]){
+        await s.page.setViewportSize({width,height});await verify();
+        const geometry=await s.page.locator('.sales-statistics-kpi').evaluateAll(cards=>cards.map(card=>{
+          const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}};
+          return {card:rect(card),badge:rect(card.querySelector('.sales-statistics-kpi-previous')),title:rect(card.querySelector('h2')),value:rect(card.querySelector('strong'))};
+        }));
+        const overlap=(a,b)=>Math.min(a.right,b.right)>Math.max(a.left,b.left)+1&&Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top)+1;
+        for(const {card,badge,title,value} of geometry){assert.ok(badge.left>=card.left&&badge.right<=card.right);assert.ok(!overlap(badge,title)&&!overlap(badge,value));assert.ok(Math.abs(badge.right-card.right+13)<=2,'Badge stays at the right edge');assert.ok(Math.abs(badge.top-card.top-13)<=2,'Badge stays at the top edge');}
+        assert.ok(await s.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No page overflow');
+        await s.page.screenshot({path:resolve(artifacts,`comparison-${width}.png`),fullPage:width>=1366});
+      }
+      await s.page.setViewportSize({width:390,height:844});await select(s.page,'Валюта отчёта','UAH');await verify();
+      const moneyBounds=await s.page.locator('.sales-statistics-kpi').nth(5).evaluate(card=>{
+        const badge=card.querySelector('.sales-statistics-kpi-previous'),value=card.querySelector('strong'),a=badge.getBoundingClientRect(),b=value.getBoundingClientRect(),c=card.getBoundingClientRect();
+        return {top:a.top-c.top,right:c.right-a.right,badgeBottom:a.bottom,valueTop:b.top,scroll:badge.scrollWidth,width:badge.clientWidth};
+      });
+      assert.ok(Math.abs(moneyBounds.top-13)<=2&&Math.abs(moneyBounds.right-13)<=2);assert.ok(moneyBounds.badgeBottom<=moneyBounds.valueTop);assert.ok(moneyBounds.scroll<=moneyBounds.width+1);
+      await s.page.mouse.move(0,0);await expect(s.page.getByRole('tooltip')).toBeHidden();
+      await s.page.locator('.sales-statistics-kpis').screenshot({path:resolve(artifacts,'comparison-390-UAH.png')});
+      await s.page.setViewportSize({width:1536,height:1024});
+      await select(s.page,'Источник','С сайта');await s.page.getByRole('button',{name:'Применить',exact:true}).click();await ready(s.page);await verify();
+      await select(s.page,'Статус','Заказ подтверждён');await s.page.getByRole('button',{name:'Применить',exact:true}).click();await ready(s.page);await verify();
+      await select(s.page,'Клиент','Синтетический клиент 1');await s.page.getByRole('button',{name:'Применить',exact:true}).click();await ready(s.page);await verify();
+    } finally {await s.finish('comparison-filters-currencies-layout')}
+  });
+  await scenario('previous KPI badges show growth and decline with consistent numbers', async () => {
+    const s=await session();
+    try {
+      await s.page.goto(base.origin+'?section=overview&view=statistics&from=2026-10-01&to=2026-10-20&currency=EUR');await ready(s.page);
+      const first=s.page.locator('.sales-statistics-kpi').first();
+      await expect(first.locator('strong')).toHaveText('7');
+      await expect(first.locator('.sales-statistics-kpi-previous')).toHaveText('6');
+      await expect(first.locator('.sales-statistics-positive')).toHaveText('↑ +17%');
+      await expect(s.page.locator('.sales-statistics-kpi-previous').nth(5)).toHaveText('4 773,41 €');
+      await s.page.screenshot({path:resolve(artifacts,'comparison-growth-desktop.png'),fullPage:true});
+      await s.page.goto(base.origin+'?section=overview&view=statistics&from=2026-10-15&to=2026-10-31&currency=EUR');await ready(s.page);
+      await expect(first.locator('strong')).toHaveText('2');
+      await expect(first.locator('.sales-statistics-kpi-previous')).toHaveText('5');
+      await expect(first.locator('.sales-statistics-negative')).toHaveText('↓ -60%');
+    } finally {await s.finish('comparison-growth-decline')}
+  });
   await scenario('fixture uses the real aggregate and changes with filters', async () => {
     const m = fixtureModel(), report = m.report({ from: '2026-01-01', to: '2026-10-31' });
     assert.equal(report.current.orders, 70); assert.equal(report.current.pieces, 420);
@@ -185,9 +259,12 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
             stylesheets.push({ url: href, sha256: createHash('sha256').update(await response.body()).digest('hex') });
           }
           const sourceHash = createHash('sha256').update(await readFile(resolve(root, 'apps/web/app/sales-statistics.css'))).digest('hex');
-          const runtimeHash = createHash('sha256').update(await readFile(resolve(root, '.local/sales-statistics/browser-runtime/apps/web/app/sales-statistics.css'))).digest('hex');
-          assert.equal(sourceHash, runtimeHash);
-          await writeFile(resolve(artifacts, 'css-http-1366.json'), JSON.stringify({ sourceHash, runtimeHash, countryStyle, stylesheets }, null, 2));
+          // Optional frozen runtime comparison; normal local dev runs directly
+          // from this checkout and have no historical copied-runtime directory.
+          const runtimeRoot=process.env.YO_SALES_RUNTIME_ROOT;
+          const runtimeHash=runtimeRoot?createHash('sha256').update(await readFile(resolve(runtimeRoot,'apps/web/app/sales-statistics.css'))).digest('hex'):null;
+          if(runtimeRoot)assert.equal(sourceHash,runtimeHash);
+          await writeFile(resolve(artifacts, 'css-http-1366.json'), JSON.stringify({ sourceHash, runtimeRoot:runtimeRoot||null, runtimeHash, countryStyle, stylesheets }, null, 2));
         }
         await s.page.screenshot({ path: resolve(artifacts, `statistics-${width}-viewport.png`) });
         await s.page.screenshot({ path: resolve(artifacts, `statistics-${width}-full.png`), fullPage: true });
@@ -349,6 +426,7 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
           await expect(s.page.locator('.sales-statistics-financial-summary')).toBeHidden();
           await expect(s.page.getByRole('combobox', { name: 'Валюта отчёта', exact: true })).toHaveCount(0);
           await expect(s.page.locator('.sales-statistics-kpi').nth(5).locator('strong')).toHaveText('—');
+          await expect(s.page.locator('.sales-statistics-kpi-previous').nth(5)).toHaveText('—');
           await expect(s.page.getByRole('heading', { name: 'Динамика выручки', exact: true })).toHaveCount(0);
           const dl = s.page.waitForEvent('download'); await s.page.getByRole('button', { name: 'Экспорт', exact: true }).click();
           await (await dl).saveAs(resolve(artifacts, 'manager-counts.csv'));
@@ -397,7 +475,12 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
     try {
       await s.page.goto(base.origin + startQuery); await ready(s.page);
       await expect(s.page.locator('.sales-statistics-page')).toContainText(text);
-      if (name === 'missing-fx') await expect(s.page.locator('.sales-statistics-kpi').nth(5).locator('strong')).toHaveText('—');
+      if (name === 'missing-fx') {
+        await expect(s.page.locator('.sales-statistics-kpi').nth(5).locator('strong')).toHaveText('—');
+        await s.page.goto(base.origin+'?section=overview&view=statistics&from=2026-10-01&to=2026-10-31');await ready(s.page);
+        await expect(s.page.locator('.sales-statistics-kpi-previous').nth(5)).toHaveText('—');
+        await expect(s.page.locator('.sales-statistics-kpi').nth(5).locator('.sales-statistics-comparison')).toHaveText('—');
+      }
       await s.page.screenshot({ path: resolve(artifacts, `${name}.png`), fullPage: true });
     } finally { await s.finish(name); }
   });

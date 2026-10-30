@@ -47,12 +47,13 @@ const requireForOrders = specifier => {
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
+  if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
 };
 const source = readFileSync(new URL("../src/orders/orders.service.ts", import.meta.url), "utf8");
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, esModuleInterop: true } }).outputText;
 const ordersModule = { exports: {} };
-vm.runInNewContext(javascript, { module: ordersModule, exports: ordersModule.exports, require: requireForOrders, Buffer, console, process, setTimeout, clearTimeout });
+vm.runInNewContext(javascript, { module: ordersModule, exports: ordersModule.exports, require: requireForOrders, Buffer, console, process, Date, setTimeout, clearTimeout });
 const { OrdersService } = ordersModule.exports;
 
 test("Overview Orders API intersects the exact cohort with search and retains the legacy contact projection", async () => {

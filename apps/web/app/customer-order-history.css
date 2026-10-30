@@ -1,0 +1,81 @@
+.customer-history-previous,.customer-history-statistics{padding:14px;border:1px solid var(--mantine-color-yoleotard-2);border-radius:var(--mantine-radius-sm);background:var(--mantine-color-white);min-width:0}
+.customer-history-previous{container-type:inline-size}
+.customer-history-previous>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
+.customer-history-previous h3,.customer-history-statistics h3{margin:0;font-size:14px;line-height:1.4}
+.customer-history-previous>header>div{min-width:0}
+.customer-history-previous>header p{margin-top:5px}
+.customer-history-previous-list{display:grid;gap:8px}
+.customer-history-order-card{display:grid;grid-template-columns:106px minmax(0,1fr) auto minmax(74px,auto) 28px;align-items:center;gap:10px;padding:9px;border:1px solid var(--mantine-color-gray-2);border-radius:var(--mantine-radius-sm);background:var(--mantine-color-white);cursor:pointer;min-width:0}
+.customer-history-order-card:focus-visible,.customer-history-modal-table tr:focus-visible{outline:2px solid var(--mantine-color-yoleotard-5);outline-offset:2px}
+.customer-history-designs{position:relative;display:flex;gap:6px;align-items:center;min-width:100px}
+.customer-history-thumbnail,.customer-history-image-placeholder{width:46px;height:64px;flex:0 0 46px;border-radius:7px;overflow:hidden;background:var(--mantine-color-gray-0);border:1px solid var(--mantine-color-gray-2)}
+.customer-history-thumbnail{display:block;cursor:zoom-in}
+.customer-history-thumbnail:focus-visible{outline:2px solid var(--mantine-color-yoleotard-5);outline-offset:2px}
+.customer-history-thumbnail img{display:block;width:100%;height:100%;object-fit:contain}
+.customer-history-image-placeholder{display:grid;place-items:center;color:var(--mantine-color-gray-5)}
+.customer-history-image-placeholder svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.5}
+.customer-history-designs .customer-history-more-designs{position:absolute;right:0;bottom:0;text-transform:none;white-space:nowrap}
+.customer-history-order-details{display:grid;gap:4px;min-width:0}
+.customer-history-order-details>.mantine-Button-root{justify-self:start;max-width:100%;padding-inline:0}
+.customer-history-order-details .mantine-Button-label{overflow:hidden;text-overflow:ellipsis}
+.customer-history-country{min-width:0}
+.customer-history-country>p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-history-order-status{min-width:0}
+.customer-history-order-status .mantine-Badge-root{height:auto;white-space:normal}
+.customer-history-order-amount{text-align:right;white-space:nowrap}
+.customer-history-order-card>.mantine-ActionIcon-root svg,.customer-history-modal-table .mantine-ActionIcon-root svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}
+.customer-history-list-scope{margin-top:12px}
+.customer-history-empty{padding:22px 0}
+.customer-history-statistics dl{margin:12px 0}
+.customer-history-statistics dl>div{padding:9px 0;border-bottom:1px solid var(--mantine-color-gray-2)}
+.customer-history-statistics dt{font-size:11px;color:var(--mantine-color-dimmed)}
+.customer-history-statistics dd{margin:4px 0 0;font-size:14px;font-weight:700;overflow-wrap:anywhere}
+.customer-history-currency-scope{margin-top:8px}
+.customer-history-modal-client .client-order-history-channel>.orders-channel{width:38px;height:38px}
+.customer-history-modal-client .client-order-history-channel svg{width:24px;height:24px}
+.customer-history-modal-client .client-order-history-client>p{font-size:18px}
+.customer-history-modal-client>.mantine-Badge-root{text-transform:uppercase}
+.customer-history-modal-table{font-size:12px;table-layout:auto;width:100%;border-collapse:separate;border-spacing:0}
+.customer-history-modal-table thead th{white-space:nowrap;background:var(--mantine-color-white)}
+.customer-history-modal-table tbody tr{cursor:pointer}
+.customer-history-modal-table tbody td{border-top:1px solid var(--mantine-color-gray-2);white-space:nowrap}
+.customer-history-modal-table tbody td:first-child{width:120px}
+.customer-history-native-amount{font-weight:500}
+.customer-history-mobile-cards{display:grid;gap:9px}
+.customer-history-order-card.is-mobile{grid-template-columns:100px minmax(0,1fr) 28px;gap:8px}
+.customer-history-order-card.is-mobile>.customer-history-designs{grid-column:1;grid-row:1/4}
+.customer-history-order-card.is-mobile>.customer-history-order-details{grid-column:2;grid-row:1}
+.customer-history-order-card.is-mobile>.customer-history-order-status{grid-column:2;grid-row:2}
+.customer-history-order-card.is-mobile>.customer-history-order-amount{grid-column:2;grid-row:3;text-align:left}
+.customer-history-order-card.is-mobile>.mantine-ActionIcon-root{grid-column:3;grid-row:1/4}
+.customer-history-preview-image{display:block;max-width:100%;width:auto;max-height:75vh;margin:auto;object-fit:contain}
+.customer-history-image-modal{max-width:calc(100vw - 24px)}
+.customer-history-visually-hidden{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@container(max-width:560px){.customer-history-order-card.is-previous{grid-template-columns:100px minmax(0,1fr) 28px}.customer-history-order-card.is-previous>.customer-history-designs{grid-column:1;grid-row:1/4}.customer-history-order-card.is-previous>.customer-history-order-details{grid-column:2;grid-row:1}.customer-history-order-card.is-previous>.customer-history-order-status{grid-column:2;grid-row:2}.customer-history-order-card.is-previous>.customer-history-order-amount{grid-column:2;grid-row:3;text-align:left}.customer-history-order-card.is-previous>.mantine-ActionIcon-root{grid-column:3;grid-row:1/4}}
+@media(max-width:48em){.customer-history-modal-actions{align-items:stretch;flex-direction:column}.customer-history-modal-actions>.mantine-Button-root{width:100%}.customer-history-previous>header{flex-wrap:wrap}.customer-history-modal-client .client-order-history-client>p{font-size:15px}.customer-history-previous,.customer-history-statistics{padding:11px}}
+
+.customer-history-modal{--modal-size:900px;max-width:calc(100vw - 24px)}
+.customer-history-previous-count{flex:0 0 auto}
+
+/* Compact history keeps up to eight real orders in the existing panel. */
+.customer-history-previous-list{gap:5px}
+.customer-history-order-card.is-previous{padding:6px 8px;gap:8px;min-height:60px}
+.is-previous .customer-history-thumbnail,.is-previous .customer-history-image-placeholder{width:36px;height:48px;flex-basis:36px}
+.is-previous .customer-history-order-details{gap:2px}
+.is-previous .customer-history-order-details .mantine-Button-root{height:18px;min-height:18px}
+.is-previous .customer-history-order-details p,.is-previous .customer-history-order-amount p{line-height:1.15;margin:0}
+.is-previous .customer-history-country{gap:4px}
+
+/* Denser all-orders table and mobile cards; image viewer retains full source. */
+.customer-history-modal-table tbody td{padding-top:5px;padding-bottom:5px}
+.customer-history-modal-table .customer-history-thumbnail,.customer-history-modal-table .customer-history-image-placeholder{width:32px;height:42px;flex-basis:32px}
+.customer-history-modal-table .customer-history-designs{gap:5px}
+.customer-history-modal-table tbody td:first-child{width:88px}
+.customer-history-mobile-cards{gap:6px}
+.customer-history-order-card.is-mobile{padding:7px;gap:5px;grid-template-columns:72px minmax(0,1fr) 28px}
+.is-mobile .customer-history-thumbnail,.is-mobile .customer-history-image-placeholder{width:32px;height:42px;flex-basis:32px}
+.is-mobile .customer-history-order-details{gap:2px}
+.is-mobile .customer-history-order-details p,.is-mobile .customer-history-order-amount p{line-height:1.2;margin:0}
+
+.is-mobile .customer-history-designs{min-width:0;max-width:100%;gap:4px}
+.customer-history-modal-table .customer-history-designs{min-width:0;width:max-content;max-width:100%}

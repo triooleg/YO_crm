@@ -15,7 +15,7 @@ test("девять утверждённых вкладок остаются вн
   assert.match(css, /\.orders-dashboard-table \.orders-expanded-row \.orders-approved-expanded/);
 });
 
-test("раскрытая карточка делегирует визуальные панели девяти доменным компонентам", () => {
+test("раскрытая карточка делегирует визуальные панели восьми доменным компонентам", () => {
   for (const component of [
     "OrderDetailsTab",
     "OrderMeasurementsTab",
@@ -30,7 +30,7 @@ test("раскрытая карточка делегирует визуальн�
   assert.match(tabs, /<DesignsInstancesTab\b/);
   assert.match(designs, /export function DesignsInstancesTab\b/);
 
-  for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
+  for (const key of ["details", "designs", "measurements", "finance", "production", "delivery", "notes", "history"])
     assert.match(tabs, new RegExp(`activeTab === "${key}"`));
 });
 

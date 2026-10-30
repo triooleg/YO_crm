@@ -1,3 +1,4 @@
+import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
 import {classifyOrderSource,orderOriginSelect,loadOrderSourceMap} from '../orders/order-source';
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
@@ -133,7 +134,7 @@ export class FinanceReportService {
   /** Bounded searchable options, including clients outside the first report page. */
   async options(search = "") {
     const text = search.trim().slice(0, 200);
-    const orders = await this.prisma.order.findMany({ where: { archivedAt: null, ...(text ? { OR: [{ number: { contains: text, mode: "insensitive" as const } }, { client: { displayName: { contains: text, mode: "insensitive" as const } } }] } : {}) }, take: 100, orderBy: [{ number: "asc" }, { id: "asc" }], select: { id: true, number: true, currency: true, clientId: true, client: { select: { displayName: true } } } });
+    const orders = await this.prisma.order.findMany({ where: { archivedAt: null, ...(text ? { OR: [{ number: { contains: text, mode: "insensitive" as const } }, ...(legacyOrderNumberAlias(text) ? [legacyOrderNumberAlias(text)!] : []), { client: { displayName: { contains: text, mode: "insensitive" as const } } }] } : {}) }, take: 100, orderBy: [{ number: "asc" }, { id: "asc" }], select: { id: true, number: true, currency: true, clientId: true, client: { select: { displayName: true } } } });
     return { orders: orders.map(order => ({ id: order.id, number: order.number, currency: order.currency, clientName: order.client.displayName })), clients: [...new Map(orders.map(order => [order.clientId, { id: order.clientId, name: order.client.displayName }])).values()], limit: 100 };
   }
 }

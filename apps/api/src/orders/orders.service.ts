@@ -1,8 +1,10 @@
+import { nextOrderNumber, legacyOrderNumberAlias } from '../website-orders/website-order-number';
+import type { ClientOrderHistoryPage, ClientOrderHistoryQuery } from './order-client-history';
 import type { TaxesService } from "../taxes/taxes.service";
 import { createMeasurementData, inheritMeasurementDefinition } from "../clients/measurement-data";
 import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
 import {classifyOrderSource,loadOrderSourceMap,matchesOrderSource,persistOrderSourceOverride} from './order-source';
-import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,type OrderListReadQuery} from './order-list-read-model';
+import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,clientHistoryOrderSelect,normalizeClientHistoryPage,normalizeOrderClientId,requireActiveOrderClient,summarizeClientOrderStatuses,presentClientHistoryOrder,presentClientHistoryCurrencyTotals,type OrderListReadQuery} from './order-list-read-model';
 import { presentInvoice } from "../finance/invoice-number";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -29,6 +31,11 @@ import { ORDER_DESIGN_NUMBER_ERROR, OrderDesignNumberError, persistOrderDesignNu
 import { keycrmSourceChannel } from "../keycrm/keycrm-normalizer";
 import { buildOrderFileName, decodeOrderFile } from "./order-file-policy";
 import { updateProductionStatusGraph as applyProductionStatusGraph } from "./production-status-graph";
+
+export function presentOrderClient<T extends { _count: { orders: number }; email?: string | null; facebook?: string | null; source?: string | null }>(client: T) {
+  const { _count, ...visible } = client;
+  return presentClientContact({ ...visible, orderCount: _count?.orders });
+}
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const OPTIMIZE_FROM_BYTES = 2 * 1024 * 1024;
@@ -65,18 +72,6 @@ async function updateProductionStatusGraph(tx: Prisma.TransactionClient, orderId
   return applyProductionStatusGraph(tx, orderId, productionStatus, orderData, options);
 }
 
-async function nextOrderNumber(tx: Prisma.TransactionClient, now = new Date()) {
-  const year = String(now.getFullYear()).slice(-2);
-  const prefix = `YO-${year}-`;
-  const last = await tx.order.findFirst({
-    where: { number: { startsWith: `YO-${year}-` } },
-    orderBy: { number: "desc" },
-    select: { number: true },
-  });
-  const sequence = Number(last?.number.slice(-4) ?? "0") + 1;
-  if (sequence > 9999) throw new BadRequestException(`Исчерпан диапазон номеров заказов за 20${year} год`);
-  return `${prefix}${String(sequence).padStart(4, "0")}`;
-}
 
 @Injectable()
 export class OrdersService {
@@ -141,14 +136,41 @@ export class OrdersService {
     });
   }
 
+  async clientHistory(clientId: string, query: ClientOrderHistoryQuery = {}): Promise<ClientOrderHistoryPage> {
+    const id = normalizeOrderClientId(clientId), { page: requestedPage, pageSize } = normalizeClientHistoryPage(query);
+    return this.prisma.$transaction(async db => {
+      const client = await requireActiveOrderClient(db, id);
+      const where = { clientId: id, archivedAt: null };
+      const groups = await db.order.groupBy({ by: ['salesStatus'], where, _count: { _all: true } });
+      const summary = summarizeClientOrderStatuses(groups);
+      const currencyGroups = await db.order.groupBy({ by: ['currency'], where, _sum: { priceMinor: true }, orderBy: { currency: 'asc' } });
+      const totalsByCurrency = presentClientHistoryCurrencyTotals(currencyGroups);
+      const page = Math.min(requestedPage, Math.max(1, Math.ceil(summary.total / pageSize)));
+      const items = await db.order.findMany({ where, select: clientHistoryOrderSelect, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize });
+      const orderIds = items.map(order => order.id);
+      const itemGroups = orderIds.length ? await db.orderItem.groupBy({ by: ['orderId'], where: { orderId: { in: orderIds }, archivedAt: null, order: where }, _count: { _all: true }, _sum: { quantity: true } }) : [];
+      const activeItems = new Map(itemGroups.map(group => [group.orderId, group]));
+      return { client, summary, items: items.map(order => presentClientHistoryOrder(order, activeItems.get(order.id))), totalsByCurrency, page, pageSize, total: summary.total };
+    }, { isolationLevel: 'RepeatableRead', timeout: 30000, maxWait: 5000 });
+  }
+
   async list(search?: string, overview?: OrderListReadQuery) {
     const options=normalizeOrderListRead(overview??{}),paged=overview?.page!==undefined||overview?.pageSize!==undefined;
+    const clientId=overview?.clientId===undefined?undefined:normalizeOrderClientId(overview.clientId);
     const query=search?.trim();if((query?.length??0)>200)throw new BadRequestException('Слишком длинный поиск заказов');
     const read=async(db:Prisma.TransactionClient)=>{
+      const clientFilter=clientId===undefined?undefined:await requireActiveOrderClient(db,clientId);
+      const eligibleClients=options.minClientOrders===undefined?undefined:await db.order.groupBy({by:['clientId'],where:{archivedAt:null},having:{clientId:{_count:{gte:options.minClientOrders}}}});
       const overviewIds=overview?.overviewFilter||overview?.period?await (await import('../overview/overview-order-model')).resolveOverviewOrderIds(db,overview):undefined;
-      const where:Prisma.OrderWhereInput={ archivedAt: null, ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
+      const where:Prisma.OrderWhereInput={ archivedAt: null, ...(eligibleClients===undefined?{}:{AND:[{clientId:{in:eligibleClients.map(client=>client.clientId)}}]}), ...(clientId===undefined?{}:{clientId}), ...(overviewIds ? { id: { in: overviewIds } } : {}), ...(query ? { OR: [
         { number: { contains: query, mode: "insensitive" as const } },
+        ...(legacyOrderNumberAlias(query) ? [legacyOrderNumberAlias(query)!] : []),
         { externalNumber: { contains: query, mode: "insensitive" as const } },
+        { deliveryTrackingCode: { contains: query, mode: "insensitive" as const } },
+        { shipment: { is: { trackingNumber: { contains: query, mode: "insensitive" as const } } } },
+        { orderShipments: { some: { archivedAt: null, trackingNumber: { contains: query, mode: "insensitive" as const } } } },
+        { country: { contains: query, mode: "insensitive" as const } },
+        { client: { country: { contains: query, mode: "insensitive" as const } } },
         { client: { displayName: { contains: query, mode: "insensitive" as const } } },
         { athlete: { is: { firstName: { contains: query, mode: "insensitive" as const } } } },
         { athlete: { is: { lastName: { contains: query, mode: "insensitive" as const } } } },
@@ -168,7 +190,7 @@ export class OrdersService {
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
         sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true, externalData: true,
         createdAt: true, productionSlot: true,
-        client: { select: { id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true } },
+        client: { select: { _count: { select: { orders: { where: { archivedAt: null } } } }, id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true } },
         athlete: { select: { id: true, firstName: true, lastName: true } },
         measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } },
         items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { instances: { where: { archivedAt: null }, select: { id: true, ordinal: true, updatedAt: true, productionStatus: true, standardHeight: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true } } } }, id: true, archivedAt: true, discipline: true, notes: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } } } },
@@ -182,15 +204,15 @@ export class OrdersService {
         const origins=await loadOrderSourceMap(db,candidates.map(order=>order.id));
         const result=buildOrderListPage(candidates.map(order=>({...order,orderSource:origins[order.id]??'UNKNOWN'})),overview??{});
         const pageIds=result.items.map(order=>order.id);
-        const rich=pageIds.length?await db.order.findMany({where:{id:{in:pageIds}},select:richSelect,take:options.pageSize}):[];
+        const rich=pageIds.length?await db.order.findMany({where:{id:{in:pageIds},...(clientId===undefined?{}:{clientId})},select:richSelect,take:options.pageSize}):[];
         const byId=new Map(rich.map(order=>[order.id,order]));
-        return {...result,items:pageIds.map(id=>{const order=byId.get(id)!;const {compositionOperations,_count,externalData,...visible}=order;return {...visible,...(visible.invoices?{invoices:visible.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee(order),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!visible.items.length),orderSource:origins[id]??'UNKNOWN',client:presentClientContact(order.client)};})};
+        return {...result,...(clientFilter?{clientFilter}:{}),items:pageIds.map(id=>{const order=byId.get(id)!;const {compositionOperations,_count,externalData,...visible}=order;return {...visible,...(visible.invoices?{invoices:visible.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee(order),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!visible.items.length),orderSource:origins[id]??'UNKNOWN',client:presentOrderClient(order.client)};})};
       }
       const orders=await db.order.findMany({where,orderBy:[{requiredDeliveryAt:'asc'},{createdAt:'desc'}],select:richSelect});
       const origins=await loadOrderSourceMap(db,orders.map(order=>order.id));
-      return orders.map(({compositionOperations,_count,externalData,...order})=>({...order,...(order.invoices?{invoices:order.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee({...order,externalData}),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!order.items.length),orderSource:origins[order.id]??'UNKNOWN',client:presentClientContact(order.client)})).filter(order=>matchesOrderSource(order.orderSource,options.source));
+      return orders.map(({compositionOperations,_count,externalData,...order})=>({...order,...(order.invoices?{invoices:order.invoices.map(presentInvoice)}:{}),websiteCardFeeMinor:websiteOrderCardFee({...order,externalData}),compositionManaged:Boolean(compositionOperations?.length||_count?.items&&!order.items.length),orderSource:origins[order.id]??'UNKNOWN',client:presentOrderClient(order.client)})).filter(order=>matchesOrderSource(order.orderSource,options.source));
     };
-    return paged?this.prisma.$transaction(read,{isolationLevel:'RepeatableRead',timeout:30000,maxWait:5000}):read(this.prisma);
+    return paged||clientId!==undefined||options.minClientOrders!==undefined?this.prisma.$transaction(read,{isolationLevel:'RepeatableRead',timeout:30000,maxWait:5000}):read(this.prisma);
   }
 
   async detail(orderId: string) {
@@ -213,6 +235,7 @@ export class OrdersService {
         createdAt: true, updatedAt: true, productionSlot: true,
         responsibleManager: { select: { id: true, displayName: true } },
         client: { select: {
+          _count: { select: { orders: { where: { archivedAt: null } } } },
           id: true, displayName: true, country: true, city: true, address: true, postalCode: true, language: true, source: true, phone: true, email: true, facebook: true, instagram: true, whatsapp: true, updatedAt: true, preferences:true,
           files:{orderBy:{createdAt:"desc"},select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,createdAt:true}},
           orders:{where:{archivedAt:null},orderBy:{createdAt:"desc"},take:8,select:{id:true,number:true,createdAt:true,priceMinor:true,currency:true,salesStatus:true,productionStatus:true,shippingStatus:true,modelImagePath:true,externalImageUrl:true}},
@@ -274,7 +297,7 @@ export class OrdersService {
     const origins=await loadOrderSourceMap(this.prisma,[order.id]);
     const { compositionOperations, _count, externalData, ...visibleOrder } = order;
     const compositionManaged = Boolean(compositionOperations?.length || _count?.items);
-    return { ...visibleOrder, ...(order.invoices ? { invoices: order.invoices.map(presentInvoice) } : {}), websiteCardFeeMinor:websiteOrderCardFee(order), compositionManaged, orderSource:origins[order.id]??'UNKNOWN', athlete, measurement: legacyAthlete ? order.measurement : null, client: presentClientContact(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
+    return { ...visibleOrder, ...(order.invoices ? { invoices: order.invoices.map(presentInvoice) } : {}), websiteCardFeeMinor:websiteOrderCardFee(order), compositionManaged, orderSource:origins[order.id]??'UNKNOWN', athlete, measurement: legacyAthlete ? order.measurement : null, client: presentOrderClient(order.client), items, paymentHistory: presentedPaymentHistory, measurementHistory };
   }
 
   async productionList(orderId?: string, from?: string, to?: string, overviewFilter?: string) {
@@ -862,8 +885,9 @@ export class OrdersService {
         const measurementById = new Map(measurements.map((measurement) => [measurement.id, measurement.athleteId]));
         if (measurementRefs.some((reference) => measurementById.get(reference.measurementId) !== reference.athleteId)) throw new BadRequestException("Снимок замеров не принадлежит выбранному спортсмену клиента");
       }
-      const number = await nextOrderNumber(tx);
-      const order = await tx.order.create({ data: { number, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
+      const createdAt = new Date();
+      const number = await nextOrderNumber(tx, createdAt);
+      const order = await tx.order.create({ data: { number, createdAt, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", order.id);
       const createdItems = await tx.orderItem.findMany({ where: { orderId: order.id, archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
       for (const item of createdItems) await reconcileAndPropagateOrderItemInstances(tx, item);

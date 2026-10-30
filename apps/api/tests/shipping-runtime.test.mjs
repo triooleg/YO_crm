@@ -333,3 +333,16 @@ for (const field of ["customerChargeCurrency", "atelierCostCurrency"]) {
     assert.deepEqual(h.audits, []);
   });
 }
+
+test('editing the parcel identity clears only the old bound URL; finance-only edits preserve its language',async()=>{
+ for(const changed of [false,true]){
+  const now=new Date('2026-10-27T00:00:00Z');
+  const current={id:'parcel',orderId:'order',carrier:'NOVA_GLOBAL',trackingNumber:'OLD123',trackingUrl:'https://nova.global/en-ua/track/?Tracking_ID=OLD123',status:'READY',currency:'EUR',customerChargeMinor:0,atelierCostMinor:0,updatedAt:now};
+  const order={id:'order',clientId:'client',currency:'EUR',priceMinor:10000,deliveryMinor:0,depositRequiredMinor:5000,paymentStatus:'UNPAID',orderShipments:[current]};
+  let write;
+  const tx={$executeRawUnsafe:async()=>1,order:{findFirst:async()=>order},appSetting:{findUnique:async()=>null},orderItemInstance:{findMany:async()=>[],updateMany:async()=>({count:0})},orderShipment:{findFirst:async()=>current,update:async({data})=>(write=data,{...current,...data})},activity:{create:async()=>({})},auditLog:{create:async()=>({})}};
+  const Service=loadShippingService(),service=new Service({$transaction:callback=>callback(tx)});service.refreshOrderShipping=async()=>{};service.persistAtelierExpense=async()=>null;
+  await service.updateShipment('order','parcel',{carrier:'NOVA_GLOBAL',trackingNumber:changed?'NEW123':'OLD123',customerChargeMinor:0,atelierCostMinor:0,currency:'EUR',status:'READY',instanceIds:[],expectedUpdatedAt:now.toISOString()},{id:'owner'});
+  assert.equal({...current,...write}.trackingUrl,changed?null:current.trackingUrl);
+ }
+});

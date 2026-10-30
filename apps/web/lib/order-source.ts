@@ -12,6 +12,7 @@ export function sourceLabel(source:string|undefined){return source==='NON_WEBSIT
 export function orderDisplayNumber(order:{number:string;sourceSystem?:string;externalNumber?:string|null;externalId?:string|null}){
  if(order.sourceSystem!=='YOLEOTARD_WEBSITE')return order.number;
  const canonical=order.number.trim();
+ if(/^\d{2}-(?:\d{2}-)?\d+$/.test(canonical))return canonical;
  if(/^(?:YO|WEB)-[1-9]\d*$/i.test(canonical))return canonical;
  const number=order.externalNumber?.trim();
  if(number)return number;

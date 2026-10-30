@@ -1,0 +1,38 @@
+# Host executor supplies only an installed exact image ID. No application/senders.
+services:
+  postgres:
+    image: ${RECOVERY_POSTGRES_IMAGE:?Exact locally installed PostgreSQL image ID required}
+    pull_policy: never
+    environment:
+      POSTGRES_USER: backup_test
+      POSTGRES_PASSWORD: ${RECOVERY_PASSWORD:?Ephemeral password required}
+      POSTGRES_DB: recovery_control
+    # Every writable location is volatile and bounded. Never add host mounts.
+    read_only: true
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    shm_size: 16m
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,nodev,size=512m,mode=0700
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,mode=0777
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    logging:
+      driver: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    ulimits:
+      core: 0
+      nofile: 256
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=10, -c, work_mem=4MB, -c, maintenance_work_mem=32MB, -c, statement_timeout=30000, -c, temp_file_limit=65536, -c, logging_collector=off, -c, log_statement=none]
+    networks: [isolated]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U backup_test -d recovery_control]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+networks:
+  isolated:
+    internal: true

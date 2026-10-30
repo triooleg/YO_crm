@@ -1,4 +1,5 @@
 ﻿"use client";
+import { OrderImagePreview } from "./orders/order-image-preview";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Alert, Group } from "@mantine/core";
@@ -756,7 +757,7 @@ function OrderLine({ o, focused = false }: { o: Order; focused?: boolean }) {
   return (
     <div className={`phase2-row${focused ? " is-context" : ""}`}>
       {o.modelImagePath && (
-        <img
+        <OrderImagePreview order={o}
           className="phase2-order-thumb"
           src={`/api/orders/images/${o.modelImagePath}`}
           alt="Модель заказа"

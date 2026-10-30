@@ -10,7 +10,7 @@ import { updateProductionStatusGraph } from "../orders/production-status-graph";
 
 import { assertShippingMoney, baseShippingCharge, convertedShippingCharge, hasOriginalShippingCharge, preservedShippingCharge, unchangedShippingCharge } from "./shipping-conversion";
 
-const labels:Record<ShippingCarrier,string>={NOVA_POSHTA:"Новая почта",NOVA_GLOBAL:"Nova Global",UKRPOSHTA:"Укрпочта",DHL:"DHL"};
+const labels:Record<ShippingCarrier,string>={NOVA_POSHTA:"Новая почта",NOVA_GLOBAL:"Nova Global",UKRPOSHTA:"Укрпочта",DHL:"DHL", UPS:"UPS"};
 const transitions:Record<ShippingStatus,ShippingStatus[]>={NOT_READY:[ShippingStatus.READY,ShippingStatus.LABEL_CREATED,ShippingStatus.SHIPPED],READY:[ShippingStatus.LABEL_CREATED,ShippingStatus.SHIPPED],LABEL_CREATED:[ShippingStatus.SHIPPED],SHIPPED:[ShippingStatus.IN_TRANSIT,ShippingStatus.DELIVERED,ShippingStatus.RETURNED,ShippingStatus.LOST],IN_TRANSIT:[ShippingStatus.DELIVERED,ShippingStatus.RETURNED,ShippingStatus.LOST],DELIVERED:[ShippingStatus.RETURNED],RETURNED:[],LOST:[]};
 const preShipmentStatuses:ShippingStatus[]=[ShippingStatus.NOT_READY,ShippingStatus.READY,ShippingStatus.LABEL_CREATED];
 const sentStatuses:ShippingStatus[]=[ShippingStatus.SHIPPED,ShippingStatus.IN_TRANSIT,ShippingStatus.DELIVERED,ShippingStatus.RETURNED,ShippingStatus.LOST];
@@ -53,7 +53,7 @@ export class ShippingService{
     this.assertAggregateBounds(order,d.costMinor);
     const data={carrier:d.carrier,trackingNumber:tracking,costMinor:d.costMinor,currency:d.currency,shippedAt,deliveredAt,notes},x=await tx.shipment.upsert({where:{orderId},create:{orderId,...data},update:data});
     const legacyData={...legacyCharge,customerChargeRateSnapshot:(legacyCharge.customerChargeRateSnapshot??Prisma.DbNull) as Prisma.InputJsonValue|typeof Prisma.DbNull};
-    const projected=primary?await tx.orderShipment.update({where:{id:primary.id},data:{carrier:d.carrier,status:d.status,trackingNumber:tracking,...legacyData,currency:d.currency,shippedAt,deliveredAt,isPrimary:true,updatedAt:new Date(Math.max(Date.now(),primary.updatedAt.getTime()+1))}}):await tx.orderShipment.create({data:{orderId,carrier:d.carrier,status:d.status,trackingNumber:tracking,...legacyData,currency:d.currency,shippedAt,deliveredAt,isPrimary:true}});
+    const projected=primary?await tx.orderShipment.update({where:{id:primary.id},data:{carrier:d.carrier,status:d.status,trackingNumber:tracking,...(primary.carrier!==d.carrier || primary.trackingNumber!==tracking?{trackingUrl:null}:{}),...legacyData,currency:d.currency,shippedAt,deliveredAt,isPrimary:true,updatedAt:new Date(Math.max(Date.now(),primary.updatedAt.getTime()+1))}}):await tx.orderShipment.create({data:{orderId,carrier:d.carrier,status:d.status,trackingNumber:tracking,...legacyData,currency:d.currency,shippedAt,deliveredAt,isPrimary:true}});
     await this.refreshOrderShipping(tx,orderId,u.id);
     await tx.activity.create({data:{clientId:order.clientId,orderId,actorId:u.id,type:"SHIPMENT_UPDATED",summary:"Обновлены данные доставки",metadata:{shipmentId:x.id,carrier:d.carrier,status:d.status,trackingNumber:x.trackingNumber}}});
     await tx.auditLog.create({data:{actorId:u.id,action:order.shipment?"UPDATE":"CREATE",entityType:"Shipment",entityId:x.id,before:order.shipment??undefined,after:x}});
@@ -122,7 +122,7 @@ export class ShippingService{
       const atelierCurrency=d.atelierCostCurrency??linkedExpense?.currency??order.currency;
       assertShippingMoney(d.atelierCostMinor,atelierCurrency);
       const atelierExpenseId=await this.persistAtelierExpense(tx,orderId,current?.atelierExpenseId??null,d.atelierCostMinor,atelierCurrency,shippedAt,u.id);
-      const data={carrier:d.carrier,status:d.status,trackingNumber:tracking,...charge,customerChargeRateSnapshot:(charge.customerChargeRateSnapshot??Prisma.DbNull) as Prisma.InputJsonValue|typeof Prisma.DbNull,atelierCostMinor:d.atelierCostMinor,atelierExpenseId,currency:d.currency,weightGrams:d.weightGrams,lengthMm:d.lengthMm,widthMm:d.widthMm,heightMm:d.heightMm,shippedAt,deliveredAt,isPrimary};
+      const data={carrier:d.carrier,status:d.status,trackingNumber:tracking,...(current && (current.carrier!==d.carrier || current.trackingNumber!==tracking)?{trackingUrl:null}:{}),...charge,customerChargeRateSnapshot:(charge.customerChargeRateSnapshot??Prisma.DbNull) as Prisma.InputJsonValue|typeof Prisma.DbNull,atelierCostMinor:d.atelierCostMinor,atelierExpenseId,currency:d.currency,weightGrams:d.weightGrams,lengthMm:d.lengthMm,widthMm:d.widthMm,heightMm:d.heightMm,shippedAt,deliveredAt,isPrimary};
       const shipment=current?await tx.orderShipment.update({where:{id:current.id},data:{...data,updatedAt:new Date(Math.max(Date.now(),current.updatedAt.getTime()+1))}}):await tx.orderShipment.create({data:{orderId,...data}});
       await tx.orderItemInstance.updateMany({where:{archivedAt:null,orderItem:{archivedAt:null},orderShipmentId:shipment.id,id:{notIn:uniqueIds}},data:{orderShipmentId:null}});
       if(uniqueIds.length)await tx.orderItemInstance.updateMany({where:{id:{in:uniqueIds}},data:{orderShipmentId:shipment.id}});

@@ -1,5 +1,11 @@
 # Backup and restore architecture
 
+Current local extension: see [operator runbook](BACKUP_RECOVERY_RUNBOOK.md),
+[implementation contract](plans/backup-disaster-recovery.md) and
+[audit/real restore evidence](release-evidence/backup-recovery-audit-2026-10-26.md).
+This feature is not deployed or enabled on production. The following core-format
+details retain legacy v1/v2 compatibility; expanded portable snapshots use v3.
+
 ## Boundaries
 
 - Application: Git commit plus versioned API/web images. Build cache, `node_modules` and container filesystems are disposable.
@@ -15,7 +21,7 @@ The uploads tree currently contains order model images, task images and communic
 
 `BackupsModule` contains `BackupService`, `BackupRepository`, `BackupStorage`, `LocalBackupStorage`, `RestoreService` and scheduler/job contracts. CRM domain modules do not call `pg_dump`, `tar` or storage-specific commands.
 
-Future admin UI API:
+Backward-compatible core admin API:
 
 - `GET/POST /api/admin/backups`
 - `GET /api/admin/backups/:id`
@@ -48,7 +54,7 @@ An API-created pending record can be completed by the same executor:
 ./scripts/backup.sh data --backup-id 20260829T030000Z-example1
 ```
 
-Both types contain PostgreSQL custom-format `postgres.dump`, `uploads.tar.gz`, `manifest.json` and `SHA256SUMS`. FULL declares application compatibility metadata; application binaries come from Git/versioned images rather than copying `node_modules` or container layers.
+Both types contain PostgreSQL custom-format `postgres.dump`, `uploads.tar.gz`, `manifest.json` and `SHA256SUMS`. Legacy FULL v2 declares compatibility metadata only. New verified-consistent FULL v3 adds a private source bundle, migrations/Compose/scripts, exact runtime image inventory and optional offline docker-save. No server .env is included. See the runbook for independent secrets and Chatwoot coverage.
 
 COMPLETED is recorded only after checksum verification. Metadata records app version, Git commit, PostgreSQL version, latest applied Prisma migration, size, checksum, storage provider, timestamps and failure state. Copy completed directories to separate access-controlled storage. `BackupStorage` is the boundary for a later S3/R2/B2/MinIO adapter.
 
@@ -83,6 +89,6 @@ For an isolated Docker drill use `docker-compose.backup-test.yml`; it has a dist
 
 ## Retention and scheduling
 
-`BackupSetting` stores enabled, frequency, time, timezone, type, retention count and provider. `BackupScheduler.isDue()` is a pure boundary; production scheduling stays disabled until a worker/lease prevents concurrent jobs. `applyRetentionPolicy(false)` reports candidates without deletion. Physical cleanup is an explicit internal execution and archives metadata after storage deletion.
+`BackupSetting` stores enabled, frequency, time, timezone, type, retention count and provider. The external host agent now executes durable requests and timezone-aware idempotent schedule slots under an exclusive host lock plus a cross-host PostgreSQL execution lease. It must be separately installed/enabled; no Docker socket is added to the API. `applyRetentionPolicy()` remains a dry-run projection; maintenance deletion requires explicit host-side configuration, verification/protected-copy rules and audit. Production activation remains unapproved.
 
 Every new module must classify data as source-of-truth or rebuildable. Source filesystem data must live under an explicit persistent mount and join the manifest/restore drill. Derived indexes or embeddings may be excluded only when source documents and a deterministic rebuild procedure exist.

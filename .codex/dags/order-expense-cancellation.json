@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "task": {
+    "id": "order-expense-cancellation",
+    "title": "Cancel saved atelier expenses in expanded order tabs",
+    "base_ref": "96fd65bbf1d0c30dc41de8ed7db385b2e096a348",
+    "baseline": ".local/expense-cancellation/baseline.json",
+    "no_commit_reason": "User authorized local feature implementation; no commit, push, production cancellation or deployment authorized.",
+    "review_results": {
+      "compatibility": "PASS",
+      "regression": "PASS",
+      "business": "PASS",
+      "visual": "PASS",
+      "release": "PASS_LOCAL_ONLY"
+    },
+    "evidence": "docs/release-evidence/order-expense-cancellation-2026-10-27.md",
+    "deployment": "NOT_AUTHORIZED_NOT_PERFORMED",
+    "local_acceptance": "READY_FOR_OWNER_REVIEW"
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "status": "DONE",
+      "agent": "COMPATIBILITY",
+      "agent_id": "01a17d7e-b755-7cc0-937d-e389f27d7e6d",
+      "kind": "analysis",
+      "title": "scope",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "implementation",
+      "status": "DONE",
+      "agent": "INTEGRATOR",
+      "agent_id": "parent",
+      "kind": "analysis",
+      "title": "implementation",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "compatibility",
+      "status": "DONE",
+      "agent": "COMPATIBILITY",
+      "agent_id": "01a17d7e-b755-7cc0-937d-e389f27d7e6d",
+      "kind": "analysis",
+      "title": "compatibility",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "implementation"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "regression",
+      "status": "DONE",
+      "agent": "REGRESSION",
+      "agent_id": "01a17a4d-187c-7921-9ddc-2f494b5690ab",
+      "kind": "analysis",
+      "title": "regression",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "implementation"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "business",
+      "status": "DONE",
+      "agent": "BUSINESS",
+      "agent_id": "01a17a54-0d2f-7a00-93dd-d8165e3b720c",
+      "kind": "analysis",
+      "title": "business",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "implementation"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "visual",
+      "status": "DONE",
+      "agent": "VISUAL",
+      "agent_id": "01a17a60-bf99-7ec0-9232-5eac999206ab",
+      "kind": "analysis",
+      "title": "visual",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "implementation"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    },
+    {
+      "id": "release",
+      "status": "DONE",
+      "agent": "RELEASE",
+      "agent_id": "01a17a7b-126e-7603-926c-d31b42bcba8a",
+      "kind": "analysis",
+      "title": "release",
+      "description": "Scoped local execution; implementation by parent INTEGRATOR only, independent review roles readonly. No implementation workers or commits.",
+      "depends_on": [
+        "compatibility",
+        "regression",
+        "business",
+        "visual"
+      ],
+      "affected_paths": [
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders-dashboard.tsx",
+        "apps/web/components/orders/order-expense-cancellation.tsx",
+        "apps/web/lib/i18n.ts",
+        "apps/web/tests/order-expense-cancellation-browser.test.mjs",
+        "docs/plans/order-expense-cancellation.md"
+      ],
+      "acceptance_criteria": [
+        "Exact expense cancellation across Delivery/Finance, ledger history and client totals preserved; refresh-only retry and mobile layout."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": false
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
+import { checkChatwootShipmentCapability } from "./chatwoot-shipment-capability";
+import { sendShipmentEmail, resolveShipmentEmailContext, validateNotificationConversation, type ShipmentEmailInput, type NotificationConversationContext } from "./shipment-email";
 import { measurementDefinitionAnnotation } from "../clients/measurement-data";
 import {
   BadGatewayException,
@@ -73,6 +76,7 @@ import { withPreferredItem } from "./preferred-page";
 import { orderInboxClientRows } from "./inbox-client-order";
 import { setInboxSpam } from "./inbox-spam";
 import { latestInboxMessageIds } from "./inbox-message-window";
+class ShipmentChatwootRejectedError extends Error {}
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -211,6 +215,7 @@ export class CommunicationsService {
         { instagram: { contains: search, mode: "insensitive" } },
         { instagramUsername: { contains: search, mode: "insensitive" } },
         { orders: { some: { number: { contains: search, mode: "insensitive" }, archivedAt: null } } },
+        ...(legacyOrderNumberAlias(search) ? [{ orders: { some: { ...legacyOrderNumberAlias(search)!, archivedAt: null } } }] : []),
         { athletes: { some: { archivedAt: null, OR: [{ firstName: { contains: search, mode: "insensitive" } }, { lastName: { contains: search, mode: "insensitive" } }] } } },
         { conversations: { some: { externalId: { contains: search, mode: "insensitive" }, archivedAt: null } } },
         ...(messageSearchClientIds.length ? [{ id: { in: messageSearchClientIds } }] : []),
@@ -1606,25 +1611,52 @@ export class CommunicationsService {
   async receiveEmailMessage(event:{externalMessageId:string;externalSenderId:string;email:string;displayName:string;content:string;emailHtml?:string;receivedAt:Date;subject:string;inReplyTo?:string;messageId?:string;references:string[];rawPath:string;attachments:Array<{name:string;mimeType:string;sizeBytes:number;url:string}>},rawPayload:Prisma.InputJsonValue){
     return this.persistInbound({channel:"EMAIL",direction:"INBOUND",receiverId:"yoleotard@gmail.com",...event,metadata:{messageType:"email",subject:event.subject,inReplyTo:event.inReplyTo,messageId:event.messageId,references:event.references,rawPath:event.rawPath,...(event.emailHtml?{emailHtml:event.emailHtml}:{}),...(event.inReplyTo?{replyTo:{externalMessageId:event.inReplyTo}}:{}),attachments:event.attachments.map(item=>({type:item.mimeType.startsWith("image/")?"image":"file",...item}))}} as ChatwootMessage,"EMAIL",rawPayload);
   }
-  async receiveSentEmailMessage(event:{externalMessageId:string;recipient:string;content:string;emailHtml?:string;sentAt:Date;subject:string;inReplyTo?:string;messageId?:string;references:string[];rawPath:string;attachments:Array<{name:string;mimeType:string;sizeBytes:number;url:string}>},rawPayload:Prisma.InputJsonValue){
+  async receiveSentEmailMessage(event:{sourceAccountIdentity?:string;externalMessageId:string;recipient:string;content:string;emailHtml?:string;sentAt:Date;subject:string;inReplyTo?:string;messageId?:string;references:string[];rawPath:string;attachments:Array<{name:string;mimeType:string;sizeBytes:number;url:string}>},rawPayload:Prisma.InputJsonValue){
     return this.p.$transaction(async tx=>{
-      const conversation=await tx.conversation.findUnique({where:{externalId_channel:{externalId:event.recipient,channel:ContactChannel.EMAIL}}});
+      let shipment = await resolveShipmentEmailContext(tx, event.externalMessageId, event.recipient);
+      if (shipment === null || shipment && (!event.sourceAccountIdentity || event.sourceAccountIdentity !== shipment.context.accountIdentity)) return {accepted:false,retainAttachments:false,retainRaw:false};
+      const conversation=shipment?.conversation || await tx.conversation.findUnique({where:{externalId_channel:{externalId:event.recipient,channel:ContactChannel.EMAIL}}});
       if(!conversation||conversation.archivedAt){await tx.auditLog.create({data:{action:"EMAIL_SENT_SKIPPED",entityType:"EmailMessage",entityId:createHash("sha256").update(event.externalMessageId).digest("hex").slice(0,24),after:{channel:"EMAIL",reason:conversation?"CONVERSATION_ARCHIVED":"CONVERSATION_NOT_FOUND"}}});return{accepted:false,retainAttachments:false,retainRaw:false}}
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"email-sent:"+conversation.id+":"+event.externalMessageId},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;
+      if (shipment) {
+        shipment = await resolveShipmentEmailContext(tx, event.externalMessageId, event.recipient);
+        if (!shipment) return {accepted:false,retainAttachments:false,retainRaw:false};
+      }
       const uncertaintyCandidate=await tx.appSetting.findFirst({where:{section:"integration.email.delivery-uncertain",value:{path:["providerMessageId"],equals:event.externalMessageId}},select:{key:true,value:true}});
-      const uncertainty=uncertaintyCandidate?await tx.appSetting.findUnique({where:{section_key:{section:"integration.email.delivery-uncertain",key:uncertaintyCandidate.key}},select:{key:true,value:true}}):null,uncertaintyValue=uncertainty?.value&&typeof uncertainty.value==="object"&&!Array.isArray(uncertainty.value)?uncertainty.value as Prisma.JsonObject:{},attempt=uncertaintyValue.providerMessageId===event.externalMessageId?await tx.messageDeliveryAttempt.findUnique({where:{id:uncertainty!.key}}):null,uncertainAttempt=attempt?.status==="UNCERTAIN"&&attempt.conversationId===conversation.id?attempt:null,draftId=typeof uncertaintyValue.draftMessageId==="string"?uncertaintyValue.draftMessageId:undefined,uncertainAiRunId=typeof uncertaintyValue.aiRunId==="string"?uncertaintyValue.aiRunId:undefined;
+      const uncertainty=uncertaintyCandidate?await tx.appSetting.findUnique({where:{section_key:{section:"integration.email.delivery-uncertain",key:uncertaintyCandidate.key}},select:{key:true,value:true}}):null,uncertaintyValue=uncertainty?.value&&typeof uncertainty.value==="object"&&!Array.isArray(uncertainty.value)?uncertainty.value as Prisma.JsonObject:{},attempt=uncertaintyValue.providerMessageId===event.externalMessageId?await tx.messageDeliveryAttempt.findUnique({where:{id:uncertainty!.key}}):null,uncertainAttempt=shipment ? await tx.messageDeliveryAttempt.findUnique({where:{id:shipment.attempt.id}}) : attempt?.status==="UNCERTAIN"&&attempt.conversationId===conversation.id?attempt:null,draftId=typeof uncertaintyValue.draftMessageId==="string"?uncertaintyValue.draftMessageId:undefined,uncertainAiRunId=typeof uncertaintyValue.aiRunId==="string"?uncertaintyValue.aiRunId:undefined;
       const duplicate=await tx.message.findUnique({where:{conversationId_externalId:{conversationId:conversation.id,externalId:event.externalMessageId}},select:{id:true,metadata:true,content:true}}),reconciledDraft=!duplicate&&uncertainAttempt&&draftId?await tx.message.findFirst({where:{id:draftId,conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT},select:{id:true,metadata:true,content:true}}):null,target=duplicate||reconciledDraft,previous=target?.metadata&&typeof target.metadata==="object"&&!Array.isArray(target.metadata)?target.metadata as Prisma.JsonObject:{};
-      const [existingAttachmentCount,claimedAttachments]=await Promise.all([target?tx.messageAttachment.count({where:{messageId:target.id}}):0,uncertainAttempt?tx.communicationAttachment.findMany({where:{clientRequestId:uncertainAttempt.clientRequestId,messageId:null},select:{path:true,originalName:true,mimeType:true,sizeBytes:true}}):[]]),attachments=event.attachments.map(item=>({type:"image",...item})),claimedMetadata=claimedAttachments.map(item=>({type:item.mimeType.startsWith("image/")?"image":"file",name:item.originalName,mimeType:item.mimeType,sizeBytes:item.sizeBytes,url:`/api/communications/files/${item.path}`})),merge=emailSentMergeDecision(previous,existingAttachmentCount,event.rawPath,Boolean(uncertainAttempt),claimedAttachments.length),metadata={...previous,provider:"GMAIL",source:merge.source,subject:event.subject,inReplyTo:event.inReplyTo,messageId:event.messageId,references:event.references,rawPath:merge.rawPath,...(event.emailHtml?{emailHtml:event.emailHtml}:{}),...(claimedMetadata.length?{attachments:claimedMetadata}:merge.retainAttachments&&attachments.length?{attachments}:{})} as Prisma.InputJsonValue;
+      const [existingAttachmentCount,claimedAttachments]=await Promise.all([target?tx.messageAttachment.count({where:{messageId:target.id}}):0,uncertainAttempt?tx.communicationAttachment.findMany({where:{clientRequestId:uncertainAttempt.clientRequestId,messageId:null},select:{path:true,originalName:true,mimeType:true,sizeBytes:true}}):[]]),attachments=event.attachments.map(item=>({type:"image",...item})),claimedMetadata=claimedAttachments.map(item=>({type:item.mimeType.startsWith("image/")?"image":"file",name:item.originalName,mimeType:item.mimeType,sizeBytes:item.sizeBytes,url:`/api/communications/files/${item.path}`})),merge=emailSentMergeDecision(previous,existingAttachmentCount,event.rawPath,Boolean(uncertainAttempt),claimedAttachments.length),metadata={...previous,...(shipment?{...shipment.context,to:shipment.context.recipient}:{}),provider:"GMAIL",source:shipment?"CRM":merge.source,subject:event.subject,inReplyTo:event.inReplyTo,messageId:event.messageId,references:event.references,rawPath:merge.rawPath,...(event.emailHtml?{emailHtml:event.emailHtml}:{}),...(claimedMetadata.length?{attachments:claimedMetadata}:merge.retainAttachments&&attachments.length?{attachments}:{})} as Prisma.InputJsonValue;
       const envelope=await tx.webhookEnvelope.create({data:{provider:"EMAIL",payload:rawPayload,payloadHash:createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex"),receivedAt:event.sentAt}}),replyTo=event.inReplyTo?await tx.message.findUnique({where:{conversationId_externalId:{conversationId:conversation.id,externalId:event.inReplyTo}},select:{id:true}}):null;
-      const message=target?await tx.message.update({where:{id:target.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,externalId:event.externalMessageId,sentAt:event.sentAt,replyToMessageId:replyTo?.id,metadata,rawPayload,webhookEnvelopeId:envelope.id}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:event.content,normalizedText:event.content.normalize("NFKC"),messageType:"email",externalId:event.externalMessageId,createdAt:event.sentAt,sentAt:event.sentAt,replyToMessageId:replyTo?.id,metadata,rawPayload,webhookEnvelopeId:envelope.id}});
+      const message=target?await tx.message.update({where:{id:target.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,externalId:event.externalMessageId,sentAt:event.sentAt,replyToMessageId:replyTo?.id,...(shipment?{authorId:shipment.context.actorId}:{}),metadata,rawPayload,webhookEnvelopeId:envelope.id}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:event.content,normalizedText:event.content.normalize("NFKC"),messageType:"email",externalId:event.externalMessageId,createdAt:event.sentAt,sentAt:event.sentAt,replyToMessageId:replyTo?.id,...(shipment?{authorId:shipment.context.actorId}:{}),metadata,rawPayload,webhookEnvelopeId:envelope.id}});
       if(merge.retainAttachments)for(const item of attachments)await tx.messageAttachment.create({data:{messageId:message.id,type:item.type,externalUrl:item.url,mimeType:item.mimeType,metadata:item as Prisma.InputJsonValue}});
-      if(uncertainAttempt){await tx.communicationAttachment.updateMany({where:{clientRequestId:uncertainAttempt.clientRequestId,messageId:null},data:{messageId:message.id,claimedAt:event.sentAt,clientRequestId:null}});await tx.messageDeliveryAttempt.update({where:{id:uncertainAttempt.id},data:{status:"SENT",messageId:message.id}});if(uncertainAiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:uncertainAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:conversation.clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:event.content,wasEdited:feedback.draftText!==event.content,accepted:true,rejected:false,sentMessageId:message.id}});else await tx.auditLog.create({data:{action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:uncertainAiRunId,after:{messageId:message.id}}})}await tx.appSetting.deleteMany({where:{section:"integration.email.delivery-uncertain",key:uncertainAttempt.id}});await tx.activity.create({data:{clientId:conversation.clientId,type:"EMAIL_DELIVERY_RECONCILED",summary:"Отправка Gmail подтверждена по папке Отправленные",metadata:{attemptId:uncertainAttempt.id,messageId:message.id,channel:"EMAIL"}}});await tx.auditLog.create({data:{action:"RECONCILE",entityType:"MessageDeliveryAttempt",entityId:uncertainAttempt.id,after:{channel:"EMAIL",status:"SENT",messageId:message.id,providerMessageIdMatched:true}}})}
+      if(uncertainAttempt && (uncertainAttempt.status==="PENDING" || uncertainAttempt.status==="UNCERTAIN" || Boolean(shipment) && uncertainAttempt.status==="FAILED")){await tx.communicationAttachment.updateMany({where:{clientRequestId:uncertainAttempt.clientRequestId,messageId:null},data:{messageId:message.id,claimedAt:event.sentAt,clientRequestId:null}});await tx.messageDeliveryAttempt.update({where:{id:uncertainAttempt.id},data:{status:"SENT",messageId:message.id}});if(uncertainAiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:uncertainAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:conversation.clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:event.content,wasEdited:feedback.draftText!==event.content,accepted:true,rejected:false,sentMessageId:message.id}});else await tx.auditLog.create({data:{action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:uncertainAiRunId,after:{messageId:message.id}}})}await tx.appSetting.deleteMany({where:{section:"integration.email.delivery-uncertain",key:uncertainAttempt.id}});await tx.activity.create({data:{clientId:conversation.clientId,type:"EMAIL_DELIVERY_RECONCILED",summary:"Отправка Gmail подтверждена по папке Отправленные",metadata:{attemptId:uncertainAttempt.id,messageId:message.id,channel:"EMAIL"}}});await tx.auditLog.create({data:{action:"RECONCILE",entityType:"MessageDeliveryAttempt",entityId:uncertainAttempt.id,after:{channel:"EMAIL",status:"SENT",messageId:message.id,providerMessageIdMatched:true}}})}
       await tx.conversation.update({where:{id:conversation.id},data:{lastMessageAt:conversation.lastMessageAt&&conversation.lastMessageAt>event.sentAt?conversation.lastMessageAt:event.sentAt}});
-      if(target)await tx.auditLog.create({data:{action:"SYNC",entityType:"OutboundMessage",entityId:message.id,after:{channel:"EMAIL",externalMessageId:event.externalMessageId,source:merge.source,reconciledDraft:Boolean(reconciledDraft)}}});
-      else{await tx.activity.create({data:{clientId:conversation.clientId,type:"OUTBOUND_MESSAGE_SYNCED",summary:"Исходящее письмо синхронизировано из Gmail",metadata:{messageId:message.id,channel:"EMAIL"}}});await tx.auditLog.create({data:{action:"CREATE",entityType:"OutboundMessage",entityId:message.id,after:{channel:"EMAIL",externalMessageId:event.externalMessageId,source:"GMAIL"}}})}
+      if(target)await tx.auditLog.create({data:{action:"SYNC",entityType:"OutboundMessage",entityId:message.id,after:{channel:"EMAIL",externalMessageId:event.externalMessageId,source:shipment?"CRM":merge.source,reconciledDraft:Boolean(reconciledDraft)}}});
+      else{await tx.activity.create({data:{clientId:conversation.clientId,type:"OUTBOUND_MESSAGE_SYNCED",summary:"Исходящее письмо синхронизировано из Gmail",metadata:{messageId:message.id,channel:"EMAIL"}}});await tx.auditLog.create({data:{action:"CREATE",entityType:"OutboundMessage",entityId:message.id,after:{channel:"EMAIL",externalMessageId:event.externalMessageId,source:shipment?"CRM":"GMAIL"}}})}
       return{accepted:true,retainAttachments:merge.retainAttachments,retainRaw:merge.retainRaw}
     })
+  }
+  sendShipmentChat(clientId: string, input: NotificationConversationContext & {channel: ContactChannel; content: string; clientRequestId: string}, actor: User) {
+    if (![ContactChannel.FACEBOOK,ContactChannel.INSTAGRAM,ContactChannel.WHATSAPP,ContactChannel.CHATWOOT].includes(input.channel as "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "CHATWOOT") || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.clientRequestId)) throw new BadRequestException("Некорректные данные уведомления в чат");
+    return this.send(clientId, {action:"SEND",channel:input.channel,content:input.content,clientRequestId:input.clientRequestId}, actor, {conversationId:input.conversationId,externalId:input.externalId});
+  }
+  /** Internal notification adapter; order scope and permission checks belong to its caller. */
+  async shipmentChatwootAvailable(clientId:string,conversationId:string,externalId:string|null,allowLookup=true,expectedProviderConversationId?:string) {
+    const [conversation,values]=await Promise.all([
+      this.p.conversation.findFirst({where:{id:conversationId,clientId,channel:ContactChannel.CHATWOOT,archivedAt:null},select:{id:true,externalId:true,messages:{orderBy:{createdAt:"desc"},take:30,select:{metadata:true}}}}),
+      this.sectionValues("integration.chatwoot"),
+    ]);
+    const baseUrl=configuredHttpsOrigin(values.baseUrl),token=this.secretValue(values,"accessTokenEncrypted");
+    if(!conversation||conversation.externalId!==externalId||values.enabled!==true||!baseUrl||!token)return false;
+    const providerConversationId=chatwootConversationId(conversation.messages);
+    if(!providerConversationId || expectedProviderConversationId && providerConversationId!==expectedProviderConversationId)return false;
+    const metadata=conversation.messages.map(message=>message.metadata as Prisma.JsonObject|null).find(meta=>meta?.source==="CHATWOOT"&&meta.chatwootConversationId===providerConversationId&&String(meta.accountId)===String(values.accountId)&&(!values.inboxId||String(meta.inboxId)===String(values.inboxId)));
+    if(!metadata)return false;
+    return checkChatwootShipmentCapability({baseUrl,token,accountId:String(metadata.accountId),inboxId:String(metadata.inboxId),providerConversationId:String(metadata.chatwootConversationId),conversationId:conversation.id,externalId:conversation.externalId,allowLookup});
+  }
+  sendShipmentEmail(clientId: string, input: ShipmentEmailInput, actor: User) {
+    return sendShipmentEmail(this.p, this.emailTransport, clientId, input, actor, (requestId, id, actorId, providerId) => this.recordEmailUncertain(requestId, id, actorId, providerId));
   }
   async verifyEmail(){const result=await this.emailTransport.verify();await this.p.appSetting.upsert({where:{section_key:{section:"integration.email",key:"verifiedAt"}},create:{section:"integration.email",key:"verifiedAt",value:new Date().toISOString()},update:{value:new Date().toISOString()}});return result}
   private async recordEmailUncertain(clientRequestId:string,clientId:string,actorId:string,providerMessageId?:string,draftMessageId?:string,aiRunId?:string){
@@ -2178,6 +2210,7 @@ export class CommunicationsService {
     conversationId: string,
     content: string,
     attachment?: { path: string; name: string; mimeType: string },
+    notification = false,
   ) {
     const baseUrl = configuredHttpsOrigin(values.baseUrl), accountId = typeof values.accountId === "string" ? values.accountId.trim() : "", token = this.secretValue(values, "accessTokenEncrypted");
     if (!baseUrl || !/^\d+$/.test(accountId) || !/^\d+$/.test(conversationId) || !token) throw new BadRequestException("Канал Chatwoot не подключён для отправки");
@@ -2192,7 +2225,10 @@ export class CommunicationsService {
     }
     const response = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
     const result = await response?.json().catch(() => ({})) as { id?: number | string; content?: string; created_at?: number } | undefined;
-    if (!response?.ok || !result?.id) throw new BadGatewayException("Chatwoot не принял исходящее сообщение");
+    if (!response?.ok || !result?.id) {
+      if (notification && response && !response.ok && [400,401,403,404,422].includes(response.status)) throw new ShipmentChatwootRejectedError("Chatwoot отклонил уведомление");
+      throw new BadGatewayException("Chatwoot не принял исходящее сообщение");
+    }
     return { id: String(result.id), content: typeof result.content === "string" ? result.content : content, createdAt: Number(result.created_at) || undefined };
   }
   async updateDraft(clientId:string,draftKey:string,d:UpdateMessageDraftDto,u:User){
@@ -2215,7 +2251,20 @@ export class CommunicationsService {
       return{...message,channel:conversation.channel};
     });
   }
-  async send(clientId: string, d: SendMessageDto, u: User) {
+  private async recordNotificationDeliveryUncertain(clientRequestId: string, conversationId: string, clientId: string, channel: ContactChannel, actorId: string, providerMessageId?: string) {
+    return this.p.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversationId},0))`;
+      const attempt = await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId}});
+      if (!attempt || attempt.clientId !== clientId || attempt.conversationId !== conversationId || attempt.status !== "PENDING") return;
+      await tx.messageDeliveryAttempt.update({where:{id:attempt.id},data:{status:"UNCERTAIN"}});
+      const section = channel === ContactChannel.WHATSAPP ? "integration.whatsapp.delivery-uncertain" : channel === ContactChannel.CHATWOOT ? "integration.chatwoot.delivery-uncertain" : "integration.meta.delivery-uncertain";
+      const value = {actorId, channel, ...(providerMessageId ? {providerMessageId} : {})};
+      await tx.appSetting.upsert({where:{section_key:{section,key:attempt.id}},create:{section,key:attempt.id,value},update:{value}});
+      await tx.activity.create({data:{clientId,type:"MESSAGE_DELIVERY_UNCERTAIN",summary:"Результат отправки уведомления неизвестен; повтор заблокирован",metadata:{attemptId:attempt.id,channel}}});
+      await tx.auditLog.create({data:{actorId,action:"DELIVERY_UNCERTAIN",entityType:"MessageDeliveryAttempt",entityId:attempt.id,after:{channel,status:"UNCERTAIN",requiresManualResolution:true,providerMessageIdStored:Boolean(providerMessageId)}}});
+    });
+  }
+  async send(clientId: string, d: SendMessageDto, u: User, notificationContext?: NotificationConversationContext) {
     const selected = await this.p.client.findFirst({
       where: { id: clientId, archivedAt: null },
       select: { source: true, preferredChannel: true, email: true, displayName: true },
@@ -2306,6 +2355,8 @@ export class CommunicationsService {
         return runMetaSendOnce({
           reserve: async () => this.p.$transaction(async tx => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            await validateNotificationConversation(tx, clientId, channel, conversation.id, conversation.externalId, notificationContext);
+            if (notificationContext && !await this.shipmentChatwootAvailable(clientId,conversation.id,conversation.externalId,false,providerConversationId)) throw new ConflictException("Канал Chatwoot изменился. Обновите предпросмотр");
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
             if (existing) {
               if (existing.clientId !== clientId || existing.conversationId !== conversation.id) throw new ConflictException("Идентификатор отправки уже использован");
@@ -2329,9 +2380,14 @@ export class CommunicationsService {
             if(sendAiRunId){const claimed=await reserveAiFeedback(tx,{aiRunId:sendAiRunId,clientId,conversationId:conversation.id});if(!claimed)throw new ConflictException("AI-черновик уже отправляется или был отправлен")}
             return { kind: "NEW" as const };
           }),
-          deliver: () => this.sendChatwootProviderMessage(values, providerConversationId, content, attachment),
+          deliver: () => this.sendChatwootProviderMessage(values, providerConversationId, content, attachment, Boolean(notificationContext)),
           pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется"),
-          persistFailure: async error => this.p.$transaction(async tx => {
+          persistFailure: async error => {
+            if (notificationContext && !(error instanceof ShipmentChatwootRejectedError)) {
+              await this.recordNotificationDeliveryUncertain(d.clientRequestId!, conversation.id, clientId, channel, u.id);
+              throw new ConflictException("Результат отправки уведомления Chatwoot неизвестен. Повтор заблокирован");
+            }
+            return this.p.$transaction(async tx => {
             const failedMetadata = { ...draftMetadata, provider: "CHATWOOT", source: "CRM", chatwootConversationId: providerConversationId, failureType: error instanceof Error ? error.constructor.name : "UnknownError", ...(attachment ? { attachments: [(({ providerUrl: _providerUrl, ...safe }) => safe)(attachment)] } : {}) } as Prisma.InputJsonValue;
             const message = draft
               ? await tx.message.update({ where: { id: draft.id }, data: { status: MessageStatus.FAILED, content: content || attachment?.name || "[Вложение]", authorId: u.id, metadata: failedMetadata } })
@@ -2343,7 +2399,8 @@ export class CommunicationsService {
             await tx.activity.create({ data: { clientId, type: "MESSAGE_SEND_FAILED", summary: "Chatwoot не принял исходящее сообщение", metadata: { messageId: message.id, channel } } });
             await tx.auditLog.create({ data: { actorId: u.id, action: "SEND_FAILED", entityType: "Message", entityId: message.id, after: { id: message.id, channel, status: MessageStatus.FAILED } } });
             return { ...message, channel };
-          }),
+          });
+          },
           persistSuccess: async result => this.p.$transaction(async tx => {
             const externalId = `chatwoot:${accountId}:${result.id}`;
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"chatwoot-echo:" + conversation.id + ":" + externalId}, 0))`;
@@ -2369,6 +2426,10 @@ export class CommunicationsService {
             await tx.auditLog.create({ data: { actorId: u.id, action: "SEND", entityType: "Message", entityId: message.id, after: { id: message.id, channel, status: message.status, externalId } } });
             return { ...message, channel };
           }),
+          persistSuccessFailure: notificationContext ? async result => {
+            await this.recordNotificationDeliveryUncertain(d.clientRequestId!, conversation.id, clientId, channel, u.id, result.id);
+            throw new ConflictException("Chatwoot принял уведомление, но CRM не сохранила результат. Повтор заблокирован");
+          } : undefined,
         });
       }
       if (channel !== ContactChannel.FACEBOOK && channel !== ContactChannel.INSTAGRAM && channel !== ContactChannel.WHATSAPP)
@@ -2427,6 +2488,7 @@ export class CommunicationsService {
         reserve: async () => {
           const prior = await this.p.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            await validateNotificationConversation(tx, clientId, channel, conversation.id, conversation.externalId, notificationContext);
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
             if (existing) return { attempt: existing, sameRequest: true };
             if (draft) {
@@ -2508,6 +2570,10 @@ export class CommunicationsService {
           };
         },
         persistFailure: async (error) => {
+          if (notificationContext && (!(error instanceof MetaGraphRequestError) || !error.failure.code || [1,2].includes(error.failure.code))) {
+            await this.recordNotificationDeliveryUncertain(d.clientRequestId!, conversation.id, clientId, channel, u.id);
+            throw new ConflictException("Результат отправки уведомления неизвестен. Повтор заблокирован");
+          }
           if (channel === ContactChannel.WHATSAPP && error instanceof MetaDeliveryUncertainError) {
             await this.p.$transaction(async tx => {
               await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id}, 0))`;
@@ -2596,6 +2662,9 @@ export class CommunicationsService {
           });
           if(outcome.kind==="SENT")return outcome.message;
           throw new ConflictException("WhatsApp принял сообщение, но CRM не подтвердила сохранение. Повтор заблокирован, чтобы клиент не получил дубликат");
+        }:notificationContext ? async(result) => {
+          await this.recordNotificationDeliveryUncertain(d.clientRequestId!, conversation.id, clientId, channel, u.id, result.message_id);
+          throw new ConflictException("Провайдер принял уведомление, но CRM не сохранила результат. Повтор заблокирован");
         }:undefined,
       });
     }

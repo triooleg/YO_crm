@@ -274,7 +274,7 @@ test('public APPLY creates only selected order, item/instance/payment/audit/roll
   assert.equal(result.createdCount, 1); assert.equal(result.failedCount, 0); assert.equal(result.scannedCount, 1);
   const imported = db.state.order.find(row => row.externalId === '675');
   assert.ok(imported); assert.equal(imported.priceMinor, 10000); assert.equal(imported.currency, 'EUR');
-  assert.equal(imported.number, 'YO-709', 'KeyCRM continues the shared sequence instead of reusing provider id 675');
+  assert.equal(imported.number, '26-709', 'KeyCRM continues the shared sequence instead of reusing provider id 675');
   assert.equal(imported.depositRequiredMinor, 5000); assert.equal(imported.paymentStatus, 'DEPOSIT_PAID');
   assert.equal(imported.sourceSystem, 'KEYCRM'); assert.equal(imported.sourceAccount, 'synthetic-connection');
   assert.equal(db.state.order.length, 2); assert.equal(db.state.client.length, 2);

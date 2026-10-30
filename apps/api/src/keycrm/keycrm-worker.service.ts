@@ -1,3 +1,4 @@
+import { recoveryIsolationEnabled } from "../recovery-safety";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { KeycrmService } from "./keycrm.service";
@@ -11,7 +12,7 @@ export class KeycrmWorkerService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly keycrm: KeycrmService) {}
 
-  onModuleInit() {
+  onModuleInit() { if (recoveryIsolationEnabled()) return;
     this.timer = setInterval(() => void this.tick(), 3_200);
     this.timer.unref();
     void this.tick();
@@ -19,7 +20,7 @@ export class KeycrmWorkerService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
-  private async tick() {
+  private async tick() { if (recoveryIsolationEnabled()) return;
     if (this.busy) return;
     this.busy = true;
     try {

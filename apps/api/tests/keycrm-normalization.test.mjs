@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
+import {loadTargetModule} from "./website-test-loader.mjs";
+const {
   keycrmDate,
   keycrmMoneyToMinor,
   keycrmRequiredMoneyToMinor,
   normalizeKeycrmOrder,
-} from "../src/keycrm/keycrm-normalizer.ts";
+} = loadTargetModule("keycrm/keycrm-normalizer.ts");
 const options = { connectionKey: "connection-a", defaultCurrency: "EUR", sourceNames: {}, sourceCurrencies: { "1": "EUR", "12": "EUR" } };
 
 test("денежные значения KeyCRM переводятся в minor units без float-арифметики", () => {
@@ -53,7 +54,7 @@ test("заказ нормализуется вместе с клиентом, т
 
   assert.equal(order.externalId, "675");
   assert.equal(order.sourceAccount, "connection-a");
-  assert.equal(order.number, "YO-675");
+  assert.equal(order.number, "26-675");
   assert.equal(order.priceMinor, 33000);
   assert.equal(order.depositRequiredMinor, 16500);
   assert.equal(order.paymentStatus, "PARTIALLY_PAID");

@@ -11,7 +11,7 @@ test('first website order creates a full ready-made CRM order, client and physic
  assert.equal(db.state.order.length,1);assert.equal(db.state.client.length,1);assert.equal(db.state.orderItem.length,1);assert.equal(db.state.orderItemInstance.length,2);
  assert.equal(db.state.order[0].priceMinor,21500);assert.equal(db.state.order[0].deliveryMinor,1000);assert.equal(db.state.order[0].discountMinor,1000);assert.equal(db.state.order[0].taxMinor,0);assert.equal(db.state.order[0].type,'READY_MODEL');assert.equal(db.state.order[0].depositRequiredMinor,0);
  assert.equal(db.state.payment.length,0);assert.equal(db.state.productionSlot.length,0);assert.equal(db.state.athlete.length,0);assert.equal(db.state.measurement.length,0);
- assert.equal(result.orderNumber,'YO-1');assert.equal(db.state.order[0].number,'YO-1');
+ assert.equal(result.orderNumber,'26-1');assert.equal(db.state.order[0].number,'26-1');
  assert.ok(db.state.order[0].websiteNoticeAt instanceof Date);assert.equal(db.state.order[0].websiteReviewedAt,null);
 });
 test('website numbering continues the KeyCRM sequence and ignores legacy WordPress local ids',async()=>{
@@ -20,8 +20,8 @@ test('website numbering continues the KeyCRM sequence and ignores legacy WordPre
  await db.order.create({data:{clientId:'history-client',number:'KC-707',sourceSystem:'KEYCRM',sourceAccount:'keycrm',externalId:'707',externalNumber:'KC-707',archivedAt:new Date('2026-10-01')}});
  await db.order.create({data:{clientId:'history-client',number:'WEB-22732',sourceSystem:'YOLEOTARD_WEBSITE',sourceAccount:'calendar.yoleotard.com',externalId:'50000',externalNumber:'WEB-random-old',archivedAt:new Date('2026-10-02')}});
  const result=await service.ingest(websitePayload());
- assert.equal(result.orderNumber,'YO-708');assert.equal(db.state.order.at(-1).number,'YO-708');
- const replay=await service.ingest(websitePayload());assert.equal(replay.orderNumber,'YO-708');assert.equal(db.state.order.length,3);
+ assert.equal(result.orderNumber,'26-708');assert.equal(db.state.order.at(-1).number,'26-708');
+ const replay=await service.ingest(websitePayload());assert.equal(replay.orderNumber,'26-708');assert.equal(db.state.order.length,3);
 });
 test('website numbering ignores the current WordPress local order number',async()=>{
  const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
@@ -29,20 +29,20 @@ test('website numbering ignores the current WordPress local order number',async(
  await db.order.create({data:{clientId:'history-client',number:'KC-707',sourceSystem:'KEYCRM',sourceAccount:'keycrm',externalId:'707',externalNumber:'#707'}});
  const p=websitePayload();p.order.externalNumber='#22734';
  const result=await service.ingest(p);
- assert.equal(result.orderNumber,'YO-708');assert.equal(db.state.order.at(-1).number,'YO-708');
+ assert.equal(result.orderNumber,'26-708');assert.equal(db.state.order.at(-1).number,'26-708');
 });
 test('website numbering respects the global Order.number namespace regardless of source',async()=>{
  const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
  await db.client.create({data:{id:'history-client',displayName:'History'}});
  await db.order.create({data:{clientId:'history-client',number:'YO-708',sourceSystem:null,sourceAccount:null,externalId:null}});
  const result=await service.ingest(websitePayload());
- assert.equal(result.orderNumber,'YO-709');assert.equal(db.state.order.at(-1).number,'YO-709');
+ assert.equal(result.orderNumber,'26-709');assert.equal(db.state.order.at(-1).number,'26-709');
 });
 test('two distinct concurrent website orders receive unique consecutive business numbers',async()=>{
  const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
  const first=websitePayload(),second=websitePayload();second.order.externalId='124';second.items[0].externalId='line-2';second.customer.email='second@example.invalid';second.customer.phone='+380 67 222 22 22';
  const results=await Promise.all([service.ingest(first),service.ingest(second)]);
- assert.deepEqual(results.map(result=>result.orderNumber).sort(),['YO-1','YO-2']);
+ assert.deepEqual(results.map(result=>result.orderNumber).sort(),['26-1','26-2']);
  assert.equal(new Set(db.state.order.map(order=>order.number)).size,2);
 });
 test('website card surcharge stays in its source snapshot, with no duplicate tax, payment or price',async()=>{

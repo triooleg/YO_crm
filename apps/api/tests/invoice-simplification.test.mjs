@@ -62,9 +62,9 @@ test('order number is the invoice number in preview, saved copies and PDF filena
  const f=fixture();f.db.state.order[0].number='YO-646';
  const a=await f.documents.invoicePreview({orderId:'order-1',templateKey:'builtin-invoice-en-sepa'},user);
  assert.equal(a.number,'YO-646');assert.match(a.html,/>YO-646</);
- f.db.state.order[0].number='YO-999';
  const first=await f.documents.invoiceFromTemplate({previewToken:a.previewToken,idempotencyKey:'order-number-a'},user);
  assert.equal(first.number,'YO-646');
+ f.db.state.order[0].number='YO-999';
  const b=await f.documents.invoicePreview({orderId:'order-1',templateKey:'builtin-invoice-en-sepa',sourceInvoiceId:first.id},user);
  const second=await f.documents.invoiceFromTemplate({previewToken:b.previewToken,idempotencyKey:'order-number-b'},user);
  assert.equal(second.number,'YO-999');assert.notEqual(first.id,second.id);

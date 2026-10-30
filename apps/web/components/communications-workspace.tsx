@@ -1,5 +1,7 @@
 "use client";
+import { OrderImagePreview } from "./orders/order-image-preview";
 import { takeParentMeasurementDraft } from "../lib/parent-measurements-message-draft";
+import { ShipmentNotificationAction } from "./shipment-notification-action";
 
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
@@ -1766,6 +1768,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <details className="communications-send-options"><summary aria-label={ui.sendOptions}>⌄</summary><button type="button" disabled={templateBusy||!client||!text.trim()} onClick={()=>void saveAsTemplate(text,activeChannel)}>{ui.saveAsTemplate}</button></details>
             </div>
             <div className="communications-compose-shortcuts" aria-label={ui.composerShortcuts}>
+              {client && <ShipmentNotificationAction key={`${client.id}:${activeChannel}`} clientId={client.id} conversationId={client.conversations.find(conversation=>conversation.channel===activeChannel)?.id} channel={activeChannel} canSend onSent={()=>void refreshInbox()} />}
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
               <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&void navigateFromInbox("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
@@ -1796,7 +1799,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           {displayedContextOrders.map((o) => (
             <article className={o.id===initialOrderId.current?"is-context":undefined} key={o.id}>
               {o.modelImagePath ? (
-                <img
+                <OrderImagePreview order={o} onOpenOrder={onNavigate?()=>onNavigate("orders",{orderId:o.id}):undefined}
                   src={
                     "/api/orders/images/" + o.modelImagePath.split("/").pop()
                   }

@@ -512,3 +512,60 @@
 .athlete-wizard-drawer .athlete-wizard-layout{flex:1;min-height:0;height:auto}
 
 .orders-dashboard-table .orders-order-number{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+/* Keep payment actions reachable when the six desktop columns no longer fit. */
+@media(max-width:48em){.orders-finance-payments>header{display:none}.orders-finance-payments>.orders-payment-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}.orders-finance-payments .orders-payment-row>span:last-child{justify-self:end}.orders-finance-payments .orders-payment-comment{overflow-wrap:anywhere}}
+
+/* Keep the authoritative client count inside the existing name click target. */
+.orders-client-cell .orders-client-name-row{display:flex;align-items:center;gap:6px;min-width:0}
+.orders-client-cell .orders-client-name-row>strong{flex:1;min-width:0}
+.orders-client-cell .orders-client-order-count{flex:0 0 auto;height:18px;min-height:18px;padding-inline:5px}
+.orders-client-cell .orders-client-order-count .mantine-Badge-label{white-space:nowrap}
+
+/* Client identity stays in its original grid track; history is a sibling action. */
+.orders-client-identity-text{min-width:0}
+.orders-client-cell .orders-client-name-row{justify-content:flex-start;gap:6px}
+.orders-client-cell .orders-client-name-button{flex:0 1 auto;min-width:0;max-width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer}
+.orders-client-cell .orders-client-name-button>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.orders-client-cell .client-order-history-trigger{flex:0 0 auto;min-width:22px;height:20px;min-height:20px;padding-inline:6px;cursor:pointer}
+.orders-client-cell .client-order-history-trigger .mantine-Badge-label{white-space:nowrap}
+.orders-client-identity-text>small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.client-order-history-tooltip{max-width:min(280px,calc(100vw - 24px));padding:12px}
+.client-order-history-hint{margin-top:5px;padding-top:7px;border-top:1px solid #ffffff33;opacity:.8}
+.client-order-history-modal{max-width:calc(100vw - 24px)}
+.client-order-history-header .client-order-history-client{flex:1;min-width:0;overflow-wrap:anywhere}
+.client-order-history-channel{flex:0 0 auto}
+.client-order-history-header>.mantine-Badge-root{flex:0 0 auto}
+.client-order-history-totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px;border-radius:8px;background:var(--mantine-color-yoleotard-0)}
+.client-order-history-table{font-size:12px}
+.client-order-history-table td{white-space:nowrap}
+.client-order-history-table .mantine-Badge-label{white-space:normal}
+@media(max-width:30em){.client-order-history-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.client-order-history-body>.mantine-Stack-root>.mantine-Group-root:last-child{align-items:stretch;flex-direction:column}}
+
+.orders-client-history-filter{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;padding:6px 10px;border-radius:8px;background:var(--mantine-color-yoleotard-0);color:var(--mantine-color-yoleotard-8)}
+
+/* Make the three Details stage symbols legible without changing their status semantics. */
+.orders-stage-list>div{grid-template-columns:36px minmax(0,1fr)}
+.orders-stage-list>div>svg{width:32px;height:32px;padding:6px;box-sizing:border-box;flex:none}
+.orders-reset-filters{flex:0 0 auto}
+.orders-reset-filters svg{width:16px;height:16px}
+
+/* Client-order history adds two independent read-only areas beside the existing event log. */
+.orders-tab-history-approved.has-customer-history{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(190px,240px);gap:10px;align-items:start}
+.orders-tab-history-approved.has-customer-history>*{min-width:0}
+.orders-history-customer-side{display:grid;align-content:start;gap:10px}
+.orders-history-client-file-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:10px}
+.orders-history-client-file-grid>button,.orders-history-client-file-grid>a{display:grid;place-items:center;min-width:0;height:68px;border:1px solid var(--mantine-color-gray-2);border-radius:6px;overflow:hidden;text-decoration:none}
+.orders-history-client-file-grid img{display:block;width:100%;height:64px;object-fit:contain}
+.orders-history-client-file-grid svg{width:22px;height:22px;color:var(--mantine-color-yoleotard-6)}
+.orders-history-client-file-grid small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+@media(max-width:1450px){.orders-tab-history-approved.has-customer-history{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}.orders-history-customer-side{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr))}.orders-history-customer-side>:only-child{grid-column:1/-1}}
+@media(max-width:900px){.orders-tab-history-approved.has-customer-history{grid-template-columns:minmax(0,1fr)}.orders-history-customer-side{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.has-customer-history .orders-history-table-head{display:none}.has-customer-history .orders-approved-activities.is-rich>div{grid-template-columns:minmax(90px,.65fr) 26px minmax(0,1fr);gap:6px}.has-customer-history .orders-approved-activities.is-rich small{grid-column:3}.has-customer-history .orders-approved-activities strong{overflow-wrap:anywhere}.has-customer-history .orders-approved-activities span{font-size:11px}}
+
+/* Order contact copy actions remain siblings of contact editors. */
+.orders-copy-value{display:inline-flex;align-items:center;gap:4px;max-width:100%;min-width:0}
+.orders-copy-value>strong,.orders-copy-value>span{min-width:0;overflow-wrap:anywhere}
+.orders-copy-value>.orders-approved-field.is-editable{width:auto;max-width:100%}
+.orders-contact-copy{flex-shrink:0}
+.orders-contact-copy svg{fill:none;stroke:currentColor}

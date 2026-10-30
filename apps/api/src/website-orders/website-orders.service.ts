@@ -50,7 +50,7 @@ export class WebsiteOrdersService {
    const manualDelivery=existing&&previous&&Object.entries(this.delivery(previous)).some(([k,v])=>((existing as Record<string,unknown>)[k]??null)!==(v??null));
    if(manualDelivery)warnings.push('LOCAL_DELIVERY_PRESERVED');
    const common={priceMinor:p.totals.chargedMinor,depositRequiredMinor:0,deliveryMinor:p.totals.deliveryMinor,discountMinor:p.totals.discountMinor,externalUpdatedAt:p.order.updatedAt?new Date(p.order.updatedAt):null,externalNumber:p.order.externalNumber??existing?.externalNumber,externalData:json(p.raw),externalImageUrl:image,...(manualDelivery?{}:this.delivery(p)),...(!existing||(existing.buyerComment??null)===(previous?.order.notes??null)?{buyerComment:p.order.notes}:{} )};
-   const websiteNumber=existing?.number??await nextWebsiteOrderNumber(tx);
+   const websiteNumber=existing?.number??await nextWebsiteOrderNumber(tx,new Date(p.order.orderedAt));
    let order=existing?await tx.order.update({where:{id:existing.id},data:common}):await tx.order.create({data:{...identity,...common,number:websiteNumber,clientId:client.id,type:'READY_MODEL',sourceLinkMode:'IMPORTED',taxMinor:0,currency:p.order.currency,createdAt:new Date(p.order.orderedAt),websiteNoticeAt:new Date(),websiteReviewedAt:null}});
    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',order.id);
    await this.items(tx,order.id,p,previous,warnings);

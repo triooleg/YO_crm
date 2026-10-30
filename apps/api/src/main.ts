@@ -1,3 +1,4 @@
+import { recoveryFetch, recoveryIsolationEnabled, recoveryRequestAllowed } from "./recovery-safety";
 import { NestFactory } from "@nestjs/core";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
@@ -11,8 +12,16 @@ import { createWebsiteOrdersSecurity, websiteOrdersBodyError } from "./website-o
 import { WebsiteApiKeysService } from './website-api-keys/website-api-keys.service';
 
 async function bootstrap() {
+  if (recoveryIsolationEnabled()) globalThis.fetch = recoveryFetch(globalThis.fetch);
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
+  app.use((request: Request, response: import('express').Response, next: import('express').NextFunction) => {
+    if (!recoveryRequestAllowed(request.method, request.path)) {
+      response.status(503).json({ code: 'RECOVERY_READ_ONLY', message: 'Изолированная проверка: изменения и интеграции отключены' });
+      return;
+    }
+    next();
+  });
   app.use('/api/public/parent-measurements', parentMeasurementsSecurityMiddleware);
   app.use('/api/public/parent-measurements/photos', json({limit:'3mb'}));
   app.use('/api/public/parent-measurements', json({limit:'32kb'}));

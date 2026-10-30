@@ -15,8 +15,8 @@ test("большая форма заказа использует Mantine Drawer
   assert.match(panel, /CrmTextInput/);
   assert.doesNotMatch(panel, /role="dialog"/);
   assert.doesNotMatch(panel, /document\.addEventListener\("keydown"/);
-  assert.match(panel, /closeOnEscape=\{!saving\}/);
-  assert.match(panel, /closeOnClickOutside=\{!saving\}/);
+  assert.match(panel, /closeOnEscape=\{!saving&&!imagePreviewOpen\}/);
+  assert.match(panel, /closeOnClickOutside=\{!saving&&!imagePreviewOpen\}/);
   assert.match(panel, /disabled=\{saving\} onClick=\{onClose\}/);
   assert.match(panel, /submittingRef=useRef\(false\)/);
   assert.match(panel, /if\(submittingRef\.current\)return/);

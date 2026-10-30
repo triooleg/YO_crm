@@ -106,3 +106,6 @@ test('invoice template settings: draft JSON, readonly copies, validation, PDF an
   }
   assert.deepEqual(errors,[]);
 });
+
+
+

@@ -104,7 +104,8 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
           if(!saved){window.history.replaceState(window.history.state,"",previous.href);return}
         }
         if(sequence!==routeSequence.current)return;
-        committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
+        committedRoute.current={section:next,href};setSectionId(next);
+        if(previous.section!=="overview"||next!=="overview")setRouteVersion(value=>value+1);
       })();
     };
     window.addEventListener("popstate",sync);return()=>{routeSequence.current++;window.removeEventListener("popstate",sync)};

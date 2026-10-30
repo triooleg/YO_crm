@@ -1,0 +1,274 @@
+{
+  "apiAudit": [
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/auth/me",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications/templates",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/branding",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications/unread-count",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/orders/website-notifications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/clients/synthetic-client",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications/synthetic-client",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/auth/me",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/auth/me",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/templates",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/branding",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/unread-count",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/orders/website-notifications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/templates",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/clients/synthetic-client",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/synthetic-client",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/preview",
+      "method": "POST",
+      "body": {
+        "clientId": "synthetic-client",
+        "conversationId": "synthetic-conversation",
+        "channel": "INSTAGRAM",
+        "orderId": "synthetic-order-1",
+        "shipmentId": "synthetic-parcel-1"
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/preview",
+      "method": "POST",
+      "body": {
+        "clientId": "synthetic-client",
+        "conversationId": "synthetic-conversation",
+        "channel": "INSTAGRAM",
+        "orderId": "synthetic-order-1",
+        "shipmentId": "synthetic-parcel-1"
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/preview",
+      "method": "POST",
+      "body": {
+        "clientId": "synthetic-client",
+        "conversationId": "synthetic-conversation",
+        "channel": "INSTAGRAM",
+        "orderId": "synthetic-order-1",
+        "shipmentId": "synthetic-parcel-1"
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/options",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/preview",
+      "method": "POST",
+      "body": {
+        "clientId": "synthetic-client",
+        "conversationId": "synthetic-conversation",
+        "channel": "INSTAGRAM",
+        "orderId": "synthetic-order-1",
+        "shipmentId": "synthetic-parcel-1"
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/shipment-notifications/send",
+      "method": "POST",
+      "body": {
+        "clientId": "synthetic-client",
+        "conversationId": "synthetic-conversation",
+        "channel": "INSTAGRAM",
+        "orderId": "synthetic-order-1",
+        "shipmentId": "synthetic-parcel-1",
+        "language": "en",
+        "scopeToken": "synthetic-only-scope",
+        "content": "Your order has been shipped! 📦\n\nYou can track your package using the link below:\n\nhttps://novaposhtaglobal.ua/track/?Tracking_ID=PC0000020000072054NPG\n\nThank you for choosing Yoleotard! ❤️",
+        "subject": "Your Yoleotard order YO-101 has been shipped",
+        "sendChat": true,
+        "sendEmail": true,
+        "confirmClientEmail": true
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/synthetic-client",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3597",
+      "path": "/api/communications/synthetic-client/drafts/50a501f7-5e80-4c95-beef-a59c8239fc3a",
+      "method": "PUT",
+      "body": {
+        "content": "Синтетический черновик guardian",
+        "channel": "INSTAGRAM"
+      }
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications/unread-count",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/orders/website-notifications",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "origin": "http://127.0.0.1:3598",
+      "path": "/api/communications/synthetic-client",
+      "method": "GET",
+      "body": null
+    }
+  ],
+  "blockedRequests": [],
+  "unknownApi": []
+}

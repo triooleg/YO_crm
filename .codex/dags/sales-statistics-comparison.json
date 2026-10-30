@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "task": {
+    "id": "sales-statistics-comparison",
+    "title": "Previous-period numbers on six sales KPI cards",
+    "base_ref": "96fd65bbf1d0c30dc41de8ed7db385b2e096a348",
+    "no_commit_reason": "Owner requested local implementation and testing; no commit or deploy authorized.",
+    "max_fix_cycles": 3,
+    "fix_cycles": 1,
+    "local_acceptance": "LOCAL_IMPLEMENTATION_ACCEPTED",
+    "review_results": {
+      "compatibility": "PASS",
+      "regression": "PASS",
+      "business": "PASS",
+      "visual": "PASS",
+      "release": "PASS_LOCAL_ONLY"
+    },
+    "evidence": "docs/ui/sales-statistics-comparison-2026-10-26.md",
+    "deployment": "NOT_AUTHORIZED_NOT_PERFORMED"
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "agent": "COMPATIBILITY",
+      "kind": "analysis",
+      "depends_on": [],
+      "status": "DONE",
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "affected_paths": [
+        "docs/plans/sales-statistics-comparison.md"
+      ],
+      "title": "scope",
+      "description": "See docs/plans/sales-statistics-comparison.md; manual role execution, no commits.",
+      "acceptance_criteria": [
+        "Real previous values; no finance or provider mutations; scoped ownership preserved"
+      ],
+      "validation_commands": [],
+      "required": true
+    },
+    {
+      "id": "aggregate-regressions",
+      "agent": "REGRESSION-WORKER",
+      "kind": "implementation",
+      "depends_on": [
+        "scope"
+      ],
+      "status": "DONE",
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "affected_paths": [
+        "apps/api/tests/sales-statistics-comparison.test.mjs"
+      ],
+      "title": "aggregate-regressions",
+      "description": "See docs/plans/sales-statistics-comparison.md; manual role execution, no commits.",
+      "acceptance_criteria": [
+        "Real previous values; no finance or provider mutations; scoped ownership preserved"
+      ],
+      "validation_commands": [],
+      "required": true
+    },
+    {
+      "id": "cards",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "depends_on": [
+        "scope"
+      ],
+      "status": "DONE",
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "affected_paths": [
+        "apps/web/components/sales-statistics-workspace.tsx",
+        "apps/web/app/sales-statistics.css",
+        "apps/web/lib/sales-statistics.ts",
+        "apps/web/tests/sales-statistics.test.mjs",
+        "apps/web/tests/sales-statistics-browser.test.mjs"
+      ],
+      "title": "cards",
+      "description": "See docs/plans/sales-statistics-comparison.md; manual role execution, no commits.",
+      "acceptance_criteria": [
+        "Real previous values; no finance or provider mutations; scoped ownership preserved"
+      ],
+      "validation_commands": [],
+      "required": true
+    },
+    {
+      "id": "reviews",
+      "agent": "REVIEWERS",
+      "kind": "review",
+      "depends_on": [
+        "aggregate-regressions",
+        "cards"
+      ],
+      "status": "DONE",
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "affected_paths": [],
+      "title": "reviews",
+      "description": "See docs/plans/sales-statistics-comparison.md; manual role execution, no commits.",
+      "acceptance_criteria": [
+        "Real previous values; no finance or provider mutations; scoped ownership preserved"
+      ],
+      "validation_commands": [],
+      "required": true
+    },
+    {
+      "id": "acceptance",
+      "agent": "RELEASE-GATEKEEPER",
+      "kind": "review",
+      "depends_on": [
+        "reviews"
+      ],
+      "status": "DONE",
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "affected_paths": [],
+      "title": "acceptance",
+      "description": "See docs/plans/sales-statistics-comparison.md; manual role execution, no commits.",
+      "acceptance_criteria": [
+        "Real previous values; no finance or provider mutations; scoped ownership preserved"
+      ],
+      "validation_commands": [],
+      "required": true
+    }
+  ]
+}

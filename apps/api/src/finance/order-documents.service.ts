@@ -175,13 +175,15 @@ export class OrderDocumentsService {
   async invoicePreviewDocument(token:string,user:User) {
     const preview=await this.storedPreview(token,user);
     if(Date.parse(preview.expiresAt)<=Date.now())throw new BadRequestException("Предпросмотр истёк; создайте новый");
-    await this.order(preview.invoice.orderId);
+    const order=await this.order(preview.invoice.orderId);
+    if(!preview.invoiceId&&order.number!==invoiceDisplayNumber(preview.invoice))throw new ConflictException("Номер заказа изменён; создайте новый предпросмотр");
     return {number:invoiceDisplayNumber(preview.invoice),pdf:Buffer.from(preview.pdfBase64,"base64")};
   }
 
   async invoiceFromTemplate(dto:InvoiceFromTemplateDto,user:User) {
     const original=await this.storedPreview(dto.previewToken,user);
     return this.prisma.$transaction(async tx=>{
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))","order-business-number-v1");
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))",original.invoice.orderId);
       await this.lockTemplates(tx);
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))","invoice-idempotency");
@@ -199,8 +201,9 @@ export class OrderDocumentsService {
       }
       if(Date.parse(preview.expiresAt)<=Date.now())throw new BadRequestException("Предпросмотр истёк; создайте новый");
       const frozen=preview.invoice;
-      const order=await tx.order.findFirst({where:{id:frozen.orderId,archivedAt:null},select:{id:true,clientId:true}});
+      const order=await tx.order.findFirst({where:{id:frozen.orderId,archivedAt:null},select:{id:true,clientId:true,number:true}});
       if(!order)throw new NotFoundException("Заказ не найден");
+      if(order.number!==invoiceDisplayNumber(frozen))throw new ConflictException("Номер заказа изменён; создайте новый предпросмотр");
       if(!builtInDocumentTemplates().some(item=>item.id===frozen.templateKey)) {
         const template=await tx.documentTemplate.findFirst({where:{id:frozen.templateKey,active:true,archivedAt:null}});
         if(!template)throw new BadRequestException("Шаблон больше не активен; выберите другой");

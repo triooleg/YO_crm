@@ -1,10 +1,11 @@
 "use client";
 import { WebsiteApiKeysPanel } from "./website-api-keys-panel";
+import { BackupSettings } from "./backup-settings";
 import { TaxSettingsPanel } from "./taxes/tax-settings-panel";
 import { FormEvent, useEffect, useRef, useState, type Ref } from "react";
 import { Badge, Modal, Progress, SegmentedControl, Tabs } from "@mantine/core";
 import { CrmAlert } from "./crm/alert";
-import { taxIntegrationOrderUi as taxUi, settingsUi, summaryFormatUi } from "../lib/i18n";
+import { backupUi, taxIntegrationOrderUi as taxUi, settingsUi, summaryFormatUi } from "../lib/i18n";
 import { CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextarea, CrmTextInput } from "./crm/settings-controls";
 import { type CrmTab } from "./crm/tab-list";
 import { canReadTaxes } from "../lib/tax-accounting";
@@ -328,14 +329,14 @@ function KeycrmSettings(){
     <Modal opened={rollbackOpen} onClose={()=>setRollbackOpen(false)} title={ui.rollbackDialogTitle} centered closeOnEscape={!busy} closeOnClickOutside={!busy} closeButtonProps={{ "aria-label": ui.close, disabled: busy }}><p>{ui.rollbackConsequences}</p><dl className="keycrm-confirm-details"><div><dt>{ui.rollbackRunId}</dt><dd>{current?.id||"—"}</dd></div></dl><div className="phase2-warning" role="note">{ui.rollbackAuditNotice}</div><div className="settings-actions"><CrmButton tone="secondary" type="button" onClick={()=>setRollbackOpen(false)} disabled={busy}>{ui.cancel}</CrmButton><CrmButton type="button" onClick={()=>void rollbackRun()} disabled={busy}>{ui.rollbackConfirmAction}</CrmButton></div></Modal>
   </div>
 }
-type SettingsSection = "account" | "finance" | "invoice-templates" | "communications" | "keycrm" | "ai" | "production" | "interface" | "taxes";
+type SettingsSection = "account" | "finance" | "invoice-templates" | "communications" | "keycrm" | "ai" | "production" | "interface" | "taxes" | "backups";
 export function SettingsWorkspace({role}:{role:string}) {
   const [section, setSection] = useState<SettingsSection | null>(null);
   useEffect(() => {
     const sync = () => {
       const tab = new URLSearchParams(window.location.search).get('tab');
       const common = ['finance', 'communications', 'ai'];
-      const allowed = [...common, ...(canReadTaxes(role) ? ['taxes'] : []), ...(role === 'OWNER' ? ['account'] : []), ...(['OWNER', 'ADMIN'].includes(role) ? ['keycrm', 'production', 'interface', 'invoice-templates'] : [])];
+      const allowed = [...common, ...(canReadTaxes(role) ? ['taxes'] : []), ...(role === 'OWNER' ? ['account'] : []), ...(['OWNER', 'ADMIN'].includes(role) ? ['keycrm', 'production', 'interface', 'invoice-templates', 'backups'] : [])];
       setSection(allowed.includes(tab ?? '') ? tab as SettingsSection : role === 'OWNER' ? 'account' : 'finance');
     };
     sync(); window.addEventListener('popstate', sync);
@@ -358,6 +359,7 @@ export function SettingsWorkspace({role}:{role:string}) {
     ...((role==="OWNER"||role==="ADMIN")?[{value:"keycrm",label:settingsUi.keycrmTab,panelId:"settings-keycrm-panel",tabId:"settings-keycrm-tab"}]:[]),
     {value:"ai",label:settingsUi.aiTab,panelId:"settings-ai-panel",tabId:"settings-ai-tab"},
     ...((role==="OWNER"||role==="ADMIN")?[{value:"production",label:settingsUi.production,panelId:"settings-production-panel",tabId:"settings-production-tab"},{value:"interface",label:settingsUi.interface,panelId:"settings-interface-panel",tabId:"settings-interface-tab"}]:[]),
+    ...(['OWNER','ADMIN'].includes(role)?[{value:"backups",label:backupUi.title,panelId:"settings-backups-panel",tabId:"settings-backups-tab"}]:[]),
   ];
   return (
     <div className="settings-page settings-tax-integration">
@@ -371,7 +373,9 @@ export function SettingsWorkspace({role}:{role:string}) {
       <Tabs className="settings-tax-layout" orientation="vertical" value={section} onChange={value => value && selectSection(value)} keepMounted={false}>
       <Tabs.List className="settings-tax-sidebar" aria-label={settingsUi.title}>{tabs.map(tab => <Tabs.Tab key={tab.value} value={tab.value} id={tab.tabId} aria-controls={tab.panelId}>{tab.label}</Tabs.Tab>)}</Tabs.List>
       <div className="settings-tax-content">
-      {section === null ? null : section === "taxes" && canReadTaxes(role) ? (
+      {section === null ? null : section === "backups" && ['OWNER','ADMIN'].includes(role) ? (
+        <BackupSettings />
+      ) : section === "taxes" && canReadTaxes(role) ? (
         <section id="settings-taxes-panel" role="tabpanel" aria-labelledby="settings-taxes-tab"><TaxSettingsPanel role={role}/></section>
       ) : section === "account"&&role==="OWNER" ? (
         <AccountSettings />

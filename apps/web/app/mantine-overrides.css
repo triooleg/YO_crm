@@ -2,6 +2,24 @@
  * Temporary compatibility styles for Mantine components that have already
  * replaced legacy UI. Keep feature-specific styling out of this file.
  */
+/* CrmSearchField owns its accessible clear action; do not show a second native X. */
+.crm-search-field input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.crm-search-field .crm-search-clear {
+  padding: 0;
+}
+
+.crm-search-field .crm-search-clear svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
 .crm-release-header {
   margin: 0;
   padding: 22px 24px 16px;

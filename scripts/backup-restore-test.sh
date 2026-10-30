@@ -2,17 +2,37 @@
 set -Eeuo pipefail
 [[ "${BACKUP_RESTORE_INTEGRATION:-false}" == "true" ]]||{ echo "Set BACKUP_RESTORE_INTEGRATION=true" >&2;exit 2; }
 [[ "${APP_ENV:-}" == "backup-drill" ]] || { echo "Set APP_ENV=backup-drill explicitly" >&2; exit 2; }
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-yoleotard-crm-backup-drill}"
+export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.backup-test.yml}" ENV_FILE="${ENV_FILE:-.env}"
+python3 "$SCRIPT_DIR/backup_runtime.py" guard-isolated .
+[[ "${TARGET_DATABASE:-yoleotard_crm_restore_test}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || exit 2
 export ALLOW_RESTORE=true;export BACKUP_STORAGE_PATH="${BACKUP_STORAGE_PATH:-/tmp/yoleotard-crm-backup-test}";TARGET_DATABASE="${TARGET_DATABASE:-yoleotard_crm_restore_test}";UPLOADS_TARGET="${UPLOADS_TARGET:-/tmp/yoleotard-crm-restore-files}"
 compose=(docker compose --env-file "${ENV_FILE:-.env}" -p "${COMPOSE_PROJECT_NAME:-yoleotard-crm}" -f "${COMPOSE_FILE:-docker-compose.yml}");PROBE="backup-restore-$(date -u +%s)-$$";CREATED_TARGET=false;CREATED_LEGACY=false;CREATED_UPLOADS=false;CREATED_LEGACY_UPLOADS=false;BACKUP_ID="";LEGACY_DIR=""
 ACTIVE_DATABASE="$("${compose[@]}" exec -T postgres printenv POSTGRES_DB|tr -d '\r')";[[ "$TARGET_DATABASE" != "$ACTIVE_DATABASE" && "$TARGET_DATABASE" != "yoleotard_crm" ]]||{ echo "Unsafe drill target" >&2;exit 2; }
 EXISTS="$("${compose[@]}" exec -T postgres sh -c 'exec psql --username="$POSTGRES_USER" --dbname=postgres --tuples-only --no-align --command="SELECT 1 FROM pg_database WHERE datname='"'"'$1'"'"'"' sh "$TARGET_DATABASE"|tr -d '\r')";[[ -z "$EXISTS" ]]||{ echo "Drill target already exists" >&2;exit 2; }
 [[ "$BACKUP_STORAGE_PATH" = /* && "$BACKUP_STORAGE_PATH" != "/" && "$UPLOADS_TARGET" = /* && "$UPLOADS_TARGET" != "/" ]]||{ echo "Unsafe drill paths" >&2;exit 2; }
 [[ ! -e "$UPLOADS_TARGET" && ! -e "${UPLOADS_TARGET}-legacy" ]]||{ echo "Drill output paths must not exist" >&2;exit 2; }
-cleanup(){ if [[ "$CREATED_TARGET" == true ]];then "${compose[@]}" exec -T postgres sh -c 'dropdb --username="$POSTGRES_USER" --if-exists "$1"' sh "$TARGET_DATABASE" >/dev/null 2>&1||true;fi;if [[ "$CREATED_LEGACY" == true ]];then "${compose[@]}" exec -T postgres sh -c 'dropdb --username="$POSTGRES_USER" --if-exists "$1"' sh "${TARGET_DATABASE}_legacy" >/dev/null 2>&1||true;fi;if [[ -n "$BACKUP_ID" ]];then "${compose[@]}" exec -T postgres sh -c 'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --command="DELETE FROM \"Backup\" WHERE \"id\"='"'"'$1'"'"'"' sh "$BACKUP_ID" >/dev/null 2>&1||true;fi;"${compose[@]}" exec -T api rm -f "/app/uploads/backup-restore-probe/$PROBE.txt" >/dev/null 2>&1||true;if [[ "$CREATED_UPLOADS" == true ]];then rm -rf -- "$UPLOADS_TARGET";fi;if [[ "$CREATED_LEGACY_UPLOADS" == true ]];then rm -rf -- "${UPLOADS_TARGET}-legacy";fi;if [[ -n "$BACKUP_ID" && -d "$BACKUP_STORAGE_PATH/$BACKUP_ID" ]];then rm -rf -- "$BACKUP_STORAGE_PATH/$BACKUP_ID";fi;if [[ -n "$LEGACY_DIR" && -d "$LEGACY_DIR" ]];then rm -rf -- "$LEGACY_DIR";fi; };trap cleanup EXIT
+cleanup(){ [[ -z "${BEFORE_FINGERPRINTS:-}" ]] || rm -f -- "$BEFORE_FINGERPRINTS";[[ -z "${AFTER_FINGERPRINTS:-}" ]] || rm -f -- "$AFTER_FINGERPRINTS";if [[ "$CREATED_TARGET" == true ]];then "${compose[@]}" exec -T postgres sh -c 'dropdb --username="$POSTGRES_USER" --if-exists "$1"' sh "$TARGET_DATABASE" >/dev/null 2>&1||true;fi;if [[ "$CREATED_LEGACY" == true ]];then "${compose[@]}" exec -T postgres sh -c 'dropdb --username="$POSTGRES_USER" --if-exists "$1"' sh "${TARGET_DATABASE}_legacy" >/dev/null 2>&1||true;fi;if [[ -n "$BACKUP_ID" ]];then "${compose[@]}" exec -T postgres sh -c 'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --command="DELETE FROM \"Backup\" WHERE \"id\"='"'"'$1'"'"'"' sh "$BACKUP_ID" >/dev/null 2>&1||true;fi;"${compose[@]}" exec -T api rm -f "/app/uploads/backup-restore-probe/$PROBE.txt" >/dev/null 2>&1||true;if [[ "$CREATED_UPLOADS" == true ]];then rm -rf -- "$UPLOADS_TARGET";fi;if [[ "$CREATED_LEGACY_UPLOADS" == true ]];then rm -rf -- "${UPLOADS_TARGET}-legacy";fi;if [[ -n "$BACKUP_ID" && -d "$BACKUP_STORAGE_PATH/$BACKUP_ID" ]];then rm -rf -- "$BACKUP_STORAGE_PATH/$BACKUP_ID";fi;if [[ -n "$LEGACY_DIR" && -d "$LEGACY_DIR" ]];then rm -rf -- "$LEGACY_DIR";fi; };trap cleanup EXIT
 "${compose[@]}" exec -T api sh -c 'mkdir -p /app/uploads/backup-restore-probe;printf "%s" "$1" >"/app/uploads/backup-restore-probe/$1.txt"' sh "$PROBE"
+BEFORE_FINGERPRINTS="$(mktemp)";AFTER_FINGERPRINTS="$(mktemp)"
+python3 "$SCRIPT_DIR/backup_runtime.py" fingerprints "$BEFORE_FINGERPRINTS"
 OUTPUT="$(./scripts/backup.sh data --output-dir "$BACKUP_STORAGE_PATH" --compose-file "${COMPOSE_FILE:-docker-compose.yml}" --env-file "${ENV_FILE:-.env}")";BACKUP_ID="$(printf '%s\n' "$OUTPUT"|sed -n 's/^Backup complete: \([^ ]*\).*/\1/p')";[[ -n "$BACKUP_ID" ]]||exit 1
 "${compose[@]}" exec -T api rm -f "/app/uploads/backup-restore-probe/$PROBE.txt";"${compose[@]}" exec -T postgres sh -c 'createdb --username="$POSTGRES_USER" "$1"' sh "$TARGET_DATABASE";CREATED_TARGET=true;mkdir "$UPLOADS_TARGET";CREATED_UPLOADS=true
 ./scripts/restore.sh --backup-id "$BACKUP_ID" --target-database "$TARGET_DATABASE" --uploads-target "$UPLOADS_TARGET" --confirm "RESTORE $TARGET_DATABASE" --compose-file "${COMPOSE_FILE:-docker-compose.yml}" --env-file "${ENV_FILE:-.env}"
+BACKUP_DATABASE_OVERRIDE="$TARGET_DATABASE" python3 "$SCRIPT_DIR/backup_runtime.py" fingerprints "$AFTER_FINGERPRINTS"
+cmp "$BEFORE_FINGERPRINTS" "$AFTER_FINGERPRINTS" || { echo 'Domain fingerprints differ' >&2;exit 1; }
+python3 - "$SCRIPT_DIR" "$BACKUP_STORAGE_PATH/$BACKUP_ID" "$UPLOADS_TARGET" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from backup_archive import validate_directory,digest
+root=Path(sys.argv[3])
+expected=validate_directory(Path(sys.argv[2]))['inventory']
+actual=sorted([dict(path=p.relative_to(root).as_posix(),sizeBytes=p.stat().st_size,sha256=digest(p)) for p in root.rglob('*') if p.is_file()],key=lambda x:x['path'])
+assert actual==expected,'All uploads digest inventory must match'
+PY
+
 DB_VALUE="$("${compose[@]}" exec -T postgres sh -c 'exec psql --username="$POSTGRES_USER" --dbname="$1" --tuples-only --no-align --command="SELECT \"id\" FROM \"Backup\" WHERE \"id\"='"'"'$2'"'"'"' sh "$TARGET_DATABASE" "$BACKUP_ID"|tr -d '\r')";FILE_VALUE="$(cat "$UPLOADS_TARGET/backup-restore-probe/$PROBE.txt")";[[ "$DB_VALUE" == "$BACKUP_ID" && "$FILE_VALUE" == "$PROBE" ]]||{ echo "Restore verification failed" >&2;exit 1; }
 
 # Exercise the legacy v1 artifact contract used by backups created before the platform module.

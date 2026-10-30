@@ -26,4 +26,10 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
       - run: docker compose --env-file .env.example -f docker-compose.backup-test.yml config --quiet
+        env:
+          BACKUP_TEST_API_IMAGE: yoleotard-crm-api:backup-test
       - run: pnpm quality:check
+      - run: python3 -m unittest discover -s scripts/tests -p 'backup_*test.py'
+        env:
+          PYTHONPATH: scripts
+          BACKUP_API_TEST_ROOT: ${{ github.workspace }}

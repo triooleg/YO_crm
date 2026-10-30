@@ -16,7 +16,7 @@ test("утверждённая таблица объединяет модель 
   assert.match(dashboard, /orders-model-sport-cell/);
 });
 
-test("раскрытый заказ использует обзорную панель и девять рабочих вкладок", () => {
+test("раскрытый заказ использует обзорную панель и восемь рабочих вкладок", () => {
   for (const token of [
     "orders-order-overview",
     "orders-order-identity",
@@ -26,7 +26,7 @@ test("раскрытый заказ использует обзорную пан
     "orders-order-tabs",
     "orders-order-tab-panel",
   ]) assert.match(dashboard + tabs, new RegExp(token));
-  for (const key of ["details", "designs", "measurements", "client", "finance", "production", "delivery", "notes", "history"])
+  for (const key of ["details", "designs", "measurements", "finance", "production", "delivery", "notes", "history"])
     assert.match(tabs, new RegExp(`key: "${key}"`));
   assert.match(css, /\.orders-order-overview/);
   assert.match(css, /\.orders-order-tabs/);

@@ -18,6 +18,9 @@ backups/
 .playwright-cli/
 apps/web/playwright-report/
 apps/web/test-results/
+apps/web/test-results-*/
+__pycache__/
+*.pyc
 apps/web/.next-*/
 output/
 tmp/

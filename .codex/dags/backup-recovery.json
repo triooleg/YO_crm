@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "task": {
+    "id": "backup-recovery",
+    "title": "Extend existing YO CRM backup and disaster recovery",
+    "base_ref": "96fd65bbf1d0c30dc41de8ed7db385b2e096a348",
+    "max_fix_cycles": 3,
+    "fix_cycles": 0,
+    "no_commit_reason": "Current request authorizes local implementation and isolated test restore only; no commit/push/deploy or production mutations.",
+    "scope_extension": "Owner requested MANUAL/AUTOMATIC workstation transfer to D:/YO_CRM_Backups; local helper prepared, never installed or activated.",
+    "local_acceptance": "LOCAL_IMPLEMENTATION_ACCEPTED; all mandatory reviews and final quality PASS; no production deployment or Windows task activation."
+  },
+  "nodes": [
+    {
+      "id": "audit",
+      "title": "audit",
+      "agent": "ARCHITECT",
+      "kind": "analysis",
+      "depends_on": [],
+      "status": "DONE",
+      "affected_paths": [
+        "docs/plans/backup-disaster-recovery.md"
+      ],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "compatibility-plan",
+      "title": "compatibility-plan",
+      "agent": "COMPATIBILITY-CONTRACT-GUARDIAN",
+      "kind": "review",
+      "depends_on": [
+        "audit"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "api",
+      "title": "api",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "compatibility-plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/api/src/backups",
+        "apps/api/tests/backup"
+      ],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "engine",
+      "title": "engine",
+      "agent": "BACKEND",
+      "kind": "implementation",
+      "depends_on": [
+        "compatibility-plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "scripts",
+        "docker-compose.backup-test.yml"
+      ],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "ui",
+      "title": "ui",
+      "agent": "FRONTEND",
+      "kind": "implementation",
+      "depends_on": [
+        "compatibility-plan"
+      ],
+      "status": "DONE",
+      "affected_paths": [
+        "apps/web/components/backup-settings.tsx",
+        "apps/web/components/settings-workspace.tsx",
+        "apps/web/lib/i18n.ts"
+      ],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "integrate",
+      "title": "integrate",
+      "agent": "INTEGRATOR",
+      "kind": "integration",
+      "depends_on": [
+        "api",
+        "engine",
+        "ui"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "regression",
+      "title": "regression",
+      "agent": "REGRESSION-GUARDIAN",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "business",
+      "title": "business",
+      "agent": "BUSINESS-RULE-REVIEWER",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "visual",
+      "title": "visual",
+      "agent": "UI-VISUAL-GUARDIAN",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "compatibility-final",
+      "title": "compatibility-final",
+      "agent": "COMPATIBILITY-CONTRACT-GUARDIAN",
+      "kind": "review",
+      "depends_on": [
+        "integrate"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    },
+    {
+      "id": "release",
+      "title": "release",
+      "agent": "RELEASE-GATEKEEPER",
+      "kind": "review",
+      "depends_on": [
+        "regression",
+        "business",
+        "visual",
+        "compatibility-final"
+      ],
+      "status": "DONE",
+      "affected_paths": [],
+      "description": "See docs/plans/backup-disaster-recovery.md",
+      "acceptance_criteria": [
+        "Preserve v1/v2, no production mutations, honest coverage"
+      ],
+      "validation_commands": [],
+      "required": true,
+      "context_strategy": [
+        "targeted_search"
+      ]
+    }
+  ]
+}

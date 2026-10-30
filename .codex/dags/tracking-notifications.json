@@ -1,0 +1,239 @@
+{
+  "version": 1,
+  "task": {
+    "id": "tracking-notifications",
+    "title": "Explicit per-parcel shipment notification in Inbox",
+    "base_ref": "96fd65bbf1d0c30dc41de8ed7db385b2e096a348",
+    "baseline": ".local/tracking-notifications/baseline.json",
+    "no_commit_reason": "Implementation and local testing authorized; no commit, push, production sends or deployment authorized.",
+    "review_results": {
+      "compatibility": "PASS",
+      "regression": "PASS",
+      "business": "PASS",
+      "visual": "PASS_WITH_NAMED_PARENT_SCREEN_LIMIT",
+      "release": "PASS_LOCAL_ONLY"
+    },
+    "evidence": "docs/release-evidence/tracking-notifications-2026-10-27.md",
+    "local_acceptance": "READY_FOR_OWNER_REVIEW",
+    "deployment": "NOT_AUTHORIZED_NOT_PERFORMED"
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "status": "DONE",
+      "agent": "COMPATIBILITY",
+      "agent_id": "01a17a3f-3ac5-7981-bb43-b7dd554182b3",
+      "kind": "analysis",
+      "title": "scope",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "depends_on": [],
+      "affected_paths": [
+        "docs/plans/tracking-notifications.md"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "email-adapter",
+      "worktree": "tracking-notification-email",
+      "agent": "IMPLEMENTER",
+      "depends_on": [
+        "scope"
+      ],
+      "agent_id": "01a17a48-b536-7a91-b167-2dd4fcba9e2e",
+      "kind": "implementation",
+      "status": "DONE",
+      "title": "email-adapter",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "apps/api/src/communications/shipment-email.ts",
+        "apps/api/src/communications/shipment-email-account.ts",
+        "apps/api/src/communications/email-transport.service.ts",
+        "apps/api/tests/shipment-email.test.mjs",
+        "apps/api/tests/shipment-email-transport.test.mjs"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "inbox-ui",
+      "worktree": "tracking-notification-ui",
+      "agent": "IMPLEMENTER",
+      "depends_on": [
+        "scope"
+      ],
+      "agent_id": "01a17a48-b703-7263-9f3e-4647984561fb",
+      "kind": "implementation",
+      "status": "DONE",
+      "title": "inbox-ui",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "apps/web/components/shipment-notification-action.tsx",
+        "apps/web/lib/shipment-notifications.ts",
+        "apps/web/tests/shipment-notifications.test.mjs",
+        "apps/web/tests/shipment-notifications-browser.test.mjs"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "core",
+      "depends_on": [
+        "scope"
+      ],
+      "agent_id": null,
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "status": "DONE",
+      "title": "core",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "apps/api/src/shipping/",
+        "apps/api/src/communications/communications.service.ts",
+        "apps/api/src/communications/email-sync.service.ts",
+        "apps/api/src/communications/chatwoot-shipment-capability.ts",
+        "apps/api/src/app.module.ts",
+        "apps/web/components/communications-workspace.tsx",
+        "apps/web/components/orders/order-expanded-tabs.tsx",
+        "apps/web/components/orders/shipment-tracking-url.tsx",
+        "apps/web/lib/i18n.ts",
+        "packages/database/prisma/"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "tests",
+      "agent": "REGRESSION",
+      "depends_on": [
+        "core"
+      ],
+      "agent_id": "01a17a4d-187c-7921-9ddc-2f494b5690ab",
+      "kind": "analysis",
+      "status": "DONE",
+      "title": "tests",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "apps/api/tests/shipment-notification-service.test.mjs",
+        "apps/api/tests/shipment-notification-postgres.test.mjs",
+        "apps/api/tests/chatwoot-shipment-capability.test.mjs",
+        "apps/api/tests/chatwoot-shipment-integration.test.mjs"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "business",
+      "agent": "BUSINESS",
+      "depends_on": [
+        "core"
+      ],
+      "agent_id": "01a17a54-0d2f-7a00-93dd-d8165e3b720c",
+      "kind": "analysis",
+      "status": "DONE",
+      "title": "business",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "docs/release-evidence/tracking-notifications-2026-10-27.md"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "visual",
+      "depends_on": [
+        "inbox-ui",
+        "core"
+      ],
+      "agent_id": null,
+      "agent": "VISUAL",
+      "kind": "analysis",
+      "status": "DONE",
+      "title": "visual",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "docs/ui/tracking-notifications-2026-10-27/"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    },
+    {
+      "id": "gate",
+      "depends_on": [
+        "email-adapter",
+        "inbox-ui",
+        "core",
+        "tests",
+        "business",
+        "visual"
+      ],
+      "agent_id": null,
+      "agent": "RELEASE",
+      "kind": "analysis",
+      "status": "DONE",
+      "title": "gate",
+      "description": "Manual scoped execution; see docs/plans/tracking-notifications.md. Local implementation and mocked tests only; no commits, production sends or deployment.",
+      "affected_paths": [
+        "docs/release-evidence/tracking-notifications-2026-10-27.md"
+      ],
+      "acceptance_criteria": [
+        "Correct per-parcel scope, explicit consent, independent channels and no duplicate known success; existing behavior preserved."
+      ],
+      "validation_commands": [],
+      "context_strategy": [
+        "targeted_search"
+      ],
+      "required": true,
+      "human_approval": true
+    }
+  ]
+}

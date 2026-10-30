@@ -1,0 +1,410 @@
+[
+  {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "before": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 62,
+        "display": "flex"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 62,
+        "width": 1920,
+        "height": 1018,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 62,
+        "width": 1920,
+        "height": 1018,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 62,
+        "width": 365,
+        "height": 1018,
+        "display": "flex"
+      },
+      ".communications-chat": {
+        "x": 369,
+        "y": 62,
+        "width": 1167,
+        "height": 1018,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 1540,
+        "y": 62,
+        "width": 380,
+        "height": 1018,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 369,
+        "y": 147.9375,
+        "width": 1167,
+        "height": 726.875,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 385,
+        "y": 960,
+        "width": 1135,
+        "height": 78,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 1920,
+        "clientWidth": 1920,
+        "scrollHeight": 1080,
+        "clientHeight": 1080
+      }
+    },
+    "after": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 62,
+        "display": "flex"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 62,
+        "width": 1920,
+        "height": 1018,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 62,
+        "width": 1920,
+        "height": 1018,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 62,
+        "width": 365,
+        "height": 1018,
+        "display": "flex"
+      },
+      ".communications-chat": {
+        "x": 369,
+        "y": 62,
+        "width": 1167,
+        "height": 1018,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 1540,
+        "y": 62,
+        "width": 380,
+        "height": 1018,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 369,
+        "y": 147.9375,
+        "width": 1167,
+        "height": 721.375,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 385,
+        "y": 954.5,
+        "width": 1135,
+        "height": 78,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 1920,
+        "clientWidth": 1920,
+        "scrollHeight": 1080,
+        "clientHeight": 1080
+      }
+    }
+  },
+  {
+    "viewport": {
+      "width": 1366,
+      "height": 768
+    },
+    "before": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 1366,
+        "height": 62,
+        "display": "flex"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 62,
+        "width": 1366,
+        "height": 706,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 62,
+        "width": 1366,
+        "height": 706,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 62,
+        "width": 314.171875,
+        "height": 706,
+        "display": "flex"
+      },
+      ".communications-chat": {
+        "x": 318.171875,
+        "y": 62,
+        "width": 702.328125,
+        "height": 706,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 1024.5,
+        "y": 62,
+        "width": 341.5,
+        "height": 706,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 318.171875,
+        "y": 177.984375,
+        "width": 702.328125,
+        "height": 384.828125,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 334.171875,
+        "y": 648,
+        "width": 670.328125,
+        "height": 78,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 1366,
+        "clientWidth": 1366,
+        "scrollHeight": 768,
+        "clientHeight": 768
+      }
+    },
+    "after": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 1366,
+        "height": 62,
+        "display": "flex"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 62,
+        "width": 1366,
+        "height": 706,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 62,
+        "width": 1366,
+        "height": 706,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 62,
+        "width": 314.171875,
+        "height": 706,
+        "display": "flex"
+      },
+      ".communications-chat": {
+        "x": 318.171875,
+        "y": 62,
+        "width": 702.328125,
+        "height": 706,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 1024.5,
+        "y": 62,
+        "width": 341.5,
+        "height": 706,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 318.171875,
+        "y": 177.984375,
+        "width": 702.328125,
+        "height": 379.328125,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 334.171875,
+        "y": 642.5,
+        "width": 670.328125,
+        "height": 78,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 1366,
+        "clientWidth": 1366,
+        "scrollHeight": 768,
+        "clientHeight": 768
+      }
+    }
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "before": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 104,
+        "display": "grid"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "display": "none"
+      },
+      ".communications-chat": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 407.54998779296875,
+        "y": 0,
+        "width": 351,
+        "height": 844,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 0,
+        "y": 290.890625,
+        "width": 390,
+        "height": 312.328125,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 8,
+        "y": 700,
+        "width": 374,
+        "height": 88,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      }
+    },
+    "after": {
+      ".crm-topbar": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 104,
+        "display": "grid"
+      },
+      ".communications-page": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "flex"
+      },
+      ".communications-grid": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "grid"
+      },
+      ".communications-clients": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "display": "none"
+      },
+      ".communications-chat": {
+        "x": 0,
+        "y": 104,
+        "width": 390,
+        "height": 740,
+        "display": "grid"
+      },
+      ".communications-orders": {
+        "x": 407.54998779296875,
+        "y": 0,
+        "width": 351,
+        "height": 844,
+        "display": "block"
+      },
+      ".communications-messages": {
+        "x": 0,
+        "y": 290.890625,
+        "width": 390,
+        "height": 308.578125,
+        "display": "flex"
+      },
+      ".communications-compose": {
+        "x": 8,
+        "y": 696.25,
+        "width": 374,
+        "height": 88,
+        "display": "grid"
+      },
+      ".communications-shortcuts": null,
+      "document": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      }
+    }
+  }
+]

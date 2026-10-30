@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Закрыть",
+    "height": 40,
+    "font": "14px",
+    "size": null
+  },
+  {
+    "name": "Английский\nРусский",
+    "height": 43.75,
+    "font": "18px",
+    "size": null
+  },
+  {
+    "name": "Текст уведомления",
+    "height": 210,
+    "font": "14px",
+    "size": null
+  },
+  {
+    "name": "Тема письма",
+    "height": 43.75,
+    "font": "18px",
+    "size": null
+  },
+  {
+    "name": "Закрыть",
+    "height": 43.75,
+    "font": "18px",
+    "size": "lg"
+  },
+  {
+    "name": "Отправить уведомление",
+    "height": 43.75,
+    "font": "18px",
+    "size": "lg"
+  }
+]

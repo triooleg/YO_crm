@@ -1,3 +1,4 @@
+import { yearOrderNumber } from "../website-orders/website-order-number";
 import { ContactChannel, OrderType, PaymentStatus, SalesStatus, ShippingStatus } from "@prisma/client";
 import type { KeycrmOrder } from "./keycrm.types";
 
@@ -179,7 +180,7 @@ export function normalizeKeycrmOrder(raw: KeycrmOrder, options: { connectionKey:
     sourceSystem: SOURCE_SYSTEM,
     sourceAccount: options.connectionKey,
     externalId: String(raw.id),
-    number: `YO-${raw.id}`,
+    number: yearOrderNumber(raw.id, orderedAt),
     externalNumber: raw.source_uuid === null || raw.source_uuid === undefined ? null : String(raw.source_uuid),
     externalUpdatedAt: keycrmDate(raw.updated_at),
     sourceName,

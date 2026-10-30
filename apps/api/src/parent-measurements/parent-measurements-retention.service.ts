@@ -1,3 +1,4 @@
+import { recoveryIsolationEnabled } from "../recovery-safety";
 import { Injectable,Logger,OnModuleDestroy,OnModuleInit } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { unlink } from 'node:fs/promises';
@@ -12,7 +13,7 @@ export class ParentMeasurementsRetentionService implements OnModuleInit,OnModule
  private running=false;
  private readonly logger=new Logger(ParentMeasurementsRetentionService.name);
  constructor(private readonly prisma:PrismaService){}
- onModuleInit(){this.timer=setInterval(()=>{void this.cleanup().catch(()=>this.logger.warn('Private draft cleanup deferred'));},60*60*1000);this.timer.unref();}
+ onModuleInit(){if(recoveryIsolationEnabled())return;this.timer=setInterval(()=>{void this.cleanup().catch(()=>this.logger.warn('Private draft cleanup deferred'));},60*60*1000);this.timer.unref();}
  onModuleDestroy(){if(this.timer)clearInterval(this.timer);}
  private async endedAt(tx:Prisma.TransactionClient,participantId:string){
   const rows=await tx.$queryRaw<Array<{endedAt:Date}>>`
@@ -25,7 +26,7 @@ export class ParentMeasurementsRetentionService implements OnModuleInit,OnModule
    ) SELECT MIN(ended) AS "endedAt" FROM chain`;
   return rows[0]?.endedAt;
  }
- async cleanup(now=new Date()){
+ async cleanup(now=new Date()){if(recoveryIsolationEnabled())return;
   if(this.running)return;this.running=true;
   try{
    const cutoff=new Date(now.getTime()-30*86400000);

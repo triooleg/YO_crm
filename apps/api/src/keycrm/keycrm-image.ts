@@ -1,3 +1,4 @@
+import { assertExternalSideEffectsAllowed } from "../recovery-safety";
 import { createHash, randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { mkdir, rename, stat, unlink, writeFile } from "node:fs/promises";
@@ -144,6 +145,7 @@ async function downloadPinned(url: URL, lookupFn: LookupLike, requestFn: typeof 
 }
 
 export async function materializeKeycrmOrderImage(sourceUrl: string, dependencies: { fetchFn?: FetchLike; lookupFn?: LookupLike; requestFn?: typeof httpsRequest; root?: string } = {}) {
+  assertExternalSideEffectsAllowed();
   const url = new URL(sourceUrl);
   const directory = join(dependencies.root ?? uploadsRoot(), "order-models");
   const source = dependencies.fetchFn

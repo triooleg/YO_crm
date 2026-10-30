@@ -24,7 +24,13 @@ export function OverviewModesWorkspace({ role, onNavigate }: { role: string; onN
       const end = new Date(`${context.from}T12:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0);
       context.to = end.toISOString().slice(0, 10);
     }
-    void onNavigate('overview', context);
+    // Both views belong to the mounted overview section. Shell navigation
+    // changes its route key and discards the workspace and browser scroll.
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', 'overview');
+    for (const [key, value] of Object.entries(context)) url.searchParams.set(key, value);
+    window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    setView(next);
   }
   if (view === null) return <div role="status" aria-label={ui.loading}><Loader size="sm" /></div>;
   if (view === 'statistics') return <SalesStatisticsWorkspace role={role} onNavigate={onNavigate} onModeChange={change} />;

@@ -43,6 +43,10 @@ function moveDate(value:string,months:number,end:boolean){const date=new Date(`$
 export function shiftSalesPeriod(query:Pick<SalesQuery,'from'|'to'>,direction:1|-1){const from=new Date(query.from),to=new Date(query.to),span=(to.getUTCFullYear()-from.getUTCFullYear())*12+to.getUTCMonth()-from.getUTCMonth()+1;return {from:moveDate(query.from,span*direction,false),to:moveDate(query.to,span*direction,true)}}
 export function salesMoney(value:number|null|undefined,currency:SalesCurrency){return value==null?'—':new Intl.NumberFormat('ru-RU',{style:'currency',currency,maximumFractionDigits:2}).format(value/100)}
 export function salesCount(value:number|null|undefined){return value==null?'—':new Intl.NumberFormat('ru-RU').format(value)}
+export function salesComparison(current:number|null|undefined,previous:number|null|undefined){
+  if(current==null||previous==null||previous===0)return null;
+  return Math.round((current-previous)/previous*100)||0;
+}
 export function salesGroupValue(group:SalesGroup,metric:SalesMetric){return metric==='amount'?group.amountMinor:group[metric]}
 export function salesExportFilename(query:Pick<SalesQuery,'from'|'to'|'currency'>){return `sales-statistics_${query.from}_${query.to}_${query.currency}.csv`.replace(/[^a-zA-Z0-9_.-]/g,'_')}
 export function salesMonthRange(month:string,query:Pick<SalesQuery,'from'|'to'>){const start=`${month}-01`,date=new Date(`${start}T00:00:00Z`),end=iso(new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)));return {from:start<query.from?query.from:start,to:end>query.to?query.to:end}}
