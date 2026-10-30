@@ -1,26 +1,13 @@
-# Technical handoff — release 0.12.11 candidate
+# Technical handoff — 0.12.11 accepted installed
 
-This public handoff describes a prepared source candidate. It does not establish production installation or acceptance. Full operational continuity and private release history remain in the canonical workspace and protected release records; they are intentionally excluded from this document.
+Version 0.12.11 is accepted installed: engineering, version, release, visual and read-only live checks passed for API and web. Source snapshot: e1e473e7918243179d0bdeecf4a0bd80b0c64f485c52e25f306f5215ef3950cb. Baseline: 0.12.10, snapshot 074d0d5ee71f3d00e73fac2803c16859840a9b06c611b3fa304e5dcc5880972d.
 
-## Source identity
+The release adds localized contact-copy actions using existing Mantine controls. Existing editing behavior remains covered. The release increment changes no API runtime, database schema or financial behavior.
 
-- Candidate version: 0.12.11.
-- Candidate snapshot SHA-256: e1e473e7918243179d0bdeecf4a0bd80b0c64f485c52e25f306f5215ef3950cb.
-- Candidate archive SHA-256: 2d577a3272b20fb2bbee501afe0600261b576fe7053f310f063b1151176427c5.
-- Candidate source inventory: 1,375 files.
-- Accepted baseline version: 0.12.10.
-- Baseline snapshot SHA-256: 074d0d5ee71f3d00e73fac2803c16859840a9b06c611b3fa304e5dcc5880972d.
+Source publication base: 8378b45fd1f0d6f89eae8409a349edb0f88c2499. Its 1,374 non-handoff candidate files match the frozen source bytes exactly. CHAT_HANDOFF.md is an approved documentation-only privacy substitution; three pre-existing remote-only evidence documents are preserved. Publication evidence and subsequent documentation updates do not imply all 1,375 candidate files are byte-identical.
 
-The release adds contact-copy actions using existing Mantine primitives, localized clipboard feedback, responsive layout and browser regression coverage. Existing edit behavior is retained. This release increment has no API runtime, database schema or financial behavior changes.
+Quality and live verification are summarized in docs/release-evidence/contact-copy-deployment-2026-10-30.md. Clipboard behavior was tested using a browser Clipboard API stub; an operating-system clipboard write was not verified.
 
-## Publication correspondence
+Installed image pins: API sha256:f856441dd06f59db98b209ba4b66e033e3b252fdc5ef69a6c7c971b86ab19c88; web sha256:3f6eba7f2104ecc7b42da8331eed7696a56e809a1fff70963bb063b4e13ee3d0. Post-deployment retention passed at 5 rollback sets, 5 releases, 5 API images and 5 web images. The backup executor is resumed and AVAILABLE with one owned cron entry; foreign cron and agent settings are preserved. Final installed release and visual reviews passed. This accepted record accompanies the main-branch fast-forward after installed acceptance.
 
-The publication preserves exact candidate bytes for 1,374 files, including runtime code, tests and assets. CHAT_HANDOFF.md is the sole documentation-only privacy substitution. The publication receipt records both its candidate and public SHA-256 values. Three remote-only release-evidence documents are retained. Do not describe this publication as byte-identical to all 1,375 candidate files.
-
-EXACT_CANDIDATE_GITHUB means exact candidate source correspondence subject to the explicitly recorded CHAT_HANDOFF.md documentation privacy substitution. It is a source-publication check, not an installed-runtime acceptance claim.
-
-## Owner policy and next gates
-
-The owner requires GitHub current-project publication for every deployment, including service-only deployment and rollback. Publish only the reviewed accepted source and sanitized release evidence. Preserve remote-only development material unless its removal is separately justified. Never publish credentials, customer data, signed URLs, private migration artifacts or operational history.
-
-Quality, source/security review and explicit integrator GO precede publication. The reviewed release branch is published before staging; main is fast-forwarded only after installed acceptance. No force-push. Actual deployment pins and installed verification must be recorded separately after deployment. At this handoff checkpoint, commit, push, staging and production acceptance are not asserted.
+Owner policy: GitHub must reflect the reviewed source for every deployment, including service-only releases and rollback. Publish the reviewed release branch before staging; fast-forward main after installed acceptance. Preserve remote-only development material unless removal is separately justified. Publish sanitized technical evidence only; exclude credentials, customer data, signed URLs and private operational history. Record actual deployment pins separately. No force-push.
