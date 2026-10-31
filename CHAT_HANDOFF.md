@@ -1,3 +1,15 @@
+## 2026-11-01 — 0.12.12 archive Inbox reader
+
+API and web use snapshot
+`ba0c6f92be5241b342a30a1f5b36d2af893dd385985707a37071ae94071a7801`.
+Archive messages preserve per-dialogue order within minute ties. Inbox displays
+source time precision and unavailable attachment inventory without inventing links.
+Ordinary messaging, authorization and finance are unchanged. No historical writer,
+schema migration, seed or operational history import is included in this release.
+See `docs/release-evidence/history-reader-deployment-2026-11-01.md` for acceptance.
+Publish exact reviewed release source to GitHub with every deployment. Private
+operational handoffs, source captures, sessions and customer screenshots stay local.
+
 # Technical handoff — 0.12.11 accepted installed
 
 Version 0.12.11 is accepted installed: engineering, version, release, visual and read-only live checks passed for API and web. Source snapshot: e1e473e7918243179d0bdeecf4a0bd80b0c64f485c52e25f306f5215ef3950cb. Baseline: 0.12.10, snapshot 074d0d5ee71f3d00e73fac2803c16859840a9b06c611b3fa304e5dcc5880972d.
