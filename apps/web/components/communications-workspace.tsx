@@ -2,6 +2,7 @@
 import { OrderImagePreview } from "./orders/order-image-preview";
 import { takeParentMeasurementDraft } from "../lib/parent-measurements-message-draft";
 import { ShipmentNotificationAction } from "./shipment-notification-action";
+import { InboxHistoryEvidence } from "./inbox-history-evidence";
 
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
@@ -1600,6 +1601,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                     </div>}
                     {(replyContext||message.replyToMessage)&&<div className="communications-reply-context"><b>{replyContext?.kind==="story"?ui.storyReply:ui.messageReply}</b>{storyUrl&&<ReplyMedia url={storyUrl} type={replyContext?.storyMediaType==="video"?"video":"image"} label={ui.storyMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:storyUrl,type})}} onLoad={scrollMessagesToLatest}/>} {replyMediaUrl&&<ReplyMedia url={replyMediaUrl} type={replyMedia?.type==="video"?"video":"image"} label={ui.quotedMedia} onOpen={(event,type)=>{previewTrigger.current=event.currentTarget;setPreview({url:replyMediaUrl,type})}} onLoad={scrollMessagesToLatest}/>} {message.replyToMessage?<span>{message.replyToMessage.content}</span>:replyContext?.kind==="message"?<span>{ui.originalMessageUnavailable}</span>:null}</div>}
                     {message.channel==="EMAIL"&&message.metadata?.emailHtml?<div className="communications-message-content email-rich-content" dangerouslySetInnerHTML={{__html:message.metadata.emailHtml}}/>:<span className="communications-message-content">{message.content}</span>}
+                    <InboxHistoryEvidence metadata={message.metadata} outbound={message.direction==="OUTBOUND"}/>
                     {attachments.length > 0 && (
                       <div className={`communications-attachments${attachments.length>1?" is-gallery":""}`}>
                         {attachments.map((attachment, index) => {
