@@ -1,7 +1,8 @@
 # Financial report receipt lookup batching — 2026-11-01
 
-Status: local candidate based on `097cb2f`; not deployed. No version bump,
-schema migration, financial mutation or finished-report cache is included.
+Status: release candidate 0.13.2 based on `097cb2f`; deployment authorized,
+installed verification pending. API and web are rebuilt together. No schema
+migration, financial mutation or finished-report cache is included.
 
 ## Diagnosis
 
