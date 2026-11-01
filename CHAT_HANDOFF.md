@@ -1,4 +1,21 @@
-## 2026-11-01 — Finance report performance 0.13.2 (deployment authorized)
+## 2026-11-02 — Finance report performance 0.13.2 installed
+
+Authorized deployment completed at 2026-11-01T22:28:34Z. Source commit
+`6124f1768ed679e3156b0d50bb9f2b23a3a0a598` is published on GitHub main;
+runtime snapshot is
+`adc4f992622c8ede213afa67bf309a77d94d243db8cd38f26f4da2db6def33b2`.
+API and web are healthy on 0.13.2; PostgreSQL and Redis were not recreated.
+Installed brand, release journal and public health agree on version/snapshot.
+Overview and Finance browser smoke passed with zero new console errors.
+Actual report requests measured 2530 ms on Overview and 2019 ms on Finance,
+versus 4194/4061 ms before. These are individual observations, not an SLA.
+Existing DATA backup plus isolated restore drill passed before cutover.
+Postdeploy retention is five source releases, five rollback sets, five API
+images and five web images. No production restore, migration or seed occurred.
+See `docs/release-evidence/finance-performance-deployment-2026-11-02.md`.
+This postdeploy documentation update does not change the frozen runtime bytes.
+
+## 2026-11-01 — Finance report performance 0.13.2 preparation (historical)
 
 Active worktree `finance-report-performance/YO_crm`, branch
 `codex/finance-report-performance`, based on `097cb2f`. User asks to diagnose and

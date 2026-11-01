@@ -1,7 +1,8 @@
 # Financial report receipt lookup batching — 2026-11-01
 
-Status: release candidate 0.13.2 based on `097cb2f`; deployment authorized,
-installed verification pending. API and web are rebuilt together. No schema
+Status: 0.13.2 installed and verified on 2026-11-02 (Europe/Kyiv), based on
+`097cb2f`. See `../release-evidence/finance-performance-deployment-2026-11-02.md`
+for exact artifacts and installed timings. API and web were rebuilt together. No schema
 migration, financial mutation or finished-report cache is included.
 
 ## Diagnosis
@@ -62,8 +63,9 @@ Both complete results have the same canonical SHA-256:
 This establishes approximately 7.1x faster tax reading for this sample and exact
 result parity. It does not establish an installed `/api/finance/report` time:
 ordinary finance reads, projection, FX and browser rendering remain outside this
-isolated measurement. End-to-end candidate verification requires a separately
-authorized deployment.
+isolated measurement. Subsequent authorized installed verification measured
+2530 ms for the Overview report and 2019 ms for the Finance report, compared
+with the 4194/4061 ms baseline above. These are individual browser observations.
 
 ## Verification
 
