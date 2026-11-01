@@ -66,6 +66,7 @@ test("normalizes Messenger standby messages while another app controls the threa
     content: "Standby text",
     receiverId: "page-1",
     receivedAt: "1970-01-01T00:00:01.000Z",
+    originalTimestamp: "1970-01-01T00:00:01.000Z",
     metadata: { messageType: "text", handoverSource: "standby" },
   });
 });
@@ -454,6 +455,7 @@ test("normalizes Facebook message echoes as outbound messages with text and atta
     content: "Ответ клиенту",
     receiverId: "page-1",
     receivedAt: "1970-01-01T00:00:00.042Z",
+    originalTimestamp: "1970-01-01T00:00:00.042Z",
     metadata: { messageType: "text", attachmentTypes: ["image"], attachments: [{ type: "image", url: "https://cdn.example/reply.jpg" }] },
   });
 });
@@ -628,6 +630,7 @@ test("normalizes Facebook message echoes delivered through standby", () => {
     content: "Ответ из Business Suite",
     receiverId: "page-1",
     receivedAt: "1970-01-01T00:00:00.085Z",
+    originalTimestamp: "1970-01-01T00:00:00.085Z",
     metadata: { messageType: "text" },
   });
 });
@@ -651,6 +654,7 @@ test("normalizes Instagram message echoes from the shared messages subscription"
     content: "[Видео]",
     receiverId: "ig-business-1",
     receivedAt: "1970-01-01T00:00:00.084Z",
+    originalTimestamp: "1970-01-01T00:00:00.084Z",
     metadata: { messageType: "video", attachmentTypes: ["video"], attachments: [{ type: "video", url: "https://cdn.example/reply.mp4" }] },
   });
 });
@@ -742,3 +746,84 @@ for(const field of ['comments','live_comments','mentions'])for(const nested of [
   assert.equal(events[0].externalMessageId,'comment-unit-test');assert.equal(events[0].receiverId,'account-unit-test');
  }
 });
+
+// Authoritative original time is separate from ordinary arrival-time fallback.
+{
+const {createHmac}=await import("node:crypto");
+const {loadTargetModule}=await import("./overview-target-loader.mjs");
+const meta=loadTargetModule('communications/meta-webhook.ts');
+const {originalMetaHistoryTimestamp}=loadTargetModule('history-migration/history-native-event.ts');
+const timestamp=Date.parse('2024-01-01T12:30:59.123Z');
+const canonical='2024-01-01T12:30:59.123Z';
+function payload(direction='INBOUND',time=timestamp,group='messaging'){
+  return {object:'instagram',entry:[{id:'receiver',[group]:[{
+    sender:{id:direction==='INBOUND'?'customer':'receiver'},recipient:{id:direction==='INBOUND'?'receiver':'customer'},
+    ...(time===undefined?{}:{timestamp:time}),message:{mid:'native-mid',text:'Synthetic native message',...(direction==='OUTBOUND'?{is_echo:true}:{})},
+  }]}]};
+}
+const normalized=(direction,value)=>direction==='INBOUND'?meta.normalizeMetaWebhook(value):meta.normalizeMetaEchoMessages(value);
+
+test('Instagram inbound and echo preserve the exact authoritative original millisecond time in replay JSON',()=>{
+  for(const direction of ['INBOUND','OUTBOUND'])for(const group of ['messaging','standby']){
+    const value=payload(direction,timestamp,group),[event]=normalized(direction,value);
+    assert.ok(event);assert.equal(event.originalTimestamp,canonical);assert.equal(event.receivedAt.toISOString(),canonical);
+    assert.equal(event.content,'Synthetic native message');assert.equal(event.externalMessageId,'native-mid');
+    assert.equal(originalMetaHistoryTimestamp(value,{accountId:'receiver',customerId:'customer',nativeMessageId:'native-mid',direction}),canonical);
+  }
+});
+
+test('strict source helper refuses missing, coercible, fractional, unsafe and invalid Date values',()=>{
+  for(const value of [undefined,null,'',String(timestamp),true,false,{},[],new Date(timestamp),new Date(NaN),NaN,Infinity,-Infinity,0,-1,timestamp+.5,Number.MAX_SAFE_INTEGER+1,8_640_000_000_000_001])
+    assert.equal(meta.originalMetaTimestamp(value),null);
+  assert.equal(meta.originalMetaTimestamp(timestamp),canonical);
+  assert.equal(meta.originalMetaTimestamp(1),'1970-01-01T00:00:00.001Z');
+});
+
+test('Instagram inbound and echo never promote missing or invalid original time to fallback evidence',()=>{
+  for(const direction of ['INBOUND','OUTBOUND'])for(const value of [undefined,null,'',String(timestamp),true,false,{},[],new Date(timestamp),new Date(NaN),NaN,Infinity,-Infinity,0,-1,timestamp+.5,Number.MAX_SAFE_INTEGER+1,8_640_000_000_000_001]){
+    const input=payload(direction);
+    if(value===undefined)delete input.entry[0].messaging[0].timestamp;
+    else input.entry[0].messaging[0].timestamp=value;
+    const before=Date.now(),[event]=normalized(direction,input),after=Date.now();
+    assert.ok(event);assert.equal(event.originalTimestamp,null);
+    const numeric=Number(value);
+    if(Number.isFinite(numeric)&&numeric>0){
+      const previousNormalTime=new Date(numeric).getTime();
+      if(Number.isNaN(previousNormalTime))assert.ok(Number.isNaN(event.receivedAt.getTime()));
+      else assert.equal(event.receivedAt.getTime(),previousNormalTime);
+    }else assert.ok(event.receivedAt.getTime()>=before&&event.receivedAt.getTime()<=after);
+    assert.equal(originalMetaHistoryTimestamp(input,{accountId:'receiver',customerId:'customer',nativeMessageId:'native-mid',direction}),null);
+  }
+});
+
+test('the actual signed webhook replay fragment records authority separately while preserving receivedAt fallback',async t=>{
+  const prior=process.env.SETTINGS_ENCRYPTION_KEY;process.env.SETTINGS_ENCRYPTION_KEY='synthetic-normalizer-time-test-key-00000000';
+  t.after(()=>{if(prior===undefined)delete process.env.SETTINGS_ENCRYPTION_KEY;else process.env.SETTINGS_ENCRYPTION_KEY=prior;});
+  const {CommunicationsService}=loadTargetModule('communications/communications.service.ts');
+  const {encryptSecret}=loadTargetModule('secret-box.ts');
+  const secret='synthetic-webhook-secret';
+  for(const time of [timestamp,undefined,null,'invalid',String(timestamp)]){
+    const input=payload();input.entry[0].id='123';input.entry[0].messaging[0].recipient.id='123';
+    if(time===undefined)delete input.entry[0].messaging[0].timestamp;else input.entry[0].messaging[0].timestamp=time;
+    const service=Object.create(CommunicationsService.prototype);let captured;
+    service.logger={log(){},warn(){},error(){}};
+    service.sectionValues=async()=>({enabled:true,instagramAccountId:'123',instagramAppSecretEncrypted:encryptSecret(secret)});
+    service.persistInbound=async(event,provider,replay,original)=>{captured={event,provider,replay,original};return false;};
+    service.p={appSetting:{upsert:async()=>({})},$transaction:items=>Promise.all(items)};
+    const body=Buffer.from(JSON.stringify(input)),signature='sha256='+createHmac('sha256',secret).update(body).digest('hex');
+    const before=Date.now();await service.receiveMetaWebhook(body,signature,input);const after=Date.now();
+    assert.equal(captured.provider,'META');assert.deepEqual(captured.original,input);
+    assert.equal(captured.replay.originalTimestamp,time===timestamp?canonical:null);
+    assert.equal(captured.replay.receivedAt,captured.event.receivedAt.toISOString());
+    if(time===timestamp||time===String(timestamp))assert.equal(captured.replay.receivedAt,canonical);
+    else assert.ok(captured.event.receivedAt.getTime()>=before&&captured.event.receivedAt.getTime()<=after);
+    assert.equal(captured.replay.externalMessageId,'native-mid');assert.equal(captured.replay.content,'Synthetic native message');
+  }
+});
+
+test('legacy normalized envelopes without authority remain unverified; no original time is reconstructed',()=>{
+  const legacy={provider:'META',channel:'INSTAGRAM',externalSenderId:'customer',externalMessageId:'native-mid',receiverId:'receiver',receivedAt:canonical};
+  assert.equal(legacy.originalTimestamp,undefined);
+  assert.equal(originalMetaHistoryTimestamp(legacy,{accountId:'receiver',customerId:'customer',nativeMessageId:'native-mid',direction:'INBOUND'}),null);
+});
+}

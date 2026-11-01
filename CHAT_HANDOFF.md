@@ -1,3 +1,15 @@
+## Operational history implementation 0.13.0
+
+Controlled single-client history execution, owner confirmation, exact backup/drill
+grant and selective rollback are implemented. Intake/planning/operational flags
+default OFF. Existing49 migration leaves are preserved; three additive history
+migrations require reviewed deployment. After any operational run, including a
+rolled-back run, API historical ingress guard1 remains required. Source completeness
+and ambiguous media remain separate acceptance checks. Runtime/deployment evidence
+is recorded separately; this source handoff does not claim a completed import.
+No browser automation, source credentials or private captures are shipped.
+See docs/operations/HISTORY_MIGRATION.md.
+
 ## 2026-11-01 — 0.12.12 archive Inbox reader
 
 API and web use snapshot

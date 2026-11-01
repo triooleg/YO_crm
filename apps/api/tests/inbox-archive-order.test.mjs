@@ -1,7 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {loadTargetModule} from './overview-target-loader.mjs';
 const {orderArchiveMinuteTies}=loadTargetModule('communications/inbox-archive-order.ts');
+
+test('native Node imports the actual tools TypeScript re-export without a transpiler or extensionless dependency',()=>{
+ const tool=new URL('../../../tools/migrator-agent/src/history.ts',import.meta.url).href;
+ const code=`import assert from 'node:assert/strict';
+  import {orderArchiveMinuteTies,proposeKeycrmArchiveApproval} from ${JSON.stringify(tool)};
+  const raw=(dialogueId,text,ordinal)=>({source:'KEYCRM',account:'synthetic',channel:'INSTAGRAM',dialogueId,sourceMessageId:text,sender:'contact:'+dialogueId,direction:'INBOUND',text,ordinal,attachments:[],timestamp:'2024-01-01',sourceTimeText:'2024-01-01 12:30',sourceTimezone:'Europe/Kyiv'});
+  const scope=new Map([['a','client'],['b','client']]);
+  assert.equal(proposeKeycrmArchiveApproval([raw('a','X',0),raw('b','X',0)],scope).equivalences.length,1);
+  assert.throws(()=>proposeKeycrmArchiveApproval([raw('a','X',0),raw('a','Y',1),raw('b','Y',0),raw('b','X',1)],scope));
+  const ordinary=[{id:'native',conversationId:'chat',effectiveAt:new Date('2024-01-01T00:00:00Z'),metadata:null}];
+  assert.deepEqual(orderArchiveMinuteTies(ordinary),ordinary);`;
+ const child=spawnSync(process.execPath,['--input-type=module','--eval',code],{encoding:'utf8',timeout:15000});
+ assert.ifError(child.error);assert.equal(child.status,0,child.stderr);
+});
+
+test('API CommonJS wrapper exposes the same single ordering implementation as history',()=>{
+ assert.equal(orderArchiveMinuteTies,loadTargetModule('history-migration/history.ts').orderArchiveMinuteTies);
+});
 const variant=(dialogue,ordinal,account='account')=>({ordinal,sourceKey:JSON.stringify(['KEYCRM',account,'INSTAGRAM',dialogue,String(ordinal)])});
 const row=(id,variants,conversationId='chat',effectiveAt=new Date('2024-01-01T10:30:00Z'))=>({id,conversationId,effectiveAt,metadata:variants?{historyArchive:{policy:'KEYCRM_SOURCE_ARCHIVE_V1',sourceVariants:variants}}:null});
 

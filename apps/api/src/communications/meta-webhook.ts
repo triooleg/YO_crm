@@ -11,6 +11,10 @@ export type MetaInboundMessage = {
   email?: string;
   phone?: string;
   receivedAt: Date;
+  /** Exact original native millisecond time, never receivedAt's arrival fallback.
+   * Optional for legacy callers/envelopes: absence is not historical evidence.
+   */
+  originalTimestamp?: string | null;
   metadata: {
     messageType: string;
     attachmentTypes?: string[];
@@ -96,6 +100,13 @@ const strictMetaTimestamp = (value: unknown) => {
   const parsed = new Date(n);
   return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 };
+/** Source-layer helper reusable by historical evidence extraction without a
+ * communications -> history dependency. Coercible strings/objects are not proof.
+ */
+export function originalMetaTimestamp(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return null;
+  return strictMetaTimestamp(value)?.toISOString() ?? null;
+}
 const strictWhatsAppTimestamp = (value: unknown) => {
   const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
   if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) return undefined;
@@ -613,7 +624,7 @@ function messengerMessages(payload: AnyRecord, channel: "FACEBOOK" | "INSTAGRAM"
     const attachmentLabel: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
     const content = String(message.text || attachments.map(x => attachmentLabel[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
-    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}), ...(replyTo ? { replyTo } : {}), ...(engagement?{engagement}:{}) } });
+    output.push({ channel, externalSenderId: String(event.sender.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.recipient?.id || "") || undefined, receivedAt: asDate(event.timestamp), originalTimestamp: originalMetaTimestamp(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(source === "standby" ? { handoverSource: "standby" } : {}), ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}), ...(replyTo ? { replyTo } : {}), ...(engagement?{engagement}:{}) } });
   }
   return output;
 }
@@ -662,7 +673,7 @@ export function normalizeMetaEchoMessages(payload: unknown): MetaEchoMessage[] {
     const labels: Record<string, string> = { image: "[Фото]", video: "[Видео]", audio: "[Аудио]", file: "[Файл]", fallback: "[Вложение]", sticker: "[Стикер]" };
     const content = String(message.text || attachments.map(x => labels[x.type] || "[Вложение]").join("\n")).trim().slice(0, 5000);
     if (!content) continue;
-    output.push({ channel, externalRecipientId: String(event.recipient.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.sender?.id || "") || undefined, receivedAt: asDate(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
+    output.push({ channel, externalRecipientId: String(event.recipient.id), externalMessageId: String(message.mid), content, receiverId: String(entry.id || event.sender?.id || "") || undefined, receivedAt: asDate(event.timestamp), originalTimestamp: originalMetaTimestamp(event.timestamp), metadata: { messageType: message.text ? "text" : attachmentTypes[0] || "attachment", ...(attachmentTypes.length ? { attachmentTypes, attachments } : {}) } });
   }
   return output;
 }

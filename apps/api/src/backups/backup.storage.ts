@@ -11,12 +11,17 @@ export type BackupManifest = {
   storage_provider: "local"; files: string[];
   legacy_identity_verified?: false;
 };
+export type OperationalBackupArtifacts = {
+  manifestSha256: string; sha256sumsSha256: string; drillReportSha256: string;
+  archiveSha256: string; archiveBytes: string; type: "data" | "full";
+};
 export interface BackupStorage {
   readonly provider: "LOCAL" | "S3";
   list(): Promise<string[]>;
   exists(id: string): Promise<boolean>;
   verify(id: string, expectedManifestId?: string): Promise<{ checksum: string; sizeBytes: bigint; manifest: BackupManifest }>;
   openArchive?(id: string, checksum: string, bytes: bigint): Promise<ReadStream>;
+  verifyOperationalArtifacts?(id: string, expected: { archiveChecksum: string; archiveBytes: string }): Promise<OperationalBackupArtifacts>;
   remove(id: string): Promise<void>;
 }
 export const BACKUP_STORAGE = Symbol("BACKUP_STORAGE");
@@ -84,6 +89,24 @@ async function hashHandle(handle: FileHandle, max: number) {
     bytes += chunk.length; if (bytes > max) throw new Error("Превышен лимит файла"); hash.update(chunk);
   }
   return { checksum: hash.digest("hex"), bytes };
+}
+async function readOperationalFile(path: string) {
+  const handle = await safeOpen(path, 1024 * 1024);
+  try {
+    const before = await handle.stat(), bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!read.bytesRead) throw new Error("Артефакт изменён во время чтения");
+      offset += read.bytesRead;
+    }
+    const after = await handle.stat(), current = await lstat(path);
+    if (after.size !== bytes.length || after.nlink !== 1 || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs ||
+        !current.isFile() || current.isSymbolicLink() || current.nlink !== 1 || current.dev !== after.dev || current.ino !== after.ino ||
+        current.size !== after.size || current.mtimeMs !== after.mtimeMs || current.ctimeMs !== after.ctimeMs) throw new Error("Артефакт изменён во время чтения");
+    await assertPrivateDirectory(dirname(path));
+    return bytes;
+  } finally { await handle.close(); }
 }
 @Injectable()
 export class LocalBackupStorage implements BackupStorage {
@@ -181,6 +204,66 @@ export class LocalBackupStorage implements BackupStorage {
       if (actual.checksum !== checksum || BigInt(actual.bytes) !== bytes) throw new Error("Архив не соответствует метаданным");
       return handle.createReadStream({ start: 0, end: actual.bytes - 1, autoClose: true });
     } catch (error) { await handle.close(); throw error; }
+  }
+  /** Read-only artifact integrity, not an operational grant or Docker execution
+   * attestation. BackupService authenticates ownership, freshness and exact grants. */
+  async verifyOperationalArtifacts(id: string, expected: { archiveChecksum: string; archiveBytes: string }): Promise<OperationalBackupArtifacts> {
+    const max = byteLimit("BACKUP_DOWNLOAD_MAX_BYTES", 64 * 1024 ** 3);
+    if (!expected || typeof expected.archiveChecksum !== "string" || !/^[a-f0-9]{64}$/.test(expected.archiveChecksum) ||
+        typeof expected.archiveBytes !== "string" || !/^[1-9][0-9]{0,19}$/.test(expected.archiveBytes) || BigInt(expected.archiveBytes) > BigInt(max)) throw new Error("Некорректные метаданные операционной копии");
+    const verified = await this.verify(id);
+    if (verified.manifest.format_version !== 3 || verified.manifest.type !== "data") throw new Error("Требуется согласованная DATA-копия формата 3");
+    const directory = this.directory(id);
+    const manifestBytes = await readOperationalFile(join(directory, "manifest.json"));
+    const sumsBytes = await readOperationalFile(join(directory, "SHA256SUMS"));
+    const reportBytes = await readOperationalFile(join(directory, "drill-report.json"));
+    const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+    const manifestSha256 = sha(manifestBytes), sha256sumsSha256 = sha(sumsBytes), drillReportSha256 = sha(reportBytes);
+    if (manifestSha256 !== verified.checksum) throw new Error("Manifest изменён после проверки");
+    const item = parseBackupJson(manifestBytes) as Record<string, unknown>;
+    const consistency = item.consistency as { verified?: unknown; method?: unknown; services?: unknown } | null;
+    if (consistency?.verified !== true || consistency.method !== "stopped-writers" || !Array.isArray(consistency.services) ||
+        !consistency.services.length || !consistency.services.includes("api") || new Set(consistency.services).size !== consistency.services.length ||
+        !consistency.services.every(service => typeof service === "string" && /^[A-Za-z0-9_-]+$/.test(service) && !["postgres", "redis"].includes(service))) throw new Error("Не подтверждена согласованность исходной копии");
+    let value: unknown;
+    try { value = parseBackupJson(reportBytes); } catch { throw new Error("Некорректный JSON отчёта изолированной проверки"); }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Некорректный отчёт изолированной проверки");
+    const report = value as Record<string, unknown>;
+    if (report.status !== "PASS" || report.cleanup !== "PASS" || report.measurement !== "ISOLATED_DRILL" ||
+        report.outboundDisabled !== true || report.workersStarted !== false || report.productionRtoVerified !== false ||
+        report.sourceFormat !== 3 || report.sourceConsistent !== true || typeof report.project !== "string" ||
+        !/^yo-recovery-[a-z0-9-]{6,40}$/.test(report.project) || !["agent-fenced", "offline-artifact-isolated"].includes(String(report.executionMode)) ||
+        report.targetMode !== undefined || report.postgresStopped === false || report.productionRestoreAllowed === true) throw new Error("Не подтверждены безопасная изоляция и очистка проверки");
+    const refs = report.references;
+    if (!refs || typeof refs !== "object" || Array.isArray(refs)) throw new Error("Отсутствуют ссылки на исходную копию");
+    const references = refs as Record<string, unknown>;
+    if (references.sourceBackupId !== id || references.sourceStoragePath !== id || references.sourceChecksum !== manifestSha256 ||
+        references.sourceManifestChecksum !== manifestSha256 || references.sourceArtifactChecksum !== sha256sumsSha256) throw new Error("Отчёт относится к другой исходной копии");
+    // Reuse the existing safe descriptor and expected hash/size admission, then
+    // compute the returned archive hash/size from bytes, never from caller flags.
+    const archivePath = join(directory, "archive.tar.gz"), archiveBefore = await lstat(archivePath);
+    const stream = await this.openArchive(id, expected.archiveChecksum, BigInt(expected.archiveBytes));
+    const archiveHash = createHash("sha256"); let archiveBytes = 0n;
+    try {
+      for await (const chunk of stream) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        archiveBytes += BigInt(bytes.length);
+        if (archiveBytes > BigInt(max)) throw new Error("Превышен лимит операционного архива");
+        archiveHash.update(bytes);
+      }
+    } finally { stream.destroy(); }
+    const archiveSha256 = archiveHash.digest("hex");
+    if (archiveSha256 !== expected.archiveChecksum || archiveBytes !== BigInt(expected.archiveBytes) || references.archiveChecksum !== archiveSha256) throw new Error("Архив изменён или не соответствует отчёту");
+    // Integrity is checked again after asynchronous archive reading; a loose
+    // source payload must not change between full verification and the receipt.
+    if ((await this.verify(id)).checksum !== manifestSha256) throw new Error("Исходная копия изменена во время проверки");
+    for (const [name, bytes] of [["manifest.json", manifestBytes], ["SHA256SUMS", sumsBytes], ["drill-report.json", reportBytes]] as const) {
+      if (!(await readOperationalFile(join(directory, name))).equals(bytes)) throw new Error("Артефакты операционной копии изменены во время проверки");
+    }
+    const archiveAfter = await lstat(archivePath);
+    if (!archiveAfter.isFile() || archiveAfter.isSymbolicLink() || archiveAfter.nlink !== 1 || archiveAfter.dev !== archiveBefore.dev || archiveAfter.ino !== archiveBefore.ino ||
+        archiveAfter.size !== archiveBefore.size || archiveAfter.mtimeMs !== archiveBefore.mtimeMs || archiveAfter.ctimeMs !== archiveBefore.ctimeMs) throw new Error("Архив заменён во время проверки");
+    return { manifestSha256, sha256sumsSha256, drillReportSha256, archiveSha256, archiveBytes: archiveBytes.toString(), type: verified.manifest.type };
   }
   async remove(id: string) {
     const target = this.directory(id); await assertPrivateDirectory(target);

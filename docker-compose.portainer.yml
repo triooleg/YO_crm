@@ -45,9 +45,16 @@ services:
       WEBSITE_ORDERS_SOURCE_ACCOUNTS: ${WEBSITE_ORDERS_SOURCE_ACCOUNTS:-}
       WEBSITE_ORDERS_KEYCRM_SOURCE_MAP: ${WEBSITE_ORDERS_KEYCRM_SOURCE_MAP:-[]}
       API_PORT: 4500
+      CRM_COMMIT: ${CRM_COMMIT:-development}
       UPLOADS_DIR: /app/uploads
       BACKUP_STORAGE_PATH: /backups
       ALLOW_RESTORE: ${ALLOW_RESTORE:-false}
+      HISTORY_MIGRATION_ENABLED: ${HISTORY_MIGRATION_ENABLED:-false}
+      HISTORY_MIGRATION_PLANNING_ENABLED: ${HISTORY_MIGRATION_PLANNING_ENABLED:-false}
+      HISTORY_MIGRATION_OPERATIONAL_ENABLED: ${HISTORY_MIGRATION_OPERATIONAL_ENABLED:-false}
+      HISTORY_MIGRATION_TRUSTED_PROXIES: ${HISTORY_MIGRATION_TRUSTED_PROXIES:-}
+      HISTORY_OPERATIONAL_GRANTS_DIR: /history-operational-grants
+      HISTORY_OPERATIONAL_HOST_ENABLED: "false"
     command: >
       sh -c "pnpm --filter @yoleotard-crm/database exec prisma migrate deploy --schema prisma/schema.prisma
       && pnpm --filter @yoleotard-crm/database seed
@@ -56,6 +63,7 @@ services:
     volumes:
       - crm_uploads:/app/uploads
       - ${BACKUP_STORAGE_PATH:-/home/trio/yoleotard-crm-backups}:/backups
+      - ${HISTORY_OPERATIONAL_GRANTS_HOST_PATH:-/home/trio/yoleotard-crm-data/history-operational-grants}:/history-operational-grants:ro
     healthcheck:
       test:
         [

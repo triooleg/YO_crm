@@ -2,6 +2,8 @@
 """External Linux executor. stdlib + Docker CLI, no HTTP API/socket in CRM.
 
 Run: python3 scripts/backup-agent.py --config /private/host-agent.json [--once]
+One existing queue job only: add --once --job-id <backup-id>. This skips scheduling
+and automatic retention; normal eligibility, leases and retry backoff still apply.
 Host-only config: project, composeFile, envFile, storageRoot, repositoryRoot;
 consistent=false, writerServices=[], writersComplete=false, offlineImages=false;
 allowAutomaticRetention=false; deletion also requires recovery.retention.enabled=true.
@@ -47,6 +49,11 @@ UTC = dt.timezone.utc
 
 def literal(value):
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def target_job_id(value):
+    require(isinstance(value, str) and ID.fullmatch(value), 'invalid target backup ID')
+    return value
 
 
 def drill_notification(backup_id, source_id, report, job):
@@ -159,11 +166,14 @@ class Agent:
         # Never reclaim while the global flock is held elsewhere. A durable lease fences DB writers.
         backup_lease.reconcile(self.sql, self.owner)
 
-    def claim(self):
+    def claim(self, target=None):
+        if target is not None:
+            target_job_id(target)
         owner = literal(self.owner)
+        target_filter = ' AND id='+literal(target) if target is not None else ''
         job = "CASE WHEN jsonb_typeof(metadata->'job')='object' THEN metadata->'job' ELSE '{\"kind\":\"BACKUP\"}'::jsonb END"
         query = f'''WITH candidate AS (SELECT id FROM "Backup"
-          WHERE status='PENDING' AND "archivedAt" IS NULL AND {backup_lease.fence(self.owner)}
+          WHERE status='PENDING' AND "archivedAt" IS NULL AND {backup_lease.fence(self.owner)}{target_filter}
           AND NOT EXISTS (SELECT 1 FROM \"Backup\" active WHERE active.status IN ('RUNNING','VERIFYING','RESTORING'))
           AND (metadata#>>'{{job,nextAttemptAt}}' IS NULL OR (metadata#>>'{{job,nextAttemptAt}}')::timestamptz<=CURRENT_TIMESTAMP)
           ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1)
@@ -375,7 +385,9 @@ class Agent:
                     'retention global lease lost')
         return maintenance.online_retention(self, self.root, apply=True, automatic=True, fence=fence)
 
-    def cycle(self):
+    def cycle(self, target=None):
+        if target is not None:
+            target_job_id(target)
         self.lease_lost = False
         with host_lock(self.root) as fd:
             if not backup_lease.acquire(self.sql, self.owner, self.lease_seconds):
@@ -392,13 +404,18 @@ class Agent:
             thread = threading.Thread(target=renew, daemon=True)
             thread.start()
             try:
-                self.locked_cycle(fd)
+                if target is None:
+                    self.locked_cycle(fd)
+                else:
+                    self.locked_cycle(fd, target)
             finally:
                 stop_heartbeat.set()
                 thread.join(timeout=65)
                 backup_lease.release(self.sql, self.owner)
 
-    def locked_cycle(self, fd):
+    def locked_cycle(self, fd, target=None):
+        if target is not None:
+            target_job_id(target)
         # Resume exact writer IDs left by a killed process before claiming another job.
         journal = self.root/'.quiescence.json'
         if journal.exists():
@@ -417,13 +434,15 @@ class Agent:
             env.pop('BACKUP_JOB_ID', None)
             subprocess.run([sys.executable,str(self.repo/'scripts/backup_chatwoot.py'),'resume',str(cw_journal)],env=env,check=True)
         self.reconcile()
-        try:
-            self.schedule()
-        except (ValueError, KeyError, TypeError, AttributeError):
-            self.event('BACKUP_SCHEDULE_INVALID')
-        row = self.claim()
+        if target is None:
+            try:
+                self.schedule()
+            except (ValueError, KeyError, TypeError, AttributeError):
+                self.event('BACKUP_SCHEDULE_INVALID')
+        row = self.claim() if target is None else self.claim(target)
         if not row:
             return
+        require(target is None or row['id'] == target, 'targeted claim returned another backup job')
         self.event('BACKUP_EXECUTOR_CLAIMED', row['id'])
         try:
             self.execute(row, fd)
@@ -438,7 +457,7 @@ class Agent:
         # capture retry handling or rewrite completed-backup telemetry.
         job = row['metadata'].get('job', {})
         kind = job.get('kind', 'BACKUP') if isinstance(job, dict) else 'BACKUP'
-        if kind == 'BACKUP':
+        if kind == 'BACKUP' and target is None:
             try:
                 self.automatic_retention()
             except Exception:
@@ -449,12 +468,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--once', action='store_true')
+    parser.add_argument('--job-id', type=target_job_id, help='execute only this eligible queue job; requires --once')
     args = parser.parse_args()
+    if args.job_id is not None and not args.once:
+        parser.error('--job-id requires --once')
     os.umask(0o077)
     agent = Agent(read_json(args.config))
     while True:
         try:
-            agent.cycle()
+            if args.job_id is None:
+                agent.cycle()
+            else:
+                agent.cycle(args.job_id)
         except Exception:
             print('Backup executor cycle failed; inspect private journal/configuration', file=sys.stderr)
             if args.once:

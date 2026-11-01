@@ -270,6 +270,8 @@ enum KeycrmSyncStatus {
 }
 
 model User {
+  historyMigrationJobs HistoryMigrationJob[]
+  historyMigrationRuns HistoryMigrationPilotRun[]
   shipmentNotifications ShipmentNotification[]
   id                       String                    @id @default(cuid())
   email                    String                    @unique
@@ -308,6 +310,151 @@ model User {
   revokedWebsiteApiKeys WebsiteApiKey[] @relation("WebsiteApiKeyRevoker")
 }
 
+// Staging and owner planning inventory. No production apply entry point.
+model HistoryMigrationJob {
+  id                  String   @id
+  createdById         String
+  source              String
+  account             String
+  channel             String
+  status              String   @default("STAGING")
+  tokenHash           String?  @unique
+  agentExpiresAt      DateTime?
+  agentRevision       Int      @default(0)
+  batchCount          Int      @default(0)
+  messageCount        Int      @default(0)
+  payloadBytes        Int      @default(0)
+  mappingRevision     Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  batches             HistoryMigrationBatch[]
+  targets             HistoryMigrationTarget[]
+  pilotRuns           HistoryMigrationPilotRun[]
+
+  @@index([createdById, status])
+}
+
+model HistoryMigrationBatch {
+  id                  String   @id
+  jobId               String
+  batchId             String
+  checksum            String
+  encryptedPayload    String
+  messageCount        Int
+  payloadBytes        Int
+  createdAt           DateTime @default(now())
+  job                 HistoryMigrationJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@unique([jobId, batchId])
+  @@unique([jobId, checksum])
+  @@index([jobId, createdAt])
+}
+
+model HistoryMigrationTarget {
+  id                String @id
+  jobId             String
+  dialogueId        String
+  mode              String
+  clientId          String?
+  evidenceEncrypted String
+  revision          Int @default(1)
+  archivedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  job               HistoryMigrationJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  client            Client? @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@unique([jobId, dialogueId])
+  @@index([clientId])
+}
+
+// The unregistered pilot writer accepts isolated WASM PostgreSQL only.
+model HistoryMigrationPilotRun {
+  id                String @id
+  jobId             String
+  actorId           String
+  environment       String @default("ISOLATED_WASM")
+  nativeConversationId String?
+  nativeAccountId   String?
+  nativeCustomerId  String?
+  sourceDigest      String
+  previewDigest     String
+  status            String @default("APPLIED")
+  result            Json
+  snapshotEncrypted String
+  createdAt         DateTime @default(now())
+  rolledBackAt      DateTime?
+  job               HistoryMigrationJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  actor             User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  origins           HistoryMigrationOrigin[]
+  identities        HistoryMigrationIdentity[]
+  nativeConversation Conversation? @relation("HistoryMigrationNativeConversation", fields: [nativeConversationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  nativeWindow      HistoryMigrationNativeWindow?
+  nativeReviews     HistoryMigrationNativeReview[]
+
+  @@unique([jobId, sourceDigest])
+  @@unique([id, nativeConversationId], map: "HistoryMigrationPilotRun_native_binding_key")
+  @@index([nativeConversationId, environment, status], map: "HistoryMigrationPilotRun_native_binding_idx")
+}
+
+// SQL requires an operational run and its authenticated window in one transaction.
+// The run's independent conversation binding remains authoritative on rollback.
+model HistoryMigrationNativeWindow {
+  runId             String @id
+  payloadEncrypted  String
+  createdAt         DateTime @default(now())
+  run               HistoryMigrationPilotRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+// Full event evidence is authenticated ciphertext; conflicting payload variants
+// remain separate records. Resolution never deletes the original evidence.
+model HistoryMigrationNativeReview {
+  id                String @id
+  runId             String
+  conversationId    String
+  scopeKey          String
+  payloadHash       String
+  reason            String
+  payloadEncrypted  String
+  webhookEnvelopeId String?
+  status            String @default("PENDING")
+  createdAt         DateTime @default(now())
+  run               HistoryMigrationPilotRun @relation(fields: [runId, conversationId], references: [id, nativeConversationId], onDelete: Restrict, onUpdate: Restrict)
+  conversation      Conversation @relation("HistoryMigrationNativeReviewConversation", fields: [conversationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  webhookEnvelope   WebhookEnvelope? @relation(fields: [webhookEnvelopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // SQL-only unique expression index: (UTF8_SHA256(scopeKey), payloadHash).
+  // Hashing bounds index keys for canonical JSON scopes up to 4096 characters.
+  @@index([runId, status, createdAt], map: "HistoryMigrationNativeReview_pending_idx")
+  @@index([webhookEnvelopeId], map: "HistoryMigrationNativeReview_envelope_idx")
+}
+
+model HistoryMigrationOrigin {
+  id                String @id
+  runId             String
+  messageId         String
+  payloadEncrypted  String
+  createdMessage    Boolean @default(false)
+  createdAt         DateTime @default(now())
+  run               HistoryMigrationPilotRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  message           Message @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@index([messageId])
+}
+
+model HistoryMigrationIdentity {
+  id                String @id
+  runId             String
+  clientId          String
+  payloadEncrypted  String
+  createdAt         DateTime @default(now())
+  run               HistoryMigrationPilotRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  client            Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId])
+}
+
 model Session {
   id        String   @id @default(cuid())
   tokenHash String   @unique
@@ -320,6 +467,8 @@ model Session {
 }
 
 model Client {
+  historyMigrationTargets HistoryMigrationTarget[]
+  historyMigrationIdentities HistoryMigrationIdentity[]
   shipmentNotifications ShipmentNotification[]
   id                      String                   @id @default(cuid())
   firstName               String
@@ -859,6 +1008,8 @@ model Payment {
 }
 
 model Conversation {
+  historyMigrationNativeRuns HistoryMigrationPilotRun[] @relation("HistoryMigrationNativeConversation")
+  historyMigrationNativeReviews HistoryMigrationNativeReview[] @relation("HistoryMigrationNativeReviewConversation")
   shipmentNotifications ShipmentNotification[]
   id               String                   @id @default(cuid())
   clientId         String
@@ -887,6 +1038,7 @@ model Conversation {
 }
 
 model Message {
+  historyMigrationOrigins HistoryMigrationOrigin[]
   id                      String                   @id @default(cuid())
   conversationId          String
   direction               MessageDirection
@@ -932,6 +1084,7 @@ model Message {
 }
 
 model WebhookEnvelope {
+  historyMigrationNativeReviews HistoryMigrationNativeReview[]
   id          String    @id @default(cuid())
   provider    String
   payload     Json

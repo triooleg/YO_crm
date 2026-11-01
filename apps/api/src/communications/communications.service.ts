@@ -76,6 +76,9 @@ import { withPreferredItem } from "./preferred-page";
 import { orderInboxClientRows } from "./inbox-client-order";
 import { setInboxSpam } from "./inbox-spam";
 import { latestInboxMessageIds } from "./inbox-message-window";
+import { guardHistoryNativeEvent } from "../history-migration/history-native-reconciliation";
+import { PrismaHistoryNativeStorage } from "../history-migration/history-native-storage";
+import { originalMetaHistoryTimestamp } from "../history-migration/history-native-event";
 class ShipmentChatwootRejectedError extends Error {}
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
@@ -1183,15 +1186,23 @@ export class CommunicationsService {
         return matches;
       });
       const pageToken=this.secretValue(values,"pageAccessTokenEncrypted"),appSecret=this.secretValue(values,"appSecretEncrypted"),instagramToken=this.secretValue(values,"instagramAccessTokenEncrypted"),whatsappToken=this.secretValue(values,"whatsappAccessTokenEncrypted"),events=scopedEvents;
+      const historyReviewedEvents = new Set<MetaInboundMessage>();
+      const historyReviewCommitted = Symbol("history-review-committed");
       const persisted = await Promise.all(events.map(async originalEvent => {
         const enriched=await this.enrichMetaEngagementContext(originalEvent,originalEvent.channel==="INSTAGRAM"?instagramToken:originalEvent.channel==="FACEBOOK"?pageToken:undefined,originalEvent.channel==="FACEBOOK"?appSecret:undefined);
         const storyMaterialized = await this.materializeMetaStoryMedia(enriched);
         const materialized = await this.materializeWhatsappMedia(storyMaterialized.event, whatsappToken), event = materialized.event;
         this.logger.log(JSON.stringify({ event: "META_MESSAGE_PARSED", timestamp, channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, attachmentCount: event.metadata.attachments?.length ?? 0 }));
-        return persistMaterializedMetaStory(storyMaterialized.paths, () => persistMaterializedWhatsapp(materialized.paths, () => this.persistInbound(event, "META", replayFragment(event,"META")), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined)), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
+        const persisted = await persistMaterializedMetaStory(storyMaterialized.paths, () => persistMaterializedWhatsapp(materialized.paths, async () => {
+          const accepted = await this.persistInbound(event, "META", replayFragment(event,"META"), payload, () => { historyReviewedEvents.add(originalEvent); });
+          // Review custody was committed with the materialized replay fragment.
+          // Keep its physical media without counting it as an accepted Message.
+          return historyReviewedEvents.has(originalEvent) ? historyReviewCommitted : accepted;
+        }, path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined)), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
+        return persisted === historyReviewCommitted ? false : persisted;
       }));
       const accepted = persisted.filter(Boolean).length;
-      const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM");
+      const facebookEvents=events.filter(event=>event.channel==="FACEBOOK"),instagramEvents=events.filter(event=>event.channel==="INSTAGRAM"&&!historyReviewedEvents.has(event));
       if(pageToken&&facebookEvents.length)void this.enrichMetaProfiles(facebookEvents,pageToken,appSecret);
       if(instagramToken&&instagramEvents.length)void this.enrichMetaProfiles(instagramEvents,instagramToken,undefined,"instagram");
       const echoes = normalizeMetaEchoMessages(payload).filter(event => {
@@ -1199,7 +1210,7 @@ export class CommunicationsService {
       });
       const echoResults = await Promise.all(echoes.map(async originalEvent => {
         const materialized = await this.materializeWhatsappMedia(originalEvent, whatsappToken);
-        return persistMaterializedWhatsapp(materialized.paths, () => this.persistMetaEcho(materialized.event), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
+        return persistMaterializedWhatsapp(materialized.paths, () => this.persistMetaEcho(materialized.event, payload), path => unlink(join(uploadsRoot(), "communication-files", path)).catch(() => undefined));
       }));
       const echoesAccepted = echoResults.filter(Boolean).length;
       const controls = normalizeMetaControlEvents(payload).filter(event => event.eventType !== "message_echo").filter(event => {
@@ -1377,16 +1388,21 @@ export class CommunicationsService {
       return true;
     });
   }
-  private async persistMetaEcho(event: MetaEchoMessage) {
+  private async persistMetaEcho(event: MetaEchoMessage, rawPayload: unknown = null) {
     return this.p.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalRecipientId}, 0))`;
+      if (event.channel === "INSTAGRAM") await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${"client-merge-global"},0))`;
       const externalId = metaConversationExternalId(event.receiverId, event.externalRecipientId);
       let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId, channel: event.channel as ContactChannel } } });
+      let migrateLegacyIdentity = false;
       if (!conversation && externalId !== event.externalRecipientId) {
         const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalRecipientId, channel: event.channel as ContactChannel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
         if (legacy && metaEchoConversationExternalIds(event.receiverId, event.externalRecipientId, legacy.messages[0]?.metadata).includes(event.externalRecipientId)) {
-          conversation = await tx.conversation.update({ where: { id: legacy.id }, data: { externalId } });
-          await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel: event.channel, identityScope: "receiverId+recipientId", source: "META_ECHO" } } });
+          if(event.channel === "INSTAGRAM") { conversation = legacy; migrateLegacyIdentity = true; }
+          else {
+            conversation = await tx.conversation.update({where:{id:legacy.id},data:{externalId}});
+            await tx.auditLog.create({data:{action:"MIGRATE",entityType:"Conversation",entityId:legacy.id,after:{channel:event.channel,identityScope:"receiverId+recipientId",source:"META_ECHO"}}});
+          }
         }
       }
       if (!conversation || conversation.archivedAt) { this.logger.warn(JSON.stringify({ event: "META_ECHO_IGNORED", channel: event.channel, recipientRef: metaIdentityLogRef(event.externalRecipientId), mid: event.externalMessageId, reason: "conversationNotFound" })); return false; }
@@ -1400,6 +1416,26 @@ export class CommunicationsService {
       const uncertainDraftId=typeof uncertaintyValue.draftMessageId==="string"?uncertaintyValue.draftMessageId:undefined,uncertainAiRunId=typeof uncertaintyValue.aiRunId==="string"?uncertaintyValue.aiRunId:undefined,uncertainActorId=typeof uncertaintyValue.actorId==="string"?uncertaintyValue.actorId:undefined;
       const oldMetadata = duplicate?.metadata && typeof duplicate.metadata === "object" && !Array.isArray(duplicate.metadata) ? duplicate.metadata as Prisma.JsonObject : {};
       if (duplicate && metaEchoAlreadyProcessed(oldMetadata) && !uncertainAttempt) return false;
+      if (event.channel === "INSTAGRAM" && !duplicate) {
+        const resolved = await resolveCanonicalInboundClient({
+          initialClientId:conversation.clientId,conversationId:conversation.id,
+          lockClient:async id=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`},
+          findConversation:id=>tx.conversation.findUnique({where:{id}}),
+          findRedirectTarget:async id=>(await tx.clientMergeRedirect.findUnique({where:{sourceClientId:id},select:{targetClient:{select:{id:true}}}}))?.targetClient||null,
+          findClient:id=>tx.client.findUnique({where:{id},select:{id:true}}),
+        });
+        if (resolved.conversation) conversation={...conversation,...resolved.conversation};
+        const scope={accountId:event.receiverId??"",customerId:event.externalRecipientId,nativeMessageId:event.externalMessageId,direction:"OUTBOUND" as const};
+        const decision=await guardHistoryNativeEvent(new PrismaHistoryNativeStorage(tx),{
+          conversationId:conversation.id,channel:event.channel,provider:"META",...scope,
+          originalTimestamp:originalMetaHistoryTimestamp(rawPayload,scope),rawPayload,envelope:rawPayload,
+        });
+        if(decision.action==="REVIEW")return false;
+      }
+      if (migrateLegacyIdentity) {
+        conversation=await tx.conversation.update({where:{id:conversation.id},data:{externalId}});
+        await tx.auditLog.create({data:{action:"MIGRATE",entityType:"Conversation",entityId:conversation.id,after:{channel:event.channel,identityScope:"receiverId+recipientId",source:"META_ECHO"}}});
+      }
       const mergedMetadata = mergeMetaEchoMetadata(oldMetadata, event.metadata, event.receiverId, sentAt);
       const metadata = { ...mergedMetadata, ...(uncertainAttempt ? { provider: "META", source: "CRM", receiverId: event.receiverId, recipientId: event.externalRecipientId } : {}) } as Prisma.InputJsonValue;
       const source = (metadata as Prisma.JsonObject).source === "CRM" ? "CRM" : "META";
@@ -1574,7 +1610,8 @@ export class CommunicationsService {
   private async persistChatwootOutbound(event: ChatwootMessage, rawPayload: Prisma.InputJsonValue) {
     return this.p.$transaction(async tx => {
       const channel = event.channel as ContactChannel;
-      const conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } } });
+      if(channel===ContactChannel.INSTAGRAM)await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${"client-merge-global"},0))`;
+      let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } } });
       if (!conversation || conversation.archivedAt) {
         this.logger.warn(JSON.stringify({ event: "CHATWOOT_OUTBOUND_IGNORED", channel, externalMessageId: event.externalMessageId, reason: "conversationNotFound" }));
         return false;
@@ -1586,6 +1623,21 @@ export class CommunicationsService {
       const payloadHash = createHash("sha256").update(JSON.stringify(rawPayload)).digest("hex");
       const echoDecision = duplicate ? chatwootEchoDecision(previousMetadata, event.metadata, payloadHash, { seenAt: sentAt.toISOString(), accountId: event.accountId, inboxId: event.inboxId }) : undefined;
       if (echoDecision?.kind === "UNCHANGED") return false;
+      if(channel===ContactChannel.INSTAGRAM && !duplicate){
+        const resolved=await resolveCanonicalInboundClient({
+          initialClientId:conversation.clientId,conversationId:conversation.id,
+          lockClient:async id=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`},
+          findConversation:id=>tx.conversation.findUnique({where:{id}}),
+          findRedirectTarget:async id=>(await tx.clientMergeRedirect.findUnique({where:{sourceClientId:id},select:{targetClient:{select:{id:true}}}}))?.targetClient||null,
+          findClient:id=>tx.client.findUnique({where:{id},select:{id:true}}),
+        });
+        if(resolved.conversation)conversation={...conversation,...resolved.conversation};
+        const decision=await guardHistoryNativeEvent(new PrismaHistoryNativeStorage(tx),{
+          conversationId:conversation.id,channel,provider:"CHATWOOT",accountId:"",customerId:event.externalSenderId,
+          nativeMessageId:event.externalMessageId,direction:"OUTBOUND",originalTimestamp:null,rawPayload,envelope:rawPayload,
+        });
+        if(decision.action==="REVIEW")return false;
+      }
       const metadata = duplicate
         ? echoDecision!.metadata
         : { ...event.metadata, source: "CHATWOOT", provider: "CHATWOOT", chatwootWebhookPayloadHash: payloadHash, webhookSeenAt: sentAt.toISOString(), accountId: event.accountId, inboxId: event.inboxId };
@@ -1699,24 +1751,29 @@ export class CommunicationsService {
       changedError:()=>new ConflictException("Состояние отправки WhatsApp уже изменилось"),
     });
   })}
-  private async persistInbound(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT" | "EMAIL", rawPayload: Prisma.InputJsonValue) {
-    return this.p.$transaction(async (tx) => {
+  private async persistInbound(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT" | "EMAIL", rawPayload: Prisma.InputJsonValue, originalPayload: unknown = null, onHistoryReview?: () => void) {
+    let historyReviewed = false;
+    const persisted = await this.p.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound:" + event.channel + ":" + event.externalSenderId}, 0))`;
       const channel = event.channel as ContactChannel, externalConversationId = provider === "META" ? metaConversationExternalId(event.receiverId, event.externalSenderId) : event.externalSenderId;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"inbound-message:" + event.channel + ":" + externalConversationId + ":" + event.externalMessageId}, 0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${"client-merge-global"}, 0))`;
       let conversation = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: externalConversationId, channel } } });
+      let migrateLegacyIdentity = false;
       if (!conversation && provider === "META" && externalConversationId !== event.externalSenderId) {
         const legacy = await tx.conversation.findUnique({ where: { externalId_channel: { externalId: event.externalSenderId, channel } }, include: { messages: { orderBy: { createdAt: "desc" }, take: 1, select: { metadata: true } } } });
         if (legacy && legacyConversationMatchesReceiver(legacy.messages[0]?.metadata, event.receiverId)) {
-          conversation = await tx.conversation.update({ where: { id: legacy.id }, data: { externalId: externalConversationId } });
-          await tx.auditLog.create({ data: { action: "MIGRATE", entityType: "Conversation", entityId: legacy.id, after: { channel, identityScope: "receiverId+senderId" } } });
+          if(channel === ContactChannel.INSTAGRAM) { conversation = legacy; migrateLegacyIdentity = true; }
+          else {
+            conversation = await tx.conversation.update({where:{id:legacy.id},data:{externalId:externalConversationId}});
+            await tx.auditLog.create({data:{action:"MIGRATE",entityType:"Conversation",entityId:legacy.id,after:{channel,identityScope:"receiverId+senderId"}}});
+          }
         }
       }
       const duplicate = conversation ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: event.externalMessageId } }, select: { id: true } }) : null;
       if (duplicate) { if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_DUPLICATE_SKIPPED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), mid: event.externalMessageId })); return false; }
       let clientId = conversation?.clientId, linkedByContact = false, client = clientId ? await tx.client.findUnique({ where: { id: clientId }, select: { id: true, archivedAt: true, lastContactAt: true,displayName:true } }) : null;
-      let ambiguousMatches = 0, matchedByMergeRedirect=false;
+      let ambiguousMatches = 0, matchedByMergeRedirect=false, canonicalClientRedirected=false;
       const match: Prisma.ClientWhereInput[] = [];
       const email=customerEmail(event.email,event.channel);
       if (email) match.push({ email: { equals: email, mode: "insensitive" } });
@@ -1751,8 +1808,29 @@ export class CommunicationsService {
         clientId=resolved.clientId;
         client=resolved.client;
         if(conversation&&resolved.conversation)conversation={...conversation,...resolved.conversation};
-        if(matchedByMergeRedirect||resolved.redirected||beforeLockClientId!==clientId)await tx.auditLog.create({data:{action:"LINK",entityType:"ClientMergeRedirect",entityId:clientId,after:{channel:event.channel,resolution:"canonicalClient"}}});
+        canonicalClientRedirected=matchedByMergeRedirect||resolved.redirected||beforeLockClientId!==clientId;
       }
+      // A mirror can reach the same client through contact matching, then upsert
+      // its existing Instagram conversation. Guard that row before the upsert.
+      const historyConversation = channel === ContactChannel.INSTAGRAM
+        ? conversation ?? (clientId ? await tx.conversation.findUnique({where:{clientId_channel:{clientId,channel}}}) : null)
+        : null;
+      if (historyConversation) {
+        if (!conversation && await tx.message.findUnique({where:{conversationId_externalId:{conversationId:historyConversation.id,externalId:event.externalMessageId}},select:{id:true}})) return false;
+        const accountId = provider === "META" ? event.receiverId ?? "" : "";
+        const scope = {accountId,customerId:event.externalSenderId,nativeMessageId:event.externalMessageId,direction:"INBOUND" as const};
+        const decision = await guardHistoryNativeEvent(new PrismaHistoryNativeStorage(tx), {
+          conversationId:historyConversation.id,channel,provider,...scope,
+          originalTimestamp:provider === "META" ? originalMetaHistoryTimestamp(originalPayload,scope) : null,
+          rawPayload:originalPayload,envelope:rawPayload,
+        });
+        if (decision.action === "REVIEW") { historyReviewed = true; return false; }
+      }
+      if (migrateLegacyIdentity && conversation) {
+        conversation = await tx.conversation.update({where:{id:conversation.id},data:{externalId:externalConversationId}});
+        await tx.auditLog.create({data:{action:"MIGRATE",entityType:"Conversation",entityId:conversation.id,after:{channel,identityScope:"receiverId+senderId"}}});
+      }
+      if(canonicalClientRedirected)await tx.auditLog.create({data:{action:"LINK",entityType:"ClientMergeRedirect",entityId:clientId!,after:{channel:event.channel,resolution:"canonicalClient"}}});
       if (client && provider === "META") this.logger.log(JSON.stringify({ event: "META_CLIENT_FOUND", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), clientId: client.id }));
       if (client?.archivedAt) {
         const before = client;
@@ -1843,6 +1921,8 @@ export class CommunicationsService {
       if (provider === "META") this.logger.log(JSON.stringify({ event: "META_MESSAGE_CREATED", channel: event.channel, senderRef: metaIdentityLogRef(event.externalSenderId), recipientId: event.receiverId, mid: event.externalMessageId, messageId: message.id, conversationId: conversation.id, attachmentCount: event.metadata.attachments?.length ?? 0 }));
       return true;
     });
+    if (historyReviewed) onHistoryReview?.();
+    return persisted;
   }
   async deleteMessage(messageId: string, d: DeleteMessageDto, u: User) {
     const selected = await this.p.message.findFirst({

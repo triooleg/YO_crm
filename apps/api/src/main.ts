@@ -10,6 +10,7 @@ import { ParentMeasurementsValidationPipe } from './parent-measurements/parent-m
 
 import { createWebsiteOrdersSecurity, websiteOrdersBodyError } from "./website-orders/website-orders-security";
 import { WebsiteApiKeysService } from './website-api-keys/website-api-keys.service';
+import { historyMigrationBodyParser } from './history-migration/history-migration-security';
 
 async function bootstrap() {
   if (recoveryIsolationEnabled()) globalThis.fetch = recoveryFetch(globalThis.fetch);
@@ -45,6 +46,9 @@ async function bootstrap() {
   };
   app.use('/api/auth/website-api-keys',keyBodyErrors);
   app.use("/api/communications/attachments", json({ limit: "24mb" }));
+  // Historical staging has a smaller independent request budget; no files or provider fetches.
+  app.use('/api/history-migration-agent', ...historyMigrationBodyParser('1mb'));
+  app.use('/api/admin/history-migration', ...historyMigrationBodyParser('16kb'));
   app.use(json({ limit: "8mb", verify: (request: Request & { rawBody?: Buffer }, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
   app.use(urlencoded({ extended: true, limit: "8mb" }));
   app.setGlobalPrefix("api");

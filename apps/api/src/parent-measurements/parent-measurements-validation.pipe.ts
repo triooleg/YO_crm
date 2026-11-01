@@ -2,7 +2,8 @@ import { ArgumentMetadata,Injectable,ValidationPipe } from '@nestjs/common';
 import * as parentDtos from './parent-measurements.dto';
 import * as rangeDtos from './parent-measurements-ranges.dto';
 import * as taxDtos from '../taxes/taxes.dto';
-const strictTypes=new Set<unknown>([...Object.values(parentDtos),...Object.values(rangeDtos),...Object.values(taxDtos)]);
+import * as historyDtos from '../history-migration/history-migration.dto';
+const strictTypes=new Set<unknown>([...Object.values(parentDtos),...Object.values(rangeDtos),...Object.values(taxDtos),...Object.values(historyDtos)]);
 
 /** Validate new DTOs before the legacy global whitelist can erase unknown fields. */
 @Injectable()

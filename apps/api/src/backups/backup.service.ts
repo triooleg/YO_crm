@@ -1,10 +1,11 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, StreamableFile, UnauthorizedException } from "@nestjs/common";
-import { BackupType, type Backup, type User } from "@prisma/client";
+import { BackupType, type Backup, type User, type Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import * as argon2 from "argon2";
 import { BACKUP_STORAGE, byteLimit, safeBackupId, type BackupStorage } from "./backup.storage";
 import { BackupRepository, type BackupJobKind, type UploadCapacity } from "./backup.repository";
 import type { QuarantinedArchive } from "./backup.upload";
+import { OperationalBackupGrantReader, type OperationalBackupGrantContext } from './backup-operational-grant';
 const present = (backup: Backup) => ({ ...backup, sizeBytes: backup.sizeBytes?.toString() ?? null });
 const object = (value: unknown): Record<string, any> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 @Injectable()
@@ -30,6 +31,42 @@ export class BackupService {
     if (typeof password !== "string" || !password || password.length > 1024) throw new UnauthorizedException("Текущий пароль указан неверно");
     const valid = await argon2.verify(current.passwordHash, password).catch(() => false);
     if (!valid) throw new UnauthorizedException("Текущий пароль указан неверно");
+    // Internal snapshot lets guarded mutations recheck password rotation under their own DB lock.
+    return current;
+  }
+  /** Internal operational executor seam; context comes from its locked app DB,
+   * never a request DTO. The shared retention fence lasts through apply commit.
+   * Host issuance is a separate, mandatory prerequisite, not an API capability.
+   */
+  async verifyOperationalGrant(grantId: string, expected: OperationalBackupGrantContext, db: Prisma.TransactionClient) {
+    const reader = new OperationalBackupGrantReader(process.env.HISTORY_OPERATIONAL_GRANTS_DIR || '/history-operational-grants');
+    const receipt = await reader.read(grantId, expected);
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'history-backup-grant:' + grantId},0))`;
+    const [used] = await db.$queryRaw<{id: string}[]>`SELECT "id" FROM "AuditLog"
+      WHERE "action"='HISTORY_OPERATIONAL_BACKUP_GRANT_USED' AND "after"->>'grantId'=${grantId} LIMIT 1`;
+    if (used) throw new BadRequestException('Разрешение резервной копии уже использовано');
+    const initial = await db.backup.findUnique({where: {id: receipt.grant.backupId}});
+    const storagePath = initial?.storagePath || initial?.id;
+    if (!storagePath || !safeBackupId(storagePath)) throw new BadRequestException('Исходная резервная копия недоступна');
+    // Same 32-bit advisory key as BackupRepository and the host retention agent.
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'backups-source:' + storagePath}))`;
+    const backup = await db.backup.findUnique({where: {id: receipt.grant.backupId}});
+    if (!backup || backup.archivedAt || backup.status !== 'COMPLETED' || backup.type !== 'DATA' || backup.storageProvider !== 'LOCAL' ||
+      (backup.storagePath || backup.id) !== storagePath || object(object(backup.metadata).job).kind !== 'BACKUP' ||
+      object(object(backup.metadata).retentionClaim).state === 'DELETING') throw new BadRequestException('Требуется действующая проверенная DATA-копия');
+    const deletingAlias = await db.backup.findFirst({where: {
+      OR: [{storagePath}, {id: storagePath, OR: [{storagePath: null}, {storagePath: ''}]}],
+      metadata: {path: ['retentionClaim','state'], equals: 'DELETING'},
+    }, select: {id: true}});
+    if (deletingAlias || !this.storage.verifyOperationalArtifacts) throw new BadRequestException('Проверка артефактов резервной копии недоступна');
+    const artifacts = await this.storage.verifyOperationalArtifacts(storagePath, {archiveChecksum: receipt.grant.archiveSha256, archiveBytes: receipt.grant.archiveBytes});
+    if (artifacts.type !== 'data' || ['manifestSha256','sha256sumsSha256','drillReportSha256','archiveSha256','archiveBytes'].some(key =>
+      artifacts[key as keyof typeof artifacts] !== receipt.grant[key as keyof typeof receipt.grant]))
+      throw new BadRequestException('Артефакты резервной копии изменились');
+    // Do not admit an expired grant after a lengthy physical verification.
+    const current = await reader.read(grantId, expected);
+    if (current.digest !== receipt.digest) throw new BadRequestException('Разрешение резервной копии изменилось');
+    return receipt;
   }
   async reserveUpload(actor: User, input: UploadCapacity) { await this.authorize(actor); return this.repository.reserveUpload(actor, input); }
   async releaseUpload(token?: string) { if (token) await this.repository.releaseUpload(token); }

@@ -40,13 +40,18 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-local-settings-encryption-key-change-me}
       REDIS_URL: redis://redis:6379
       API_PORT: 4500
+      CRM_COMMIT: ${CRM_COMMIT:-development}
       UPLOADS_DIR: /app/uploads
       BACKUP_STORAGE_PATH: /backups
       ALLOW_RESTORE: ${ALLOW_RESTORE:-false}
+      HISTORY_MIGRATION_OPERATIONAL_ENABLED: ${HISTORY_MIGRATION_OPERATIONAL_ENABLED:-false}
+      HISTORY_OPERATIONAL_GRANTS_DIR: /history-operational-grants
+      HISTORY_OPERATIONAL_HOST_ENABLED: "false"
     ports: ["${API_PUBLIC_PORT:-4500}:4500"]
     volumes:
       - crm_uploads:/app/uploads
       - ${BACKUP_STORAGE_PATH:-./.local/backups}:/backups
+      - ${HISTORY_OPERATIONAL_GRANTS_HOST_PATH:-./.local/history-operational-grants}:/history-operational-grants:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
