@@ -17,7 +17,7 @@ import threading
 import time
 import datetime as dt
 from backup_archive import digest, read_json, require, validate_directory, scan_tar, disk_budget
-from backup_runtime import atomic_json, fingerprints
+from backup_runtime import atomic_json, fingerprints, local_consistency, require_execution, sql as host_sql
 
 WALL_SECONDS = 300
 MEMORY_BYTES = 768 * 1024**2
@@ -149,12 +149,42 @@ def pinned_image(image, deadline=None):
     return info
 
 
+def source_report_fields(backup, result):
+    """Only a leased host DRILL may use its exact source capture receipt."""
+    fields = dict(sourceFormat=result['formatVersion'], sourceConsistent=False)
+    owner, job = os.environ.get('BACKUP_EXECUTION_OWNER'), os.environ.get('BACKUP_JOB_ID')
+    storage = os.environ.get('BACKUP_STORAGE_PATH')
+    if not owner or not job or not storage:
+        return fields
+    require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{7,127}', job), 'invalid drill execution job')
+    require(not backup.is_symlink() and backup.parent.resolve() == Path(storage).resolve(), 'drill source outside host storage')
+    source, checksum, size = backup.name, result['checksum'], result['sizeBytes']
+    require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{7,127}', source) and
+            re.fullmatch(r'[a-f0-9]{64}', checksum) and type(size) is int and size > 0, 'invalid drill source identity')
+    require_execution(job)
+    # Values interpolated below have strict non-SQL alphabets. The live leased
+    # job must name this completed local source, independently of archive flags.
+    bound = host_sql(f"""SELECT EXISTS (SELECT 1 FROM "Backup" j JOIN "Backup" b
+        ON b.id=j.metadata#>>'{{job,sourceBackupId}}'
+        WHERE j.id='{job}' AND j.metadata#>>'{{job,kind}}'='DRILL'
+        AND b.id='{source}' AND b.status='COMPLETED' AND b.type='DATA'
+        AND b."storageProvider"='LOCAL' AND b."archivedAt" IS NULL
+        AND COALESCE(b."storagePath",b.id)=b.id AND b.checksum='{checksum}' AND b."sizeBytes"={size}
+        AND b.metadata#>>'{{consistency,verified}}'='true'
+        AND b.metadata#>>'{{consistencyTrust}}'='VERIFIED_LOCAL_QUIESCENCE');""")
+    require_execution(job)
+    if bound == 't':
+        fields['sourceConsistent'] = local_consistency(backup, result)['verified']
+    return fields
+
+
 def drill(backup, project, image, output, retain=False):
     os.umask(0o077)
     started_mono = time.monotonic()
     started_utc = dt.datetime.now(dt.timezone.utc).isoformat()
     deadline = started_mono+WALL_SECONDS
     result = validate_directory(backup, deadline=deadline)
+    source_fields = source_report_fields(backup, result)
     require(not output.exists() and output.is_absolute(), 'new absolute output directory required')
     image_info = pinned_image(image, deadline)
     project_guard(project, deadline)
@@ -178,7 +208,7 @@ def drill(backup, project, image, output, retain=False):
     report = dict(status='FAILED', project=project, outboundDisabled=True, workersStarted=False,
                   startedAt=started_utc, sourceCreatedAt=result['manifest'].get('created_at'),
                   measurement='ISOLATED_DRILL', productionRtoVerified=False,
-                  sourceFormat=result['formatVersion'], sourceConsistent=result['consistent'], executionMode='agent-fenced' if os.environ.get('BACKUP_EXECUTION_OWNER') else 'offline-artifact-isolated')
+                  **source_fields, executionMode='agent-fenced' if os.environ.get('BACKUP_EXECUTION_OWNER') else 'offline-artifact-isolated')
     report.update(references=dict(sourceBackupId=result['manifest'].get('backup_id', backup.name),
                                  sourceStoragePath=backup.name, sourceChecksum=result['checksum'],
                                  sourceManifestChecksum=result['checksum'],

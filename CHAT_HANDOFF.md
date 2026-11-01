@@ -1,3 +1,13 @@
+## 2026-11-01 — 0.13.1 local-capture drill consistency correction
+
+Pilot job0623ca00-d529-4375-8dc8-eb05cf05e31a contains308 acknowledged source records from two KeyCRM dialogues, both OWNER-bound to canonical The Samant/order26-642. Existing ClientsService.merge completed with all5 native messages/attachments/envelopes preserved. Preview213new/95 duplicate pairs/0conflicts; real OWNER preparation confirmed. No historical messages applied yet;41deferred retained, source completeness UNVERIFIED.
+
+Actual job-bound DATA op-history-data-14e994e4-23c6-49a4-b3d6-7d2f29181ba5 and isolated DRILL op-history-drill-4e62e0fa-bb78-4a75-8a05-f7362f94d777 completed, drillPASS/cleanupPASS. Grant issuance correctly refused sourceConsistent=false: generic archive validation never attests local quiescence. This patch obtains source consistency only for a live-leased host DRILL bound in PostgreSQL to that exact completed local DATA source/checksum/size, within configured host storage; only then it consults the existing external capture receipt. Offline/fabricated/malformed/mismatched/symlinked receipts remain untrusted. Isolation, grant freshness, API, schema, auth and financial logic unchanged.
+
+Candidate release0.13.1 rebuilds web only for version/journal; intentionally retains API0.13.0 image sha256:0c8c7ac4e80e27085788669574dfbccbaa1ca10167f2615491eec8f1f78ef464 from accepted source63574f6dd17c843e78adde3ae10984bb3e6ef47157e6b4bc4656bf98f3d9e82f. Host recovery-drill.py changes; original source/release receipts remain immutable. Exact artifacts, reviewed narrow adapter, retention and installed acceptance required before claiming deployment. No migration/seed/API recreation or automatic message apply.
+
+Normal executor configs/live root ownership repaired previously: trio1000 owns normal configdir0700/configs0600 and LIVEroot0700/privateextras0600; source leaves root-owned. Preserve this on delivery. Root-only issuer settings mirror is separate exact-byte copy for existing issuer, not a second backup engine. Actual normal cron completion, not a one-shot root heartbeat, is the acceptance boundary.
+
 ## Operational history implementation 0.13.0
 
 Controlled single-client history execution, owner confirmation, exact backup/drill
