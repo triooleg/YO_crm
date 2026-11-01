@@ -53,6 +53,13 @@ The isolated speed ratio must not be described as the whole-page speed ratio.
   health dependencies PostgreSQL, Redis and uploads were up.
 - Browser Overview and Finance financial cards/charts loaded; brand and current
   journal entry displayed 0.13.2 with the exact snapshot. Zero new console errors.
+- Earlier accumulated network captures contain eight transient HTTP 502 responses
+  on background notification polling. Their exact wall-clock times were not
+  retained, so they cannot be precisely attributed to cutover. A separate fresh
+  Finance reload beginning 22:37:53 UTC matched 46 new requests and verified the
+  report, options and background polling successfully, with zero HTTP errors or
+  network failures. Earlier buffered events were explicitly excluded by request
+  wall-clock time; this clean sample establishes current behavior.
 - Fresh postdeployment inventory: five release source sets, five rollback sets,
   five API images and five web images; no further cleanup candidates.
 
