@@ -245,7 +245,21 @@ export class TaxesService {
   for(const e of expenses){const date=kyivDate(e.incurredAt);if(date.slice(0,7)<from||date.slice(0,7)>to)continue;const n=await convert(e.amountMinor,e.currency,date);if(n!==null){if(linked.has(e.id))taxCash=sum([taxCash,n]);else nonTax=sum([nonTax,n]);}}
   const incomplete=taxIncomplete||missingRates.length>0;return {currency:'UAH',timezone:'Europe/Kyiv',receivedMinor:missingRates.length?null:received,nonTaxExpensesMinor:missingRates.length?null:nonTax,taxCashExpensesMinor:taxCash,cashResultMinor:missingRates.length?null:sum([received,-nonTax,-taxCash]),resultAfterAccrualMinor:incomplete?null:sum([received,-nonTax,-accrued]),incomplete,missingRates,fxEvidence};
  }
- private async reportIn(tx:Tx,from:string,to:string){
+  /** Request-local lookup state from the caller's existing read snapshot.
+   * Keep SOURCE history and lifecycle/retry selectors identical to the command
+   * helpers; no result survives this call or needs mutation invalidation. */
+  private async reportReceiptLookups(tx:Tx,roots:TaxEntry[],drafts:TaxEntry[]){
+   const paymentRootIds=roots.filter(root=>root.paymentId).map(root=>root.id);
+   const sources=paymentRootIds.length?await rows<TaxEntry>(tx,`SELECT DISTINCT ON ("rootId") * FROM "TaxEntry" WHERE "rootId"=ANY($1::text[]) AND kind='SOURCE' ORDER BY "rootId",sequence DESC`,paymentRootIds):[];
+   const sourceIds=sources.map(source=>source.id);
+   const finals=sourceIds.length?await rows<TaxEntry>(tx,`SELECT DISTINCT ON (snapshot->>'sourceId') * FROM "TaxEntry" WHERE snapshot->>'sourceId'=ANY($1::text[]) AND snapshot->>'lifecycle'='true' AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') ORDER BY snapshot->>'sourceId',sequence DESC`,sourceIds):[];
+   const finalBySource=new Map(finals.map(final=>[final.snapshot.sourceId as string,final]));
+   const pendingSources=sources.filter(source=>!finalBySource.get(source.id)?.snapshot.receiptConfirmed);
+   const retries=pendingSources.length?await rows<TaxEntry>(tx,`SELECT DISTINCT ON (e."rootId") e.* FROM "TaxEntry" e JOIN unnest($1::text[],$2::text[]) AS current_source(root_id,source_id) ON e."rootId"=current_source.root_id AND (e.snapshot->>'retryFor'=current_source.source_id OR e.snapshot->>'manualReviewFor'=current_source.source_id) WHERE e.kind='RESOLVE' ORDER BY e."rootId",e.sequence DESC`,pendingSources.map(source=>source.rootId!),pendingSources.map(source=>source.id)):[];
+   const adjusted=drafts.length?await rows<{reversesEntryId:string}>(tx,`SELECT DISTINCT "reversesEntryId" FROM "TaxEntry" WHERE "reversesEntryId"=ANY($1::text[]) AND kind='ADJUST'`,drafts.map(draft=>draft.id)):[];
+   return {sourceByRoot:new Map(sources.map(source=>[source.rootId!,source])),finalBySource,retryByRoot:new Map(retries.map(retry=>[retry.rootId!,retry])),adjustedDraftIds:new Set(adjusted.map(row=>row.reversesEntryId))};
+  }
+  private async reportIn(tx:Tx,from:string,to:string){
   const periods=await rows<TaxPeriod>(tx,`SELECT * FROM "TaxPeriod" WHERE month>=$1 AND month<=$2 ORDER BY month`,from,to),ids=periods.map(p=>p.id);
   const entries=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e JOIN "TaxPeriod" p ON p.id=e."periodId" LEFT JOIN "TaxEntry" r ON r.id=COALESCE(e."rootId",e.id) LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE p.month>=$1 AND p.month<=$2 AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,from,to);
   const settlements=await rows<TaxAllocation>(tx,`SELECT * FROM "TaxExpenseAllocation" ORDER BY sequence`),expenses=await tx.expense.findMany({where:{id:{in:settlements.filter(x=>x.kind==='PAYMENT_LINK').map(x=>x.expenseId)},archivedAt:null,OR:[{orderId:null},{order:{archivedAt:null}}]}}),expenseMap=new Map(expenses.map(e=>[e.id,e]));
@@ -265,9 +279,11 @@ export class TaxesService {
    }
 
   }
-  let pendingCount=0;const pendingStatuses:Row[]=[];const relevantRoots=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='ROOT' AND id=ANY($1::text[])`,[...rootIds]);for(const root of relevantRoots){
+   let pendingCount=0;const pendingStatuses:Row[]=[];const relevantRoots=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='ROOT' AND id=ANY($1::text[])`,[...rootIds]);
+   const drafts=entries.filter(entry=>entry.kind==='DRAFT'),lookups=await this.reportReceiptLookups(tx,relevantRoots,drafts);
+   for(const root of relevantRoots){
    if(!root.paymentId){if(!related.some(e=>e.rootId===root.id&&e.kind==='FINALIZE')){pendingCount++;pendingStatuses.push({rootId:root.id,status:'OFFICIAL_BASIS_PENDING',month:periods.find(p=>p.id===root.periodId)?.month});}continue;}
-   const source=await this.source(tx,root.id);if(!source){pendingCount++;pendingStatuses.push({rootId:root.id,status:'SOURCE_MISSING'});continue;}const finalized=await this.finalForSource(tx,source.id);if(!finalized||!finalized.snapshot.receiptConfirmed){pendingCount++;const retry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND (snapshot->>'retryFor'=$2 OR snapshot->>'manualReviewFor'=$2) ORDER BY sequence DESC LIMIT 1`,root.id,source.id);pendingStatuses.push({rootId:root.id,paymentId:root.paymentId,sourceId:source.id,status:finalized?'RECEIPT_CONFIRMATION_REQUIRED':retry?.snapshot.manualReviewFor?(retry.snapshot.reviewReason==='CLOSED_PERIOD'?'CLOSED_PERIOD_RECONCILIATION_REQUIRED':'MANUAL_RECONCILIATION_REQUIRED'):source.snapshot.state?.voidedAt?'LEGAL_REFUND_RECONCILIATION':retry?'NBU_RETRY_PENDING':'VALUATION_PENDING',incomeDate:retry?.snapshot.incomeDate??source.snapshot.incomeDate,attempt:retry?.snapshot.attempt??0,nextRetryAt:retry?.snapshot.nextRetryAt??null,reviewReason:retry?.snapshot.reviewReason??null,closedPeriods:retry?.snapshot.closedPeriods??[]});}
+    const source=lookups.sourceByRoot.get(root.id);if(!source){pendingCount++;pendingStatuses.push({rootId:root.id,status:'SOURCE_MISSING'});continue;}const finalized=lookups.finalBySource.get(source.id);if(!finalized||!finalized.snapshot.receiptConfirmed){pendingCount++;const retry=lookups.retryByRoot.get(root.id);pendingStatuses.push({rootId:root.id,paymentId:root.paymentId,sourceId:source.id,status:finalized?'RECEIPT_CONFIRMATION_REQUIRED':retry?.snapshot.manualReviewFor?(retry.snapshot.reviewReason==='CLOSED_PERIOD'?'CLOSED_PERIOD_RECONCILIATION_REQUIRED':'MANUAL_RECONCILIATION_REQUIRED'):source.snapshot.state?.voidedAt?'LEGAL_REFUND_RECONCILIATION':retry?'NBU_RETRY_PENDING':'VALUATION_PENDING',incomeDate:retry?.snapshot.incomeDate??source.snapshot.incomeDate,attempt:retry?.snapshot.attempt??0,nextRetryAt:retry?.snapshot.nextRetryAt??null,reviewReason:retry?.snapshot.reviewReason??null,closedPeriods:retry?.snapshot.closedPeriods??[]});}
   }
   const startDate=from+'-01',endDate=new Date(to+'-01T00:00:00Z');endDate.setUTCMonth(endDate.getUTCMonth()+1);
   const uncaptured=await tx.payment.findMany({where:{voidedAt:null,order:{archivedAt:null},receivedAt:{gte:new Date(Date.parse(startDate+'T00:00:00Z')-86400000),lt:endDate}},select:{id:true,receivedAt:true}});
@@ -275,7 +291,7 @@ export class TaxesService {
   for(const payment of uncaptured){const date=kyivDate(payment.receivedAt);if(date<ACCOUNTING_START||date.slice(0,7)<from||date.slice(0,7)>to)continue;const policy=policies.filter(p=>p.effectiveFrom<=date).at(-1);if(!policy)continue;const expected=policy.group===3?['UNIFIED','MILITARY']:[];
    if(expected.some(c=>!entries.some(e=>e.paymentId===payment.id&&e.component===c&&e.kind==='ROOT'))){unappliedBackfillCount++;pendingStatuses.push({paymentId:payment.id,status:'APPROVED_BACKFILL_REQUIRED',incomeDate:date});}
   }
-  for(const draft of entries.filter(e=>e.kind==='DRAFT')){if(!await one(tx,`SELECT id FROM "TaxEntry" WHERE "reversesEntryId"=$1 AND kind='ADJUST'`,draft.id)){pendingCount++;pendingStatuses.push({draftId:draft.id,rootId:draft.rootId,status:'DRAFT_CORRECTION_PENDING'});}}
+   for(const draft of drafts){if(!lookups.adjustedDraftIds.has(draft.id)){pendingCount++;pendingStatuses.push({draftId:draft.id,rootId:draft.rootId,status:'DRAFT_CORRECTION_PENDING'});}}
   pendingCount+=unappliedBackfillCount;
   for(const period of periods){const policy=period.snapshot.policy as TaxPolicy;for(const c of COMPONENTS){if(c==='UNIFIED'&&policy.unifiedMode!=='FIXED'||c==='MILITARY'&&policy.group!==2)continue;if(!entries.some(e=>e.kind==='ROOT'&&e.sourceKey===`month:${period.month}:${c}`)){pendingCount++;pendingStatuses.push({month:period.month,component:c,status:'MONTHLY_GENERATION_PENDING'});}}}
   const roundingReconciliation:Row[]=[];

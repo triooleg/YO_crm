@@ -1,3 +1,36 @@
+## 2026-11-01 — Finance report performance 0.13.2 (deployment authorized)
+
+Active worktree `finance-report-performance/YO_crm`, branch
+`codex/finance-report-performance`, based on `097cb2f`. User asks to diagnose and
+speed up Overview/Finance financial loading. User now explicitly authorizes
+deployment and requires current code on GitHub for every deployment. Candidate
+0.13.2 rebuilds API and web together; no migration/seed, no history import.
+Fresh preflight confirms installed web/host0.13.1 and retained API0.13.0.
+
+Browser baseline report response 4194/4061 ms; N+1 receipt reads in
+`TaxesService.reportIn` replaced with request-local bulk SELECTs under the same
+read snapshot. Real READ ONLY RepeatableRead differential: 502 queries/2234 ms
+legacy versus 76 queries/315 ms candidate; full-result hashes identical.
+No money, tax rules, payments, archival predicates, contracts, FX cache or UI
+changed. No cross-request financial cache. See
+`docs/operations/FINANCE_REPORT_PERFORMANCE.md` for scope and limits.
+
+Four test-first batching regressions pass. `pnpm quality:check` exit0:
+API 2257 PASS/78 SKIP, web 800 PASS/27 SKIP, database 28 PASS; all typechecks and
+both builds pass. Independent regression and business reviews PASS; supplemental
+Standards and Spec reviews PASS. UI-contract review PASS for unchanged frontend;
+candidate responsive/installed browser smoke is unverified (no deployment).
+Synthetic in-memory PostgreSQL proof: four selectors and ten complete reports
+match legacy; dense fixture 476 to 15 SQL calls. All five independent roles PASS
+for local implementation, including final release-gate review. This is not a
+deployment clearance: installed candidate remains unverified; a future release
+needs explicit authorization, version guardian and exact-artifact release gates.
+Resume only this narrow diff; preserve unrelated work in other checkouts.
+
+Previous pilot messages remain preserved. Per latest user direction, future chat
+history collection must use original official sources only; do not start another
+KeyCRM history import. The performance task does not authorize migration work.
+
 ## 2026-11-01 — 0.13.1 local-capture drill consistency correction
 
 Pilot job0623ca00-d529-4375-8dc8-eb05cf05e31a contains308 acknowledged source records from two KeyCRM dialogues, both OWNER-bound to canonical The Samant/order26-642. Existing ClientsService.merge completed with all5 native messages/attachments/envelopes preserved. Preview213new/95 duplicate pairs/0conflicts; real OWNER preparation confirmed. No historical messages applied yet;41deferred retained, source completeness UNVERIFIED.
