@@ -39,7 +39,7 @@ test('actual native operational import serializes real ingress before, during an
  process.env.AI_ENABLED='true';process.env.AI_MESSAGE_ANALYSIS_ENABLED='true';
  globalThis.fetch=()=>{throw Error('NETWORK_FORBIDDEN_IN_OPERATIONAL_INGRESS_FIXTURE');};
  try{
-  f=await historyNativeFixture();assert.equal(f.migrations,52);
+  f=await historyNativeFixture();assert.equal(f.migrations,53);
   for(const sql of historyFullSchemaSeed.split(';').map(s=>s.trim()).filter(Boolean))await f.db.$executeRawUnsafe(sql);
   await f.db.$executeRaw`UPDATE "Client" SET instagram='222',"instagramUsername"='synthetic_handle' WHERE id='existing'`;
   await f.db.$executeRaw`UPDATE "Conversation" SET "externalId"='111:222' WHERE id='protected-ig'`;

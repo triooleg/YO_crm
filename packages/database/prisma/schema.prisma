@@ -1960,6 +1960,41 @@ model MeasurementDraftAsset {
 }
 
 
+// Disposable report derivatives; business history remains in the source tables.
+model FinanceReportRevision {
+  key      String @id
+  revision BigInt @default(0)
+}
+
+model FinancePeriodSnapshot {
+  key                String @id
+  period             String
+  scope              String
+  sourceRevision     String
+  calculationVersion String
+  taxPolicyVersion   String
+  fxVersion          String
+  calculatedAt       DateTime @db.Timestamptz(3)
+  status             String
+  payload            Json?
+  checksum           String?
+  leaseToken         String?
+  leaseUntil         DateTime? @db.Timestamptz(3)
+  rows               FinanceReportCacheRow[]
+}
+
+model FinanceReportCacheRow {
+  snapshotKey String
+  kind        String
+  id          String
+  payload     Json
+  ordinal     Int
+  snapshot    FinancePeriodSnapshot @relation(fields: [snapshotKey], references: [key], onDelete: Cascade)
+
+  @@id([snapshotKey, kind, id])
+  @@index([snapshotKey, kind, ordinal])
+}
+
 // Tax economic rows are append-only. PostgreSQL constraints/triggers live in
 // 20261019123000_fop_tax_ledger; pending receipt events never carry money.
 model TaxPolicy {

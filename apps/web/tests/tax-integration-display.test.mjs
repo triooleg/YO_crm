@@ -14,6 +14,7 @@ test('summary retains confirmed pending-receipt count without downloading tax ro
  assert.equal(fiscalReceiptConfirmationCount({projection:'summary',receiptConfirmationCount:2,fiscal}),2);
  assert.equal(fiscalReceiptConfirmationCount({projection:'summary',receiptConfirmationCount:2,fiscal:{...fiscal,current:{...fiscal.current,incomplete:false}}}),0);
  assert.equal(fiscalReceiptConfirmationCount({receiptConfirmationCount:2,fiscal}),0);
+ assert.equal(fiscalReceiptConfirmationCount({evidenceProjection:'page',receiptConfirmationCount:2,fiscal}),2);
 });
 
 test('unknown fiscal amounts are visibly distinct from real zero amounts', () => {

@@ -85,7 +85,7 @@ export async function historyFullSchemaFixture(){
   const version=await assertMemory(f.db,PGlite);
   const folder=resolve(base,'packages/database/prisma/migrations');
   const names=(await readdir(folder,{withFileTypes:true})).filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort();
-  assert.equal(names.length,52,'Expected the complete canonical 52-migration chain');
+  assert.equal(names.length,53,'Expected the complete canonical 53-migration chain');
   const files=await Promise.all(names.map(async name=>({name,bytes:await readFile(resolve(folder,name,'migration.sql'))})));
   // The instance above was just created here, never supplied by a caller.
   await f.db.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');

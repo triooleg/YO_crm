@@ -10,11 +10,12 @@ export function loadTargetModule(path){
  const filename=resolve(fileURLToPath(new URL('../src/',import.meta.url)),path);
  if(modules.has(filename))return modules.get(filename).exports;
  const module={exports:{}};modules.set(filename,module);
- const source=ts.transpileModule(readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText;
+ const source=ts.transpileModule(readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,esModuleInterop:true}}).outputText;
  const localRequire=name=>{
   if(name.startsWith('.')){
    const target=resolve(dirname(filename),name+'.ts');
    if(existsSync(target))return loadTargetModule(target);
+   if(name.endsWith('.json'))return createRequire(filename)(name);
    // Isolated DAG verification can use the backend worker's real shared model
    // before MAIN integrates it; the ordinary integrated tree needs no override.
    if(name==='../overview/overview-order-model'&&process.env.OVERVIEW_MODEL_DIRECTORY)return loadTargetModule(resolve(process.env.OVERVIEW_MODEL_DIRECTORY,'overview-order-model.ts'));

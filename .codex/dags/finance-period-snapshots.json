@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "task": {
+    "id": "finance-period-snapshots",
+    "title": "Durable revision-guarded finance periods",
+    "base_ref": "369d61a17232e601c69a94b9a69a7ab64566c8c6",
+    "deployment": "AUTHORIZED_AFTER_COMPLETION_PREPARATION",
+    "evidence": "docs/plans/finance-period-snapshots.md",
+    "review_results": {
+      "compatibility_scope": "PASS",
+      "compatibility_final": "PASS",
+      "regression": "PASS",
+      "business": "PASS",
+      "spec": "PASS",
+      "standards": "PASS",
+      "visual": "PASS_LOCAL_RESPONSIVE",
+      "version_candidate": "PASS",
+      "release": "PENDING_EXACT_ARTIFACTS"
+    }
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "agent": "COMPATIBILITY",
+      "kind": "analysis",
+      "status": "DONE",
+      "depends_on": [],
+      "required": true,
+      "context_strategy": "symbols",
+      "affected_paths": [
+        "apps/api/src/finance",
+        "apps/api/src/taxes",
+        "apps/api/src/overview"
+      ]
+    },
+    {
+      "id": "storage",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "status": "DONE",
+      "depends_on": [
+        "scope"
+      ],
+      "required": true,
+      "context_strategy": "symbols",
+      "affected_paths": [
+        "packages/database/prisma/schema.prisma",
+        "packages/database/prisma/migrations/20261102160000_finance_report_snapshots",
+        "packages/database/tests/finance-report-snapshots.test.mjs"
+      ],
+      "description": "Isolated finance-period-storage; parent INTEGRATOR alone combines uncommitted assigned diff."
+    },
+    {
+      "id": "engine",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "status": "DONE",
+      "depends_on": [
+        "scope"
+      ],
+      "required": true,
+      "context_strategy": "symbols",
+      "affected_paths": [
+        "apps/api/src/finance/finance-period-cache.ts",
+        "apps/api/tests/finance-period-cache.test.mjs"
+      ],
+      "description": "Isolated finance-period-engine; revision, checksum and immutable artifact key tests."
+    },
+    {
+      "id": "rows",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "status": "DONE",
+      "depends_on": [
+        "scope"
+      ],
+      "required": true,
+      "context_strategy": "symbols",
+      "affected_paths": [
+        "apps/api/src/finance/finance-period-rows.ts",
+        "apps/api/tests/finance-period-rows.test.mjs"
+      ],
+      "description": "Isolated finance-period-rows; real SQL paging and existing JS sort equivalence."
+    },
+    {
+      "id": "integration",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "status": "DONE",
+      "depends_on": [
+        "scope"
+      ],
+      "required": true,
+      "context_strategy": "symbols",
+      "affected_paths": [
+        "apps/api/src/finance/finance-report.service.ts",
+        "apps/api/src/finance/finance-report-model.ts",
+        "apps/api/src/finance/finance-persistent-report.ts",
+        "apps/api/src/finance/finance-payment-facts.ts",
+        "apps/api/src/finance/finance.controller.ts",
+        "apps/api/tests/finance-payment-facts.test.mjs"
+      ]
+    },
+    {
+      "id": "gates",
+      "agent": "RELEASE",
+      "kind": "review",
+      "status": "RUNNING",
+      "depends_on": [
+        "storage",
+        "engine",
+        "rows",
+        "integration"
+      ],
+      "required": true,
+      "context_strategy": "dependency_summary",
+      "affected_paths": []
+    }
+  ]
+}

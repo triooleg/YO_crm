@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFinanceRequestCoordinator, canonicalFinanceRequest } from '../lib/finance-request-coordinator.ts';
 
+test('summary sharing ignores detail evidence projection while detail requests retain it',()=>{
+ assert.equal(canonicalFinanceRequest('/api/finance/report?projection=summary&evidence=page'),canonicalFinanceRequest('/api/finance/report?projection=summary'));
+ assert.notEqual(canonicalFinanceRequest('/api/finance/report?evidence=page'),canonicalFinanceRequest('/api/finance/report'));
+});
+
 test('Overview and Finance share one in-flight canonical report, with independent response bodies', async () => {
   let calls=0, release;
   const coordinator=createFinanceRequestCoordinator(async()=>{calls++;await new Promise(resolve=>release=resolve);return new Response('{"value":7}');});

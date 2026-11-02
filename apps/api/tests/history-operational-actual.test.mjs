@@ -64,9 +64,9 @@ test('retained text archive operational rehearsal: server pairs95, adds213, orig
   // schema/migrations correspondence with the runtime selected above.
   assert.equal(sha(await readFile(join(root,'packages/database/prisma/schema.prisma'))),sha(await readFile(join(sourceRoot,'packages/database/prisma/schema.prisma'))));
   const migrations=join(root,'packages/database/prisma/migrations');
-  const migrationNames=(await readdir(migrations,{withFileTypes:true})).filter(row=>row.isDirectory()).map(row=>row.name).sort();assert.equal(migrationNames.length,52);
+  const migrationNames=(await readdir(migrations,{withFileTypes:true})).filter(row=>row.isDirectory()).map(row=>row.name).sort();assert.equal(migrationNames.length,53);
   for(const name of migrationNames)assert.equal(sha(await readFile(join(migrations,name,'migration.sql'))),sha(await readFile(join(sourceRoot,'packages/database/prisma/migrations',name,'migration.sql'))));
-  f=await historyNativeFixture();assert.equal(f.migrations,52);
+  f=await historyNativeFixture();assert.equal(f.migrations,53);
   for(const sql of historyFullSchemaSeed.split(';').map(row=>row.trim()).filter(Boolean))await f.db.$executeRawUnsafe(sql);
   await f.db.$executeRaw`UPDATE "Client" SET instagram='222',"instagramUsername"='synthetic_handle' WHERE id='existing'`;
   await f.db.$executeRaw`UPDATE "Conversation" SET "externalId"='111:222' WHERE id='protected-ig'`;

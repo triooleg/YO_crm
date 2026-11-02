@@ -29,13 +29,13 @@ function preserve(baseline,current){
 }
 function retainedMessages(snapshot,ids){return snapshot.Message.filter(row=>ids.has(row.id)).map(({metadata,...row})=>row).sort((a,b)=>a.id.localeCompare(b.id));}
 
-test('isolated 52-migration full-schema append/replay/rollback and physical PGlite dump restore',optIn,async t=>{
+test('isolated 53-migration full-schema append/replay/rollback and physical PGlite dump restore',optIn,async t=>{
  const {historyFullSchemaFixture,restoreHistoryFullSchemaFixture,fullSchemaDigest}=await import('./history-full-schema-fixture.mjs');
  const f=await historyFullSchemaFixture();
  const q=(sql,params)=>f.db.query(sql,params);
  const report={scope:'SYNTHETIC_IN_MEMORY_PGLITE_ONLY',concurrency:'NOT_TESTED_SINGLE_CONNECTION_WASM',dumps:{}};
  try{
-  assert.equal(f.migrations.length,52);assert.ok(f.schema.triggers.length>0);assert.ok(f.schema.constraints.length>0);
+  assert.equal(f.migrations.length,53);assert.ok(f.schema.triggers.length>0);assert.ok(f.schema.constraints.length>0);
   const baseline=await f.snapshot();
   report.version=f.version;report.migrations={count:f.migrations.length,sha256:fullSchemaDigest(f.migrations),first:f.migrations[0].name,last:f.migrations.at(-1).name};
   report.historyModule={files:f.coreManifest.length,sha256:fullSchemaDigest(f.coreManifest)};

@@ -12,8 +12,8 @@ test('native PostgreSQL16 ownership, schema, isolated refusal and multi-session 
   const writer=await f.connect(),reader=await f.connect();
   t.diagnostic(JSON.stringify({version:f.version,migrations:f.migrations,fencedTables:f.locked.length,productionWrites:0}));
   await f.db.$executeRaw`INSERT INTO "Client" (id,"firstName","displayName","updatedAt") VALUES ('native-protected','Synthetic','Synthetic native',CURRENT_TIMESTAMP)`;
-  await t.test('all 52 real migrations; original WASM-only guard still rejects native',async()=>{
-   assert.equal(f.migrations,52);assert.ok(f.locked.includes('Order'));assert.ok(f.locked.includes('MessageAttachment'));
+  await t.test('all 53 real migrations; original WASM-only guard still rejects native',async()=>{
+   assert.equal(f.migrations,53);assert.ok(f.locked.includes('Order'));assert.ok(f.locked.includes('MessageAttachment'));
    const {assertIsolatedHistoryDatabase}=loadTargetModule('history-migration/isolated-history-state.ts');
    await assert.rejects(assertIsolatedHistoryDatabase(f.db),/WASM/);
   });

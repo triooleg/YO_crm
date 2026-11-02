@@ -11,6 +11,8 @@ import { OrderDocumentsService } from "./order-documents.service";
  @Get("report") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") report(@Query() query:FinanceReportQueryDto){return this.reports.report(query)}
  @Get("report/export") @Roles("OWNER","ADMIN","ACCOUNTANT") async exportReport(@Query() query:FinanceReportQueryDto,@Res() res:Response){const csv=await this.reports.report(query,true);res.setHeader("Content-Type","text/csv; charset=utf-8");res.setHeader("Content-Disposition",'attachment; filename="finance-report.csv"');res.setHeader("Cache-Control","no-store");return res.send(csv)}
  @Get("report/options") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") reportOptions(@Query() query:FinanceReportQueryDto){return this.reports.options(query.search)}
+ @Get("report/cache/diagnostics") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN") cacheDiagnostics(){return this.reports.cacheDiagnostics()}
+ @Post("report/cache/rebuild") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN") rebuildCache(@Body() query:FinanceReportQueryDto,@Req() req:Request&{user:User}){return this.reports.rebuildCache(query.month,req.user)}
  @Get("report/orders/:id") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","ACCOUNTANT") reportOrder(@Param("id") id:string,@Query() query:FinanceReportQueryDto){return this.reports.order(id,query)}
  @Get() @Roles("OWNER","ADMIN","ACCOUNTANT") summary(@Query("month") month?:string){return this.finance.summary(month)}
  @Get("settings") @Roles("OWNER","ADMIN") settings(){return this.finance.settings()}

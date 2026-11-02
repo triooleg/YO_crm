@@ -61,7 +61,7 @@ test('actual history SQL atomically preserves ABSENT/INTAKE2/PLANNING6 prefixes 
   assert.match((await db.query('SELECT pg_catalog.version() AS version')).rows[0].version,/PGlite.*wasm32/u);
   const folder=resolve(sourceRoot,'packages/database/prisma/migrations');
   const names=(await readdir(folder,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name).sort();
-  assert.equal(names.length,52);assert.deepEqual(names.slice(49),additions);
+  assert.equal(names.length,53);assert.deepEqual(names.slice(49,52),additions);
   const files=await Promise.all(names.map(async name=>({name,bytes:await readFile(resolve(folder,name,'migration.sql'))})));
   assert.equal(hash(JSON.stringify(files.slice(0,49).map(f=>[f.name,hash(f.bytes)]))),baselineDigest,'Existing 49 migration BYTES changed');
   for(const f of files.slice(0,49))await db.exec(f.bytes.toString('utf8'));
@@ -69,7 +69,7 @@ test('actual history SQL atomically preserves ABSENT/INTAKE2/PLANNING6 prefixes 
   const business=(await catalog(db)).rows,businessTables=Object.keys(business);
   const tableNames=async()=>(await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'HistoryMigration%' ORDER BY tablename`)).rows.map(r=>r.tablename);
   assert.deepEqual(await tableNames(),[]);
-  for(const [index,f] of files.slice(49).entries())await t.test(f.name,async()=>{
+  for(const [index,f] of files.slice(49,52).entries())await t.test(f.name,async()=>{
    const parts=statements(f.bytes.toString('utf8'));
    assert.match(parts[0],/^BEGIN\s*;$/iu);assert.match(parts.at(-1),/^COMMIT\s*;$/iu);
    const before=await catalog(db);

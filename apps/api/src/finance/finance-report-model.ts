@@ -9,9 +9,11 @@ type Payment = { id: string; orderId: string | null; amountMinor: number; curren
 type Order = { id: string; number: string; clientId: string; client: { displayName: string }; priceMinor: number; currency: string; salesStatus: string; paymentStatus: string; shippingStatus: string; requiredDeliveryAt?: DateValue | null; productionSlot?: { endsAt: DateValue } | null; archivedAt?: DateValue | null };
 type Expense = { id: string; categoryId: string; category: { name: string }; amountMinor: number; currency: string; incurredAt: DateValue; orderId?: string | null; order?: { number: string } | null; notes?: string | null; archivedAt?: DateValue | null; orderShipment?: { id: string } | null };
 type Invoice = { id: string; number: string; orderId: string; order: { number: string; clientId: string; client: { displayName: string } }; issueDate: DateValue; dueDate?: DateValue | null; totalMinor: number; currency: string; status: string; archivedAt?: DateValue | null };
-export type FinanceReportSources = { orderSources?: Record<string,OrderSource>; orders: Order[]; payments: Payment[]; expenses: Expense[]; invoices: Invoice[]; categories: { id: string; name: string; active?: boolean }[] };
-export type FinanceReportQuery = { projection?: 'summary' | 'full'; source?: string; month?: string; currency?: string; range?: number; tab?: string; taxComponent?: 'UNIFIED'|'MILITARY'|'ESV'; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
-export type FinanceValuation = { provider: string; cache: ExchangeRateCache | null };
+export type FinancePaymentFacts = Record<string, { paidMinor: number | null; latest: Payment | null }>;
+export type FinanceCashPeriod={receivedMinor:number;expensesMinor:number;resultMinor:number;breakdown:{source:OrderSource;amountMinor:number}[]};
+export type FinanceReportSources = { cashPeriods?:Record<string,FinanceCashPeriod>;paymentFacts?: FinancePaymentFacts; orderSources?: Record<string,OrderSource>; orders: Order[]; payments: Payment[]; expenses: Expense[]; invoices: Invoice[]; categories: { id: string; name: string; active?: boolean }[] };
+export type FinanceReportQuery = { projection?: 'summary' | 'full'; evidence?:'page'|'full'; source?: string; month?: string; currency?: string; range?: number; tab?: string; taxComponent?: 'UNIFIED'|'MILITARY'|'ESV'; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
+export type FinanceValuation = { provider: string; cache: ExchangeRateCache | null; onConversion?:()=>void };
 
 const ISO_CURRENCIES = ["EUR", "USD", "UAH"];
 const iso = (value: DateValue) => new Date(value).toISOString();
@@ -46,6 +48,7 @@ export function assertValuationVersion(query: FinanceReportQuery, valuation: Fin
 
 export function normalizeFinanceQuery(query: FinanceReportQuery, now = new Date()) {
   if (query.projection !== undefined && !['summary', 'full'].includes(query.projection)) throw new BadRequestException('Недопустимая проекция отчёта');
+  if(query.evidence!==undefined&&!['page','full'].includes(query.evidence))throw new BadRequestException('Недопустимая детализация отчёта');
   const month = query.month || financeBusinessDay(now).slice(0, 7), currency = query.currency || "EUR", range = Number(query.range ?? 6), page = Number(query.page ?? 1), pageSize = Number(query.pageSize ?? 10), tab = query.tab || "payments";
   if (!/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException("Выберите корректный месяц отчёта");
   if (!ISO_CURRENCIES.includes(currency) || ![3, 6, 12].includes(range)) throw new BadRequestException("Недопустимая валюта или период отчёта");
@@ -72,12 +75,13 @@ export function createReportConverter(currency: string, valuation: FinanceValuat
     try {
       if (!valuation.cache || valuation.cache.provider !== valuation.provider) throw new Error("Нет официального курса для конвертации отчёта");
       assertExchangeRateCacheFresh(valuation.cache, now);
+      valuation.onConversion?.();
       return convertReportMinor(amount, buildRateForPair(valuation.cache, source as ExchangeRateCurrency, currency as ExchangeRateCurrency));
     } catch (reason) { throw new ServiceUnavailableException((reason as Error).message); }
   };
 }
 
-export function buildFinanceReport(sources: FinanceReportSources, input: FinanceReportQuery, valuation: FinanceValuation, now = new Date(), exportAll = false) {
+export function buildFinanceReport(sources: FinanceReportSources, input: FinanceReportQuery, valuation: FinanceValuation, now = new Date(), exportAll = false, internalProjection = false, cashOnly = false) {
   const query = normalizeFinanceQuery(input, now), version = assertValuationVersion(query, valuation, now);
   const convert = createReportConverter(query.currency, valuation, now);
   const start = financePeriod(query.month), end = financePeriod(query.month, 1), previousStart = financePeriod(query.month, -1);
@@ -88,13 +92,15 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
   const expenses = sources.expenses.filter(expense => !expense.archivedAt && belongsToActiveOrder(expense.orderId));
   const invoices = sources.invoices.filter(invoice => !invoice.archivedAt && activeOrderIds.has(invoice.orderId));
   const cash = (from: Date, to: Date) => {
+    const saved=sources.cashPeriods?.[from.toISOString().slice(0,7)];
+    if(saved&&from.getUTCDate()===1&&to.getUTCDate()===1&&to.getTime()===financePeriod(from.toISOString().slice(0,7),1).getTime())return {receivedMinor:saved.receivedMinor,expensesMinor:saved.expensesMinor,resultMinor:saved.resultMinor};
     const receivedMinor = sum(payments.filter(payment => inside(payment.receivedAt, from, to)).map(payment => convert(payment.amountMinor, payment.currency)));
     const expensesMinor = sum(expenses.filter(expense => inside(expense.incurredAt, from, to)).map(expense => convert(expense.amountMinor, expense.currency)));
     return { receivedMinor, expensesMinor, resultMinor: sum([receivedMinor, -expensesMinor]) };
   };
   const current = cash(start, end), previous = cash(previousStart, start);
   const origin=(id:string|null|undefined):OrderSource=>id?sources.orderSources?.[id]??'UNKNOWN':'UNKNOWN';
-  const receiptBreakdown=(from:Date,to:Date)=>ORDER_SOURCES.map(source=>({source,amountMinor:sum(payments.filter(payment=>inside(payment.receivedAt,from,to)&&origin(payment.orderId)===source).map(payment=>convert(payment.amountMinor,payment.currency)))}));
+  const receiptBreakdown=(from:Date,to:Date)=>sources.cashPeriods?.[from.toISOString().slice(0,7)]?.breakdown??ORDER_SOURCES.map(source=>({source,amountMinor:sum(payments.filter(payment=>inside(payment.receivedAt,from,to)&&origin(payment.orderId)===source).map(payment=>convert(payment.amountMinor,payment.currency)))}));
   const sourceAnalytics={websiteReceivedMinor:receiptBreakdown(start,end).find(row=>row.source==='WEBSITE')!.amountMinor,totalReceivedMinor:current.receivedMinor,breakdown:receiptBreakdown(start,end),trend:Array.from({length:query.range},(_,index)=>{const from=financePeriod(query.month,index-query.range+1),to=financePeriod(query.month,index-query.range+2);return {month:from.toISOString().slice(0,7),breakdown:receiptBreakdown(from,to)};})};
 
   const monthlyTrend = Array.from({ length: query.range }, (_, index) => {
@@ -112,9 +118,11 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
   const byOrder = new Map<string, Payment[]>();
   for (const payment of payments) { if(!payment.orderId)continue; const list = byOrder.get(payment.orderId) || []; list.push(payment); byOrder.set(payment.orderId, list); }
   const isDebtCohort = (order: Order) => !["CANCELLED", "COMPLETED"].includes(order.salesStatus) && order.paymentStatus !== "REFUNDED" && order.shippingStatus !== "RETURNED";
-  const allOrderRows = [...new Map(activeOrders.map(order=>[order.id,order])).values()].filter(order => isDebtCohort(order) || byOrder.get(order.id)?.some(payment => inside(payment.receivedAt))).map(order => {
-    const orderPayments = byOrder.get(order.id) || [], latest = [...orderPayments].sort((left, right) => new Date(right.receivedAt).getTime() - new Date(left.receivedAt).getTime() || right.id.localeCompare(left.id))[0];
-    const originalPaidMinor = sum(orderPayments.map(payment => {
+  const allOrderRows = (cashOnly?[]:[...new Map(activeOrders.map(order=>[order.id,order])).values()]).filter(order => isDebtCohort(order) || byOrder.get(order.id)?.some(payment => inside(payment.receivedAt))).map(order => {
+    const orderPayments = byOrder.get(order.id) || [], fact = sources.paymentFacts?.[order.id];
+    const latest = fact ? fact.latest : [...orderPayments].sort((left, right) => new Date(right.receivedAt).getTime() - new Date(left.receivedAt).getTime() || right.id.localeCompare(left.id))[0];
+    if (fact && (!Number.isSafeInteger(fact.paidMinor) || fact.paidMinor! < 0)) throw new ServiceUnavailableException(`Нет применённой суммы платежа для заказа ${order.number}`);
+    const originalPaidMinor = fact ? fact.paidMinor! : sum(orderPayments.map(payment => {
       if (payment.currency === order.currency) return payment.amountMinor;
       if (payment.appliedCurrency === order.currency && Number.isSafeInteger(payment.appliedAmountMinor) && payment.appliedAmountMinor! >= 0) return payment.appliedAmountMinor!;
       throw new ServiceUnavailableException(`Нет применённой суммы платежа для заказа ${order.number}`);
@@ -129,7 +137,7 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
     return { orderSource:origin(order.id), id: order.id, orderId: order.id, number: order.number, clientId: order.clientId, clientName: order.client.displayName, date: latest ? iso(latest.receivedAt) : null, amountMinor, paidMinor, balanceMinor, status: originalBalanceMinor === 0 ? "PAID" : originalPaidMinor > 0 ? "PARTIAL" : "UNPAID", method: latest?.method || null, notes: latest?.notes || null, originalCurrency: order.currency, originalAmountMinor: order.priceMinor, originalPaidMinor, originalBalanceMinor, roundingDifferenceMinor: originalPaidMinor <= order.priceMinor ? amountMinor - paidMinor - balanceMinor : 0, forecastDate, forecastSource: forecastDate ? order.requiredDeliveryAt ? "deadline" : "production" : null, activeDebt, receivedInMonth };
   }).filter((row): row is NonNullable<typeof row> => row !== null);
   const debtRows = allOrderRows.filter(order => order.activeDebt && order.originalBalanceMinor > 0), upcoming = debtRows.filter(order => order.forecastDate).sort((left, right) => left.forecastDate!.localeCompare(right.forecastDate!) || left.id.localeCompare(right.id));
-  const invoiceRows = invoices.filter(invoice => inside(invoice.issueDate) && (query.tab === "invoices" || invoice.status !== "CANCELLED")).map(invoice => ({ orderSource:origin(invoice.orderId), id: invoice.id, orderId: invoice.orderId, number: invoice.number, orderNumber: invoice.order.number, clientId: invoice.order.clientId, clientName: invoice.order.client.displayName, date: iso(invoice.issueDate), dueDate: invoice.dueDate ? iso(invoice.dueDate) : null, status: invoice.status, amountMinor: convert(invoice.totalMinor, invoice.currency), paidMinor: invoice.status === "PAID" ? convert(invoice.totalMinor, invoice.currency) : null, balanceMinor: invoice.status === "PAID" ? 0 : null, originalAmountMinor: invoice.totalMinor, originalCurrency: invoice.currency }));
+  const invoiceRows = (cashOnly?[]:invoices).filter(invoice => inside(invoice.issueDate) && (query.tab === "invoices" || invoice.status !== "CANCELLED")).map(invoice => ({ orderSource:origin(invoice.orderId), id: invoice.id, orderId: invoice.orderId, number: invoice.number, orderNumber: invoice.order.number, clientId: invoice.order.clientId, clientName: invoice.order.client.displayName, date: iso(invoice.issueDate), dueDate: invoice.dueDate ? iso(invoice.dueDate) : null, status: invoice.status, amountMinor: convert(invoice.totalMinor, invoice.currency), paidMinor: invoice.status === "PAID" ? convert(invoice.totalMinor, invoice.currency) : null, balanceMinor: invoice.status === "PAID" ? 0 : null, originalAmountMinor: invoice.totalMinor, originalCurrency: invoice.currency }));
   const activeInvoices = invoiceRows.filter(invoice => invoice.status !== "CANCELLED");
   let rows: Record<string, unknown>[] = query.tab === "expenses" ? expenseRows : query.tab === "invoices" ? invoiceRows : query.scope === "forecast" ? upcoming : allOrderRows.filter(order => order.receivedInMonth || (order.activeDebt && order.originalBalanceMinor > 0));
   const search = query.search?.trim().toLocaleLowerCase("ru-RU");
@@ -143,7 +151,7 @@ export function buildFinanceReport(sources: FinanceReportSources, input: Finance
     return order * (query.direction === "asc" ? 1 : -1) || String(left.id).localeCompare(String(right.id));
   });
   const total = rows.length;
-  if (exportAll && total > 50_000) throw new BadRequestException("Экспорт ограничен 50 000 строками. Уточните фильтры.");
+  if (exportAll && !internalProjection && total > 50_000) throw new BadRequestException("Экспорт ограничен 50 000 строками. Уточните фильтры.");
   const page = Math.min(query.page, Math.max(1, Math.ceil(total / query.pageSize)));
   const clients = new Map(sources.orders.map(order => [order.clientId, { id: order.clientId, name: order.client.displayName }]));
   return { sourceAnalytics, month: query.month, currency: query.currency, valuationVersion: version, valuation: { provider: valuation.provider, effectiveDate: valuation.cache?.effectiveDate || null, fetchedAt: valuation.cache?.fetchedAt || null, officialUrl: valuation.cache?.officialUrl || null }, today, forecastUntil: until.toISOString().slice(0, 10), current, previous, debtMinor: sum(debtRows.map(order => order.balanceMinor)), forecastMinor: sum(upcoming.map(order => order.balanceMinor)), forecastCount: upcoming.length, invoiceCount: activeInvoices.length, invoiceTotalMinor: sum(activeInvoices.map(invoice => invoice.amountMinor)), unpaidInvoiceCount: activeInvoices.filter(invoice => invoice.status !== "PAID").length, monthlyTrend, categoryBreakdown, recentExpenses: [...expenseRows].sort((left, right) => right.date.localeCompare(left.date) || left.id.localeCompare(right.id)).slice(0, 5), upcoming: upcoming.slice(0, 5), table: { tab: query.tab, rows: exportAll ? rows : rows.slice((page - 1) * query.pageSize, page * query.pageSize), total, page, pageSize: query.pageSize }, options: { clients: [...clients.values()].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 500), categories: sources.categories, orders: sources.orders.slice(0, 500).map(order => ({ id: order.id, number: order.number, clientName: order.client.displayName, currency: order.currency })) } };
@@ -153,6 +161,14 @@ export function csvCell(value: unknown) {
   let text = value == null ? "" : String(value);
   if (/^[\s]*[=+@\-\t\r]/u.test(text)) text = "'" + text;
   return '"' + text.replace(/"/g, '""') + '"';
+}
+/** PostgreSQL jsonb does not preserve property insertion order. Evidence text in
+ * CSV must be deterministic for both fresh and persisted report projections. */
+export function financeEvidenceJson(value:unknown):string {
+  return JSON.stringify(value,(_key,item:unknown)=>{
+    if(item&&typeof item==='object'&&!Array.isArray(item)&&!(item instanceof Date))return Object.fromEntries(Object.entries(item).sort(([a],[b])=>a<b?-1:a>b?1:0));
+    return item;
+  });
 }
 export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, tab: string, historicalExpenses?: FiscalReport['expenseValues']) {
   const amounts = (value: unknown) => {
@@ -170,7 +186,7 @@ export function financeReportCsv(report: ReturnType<typeof buildFinanceReport>, 
   if(tab==='expenses'&&historicalExpenses){
     const values=new Map(historicalExpenses.map(e=>[e.expenseId,e]));
     headers.push('Историческая сумма','Дата исторической оценки','Доказательства исторического курса');
-    lines.forEach((line,index)=>{const v=values.get(String(report.table.rows[index]!.id));line.push(v?.amountMinor==null?'Не рассчитано':amounts(v.amountMinor),v?.valuationDate??'',JSON.stringify(v?.fxEvidence??null));});
+    lines.forEach((line,index)=>{const v=values.get(String(report.table.rows[index]!.id));line.push(v?.amountMinor==null?'Не рассчитано':amounts(v.amountMinor),v?.valuationDate??'',financeEvidenceJson(v?.fxEvidence??null));});
   }
   return "\uFEFF" + [headers, ...lines].map(row => row.map(csvCell).join(";")).join("\r\n");
 }

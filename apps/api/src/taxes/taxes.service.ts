@@ -6,9 +6,11 @@ import { ACCOUNTING_START, COMPONENTS, WAGE_CATALOG, convertMinor, dateOnly as p
 import { allocation, allow, assertTaxExpenseMutable, audit, cas, config, entry, hash, json, key, lockConfig, lockExpense, one, rows, type Actor, type Config, type Row, type TaxAllocation, type TaxEntry, type TaxPeriod, type TaxPolicy, type Tx } from './tax-store';
 import { policyImpactPreview } from './tax-policy-preview';
 import type { TaxPolicyPreviewInput, TaxOrderEstimate, TaxOrderCompleteness } from '../finance/finance-fiscal.types';
+import { FinancePeriodCache, type FinancePeriodRequest, type FinancePeriodResult } from '../finance/finance-period-cache';
+import { readRetryableFinanceSnapshot } from '../finance/finance-cache-retry';
 export type Command={operationKey:string;expectedRevision:number};
 export type CaptureOptions={createIfMissing?:boolean;receiptConfirmed?:boolean;evidence?:string;confirmedByRole?:string};
-type CashData={payments:{amountMinor:number;currency:string;receivedAt:Date}[];expenses:{id:string;amountMinor:number;currency:string;incurredAt:Date}[];links:{expenseId:string}[]};
+type CashData={payments:{id:string;amountMinor:number;currency:string;receivedAt:Date|string}[];expenses:{id:string;amountMinor:number;currency:string;incurredAt:Date|string}[];links:{expenseId:string}[]};
 export type Totals={accruedMinor:number;paidMinor:number;allocatedMinor:number;debtMinor:number;creditMinor:number};
 const monetary=['FINALIZE','REVERSE','RESTORE','ADJUST'];
 const sum=(values:number[])=>safeMinor(values.reduce((n,v)=>n+BigInt(v),0n));
@@ -21,7 +23,8 @@ function reason(value:string){if(typeof value!=='string'||!value.trim()||value.l
 function positive(value:number){integer(value);if(value<=0)fail('Сумма должна быть положительной');return value;}
 @Injectable()
 export class TaxesService {
- constructor(private readonly prisma:PrismaService,private readonly nbu:HistoricalNbuService){}
+ private readonly reportCache:FinancePeriodCache<Tx>;
+ constructor(private readonly prisma:PrismaService,private readonly nbu:HistoricalNbuService){this.reportCache=new FinancePeriodCache(prisma);}
  private async command<T>(action:string,d:Command,actor:Actor,admin:boolean,run:(tx:Tx,c:Config)=>Promise<T>,periodRevision=false,beforeLock?:(tx:Tx)=>Promise<void>):Promise<T>{
   allow(actor,admin);key(d.operationKey);if(!Number.isInteger(d.expectedRevision)||d.expectedRevision<0)fail('Укажите ревизию');
   return this.prisma.$transaction(async tx=>{
@@ -232,10 +235,63 @@ export class TaxesService {
   return {examined:candidates.length,finalized,retried,deferred};
  }
  async reconcilePayment(paymentId:string,now=new Date()){return this.reconcilePending(now,2,paymentId);}
- async report(query:{from?:string;to?:string},actor:Actor){allow(actor);const from=monthKey(query.from??kyivDate(new Date()).slice(0,7)),to=monthKey(query.to??from);try{monthsBetween(from,to);}catch{throw new BadRequestException('Неверный интервал отчёта');}const frozen=await this.prisma.$transaction(async tx=>({report:await this.reportIn(tx,from,to),cash:await this.cashData(tx,from,to)}),{isolationLevel:'RepeatableRead',timeout:30000});return {...frozen.report,results:await this.financialResults(from,to,frozen.report.totals.accruedMinor,frozen.report.incomplete,frozen.cash)};}
+ async report(query:{from?:string;to?:string},actor:Actor){
+  allow(actor);
+  const today=kyivDate(new Date()),from=monthKey(query.from??today.slice(0,7)),to=monthKey(query.to??from);
+  let months:string[];try{months=monthsBetween(from,to);}catch{throw new BadRequestException('Неверный интервал отчёта');}
+  const readLegacy=async(tx:Tx)=>({report:await this.reportIn(tx,from,to),cash:await this.cashData(tx,from,to)});
+  const projectLegacy=async(frozen:Awaited<ReturnType<typeof readLegacy>>)=>({...frozen.report,results:await this.financialResults(from,to,frozen.report.totals.accruedMinor,frozen.report.incomplete,frozen.cash)});
+  type MonthInputs={inputs:Awaited<ReturnType<TaxesService['readReportInputs']>>;cash:CashData};
+  type Peek=<T>(tx:Tx,request:FinancePeriodRequest)=>Promise<{revision:string|null;result:FinancePeriodResult<T>|null}>;
+  // The optional structural boundary also preserves old unit/fallback adapters
+  // until the additive cache engine (including its read-only peek) is present.
+  const peek=(this.reportCache as FinancePeriodCache<Tx>&{peekIn?:Peek}).peekIn?.bind(this.reportCache);
+  if(typeof this.prisma.$queryRawUnsafe==='function'&&peek){
+   const cached=await readRetryableFinanceSnapshot(this.reportCache,{period:to,scope:`tax-report:${from}:${to}:${to>=today.slice(0,7)?today:'historical'}`,
+     dependencies:['epoch','metadata','tax-global','fx-global',...months.flatMap(m=>[`month:${m}`,`tax:${m}`])],
+     calculationVersion:'tax-report-v3',taxPolicyVersion:'fop-ledger-v1',fxVersion:'historical-nbu-v1'},
+     async tx=>{
+      const parts:MonthInputs[]=[],queued:{request:FinancePeriodRequest;payload:MonthInputs}[]=[];
+      for(const month of months){
+       const request:FinancePeriodRequest={period:month,scope:'tax-inputs',dependencies:['epoch','tax-global',`tax:${month}`,`month:${month}`],
+        calculationVersion:'tax-inputs-v2',taxPolicyVersion:'fop-ledger-v1',fxVersion:'native-inputs-v1'};
+       const observed=await peek<MonthInputs>(tx,request);
+       if(observed.result){parts.push(observed.result.payload);continue;}
+       if(observed.revision===null){
+        // No assumed-zero revision and no cache publication from uncovered data.
+        return {parts:[{inputs:await this.readReportInputs(tx,from,to),cash:await this.cashData(tx,from,to)}],queued:[]};
+       }
+       const inputs=await this.readReportInputs(tx,month,month),cash=await this.cashData(tx,month,month);
+       // Reads include the preceding UTC day to cover Kyiv boundaries. Store
+       // each mutable cash/backfill fact only in its actual Kyiv month; an
+       // unchanged adjacent month's duplicate must never overwrite a correction.
+       inputs.uncaptured=inputs.uncaptured.filter(p=>kyivDate(p.receivedAt).slice(0,7)===month);
+       cash.payments=cash.payments.filter(p=>kyivDate(p.receivedAt).slice(0,7)===month);
+       cash.expenses=cash.expenses.filter(e=>kyivDate(e.incurredAt).slice(0,7)===month);
+       const payload:MonthInputs=JSON.parse(json({inputs,cash}));
+       parts.push(payload);queued.push({request:{...request,expectedSourceRevision:observed.revision},payload});
+      }
+      return {parts,queued};
+     },async source=>{
+      // This callback runs after the outer source transaction releases its
+      // connection. No nested transaction or external FX call during capture.
+      for(const pending of source.queued)await this.reportCache.read(pending.request,async()=>pending.payload,async payload=>({payload}));
+      const report=await this.reportIn(this.prisma,from,to,this.combineReportInputs(source.parts.map(p=>p.inputs)));
+      const value=await projectLegacy({report,cash:this.combineCashData(source.parts.map(p=>p.cash))});
+      return {payload:JSON.parse(json(value)) as typeof value};
+     },value=>value.results.missingRates.length>0);
+   if(cached?.key)return cached.payload;
+  }
+  const frozen=await this.prisma.$transaction(readLegacy,{isolationLevel:'RepeatableRead',timeout:30000});
+  return projectLegacy(frozen);
+ }
+ private combineCashData(parts:CashData[]):CashData{
+  const unique=<T,K extends keyof T>(rows:T[],key:K)=>[...new Map(rows.map(row=>[row[key],row])).values()].sort((a,b)=>String(a[key])<String(b[key])?-1:String(a[key])>String(b[key])?1:0);
+  return {payments:unique(parts.flatMap(p=>p.payments),'id'),expenses:unique(parts.flatMap(p=>p.expenses),'id'),links:unique(parts.flatMap(p=>p.links),'expenseId')};
+ }
  private async cashData(tx:Tx,from:string,to:string):Promise<CashData>{
   const end=new Date(to+'-01T00:00:00Z');end.setUTCMonth(end.getUTCMonth()+1);const range={gte:new Date(Date.parse(from+'-01T00:00:00Z')-86400000),lt:end};
-  const payments=await tx.payment.findMany({where:{voidedAt:null,receivedAt:range,order:{archivedAt:null}},select:{amountMinor:true,currency:true,receivedAt:true}}),expenses=await tx.expense.findMany({where:{archivedAt:null,incurredAt:range,OR:[{orderId:null},{order:{archivedAt:null}}]},select:{id:true,amountMinor:true,currency:true,incurredAt:true}}),links=await rows<{expenseId:string}>(tx,`SELECT "expenseId" FROM "TaxExpenseAllocation" WHERE kind='PAYMENT_LINK'`);return {payments,expenses,links};
+  const payments=await tx.payment.findMany({where:{voidedAt:null,receivedAt:range,order:{archivedAt:null}},select:{id:true,amountMinor:true,currency:true,receivedAt:true},orderBy:{id:'asc'}}),expenses=await tx.expense.findMany({where:{archivedAt:null,incurredAt:range,OR:[{orderId:null},{order:{archivedAt:null}}]},select:{id:true,amountMinor:true,currency:true,incurredAt:true},orderBy:{id:'asc'}}),links=await rows<{expenseId:string}>(tx,`SELECT "expenseId" FROM "TaxExpenseAllocation" WHERE kind='PAYMENT_LINK'`);return {payments,expenses,links};
  }
  private async financialResults(from:string,to:string,accrued:number,taxIncomplete:boolean,data:CashData){
   const {payments,expenses,links}=data,linked=new Set(links.map(l=>l.expenseId)),cache=new Map<string,HistoricalRate|Error>();
@@ -245,9 +301,9 @@ export class TaxesService {
   for(const e of expenses){const date=kyivDate(e.incurredAt);if(date.slice(0,7)<from||date.slice(0,7)>to)continue;const n=await convert(e.amountMinor,e.currency,date);if(n!==null){if(linked.has(e.id))taxCash=sum([taxCash,n]);else nonTax=sum([nonTax,n]);}}
   const incomplete=taxIncomplete||missingRates.length>0;return {currency:'UAH',timezone:'Europe/Kyiv',receivedMinor:missingRates.length?null:received,nonTaxExpensesMinor:missingRates.length?null:nonTax,taxCashExpensesMinor:taxCash,cashResultMinor:missingRates.length?null:sum([received,-nonTax,-taxCash]),resultAfterAccrualMinor:incomplete?null:sum([received,-nonTax,-accrued]),incomplete,missingRates,fxEvidence};
  }
-  /** Request-local lookup state from the caller's existing read snapshot.
-   * Keep SOURCE history and lifecycle/retry selectors identical to the command
-   * helpers; no result survives this call or needs mutation invalidation. */
+  /** Lookup state from the caller's read snapshot. Monthly input derivatives
+   * serialize these maps under root-wide tax revision dependencies; SOURCE and
+   * lifecycle/retry selectors remain identical to the command helpers. */
   private async reportReceiptLookups(tx:Tx,roots:TaxEntry[],drafts:TaxEntry[]){
    const paymentRootIds=roots.filter(root=>root.paymentId).map(root=>root.id);
    const sources=paymentRootIds.length?await rows<TaxEntry>(tx,`SELECT DISTINCT ON ("rootId") * FROM "TaxEntry" WHERE "rootId"=ANY($1::text[]) AND kind='SOURCE' ORDER BY "rootId",sequence DESC`,paymentRootIds):[];
@@ -259,12 +315,44 @@ export class TaxesService {
    const adjusted=drafts.length?await rows<{reversesEntryId:string}>(tx,`SELECT DISTINCT "reversesEntryId" FROM "TaxEntry" WHERE "reversesEntryId"=ANY($1::text[]) AND kind='ADJUST'`,drafts.map(draft=>draft.id)):[];
    return {sourceByRoot:new Map(sources.map(source=>[source.rootId!,source])),finalBySource,retryByRoot:new Map(retries.map(retry=>[retry.rootId!,retry])),adjustedDraftIds:new Set(adjusted.map(row=>row.reversesEntryId))};
   }
-  private async reportIn(tx:Tx,from:string,to:string){
+  private async readReportInputs(tx:Tx,from:string,to:string){
   const periods=await rows<TaxPeriod>(tx,`SELECT * FROM "TaxPeriod" WHERE month>=$1 AND month<=$2 ORDER BY month`,from,to),ids=periods.map(p=>p.id);
   const entries=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e JOIN "TaxPeriod" p ON p.id=e."periodId" LEFT JOIN "TaxEntry" r ON r.id=COALESCE(e."rootId",e.id) LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE p.month>=$1 AND p.month<=$2 AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,from,to);
-  const settlements=await rows<TaxAllocation>(tx,`SELECT * FROM "TaxExpenseAllocation" ORDER BY sequence`),expenses=await tx.expense.findMany({where:{id:{in:settlements.filter(x=>x.kind==='PAYMENT_LINK').map(x=>x.expenseId)},archivedAt:null,OR:[{orderId:null},{order:{archivedAt:null}}]}}),expenseMap=new Map(expenses.map(e=>[e.id,e]));
+   const settlements=await rows<TaxAllocation>(tx,`SELECT * FROM "TaxExpenseAllocation" ORDER BY sequence`),expenses=await tx.expense.findMany({where:{id:{in:settlements.filter(x=>x.kind==='PAYMENT_LINK').map(x=>x.expenseId)},archivedAt:null,OR:[{orderId:null},{order:{archivedAt:null}}]}});
+   const rootIds=new Set(entries.map(e=>e.rootId??e.id));
+   const related=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=ANY($1::text[]) AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') ORDER BY sequence`,[...rootIds]);
+   const relevantRoots=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='ROOT' AND id=ANY($1::text[]) ORDER BY sequence`,[...rootIds]);
+   const drafts=entries.filter(entry=>entry.kind==='DRAFT'),lookups=await this.reportReceiptLookups(tx,relevantRoots,drafts);
+   const startDate=from+'-01',endDate=new Date(to+'-01T00:00:00Z');endDate.setUTCMonth(endDate.getUTCMonth()+1);
+   const uncaptured=await tx.payment.findMany({where:{voidedAt:null,order:{archivedAt:null},receivedAt:{gte:new Date(Date.parse(startDate+'T00:00:00Z')-86400000),lt:endDate}},select:{id:true,receivedAt:true},orderBy:{id:'asc'}});
+   const policies=await rows<TaxPolicy>(tx,`SELECT * FROM "TaxPolicy" WHERE state='PUBLISHED' ORDER BY "effectiveFrom"`);
+   const subsequentCorrections=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e LEFT JOIN "TaxEntry" r ON r.id=e."rootId" LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE e."originalPeriodId"=ANY($1::text[]) AND e.kind IN('ADJUST','REVERSE','RESTORE') AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,ids);
+   return {periods,entries,settlements,expenses,related,relevantRoots,uncaptured,policies,subsequentCorrections,
+    lookups:{sourceByRoot:[...lookups.sourceByRoot],finalBySource:[...lookups.finalBySource],retryByRoot:[...lookups.retryByRoot],adjustedDraftIds:[...lookups.adjustedDraftIds]}};
+  }
+  private combineReportInputs(parts:Awaited<ReturnType<TaxesService['readReportInputs']>>[]){
+   const unique=<T extends {id:string}>(values:T[])=>[...new Map(values.map(value=>[value.id,value])).values()];
+   const sequence=<T extends {id:string}>(values:T[])=>unique(values).sort((a,b)=>{
+    const x=BigInt(String((a as Row).sequence??0)),y=BigInt(String((b as Row).sequence??0));return x<y?-1:x>y?1:0;
+   });
+   const byId=<T extends {id:string}>(values:T[])=>unique(values).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+   const lookup=(values:[string,TaxEntry][])=>[...new Map(values).entries()];
+   return {
+    periods:unique(parts.flatMap(p=>p.periods)).sort((a,b)=>a.month.localeCompare(b.month)),
+    entries:sequence(parts.flatMap(p=>p.entries)),settlements:sequence(parts.flatMap(p=>p.settlements)),
+    expenses:byId(parts.flatMap(p=>p.expenses)),related:sequence(parts.flatMap(p=>p.related)),
+    relevantRoots:sequence(parts.flatMap(p=>p.relevantRoots)),uncaptured:byId(parts.flatMap(p=>p.uncaptured)),
+    policies:unique(parts.flatMap(p=>p.policies)).sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom)),
+    subsequentCorrections:sequence(parts.flatMap(p=>p.subsequentCorrections)),
+    lookups:{sourceByRoot:lookup(parts.flatMap(p=>p.lookups.sourceByRoot)),finalBySource:lookup(parts.flatMap(p=>p.lookups.finalBySource)),
+     retryByRoot:lookup(parts.flatMap(p=>p.lookups.retryByRoot)),adjustedDraftIds:[...new Set(parts.flatMap(p=>p.lookups.adjustedDraftIds))]},
+   };
+  }
+  private async reportIn(tx:Tx,from:string,to:string,providedInputs?:Awaited<ReturnType<TaxesService['readReportInputs']>>){
+   const {periods,entries,settlements,expenses,related,relevantRoots,uncaptured,policies,subsequentCorrections,lookups:storedLookups}=providedInputs??await this.readReportInputs(tx,from,to);
+   const ids=periods.map(p=>p.id),expenseMap=new Map(expenses.map(e=>[e.id,e]));
   const components=Object.fromEntries(COMPONENTS.map(c=>[c,{accruedMinor:0,paidMinor:0,allocatedMinor:0,debtMinor:0,creditMinor:0}])) as Record<Component,Totals>;
-  const rootIds=new Set(entries.map(e=>e.rootId??e.id));const related=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=ANY($1::text[]) AND kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') ORDER BY sequence`,[...rootIds]);const reversed=new Set(settlements.filter(a=>a.kind==='REVERSE_ALLOCATION').map(a=>a.reversesId));
+   const rootIds=new Set(entries.map(e=>e.rootId??e.id));const reversed=new Set(settlements.filter(a=>a.kind==='REVERSE_ALLOCATION').map(a=>a.reversesId));
   const active=settlements.filter(a=>a.kind==='ALLOCATE'&&!reversed.has(a.id)&&Boolean(a.rootId&&rootIds.has(a.rootId)));
   for(const comp of COMPONENTS){const t=components[comp];t.accruedMinor=sum(entries.filter(e=>e.component===comp&&monetary.includes(e.kind)).map(e=>e.amountMinor??0));t.allocatedMinor=0;t.debtMinor=0;
    for(const rootId of rootIds){const events=related.filter(e=>e.rootId===rootId&&e.component===comp),lots:{periodId:string;amount:number}[]=[];
@@ -279,15 +367,13 @@ export class TaxesService {
    }
 
   }
-   let pendingCount=0;const pendingStatuses:Row[]=[];const relevantRoots=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='ROOT' AND id=ANY($1::text[])`,[...rootIds]);
-   const drafts=entries.filter(entry=>entry.kind==='DRAFT'),lookups=await this.reportReceiptLookups(tx,relevantRoots,drafts);
+    let pendingCount=0;const pendingStatuses:Row[]=[];
+    const drafts=entries.filter(entry=>entry.kind==='DRAFT'),lookups={sourceByRoot:new Map(storedLookups.sourceByRoot),finalBySource:new Map(storedLookups.finalBySource),retryByRoot:new Map(storedLookups.retryByRoot),adjustedDraftIds:new Set(storedLookups.adjustedDraftIds)};
    for(const root of relevantRoots){
    if(!root.paymentId){if(!related.some(e=>e.rootId===root.id&&e.kind==='FINALIZE')){pendingCount++;pendingStatuses.push({rootId:root.id,status:'OFFICIAL_BASIS_PENDING',month:periods.find(p=>p.id===root.periodId)?.month});}continue;}
     const source=lookups.sourceByRoot.get(root.id);if(!source){pendingCount++;pendingStatuses.push({rootId:root.id,status:'SOURCE_MISSING'});continue;}const finalized=lookups.finalBySource.get(source.id);if(!finalized||!finalized.snapshot.receiptConfirmed){pendingCount++;const retry=lookups.retryByRoot.get(root.id);pendingStatuses.push({rootId:root.id,paymentId:root.paymentId,sourceId:source.id,status:finalized?'RECEIPT_CONFIRMATION_REQUIRED':retry?.snapshot.manualReviewFor?(retry.snapshot.reviewReason==='CLOSED_PERIOD'?'CLOSED_PERIOD_RECONCILIATION_REQUIRED':'MANUAL_RECONCILIATION_REQUIRED'):source.snapshot.state?.voidedAt?'LEGAL_REFUND_RECONCILIATION':retry?'NBU_RETRY_PENDING':'VALUATION_PENDING',incomeDate:retry?.snapshot.incomeDate??source.snapshot.incomeDate,attempt:retry?.snapshot.attempt??0,nextRetryAt:retry?.snapshot.nextRetryAt??null,reviewReason:retry?.snapshot.reviewReason??null,closedPeriods:retry?.snapshot.closedPeriods??[]});}
   }
-  const startDate=from+'-01',endDate=new Date(to+'-01T00:00:00Z');endDate.setUTCMonth(endDate.getUTCMonth()+1);
-  const uncaptured=await tx.payment.findMany({where:{voidedAt:null,order:{archivedAt:null},receivedAt:{gte:new Date(Date.parse(startDate+'T00:00:00Z')-86400000),lt:endDate}},select:{id:true,receivedAt:true}});
-  const policies=await rows<TaxPolicy>(tx,`SELECT * FROM "TaxPolicy" WHERE state='PUBLISHED' ORDER BY "effectiveFrom"`);let unappliedBackfillCount=0;
+   let unappliedBackfillCount=0;
   for(const payment of uncaptured){const date=kyivDate(payment.receivedAt);if(date<ACCOUNTING_START||date.slice(0,7)<from||date.slice(0,7)>to)continue;const policy=policies.filter(p=>p.effectiveFrom<=date).at(-1);if(!policy)continue;const expected=policy.group===3?['UNIFIED','MILITARY']:[];
    if(expected.some(c=>!entries.some(e=>e.paymentId===payment.id&&e.component===c&&e.kind==='ROOT'))){unappliedBackfillCount++;pendingStatuses.push({paymentId:payment.id,status:'APPROVED_BACKFILL_REQUIRED',incomeDate:date});}
   }
@@ -299,7 +385,6 @@ export class TaxesService {
    const valued=[...latest.values()].filter(e=>!e.snapshot.originalPayment.voidedAt&&!e.snapshot.excludedBeforeStart);if(!valued.length)continue;
    const policiesUsed=new Set(valued.map(e=>e.snapshot.valuationPolicy?.id??e.policyId));for(const policyId of policiesUsed){const es=valued.filter(e=>(e.snapshot.valuationPolicy?.id??e.policyId)===policyId),policy=es[0]!.snapshot.valuationPolicy??period.snapshot.policy,baseMinor=sum(es.map(e=>e.baseMinor??0)),receiptRoundedMinor=sum(es.map(e=>e.snapshot.targetMinor??0)),aggregateRoundedMinor=percentMinor(baseMinor,comp==='UNIFIED'?policy.unifiedRateBps:policy.militaryRateBps);roundingReconciliation.push({month:period.month,component:comp,policyId,baseMinor,receiptRoundedMinor,aggregateRoundedMinor,differenceMinor:receiptRoundedMinor-aggregateRoundedMinor});}
   }
-  const subsequentCorrections=await rows<TaxEntry>(tx,`SELECT e.* FROM "TaxEntry" e LEFT JOIN "TaxEntry" r ON r.id=e."rootId" LEFT JOIN "Order" o ON o.id=COALESCE(e."orderId",r."orderId") WHERE e."originalPeriodId"=ANY($1::text[]) AND e.kind IN('ADJUST','REVERSE','RESTORE') AND (COALESCE(e."orderId",r."orderId") IS NULL OR o."archivedAt" IS NULL) ORDER BY e.sequence`,ids);
   const totals=Object.fromEntries(['accruedMinor','paidMinor','allocatedMinor','debtMinor','creditMinor'].map(k=>[k,sum(COMPONENTS.map(c=>components[c][k as keyof Totals]))])) as Totals;
   const visibleLinks=new Set(settlements.filter(a=>a.kind==='PAYMENT_LINK'&&expenseMap.has(a.expenseId)&&((kyivDate(expenseMap.get(a.expenseId)!.incurredAt).slice(0,7)>=from&&kyivDate(expenseMap.get(a.expenseId)!.incurredAt).slice(0,7)<=to)||active.some(x=>x.linkId===a.id))).map(a=>a.id));
   return {currency:'UAH' as const,accountingStartDate:ACCOUNTING_START,from,to,incomplete:pendingCount>0,pendingCount,pendingStatuses,unappliedBackfillCount,roundingReconciliation,totals,components,periods,entries,settlements:settlements.filter(a=>visibleLinks.has(a.id)||visibleLinks.has(a.linkId!)),settlementOptions:settlements.filter(a=>a.kind==='PAYMENT_LINK'&&expenseMap.has(a.expenseId)),subsequentCorrections,coverageIncomplete:from<ACCOUNTING_START.slice(0,7),declarationReady:false};

@@ -17,6 +17,7 @@ export type InvoiceRow = {orderSource?:OrderSource;id:string;orderId:string;numb
 export type FinanceOrder = {id:string;number:string;archivedAt?:string|null;displayCurrency:string;priceMinor:number;depositRequiredMinor:number;currency:string;requiredDeliveryAt?:string;client:{displayName:string;country?:string;language?:string};payments:{id?:string;displayAmountMinor:number;amountMinor:number;currency:string;appliedAmountMinor?:number;appliedCurrency?:string;receivedAt?:string;method?:string;reference?:string;notes?:string}[];invoices:FinanceInvoice[]};
 export type FinanceReport = {
  projection?: 'summary';
+ evidenceProjection?:'page';
  receiptConfirmationCount?: number;
  fiscal?: FiscalReport;
  sourceAnalytics?:{websiteReceivedMinor:number;totalReceivedMinor:number;breakdown:SourceAmount[];trend:{month:string;breakdown:SourceAmount[]}[]};
@@ -29,7 +30,7 @@ export type FinanceReport = {
   options:{clients:{id:string;name:string}[];categories:{id:string;name:string;active?:boolean}[];orders:{id:string;number:string;clientName:string;currency:string}[]};
 };
 export function moveFinanceMonth(month:string, delta:number){const [year,value]=month.split('-').map(Number);const next=new Date(Date.UTC(year!,value!-1+delta,1));return `${next.getUTCFullYear()}-${String(next.getUTCMonth()+1).padStart(2,'0')}`;}
-export function financeReportQuery(filters:FinanceFilters, valuationVersion?:string){const query=new URLSearchParams();for(const [key,value] of Object.entries(filters))if(value!==''&&value!==undefined)query.set(key,String(value));if(valuationVersion)query.set('valuationVersion',valuationVersion);return query;}
+export function financeReportQuery(filters:FinanceFilters, valuationVersion?:string){const query=new URLSearchParams();for(const [key,value] of Object.entries(filters))if(value!==''&&value!==undefined)query.set(key,String(value));query.set('evidence','page');if(valuationVersion)query.set('valuationVersion',valuationVersion);return query;}
 export const FINANCE_PAGE_SIZES = [10,25,50,100] as const;
 export function patchFinanceFilters(current:FinanceFilters,next:Partial<FinanceFilters>):FinanceFilters{
   const result={...current,...next,page:next.page??1};

@@ -57,7 +57,7 @@ export async function historyNativeFixture(failurePoint){
   started=true;
   await command(join(bin,'psql.exe'),['-X','-v','ON_ERROR_STOP=1','-c',`CREATE DATABASE ${ident(dbName)}`],{env});
   const migrations=resolve(root,'packages/database/prisma/migrations');
-  const names=(await readdir(migrations,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name).sort();assert.equal(names.length,52);
+  const names=(await readdir(migrations,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name).sort();assert.equal(names.length,53);
   for(const name of names)await command(join(bin,'psql.exe'),['-X','-q','-v','ON_ERROR_STOP=1','-f',join(migrations,name,'migration.sql')],{env:{...env,PGDATABASE:dbName}});
   async function bind(databaseName){
   const url=`postgresql://${role}:${password}@127.0.0.1:${port}/${databaseName}?connection_limit=1`;

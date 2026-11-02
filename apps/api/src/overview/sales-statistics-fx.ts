@@ -14,9 +14,9 @@ type Input = {
   priority?: { from: string; to: string };
 };
 type Observation = { day: string; rate: ExchangeRateObservation; url: string; fetchedAt: string; provenance: string };
-type Range = { provider: ExchangeRateProvider; currency: 'EUR' | 'USD'; start: string; end: string; url: string };
+type Range = { provider: ExchangeRateProvider; currency: 'EUR' | 'USD'; start: string; end: string; url: string; requiredDays: string[] };
 type Records = { observations: Observation[]; blocked: string[] };
-const DAY = 86_400_000, TTL = 30 * 60_000;
+const DAY = 86_400_000, TTL = 30 * 60_000, RETRY_TTL = 30_000;
 const MAX_REQUESTS = 24, MAX_DAYS = 366, MAX_BYTES = 2 * 1024 * 1024, MAX_ENTRIES = 1000;
 const DEADLINE_MS = 10_000;
 const NBU = 'https://bank.gov.ua/NBU_Exchange/exchange_site';
@@ -118,10 +118,11 @@ function decodeRange(body: string, range: Range, fetchedAt: string): Records {
 /** Read-only, per-instance historical reference loader. Call prepare AFTER leaving DB transactions.
  * No database/service dependency, operational-cache refresh, provider fallback or logging.
  * At most 24 range requests/report, 366 days/request, two active requests/instance,
- * 10s total HTTP deadline, 2MiB/body, 1000 cached day slots, 30min TTL.
+ * 10s total HTTP deadline, 2MiB/body, 1000 cached day slots. Complete evidence
+ * keeps its 30min TTL; missing/blocked required dates retry after 30s.
  */
 export class SalesStatisticsFx {
-  private readonly memo = new Map<string, { expires: number; weight: number; records: Records }>();
+  private readonly memo = new Map<string, { expires: number; retryAt: number; weight: number; records: Records }>();
   private readonly flights = new Map<string, Promise<Records>>();
   private readonly queue: (() => void)[] = [];
   private active = 0;
@@ -131,7 +132,15 @@ export class SalesStatisticsFx {
     const now = this.clock().getTime();
     for (const [url, entry] of this.memo) if (entry.expires <= now) this.memo.delete(url);
     const cached = this.memo.get(range.url);
-    if (cached) return Promise.resolve(cached.records);
+    if (cached) {
+      const blocked = new Set(cached.records.blocked), observed = new Set(cached.records.observations.map(row => row.day));
+      // A URL can later be used for additional event dates inside the same
+      // range. Check this request's needed days, not every calendar day (or
+      // just the dates which happened to be needed by the first caller).
+      const complete = range.requiredDays.every(day => observed.has(day) && !blocked.has(day));
+      if (complete || now < cached.retryAt) return Promise.resolve(cached.records);
+      this.memo.delete(range.url);
+    }
     const flight = this.flights.get(range.url);
     if (flight) return flight;
     if (this.flights.size >= MAX_REQUESTS) return Promise.resolve({ observations: [], blocked: [] });
@@ -145,7 +154,8 @@ export class SalesStatisticsFx {
             const first = this.memo.keys().next().value!;
             total -= this.memo.get(first)!.weight; this.memo.delete(first);
           }
-          this.memo.set(range.url, { expires: this.clock().getTime() + TTL, weight, records });
+          const fetched = this.clock().getTime();
+          this.memo.set(range.url, { expires: fetched + TTL, retryAt: fetched + RETRY_TTL, weight, records });
           resolve(records);
         }, () => resolve({ observations: [], blocked: [] })).finally(() => {
           this.active--; this.flights.delete(range.url); this.queue.shift()?.();
@@ -254,8 +264,9 @@ export class SalesStatisticsFx {
       while (index < missing.length) {
         const start = missing[index++]!, until = addDays(start, MAX_DAYS - 1);
         let end = start;
-        while (index < missing.length && missing[index]! <= until) end = missing[index++]!;
-        ranges.push({ provider, currency: leg, start, end, url: rangeUrl(provider, leg, start, end) });
+        const requiredDays = [start];
+        while (index < missing.length && missing[index]! <= until) { end = missing[index++]!; requiredDays.push(end); }
+        ranges.push({ provider, currency: leg, start, end, url: rangeUrl(provider, leg, start, end), requiredDays });
       }
     }
     // Interleave the two NBU legs: a long EUR series must not consume the USD budget.

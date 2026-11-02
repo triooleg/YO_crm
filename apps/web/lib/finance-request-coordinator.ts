@@ -3,6 +3,7 @@
 export function canonicalFinanceRequest(path:string){
   const url=new URL(path,'http://crm.invalid');
   if(url.pathname==='/api/finance/report'){
+    if(url.searchParams.get('projection')==='summary')url.searchParams.delete('evidence');
     const defaults:Record<string,string>={currency:'EUR',range:'6',tab:'payments',page:'1',pageSize:'10',sort:'date',direction:'desc',scope:'all',projection:'full'};
     for(const [key,value] of [...url.searchParams])if(value===''||defaults[key]===value)url.searchParams.delete(key);
   }

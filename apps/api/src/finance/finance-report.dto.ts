@@ -5,6 +5,7 @@ import { ORDER_SOURCES } from "../orders/order-source";
 /** Additive read contract. Mutations continue using the existing finance/order DTOs. */
 export class FinanceReportQueryDto {
   @IsOptional() @IsIn(['summary', 'full']) projection?: 'summary' | 'full';
+  @IsOptional() @IsIn(['page','full']) evidence?:'page'|'full';
   @IsOptional() @IsIn(['ALL',...ORDER_SOURCES,'NON_WEBSITE']) source?:string;
   @IsOptional() @IsString() @MaxLength(7) month?: string;
   @IsOptional() @IsIn(["EUR", "USD", "UAH"]) currency?: string;

@@ -55,7 +55,7 @@ def passed(name): rpc('passed', name=name)
 
 # Correct inventory comes from source migration bytes, not the queried database.
 with gate(old): pass
-passed('52 real migrations, zero native runs admit legacy image')
+passed('53 real migrations, zero native runs admit legacy image')
 refused(lambda:enter_exit(gate(contract=SchemaContract('0'*64,'NATIVE_V1'))))
 rpc('migrationFault', kind='checksum')
 refused(lambda:enter_exit(gate()))
@@ -144,7 +144,7 @@ test('owned PostgreSQL host gate fences actual operational core and exact schema
   const names=(await readdir(folder,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name).sort();
   const sources=await Promise.all(names.map(name=>readFile(new URL(name+'/migration.sql',folder))));
   const pairs=names.map((name,i)=>[name,createHash('sha256').update(sources[i]).digest('hex')]);
-  assert.equal(pairs.length,52);
+  assert.equal(pairs.length,53);
   const inventory=createHash('sha256').update(JSON.stringify(pairs)).digest('hex');
   await f.db.$executeRawUnsafe('CREATE TABLE "_prisma_migrations" (migration_name text PRIMARY KEY,checksum text NOT NULL,finished_at timestamptz,rolled_back_at timestamptz)');
   for(const [name,checksum] of pairs)await f.db.$executeRaw`INSERT INTO "_prisma_migrations" VALUES (${name},${checksum},CURRENT_TIMESTAMP,NULL)`;

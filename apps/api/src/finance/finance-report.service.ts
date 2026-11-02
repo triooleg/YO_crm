@@ -1,7 +1,7 @@
 import { FinanceSourceCache } from "./finance-source-cache";
 import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
 import {classifyOrderSource,orderOriginSelect,loadOrderSourceMap} from '../orders/order-source';
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { parseExchangeRateCache, type ExchangeRateCache } from "./exchange-rates";
@@ -12,6 +12,8 @@ import { monthsBetween } from '../taxes/tax-math';
 import { fiscalTaxTable, projectFiscalReport, unavailableFiscalReport, type FiscalLedger } from './finance-fiscal-model';
 import { appendFiscalCsv, fiscalTaxCsv } from './finance-fiscal-csv';
 import type { HistoricalRate } from '../taxes/historical-nbu.service';
+import { readFinancePaymentFacts } from './finance-payment-facts';
+import { FinancePersistentReport, type FinanceDeferredSnapshot } from './finance-persistent-report';
 
 const BATCH_SIZE = 500;
 const orderSelect = { ...orderOriginSelect, id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, archivedAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
@@ -33,10 +35,34 @@ const batchArgs = (cursor?: string) => ({ take: BATCH_SIZE, orderBy: { id: "asc"
 export class FinanceReportService {
   private readonly fiscalRateCache = new Map<string, { expiresAt: number; value: Promise<HistoricalRate | Error | null> }>();
   private readonly sourceCache = new FinanceSourceCache<Awaited<ReturnType<FinanceReportService["readSources"]>>>();
-  constructor(private readonly prisma: PrismaService, private readonly taxes?: TaxesService) {}
+  private readonly persistent: FinancePersistentReport;
+  constructor(private readonly prisma: PrismaService, private readonly taxes?: TaxesService) {
+    this.persistent=new FinancePersistentReport(prisma,
+      async(tx,query,from,end,purpose)=>{const raw=await this.readSources(tx,query,from,end,true,purpose);return {...raw,invoices:raw.invoices.map(presentInvoice)};},
+      tx=>this.valuation(tx),taxes?(c,d)=>taxes.historicalRate(c,d):undefined);
+  }
 
   /** Aggregate process diagnostics only; no database keys, customer data or HTTP route. */
   sourceCacheStats() { return this.sourceCache.stats(); }
+  persistentCacheStats() { return this.persistent.cache.diagnostics(); }
+  async cacheDiagnostics() {
+    const process=this.persistentCacheStats();
+    try{
+      const coverage=await this.prisma.$queryRawUnsafe<{covered:boolean}[]>('SELECT yo_finance_cache_coverage() AS covered');
+      const rows=await this.prisma.$queryRawUnsafe<{status:string;count:string}[]>('SELECT status,count(*)::text AS count FROM "FinancePeriodSnapshot" GROUP BY status ORDER BY status');
+      return {available:coverage[0]?.covered===true,process,snapshots:rows.map(r=>({status:r.status,count:Number(r.count)}))};
+    }catch{return {available:false,process,snapshots:[]};}
+  }
+  async rebuildCache(month:string|undefined,actor:{id:string;role:string}) {
+    if(!['OWNER','ADMIN'].includes(actor.role))throw new ForbiddenException('Недостаточно прав');
+    const query=normalizeFinanceQuery({month,projection:'summary'});
+    // The cache revision/audit are atomic. Business records are never edited.
+    await this.prisma.$transaction(async tx=>{
+      await tx.$executeRawUnsafe('UPDATE "FinanceReportRevision" SET revision=revision+1 WHERE key=ANY($1::text[])',[`month:${query.month}`,`tax:${query.month}`]);
+      await tx.auditLog.create({data:{actorId:actor.id,action:'REBUILD_CACHE',entityType:'FinanceReportCache',entityId:query.month,after:{month:query.month}}});
+    });
+    return this.report(query);
+  }
 
   private async historicalRate(currency: string, date: string) {
     const key = currency + ':' + date, now = Date.now();
@@ -61,11 +87,14 @@ export class FinanceReportService {
     return { provider, cache: cache?.provider === provider ? cache : null };
   }
 
-  private async readSources(tx: Prisma.TransactionClient, query: ReturnType<typeof normalizeFinanceQuery>, from: Date, end: Date) {
+  private async readSources(tx: Prisma.TransactionClient, query: ReturnType<typeof normalizeFinanceQuery>, from: Date, end: Date, bounded = false, purpose:'full'|'cash'|'fiscal'='full') {
+    const deferredSnapshots:FinanceDeferredSnapshot[]=[];
+    const detailFrom=bounded&&purpose==='full'?financePeriod(query.month):from;
     // Archived orders retain immutable history but are outside every active finance projection.
     const orders = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { archivedAt: null }, select: orderSelect }));
-    const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null } }, select: paymentSelect }));
-    const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
+    const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, ...(bounded ? { receivedAt: {gte: detailFrom,lt:end} } : {}) }, select: paymentSelect }));
+    const paymentFacts = bounded&&purpose==='full' ? await readFinancePaymentFacts(tx) : undefined;
+    const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: detailFrom, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
     const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, order: { archivedAt: null }, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
     const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] } } }] }, select: { id: true, name: true, active: true } }));
     const orderSources=Object.fromEntries(orders.map(order=>[order.id,classifyOrderSource(order)]));
@@ -74,19 +103,35 @@ export class FinanceReportService {
     let ledger: FiscalLedger = { months: [], links: [], unavailable: true };
     let fiscalOrders = orders;
     let fiscalPayments = payments, fiscalExpenses = expenses;
-    if (this.taxes) {
+    if (this.taxes&&purpose!=='cash') {
       // Recover from a failed tax SQL read without aborting the working legacy cash snapshot.
       await tx.$executeRawUnsafe('SAVEPOINT fiscal_read');
       try {
         const months = [];
-        for (const m of monthsBetween(from.toISOString().slice(0, 7), query.month)) months.push(await this.taxes.readReportIn(tx, m));
+        for (const m of monthsBetween(from.toISOString().slice(0, 7), query.month)) {
+          // Root-wide ledger dependencies are tracked by DB triggers, including
+          // RESOLVE/worker/import writes. A November receipt does not reread a
+          // verified unchanged June ledger. Parent publication rechecks the
+          // complete dependency vector after these independent RR reads.
+          const request={period:m,scope:'tax-ledger',dependencies:['epoch','metadata','tax-global',`month:${m}`,`tax:${m}`],calculationVersion:'tax-read-model-v1',taxPolicyVersion:'fop-ledger-projection-v1',fxVersion:'native-uah'};
+          const probe=bounded?await this.persistent.cache.peekIn<Awaited<ReturnType<TaxesService['readReportIn']>>>(tx,request):null;
+          const payload=probe?.result?.payload??await this.taxes.readReportIn(tx,m);
+          if(bounded&&!probe?.result&&probe?.revision)deferredSnapshots.push({request:{...request,expectedSourceRevision:probe.revision},projection:{payload:JSON.parse(JSON.stringify(payload))}});
+          months.push(payload);
+        }
         const links = [...new Map(months.flatMap(m => m.settlementOptions).map(l => [l.expenseId, { expenseId: l.expenseId, component: l.component }])).values()];
         ledger = { months, links };
         // Extra Kyiv boundary reads belong only to the new fiscal projection.
-        const fiscalFrom = new Date(from.getTime() - 86400000);
-        const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, receivedAt: { gte: fiscalFrom, lt: from } }, select: paymentSelect }));
-        const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: from }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
+        const boundaryFrom=bounded?detailFrom:from,fiscalFrom = new Date(boundaryFrom.getTime() - 86400000);
+        const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, receivedAt: { gte: fiscalFrom, lt: boundaryFrom } }, select: paymentSelect }));
+        const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: boundaryFrom }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
         fiscalPayments = [...payments, ...precedingPayments]; fiscalExpenses = [...expenses, ...precedingExpenses];
+        if (bounded) {
+          // A moved receipt may still be referenced by an earlier tax root.
+          const known = new Set(fiscalPayments.map(p=>p.id));
+          const referenced = [...new Set(months.filter(m=>m.month===query.month).flatMap(m=>[...m.entries.map(e=>e.paymentId),...m.pendingStatuses.map(p=>p.paymentId as string | undefined)]).filter((id):id is string=>Boolean(id)&&!known.has(id!)))];
+          if (referenced.length) fiscalPayments.push(...await readBatches(cursor=>tx.payment.findMany({...batchArgs(cursor),where:{id:{in:referenced},voidedAt:null,order:{archivedAt:null}},select:paymentSelect})));
+        }
         const extraOriginIds = [...new Set([...precedingPayments.map(p=>p.orderId), ...precedingExpenses.map(e=>e.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
         Object.assign(orderSources, await loadOrderSourceMap(tx, extraOriginIds));
         const taxOrderIds = [...new Set([...months.flatMap(m => m.entries.map(e => e.orderId)), ...fiscalPayments.map(p => p.orderId), ...fiscalExpenses.map(e => e.orderId)].filter((id): id is string => Boolean(id)))].filter(id => !orders.some(o => o.id === id));
@@ -102,7 +147,7 @@ export class FinanceReportService {
         ledger = { months: [], links: [], unavailable: true };
       }
     }
-    return { orders, payments, expenses, invoices, categories, orderSources,
+    return { orders, payments, expenses, invoices, categories, orderSources, deferredSnapshots, ...(paymentFacts ? {paymentFacts} : {}),
       data: { orders: fiscalOrders, orderSources, payments: fiscalPayments, expenses: fiscalExpenses, ledger } };
   }
 
@@ -124,6 +169,12 @@ export class FinanceReportService {
 
   async report(input: FinanceReportQuery, exportAll = false) {
     const now = new Date(), query = normalizeFinanceQuery(input, now), from = financePeriod(query.month, -Math.max(query.range - 1, 1)), end = financePeriod(query.month, 1);
+    // Missing migration/disabled coverage has a safe legacy fallback. The cache
+    // never controls authorization or makes an old valuation token acceptable.
+    if(typeof this.prisma.$queryRawUnsafe==='function'){
+      const persisted=await this.persistent.report(query,exportAll,now);
+      if(persisted!==null)return persisted;
+    }
     let commit!: () => void, abort!: (error: unknown) => void;
     const committed = new Promise<void>((resolve, reject) => { commit = resolve; abort = reject; });
     void committed.catch(() => {});

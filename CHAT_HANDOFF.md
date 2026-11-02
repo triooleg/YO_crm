@@ -1,3 +1,50 @@
+## 2026-11-02 — 0.14.0 durable finance candidate, local gates complete
+
+Owner authorized persistent PostgreSQL financial reporting and then deployment
+AFTER completion, with current source publication to GitHub. INTEGRATOR checkout:
+finance-report-performance, branch codex/finance-loading-optimization, base369d61a.
+Production is still0.13.4/schema52; no production migration or cutover for this
+candidate has occurred. New candidate version is0.14.0, API and web rebuilt.
+
+Implemented three derivative tables, transactional revision/coverage triggers
+for18 source tables, cross-process leases/checksums/CAS repair, independent
+monthly cash/fiscal/tax input reuse, lifetime SQL payment facts and SQL detail
+paging. Statistics has tokenless durable financial/counts projections; export
+receipts remain actor/role/query-bound in memory. Existing raw MVCC cache,
+batching, session/request guards, integer formulas and fixed monthly ESV remain.
+Incomplete money stays null. Transient missing FX retries after30s; complete
+historical and deterministic pending snapshots have no forced TTL.
+
+Reviewed edge cases have regression proof: stale reader cannot revoke a newer
+lease; boundary tax-expense IDs survive warm/range replay; equal-timestamp NFC/
+NFD receipt IDs keep legacy metadata order; broken CSV artifacts are repaired;
+same-instance negative FX can recover; mutable preceding-day tax inputs belong
+only to their Kyiv month, so old adjacent copies cannot undo corrections/voids.
+
+Final pnpm quality:check exit0: API2354/web824/database65 PASS =3243 PASS,
+109 optional SKIP, zero FAIL; all typechecks and builds pass. Native PostgreSQL16
+with all53 migrations passes full JSON/CSV, currencies, historical FX changes,
+restart, five callers, pool1, tax/statistics derivative-only hits, Unicode ties,
+and preceding-day correction/void. Activated MVCC/PGlite21/21 PASS. Eight browser
+fixture paths and six responsive screenshots PASS. Independent compatibility,
+regression, Spec/business and visual reviews have no open application blockers.
+Private logs: .local/finance-periods. Operational/performance reports:
+docs/operations/FINANCE_PERIOD_SNAPSHOTS.md and FINANCE_PERIOD_PERFORMANCE.md.
+
+Plan/DAG: docs/plans/finance-period-snapshots.md and
+.codex/dags/finance-period-snapshots.json. Remaining release-only work: freeze/
+GitHub publication, exact image builds, fresh existing DATA52+isolated restore,
+shadow schema53/rollback qualification, exact Linux operator/version/release
+reviews, authorized cutover, retention and installed UI/HTTP verification.
+Private adapters under .local/finance-period-deploy are not release-qualified
+until pins and actual evidence are bound. Rollback retains schema53 with old
+images; never restore production DB as an ordinary application rollback.
+
+Fresh preflight confirms0.13.4 images850de594bf2e/1a2a8d010c82, snapshot14d01924d946,
+healthy4 services. LIVE/.deployed-snapshot is stale0.13.0 metadata; it is not the
+runtime identity. Reconcile its exact bytes/metadata by verified postcutover CAS,
+retain historical evidence, and require installed version-guardian acceptance.
+
 ## 2026-11-02 — 0.13.4 installed country/date editors
 
 Authorized API/web deployment completed from commit
