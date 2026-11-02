@@ -1,4 +1,26 @@
-## 2026-11-02 — 0.13.3 deployment preparation (authorized)
+## 2026-11-02 — 0.13.3 installed finance loading optimization
+
+Authorized API/web deployment completed from source commit
+`3efa0ad7e42c8f047358c824a3e11495223fe835`, published to `origin/main`;
+snapshot `075c328a0f639046c9665b5496a9dd351fca9f37678c1c4443ac586e3d7c3bea`.
+Installed API `db36c902243f`, web `559935ee8147`; all four services healthy,
+PostgreSQL/Redis containers retained. Public root/health200, browser brand and
+first journal entry0.13.3/full snapshot, Overview and Finance smoke passed with
+no new console errors. Exact-version quality3126PASS/105optionalSKIP/0FAIL;
+both builds/typechecks and Linux operator45/45PASS. Fresh consistent DATA and
+isolated offline drill/cleanupPASS; existing retention owner confirmed5/5/5/5.
+No migration, seed, production restore, payment/order write or history import.
+See `docs/release-evidence/finance-loading-deployment-2026-11-02.md` for exact
+images, guarded pre-lock refusal/retry evidence, measured loading limits and
+scope. VERSION GUARDIAN INSTALLED and final RELEASE INSTALLED both PASS for
+the exact unchanged images/snapshot. Documentation-only publication follows.
+
+Later user requests (clickable client country and order creation-date editor)
+are being implemented uncommitted in the isolated `client-country-inline`
+worktree. They are NOT included in this frozen production release. Do not mix
+their pending reviews with the finance installed identity.
+
+## 2026-11-02 — 0.13.3 deployment preparation (historical)
 
 Owner now explicitly authorizes deployment of the six verified improvements;
 the standing request requires the exact current source on GitHub with deployment.

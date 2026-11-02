@@ -5,7 +5,7 @@
     "title": "Six finance loading improvements",
     "base_ref": "fca28920b448af55c4547eee228a815fcfe1fa68",
     "no_commit_reason": "Superseded: owner explicitly authorized deployment and standing GitHub publication; scoped source commit/push now authorized.",
-    "deployment": "AUTHORIZED_PREPARATION_0.13.3_NOT_YET_APPLIED",
+    "deployment": "INSTALLED_VERIFIED_0.13.3_075c328a0f63",
     "evidence": "docs/plans/finance-loading-optimization.md",
     "review_results": {
       "compatibility": "PASS",
@@ -14,7 +14,8 @@
       "business": "PASS",
       "visual": "PASS_LOCAL_CHROMIUM",
       "regression": "PASS",
-      "release": "PASS_LOCAL_IMPLEMENTATION"
+      "release": "PASS_INSTALLED_0.13.3",
+      "version": "PASS_PREDEPLOY_AND_INSTALLED_0.13.3"
     },
     "validation": {
       "quality": "PASS",

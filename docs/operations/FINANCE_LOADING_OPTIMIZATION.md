@@ -2,10 +2,11 @@
 
 Implementation based on `fca28920`, branch `codex/finance-loading-optimization`.
 Owner subsequently authorized deployment and source publication as 0.13.3.
-Production baseline is the previously accepted 0.13.2 until reviewed cutover.
-API and web must ship together. No database migration, index DDL or financial
-mutation is included. Installed release evidence is recorded separately after
-deployment; local acceptance below does not by itself establish installed proof.
+API and web were deployed together as 0.13.3 after the reviewed 0.13.2 baseline.
+No database migration, index DDL or financial mutation was included. Exact
+installed identities and bounded live observations are recorded in
+`docs/release-evidence/finance-loading-deployment-2026-11-02.md`; local acceptance
+below remains distinct from that installed proof.
 
 ## Delivered behavior
 
