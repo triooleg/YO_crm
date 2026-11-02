@@ -1,4 +1,22 @@
-## 2026-11-02 — 0.13.4 deployment authorized (preparation)
+## 2026-11-02 — 0.13.4 installed country/date editors
+
+Authorized API/web deployment completed from commit
+`3be732fee83519cc5105777b86a1f19fc7ea30be`, published toorigin/main. Snapshot
+`14d01924d9464e8d4fef826482ff4dba8741b58abbadc0ef517cdbf7c5d7f64b`.
+Installed API850de594bf2e / web1a2a8d010c82; all4healthy, PG/Redis unchanged,
+guard1/schema52NATIVE_V1 retained. Public root/health200, UIbrand/firstjournal
+0.13.4/fullsnapshot. Real browser verified missing/existing country editors and
+search/cancel, created-date calendar and keyboardcancel, no new console errors.
+No production client/order/payment test writes. Exact-version quality3138PASS /
+107optionalSKIP /0FAIL, builds/typesPASS; Linux operator45/45PASS. Fresh DATA
+consistentcapture +isolatedoffline restore/cleanupPASS; existingownerretention
+post-check5/5/5/5 nofurthertargets. No migration/seed/productionrestore.
+See `docs/release-evidence/client-country-created-date-deployment-2026-11-02.md`
+for exact identities and honest test scope. VERSION GUARDIAN INSTALLED and final
+RELEASE INSTALLED both PASS for the unchanged artifacts. Documentation-only
+publication follows without changing installed bytes.
+
+## 2026-11-02 — 0.13.4 deployment authorized (historical preparation)
 
 Owner explicitly requested deployment of the reviewed country/date editors.
 Scoped commit/push is authorized by the standing GitHub-with-deployment request.

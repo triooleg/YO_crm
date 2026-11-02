@@ -1,5 +1,10 @@
 # Client country and order created date — local integration evidence
 
+Historical local implementation evidence below. Owner subsequently authorized
+deployment; these editors are now installed as0.13.4. Exact deployed identities
+and installed checks are in
+`client-country-created-date-deployment-2026-11-02.md`.
+
 Worktree: `D:/CodexData/.codex/worktrees/client-country-inline/YO_crm`.
 Branch: `codex/client-country-inline`; HEAD/base: `3efa0ad7e42c8f047358c824a3e11495223fe835`.
 Status: PASS_LOCAL_IMPLEMENTATION. Uncommitted local feature; all mandatory independent review roles and supplemental Standards/Spec PASS.
