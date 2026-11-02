@@ -1,4 +1,5 @@
 "use client";
+import {orderCreatedDateLabel} from "../../lib/order-created-date";
 import { OrderContactCopy } from "./order-contact-copy";
 import { OrderImagePreview } from "./order-image-preview";
 import { useMediaQuery } from "@mantine/hooks";
@@ -316,7 +317,7 @@ function OrderDetailsTab({ order, items, taxRole, clientContactActions, composit
       <FieldGrid>
         <Field label={ui.orderNumber} value={orderDisplayNumber(order)} /><Field label={sourceUi.filter} value={sourceLabel(order.orderSource)} />
         <Field label={ui.orderTypeName} value={orderTypeLabel(order.type)} />
-        <Field label={ui.createdAt} value={formatDate(order.createdAt)} />
+        <Field label={ui.createdAt} value={orderCreatedDateLabel(order.createdAt)} />
         <Field label={ui.source} value={orderLabel("source", order.client.source)} />
         <Field label={ui.manager} value={order.responsibleManager?.displayName || ui.notSpecified} />
         <Field label={ui.statusPrefix} value={<CrmStatusBadge domain="sales" status={order.salesStatus} />} />
@@ -327,7 +328,7 @@ function OrderDetailsTab({ order, items, taxRole, clientContactActions, composit
       </FieldGrid>
     </TabCard>
     <TabCard title={ui.clientDetails} action={<CrmButton tone="secondary" size="compact-xs" onClick={onClient}>{ui.openClient}</CrmButton>}>
-      <ClientIdentity order={order} />
+      <ClientIdentity order={order} countryEditor={<ClientContactEditor client={order.client} field="country" role={taxRole??""} label={ui.country} emptyValue={ui.notSpecifiedFeminine} labels={{...orderClientContactUi,save:ui.save,cancel:ui.cancel}} actions={clientContactActions}/>} />
       <SimpleGrid className="orders-client-details-columns" cols={{base:1,sm:2}} spacing="xs"><FieldGrid single>
         <ClientContactEditor client={order.client} field="phone" role={taxRole??""} label={ui.phone} emptyValue={ui.notSpecified} labels={{...orderClientContactUi,save:ui.save,cancel:ui.cancel}} actions={clientContactActions}/>
         <ClientContactEditor client={order.client} field="email" role={taxRole??""} label={ui.email} emptyValue={ui.notSpecified} labels={{...orderClientContactUi,save:ui.save,cancel:ui.cancel}} actions={clientContactActions}/>
@@ -849,7 +850,7 @@ function EmptyState({ text, compact, action }: { text: string; compact?: boolean
 function SummaryMetric({ label, value }: { label: string; value: string }) { return <div className="orders-summary-metric"><small>{label}</small><strong>{value}</strong></div>; }
 function Stage({ icon, label, value }: { icon: string; label: string; value: string }) { return <div><TabIcon name={icon} /><span><strong>{label}</strong><small>{value}</small></span></div>; }
 function MoneyRow({ label, value, currency, strong, tone, onEdit, editLabel }: { label: string; value: number | null; currency: string; strong?: boolean; tone?: "success" | "danger"; onEdit?: () => void; editLabel?: string }) { return <div className={`orders-approved-money${strong ? " is-strong" : ""}${tone ? ` is-${tone}` : ""}`}><span>{label}</span>{onEdit ? <UnstyledButton onClick={onEdit} aria-label={editLabel ?? orderDiscountUi.title}><b><u>{money(value, currency)}</u> ✎</b></UnstyledButton> : <b>{money(value, currency)}</b>}</div>; }
-function ClientIdentity({ order, large }: { order: ExpandedOrderView; large?: boolean }) { return <div className={`orders-client-identity${large ? " is-large" : ""}`}><span className="orders-client-portrait"><TabIcon name="client" /><small>{initials(order.client.displayName)}</small></span><div><span className="orders-copy-value"><strong>{order.client.displayName}</strong><OrderContactCopy value={order.client.displayName} label={ui.clientDetails} identity={order.client.id}/></span><small>{countryLabel(order.client.country) || ui.notSpecifiedFeminine}</small></div></div>; }
+function ClientIdentity({ order, large, countryEditor }: { order: ExpandedOrderView; large?: boolean; countryEditor?: ReactNode }) { return <div className={`orders-client-identity${large ? " is-large" : ""}`}><span className="orders-client-portrait"><TabIcon name="client" /><small>{initials(order.client.displayName)}</small></span><div><span className="orders-copy-value"><strong>{order.client.displayName}</strong><OrderContactCopy value={order.client.displayName} label={ui.clientDetails} identity={order.client.id}/></span>{countryEditor ?? <small>{countryLabel(order.client.country) || ui.notSpecifiedFeminine}</small>}</div></div>; }
 function ItemThumb({ item, order }: { item: ExpandedOrderItem; order: Pick<ExpandedOrderView, "id" | "number"> }) { const image = itemImage(item); return image ? <OrderImagePreview className="orders-item-thumb" src={image} alt={item.name} order={order}/> : <span className="orders-item-thumb is-empty"><TabIcon name="designs" /></span>; }
 
 function OrderImageEditor({ item, order, onImage }: { item: ExpandedOrderItem; order: ExpandedOrderView; onImage: TabCallbacks["onImage"] }) {

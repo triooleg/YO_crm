@@ -1,12 +1,13 @@
 import { nextOrderNumber, legacyOrderNumberAlias } from '../website-orders/website-order-number';
 import type { ClientOrderHistoryPage, ClientOrderHistoryQuery } from './order-client-history';
+import type { SalesStatisticsService } from '../overview/sales-statistics.service';
 import type { TaxesService } from "../taxes/taxes.service";
 import { createMeasurementData, inheritMeasurementDefinition } from "../clients/measurement-data";
 import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
 import {classifyOrderSource,loadOrderSourceMap,matchesOrderSource,persistOrderSourceOverride} from './order-source';
 import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,clientHistoryOrderSelect,normalizeClientHistoryPage,normalizeOrderClientId,requireActiveOrderClient,summarizeClientOrderStatuses,presentClientHistoryOrder,presentClientHistoryCurrencyTotals,type OrderListReadQuery} from './order-list-read-model';
 import { presentInvoice } from "../finance/invoice-number";
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCH
 import { presentClientContact } from "../communications/inbound-routing";
 import { websiteOrderCardFee } from "./website-order-fee";
 import { uploadsRoot } from "../uploads";
-import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDesignNumberDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderSourceDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
+import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderCreatedAtDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDesignNumberDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderSourceDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto } from "./orders.dto";
 import { archiveOrdersTransaction, OrderArchiveError, ORDER_ARCHIVE_ERROR } from "./order-archive";
 import { DELIVERY_ADDRESS_ERROR, DeliveryAddressOperationError, persistOrderDeliveryAddress } from "./order-delivery-address";
 import { changeOrderCurrencyTransaction, OrderCurrencyChangeError } from "./order-currency";
@@ -75,7 +76,7 @@ async function updateProductionStatusGraph(tx: Prisma.TransactionClient, orderId
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService, private readonly exchangeRates: ExchangeRatesService, private readonly taxes?: TaxesService) {}
+  constructor(private readonly prisma: PrismaService, private readonly exchangeRates: ExchangeRatesService, private readonly taxes?: TaxesService, private readonly salesStatistics?: Pick<SalesStatisticsService, 'invalidate'>) {}
 
   async defaults() {
     const [setting, duration, lead] = await Promise.all([
@@ -385,6 +386,33 @@ export class OrdersService {
       return updated;
     });
   }
+  async updateCreatedAt(orderId: string, dto: UpdateOrderCreatedAtDto, actor: User) {
+    if (!["OWNER", "ADMIN", "MANAGER"].includes(actor.role)) throw new ForbiddenException("Недостаточно прав для выполнения действия");
+    for (const value of [dto.createdAt, dto.expectedCreatedAt]) {
+      if (typeof value !== "string" || !/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString() !== value) {
+        throw new BadRequestException("Введите корректную дату создания заказа");
+      }
+    }
+    const saved = await this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({where: {id: orderId, archivedAt: null}});
+      if (!order) throw new NotFoundException("Заказ не найден");
+      if (order.createdAt.toISOString() !== dto.expectedCreatedAt) throw new ConflictException("Дата создания заказа уже изменена. Обновите данные и повторите действие");
+      if (dto.createdAt === dto.expectedCreatedAt) return {id: order.id, createdAt: order.createdAt};
+      // Order numbers are durable identities. Year prefixes are assigned at creation;
+      // correcting a date never renumbers an existing order or changes related dates.
+      const createdAt = new Date(dto.createdAt);
+      const changed = await tx.order.updateMany({where: {id: orderId, archivedAt: null, createdAt: order.createdAt}, data: {createdAt}});
+      if (changed.count !== 1) throw new ConflictException("Дата создания заказа уже изменена. Обновите данные и повторите действие");
+      const before = {createdAt: dto.expectedCreatedAt}, after = {createdAt: dto.createdAt};
+      await tx.activity.create({data: {clientId: order.clientId, orderId, type: "ORDER_CREATED_AT_UPDATED", summary: "Изменена дата создания заказа", metadata: {before, after}}});
+      await tx.auditLog.create({data: {actorId: actor.id, action: "UPDATE", entityType: "Order", entityId: orderId, before, after}});
+      return {id: order.id, createdAt};
+    });
+    if (dto.createdAt !== dto.expectedCreatedAt) this.salesStatistics?.invalidate();
+    return saved;
+  }
+
   async updateDeadline(orderId: string, dto: UpdateOrderDeadlineDto, actor: User) {
     const requiredDeliveryAt = new Date(dto.requiredDeliveryAt);
     return this.prisma.$transaction(async tx => {

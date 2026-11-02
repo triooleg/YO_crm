@@ -4,11 +4,11 @@ import { Select, Group, useMantineTheme } from "@mantine/core";
 import { ordersDashboardUi as ui } from "../../lib/i18n";
 import { countryChoices, countryMatchesPrefix, findCountry } from "../../lib/country-options.mjs";
 
-export function CountrySelect({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+export function CountrySelect({ value, onChange, disabled, withinPortal }: { value: string; onChange: (value: string) => void; disabled?: boolean; withinPortal?: boolean }) {
   const choices = countryChoices(value);
   const controls = useMantineTheme().other.crmControls;
   const selected = findCountry(value);
-  return <Select label={ui.country} searchable clearable disabled={disabled} value={value || null}
+  return <Select comboboxProps={{withinPortal}} label={ui.country} searchable clearable disabled={disabled} value={value || null}
     onChange={next => onChange(next || "")} data={choices} placeholder={ui.countrySearch} nothingFoundMessage={ui.countryNotFound}
     leftSection={selected && <span aria-hidden className={`fi fi-${selected.code}`} />}
     filter={({ options, search }) => options.filter(option => "value" in option && countryMatchesPrefix(choices.find(country => country.value === option.value)!, search))}

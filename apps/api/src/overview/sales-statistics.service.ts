@@ -42,11 +42,19 @@ type ExportSnapshot = { actor: string; role: string; fingerprint: string; snapsh
 
 @Injectable()
 export class SalesStatisticsService {
+  private sourceRevision = 0;
   private source?: Snapshot;
   private reading?: Promise<Snapshot>;
   private readonly fx = new SalesStatisticsFx();
   private readonly exports = new Map<string, ExportSnapshot>();
   constructor(private readonly prisma: PrismaService) {}
+
+  invalidate() {
+    this.sourceRevision++;
+    this.source = undefined;
+    this.reading = undefined;
+    this.exports.clear();
+  }
 
   private permissions(actor: Actor) {
     if (!READ_ROLES.includes(actor.role)) throw new ForbiddenException('Недостаточно прав для статистики продаж');
@@ -55,7 +63,8 @@ export class SalesStatisticsService {
   private async read(now: Date, force = false): Promise<Snapshot> {
     if (!force && this.source && now.getTime() < this.source.at + SOURCE_TTL) return this.source;
     if (this.reading) return this.reading;
-    this.reading = this.prisma.$transaction(async tx => {
+    const revision = this.sourceRevision;
+    const flight = this.prisma.$transaction(async tx => {
       const [orders, payments, expenses, redirects, clients, settings] = await Promise.all([
         batches(cursor => tx.order.findMany({ ...args(cursor), select: orderSelect })),
         batches(cursor => tx.payment.findMany({ ...args(cursor), where: { voidedAt: null }, select: paymentSelect })),
@@ -78,17 +87,24 @@ export class SalesStatisticsService {
       if (cache?.provider !== provider) cache = null;
       return { sources, snapshots: payments.map(payment => payment.exchangeRateSnapshot).filter(Boolean), provider, cache, version: digest({ sources, provider, cache }), at: now.getTime() };
     }, { isolationLevel: 'RepeatableRead', timeout: 30_000, maxWait: 5_000 });
-    try { this.source = await this.reading; return this.source; } finally { this.reading = undefined; }
+    const reading: Promise<Snapshot> = flight.then(snapshot => {
+      if (revision !== this.sourceRevision) return this.read(now, true);
+      this.source = snapshot; return snapshot;
+    }).finally(() => { if (this.reading === reading) this.reading = undefined; });
+    this.reading = reading;
+    return reading;
   }
 
   async report(input: SalesQueryInput, actor: Actor, now = new Date()): Promise<SalesStatisticsReport> {
     const financial = this.permissions(actor), query = normalizeSalesQuery(input, now);
+    const revision = this.sourceRevision;
     const snapshot = await this.read(now, (input as SalesQueryInput & { refresh?: string }).refresh === '1');
     // Official historical HTTP is deliberately outside the database transaction.
     const events = financial ? salesStatisticsValuationEvents(snapshot.sources, query, now) : [];
     const span = Date.parse(query.to) - Date.parse(query.from) + 86_400_000;
     const priority = { from: new Date(Date.parse(query.from) - span).toISOString().slice(0, 10), to: query.to };
     const fx = await this.fx.prepare({ provider: snapshot.provider, currency: query.currency, events, priority, cache: snapshot.cache, snapshots: snapshot.snapshots });
+    if (revision !== this.sourceRevision) throw new ConflictException('Данные статистики изменились. Обновите статистику перед экспортом.');
     const report = buildSalesStatistics(snapshot.sources, query, financial, fx, now);
     const fingerprint = digest(query), version = digest({ snapshot: snapshot.version, fx: fx.version, query, actor: actor.id, role: actor.role });
     report.valuationVersion = version;

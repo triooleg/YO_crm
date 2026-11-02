@@ -99,3 +99,40 @@ test('real controller preserves session/roles guards, validated query and CSV re
   assert.equal(headers['Content-Type'], 'text/csv; charset=utf-8'); assert.match(headers['Content-Disposition'], /sales-statistics.csv/);
   assert.match(sent, /'=/); // formula-like client labels remain inert CSV text when client tab is exported.
 });
+
+test('created date invalidation immediately moves the statistics cohort without rewriting historical receipts', async () => {
+  const { SalesStatisticsService } = load('overview/sales-statistics.service.ts');
+  const {db,dataset}=database(),service=new SalesStatisticsService(db);
+  const before=await service.report(query,actor,NOW);assert.equal(before.current.orders,1);
+  const paymentBefore=JSON.stringify(dataset.payment);dataset.order[0].createdAt=date('2025-03-02T10:00:00Z');
+  service.invalidate();
+  const after=await service.report(query,actor,NOW);assert.equal(after.current.orders,0);assert.equal(after.current.receivedMinor,before.current.receivedMinor);assert.equal(JSON.stringify(dataset.payment),paymentBefore);
+  assert.throws(()=>service.export({...query,valuationVersion:before.valuationVersion},actor,NOW),/Обновите статистику/);
+});
+
+test('an in-flight statistics snapshot cannot repopulate the cache after created date invalidation', async () => {
+  const {SalesStatisticsService}=load('overview/sales-statistics.service.ts');
+  const {db,dataset}=database();const transaction=db.$transaction;let release,started;
+  const ready=new Promise(ok=>{started=ok}),gate=new Promise(ok=>{release=ok});let first=true;
+  db.$transaction=async(...args)=>{const snapshot=await transaction(...args);if(first){first=false;started();await gate}return snapshot};
+  const service=new SalesStatisticsService(db),pending=service.report(query,actor,NOW);await ready;
+  dataset.order[0].createdAt=date('2025-03-02T10:00:00Z');service.invalidate();
+  assert.equal((await service.report(query,actor,NOW)).current.orders,0);release();
+  await assert.rejects(pending,error=>error.getStatus()===409);assert.equal((await service.report(query,actor,NOW)).current.orders,0);
+});
+
+test('FX paused before mutation cannot publish or re-register an obsolete CSV token', async () => {
+  const {SalesStatisticsService}=load('overview/sales-statistics.service.ts');
+  const {SalesStatisticsFx}=load('overview/sales-statistics-fx.ts');
+  const {db,dataset}=database(),service=new SalesStatisticsService(db);
+  const previous=await service.report(query,actor,NOW),prepare=SalesStatisticsFx.prototype.prepare;let release,started;
+  const ready=new Promise(ok=>{started=ok}),gate=new Promise(ok=>{release=ok});
+  SalesStatisticsFx.prototype.prepare=async function(...args){const result=await prepare.apply(this,args);started();await gate;return result};
+  try{
+    const pending=service.report(query,actor,NOW);await ready;
+    dataset.order[0].createdAt=date('2025-03-02T10:00:00Z');service.invalidate();release();
+    await assert.rejects(pending,error=>error.getStatus()===409);
+    assert.throws(()=>service.export({...query,valuationVersion:previous.valuationVersion},actor,NOW),/Обновите статистику/);
+  }finally{release();SalesStatisticsFx.prototype.prepare=prepare}
+  assert.equal((await service.report(query,actor,NOW)).current.orders,0);
+});

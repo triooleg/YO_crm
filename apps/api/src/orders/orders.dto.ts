@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, IsUUID, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsIn, IsOptional, IsPositive, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import { Transform, Type } from "class-transformer";
 import { Discipline, OrderType, PaymentMethod, ProductionStatus, SalesStatus } from "@prisma/client";
 import { CreateMeasurementDto } from "../clients/clients.dto";
@@ -196,4 +196,10 @@ export class VoidOrderPaymentDto {
 
 export class OrderMeasurementDto extends CreateMeasurementDto {
   @ApiPropertyOptional() @IsOptional() @IsString() expectedMeasurementId?: string;
+}
+
+/** Canonical UTC instants; the UI changes the calendar day, retaining the time. */
+export class UpdateOrderCreatedAtDto {
+  @ApiProperty() @IsDateString({strict:true}) @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) createdAt!: string;
+  @ApiProperty() @IsDateString({strict:true}) @Matches(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) expectedCreatedAt!: string;
 }

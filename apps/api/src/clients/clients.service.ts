@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Discipline, Prisma, type AiMode, type User } from "@prisma/client";
+import type { SalesStatisticsService } from '../overview/sales-statistics.service';
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto, UpdateAthleteDto } from "./clients.dto";
@@ -14,7 +15,7 @@ function comparablePhone(value?:string|null){return value?.replace(/\D/g,"")||""
 
 @Injectable()
 export class ClientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly salesStatistics?: Pick<SalesStatisticsService, 'invalidate'>) {}
 
   async list(search?: string, period?: string) {
     if (period !== undefined && period !== "" && (typeof period !== "string" || !/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(period))) {
@@ -282,7 +283,8 @@ export class ClientsService {
     });
   }
   async updateProfile(id:string,dto:{displayName:string;country?:string|null;language?:string|null;phone?:string|null;email?:string|null;expectedUpdatedAt:string},actor:User){
-    return this.prisma.$transaction(async tx=>{
+    let countryChanged=false;
+    const saved=await this.prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
       await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${id} FOR UPDATE`;
@@ -298,8 +300,11 @@ export class ClientsService {
       if(!client)throw new NotFoundException("Клиент не найден");
       await tx.activity.create({data:{clientId:id,type:"CLIENT_PROFILE_UPDATED",summary:"Изменены данные клиента"}});
       await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{displayName:before.displayName,country:before.country,language:before.language,phone:before.phone,email:before.email},after:{displayName:client.displayName,country:client.country,language:client.language,phone:client.phone,email:client.email}}});
+      countryChanged=before.country!==client.country;
       return presentClientContact(client);
     });
+    if(countryChanged)this.salesStatistics?.invalidate();
+    return saved;
   }
 
   async addAthlete(clientId: string, dto: CreateAthleteDto, actor: User) {

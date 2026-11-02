@@ -1,3 +1,47 @@
+## 2026-11-02 — 0.13.4 deployment authorized (preparation)
+
+Owner explicitly requested deployment of the reviewed country/date editors.
+Scoped commit/push is authorized by the standing GitHub-with-deployment request.
+Product version0.13.4 agrees in root/changelog/first UI journal. Rebuild both API
+and web; retain PostgreSQL/Redis, existing proxy, guards and backup/retention
+owners. No migration, seed, production restore or test payment/order writes.
+Fresh baseline0.13.3 snapshot075c328a0f639046c9665b5496a9dd351fca9f37678c1c4443ac586e3d7c3bea;
+API db36c902243f / web559935ee8147, all4healthy, sufficient disk. Private bundle
+preparation `.local/country-date-deploy`; frozen quality, backup/drill, exact
+artifact and installed reviews required. User confirmed stale0.12.11 was an old
+browser tab; refresh shows current version. No automatic forced page refresh.
+
+## 2026-11-02 — Client country and order creation date (local implementation history)
+
+Owner added these requests while the frozen finance deployment was running.
+Implemented and independently reviewed in `codex/client-country-inline` from
+`3efa0ad7`, then the INTEGRATOR copied the exact verified 20 source/test files
+plus evidence into this finance worktree after documentation commit `6ee59f7`.
+No conflicting source or unrelated dirty changes were overwritten. Feature
+remains uncommitted and NOT deployed; production is still exact0.13.3 below.
+
+Client country (present or empty) opens the existing searchable Mantine country
+catalogue, saves through the existing client PATCH/RBAC/CAS/audit, and refreshes
+same-client rows without a page reload. Shipping/address country is untouched.
+Order list created date opens a Mantine calendar and guarded timestamp PATCH;
+strict UTC, expected old date, active-order CAS, audit/activity and Kyiv/DST
+handling apply. Correcting a date preserves order number and all payment,
+production and shipment dates/statuses. Statistics source/export caches are
+invalidated after committed country/date changes; a stale pending DB/FX report
+cannot register an obsolete CSV receipt.
+
+Compatibility/Standards/Spec, business/security, regression and visual reviews
+PASS, including 1920/1366/390 viewport overlays, keyboard/cancel/focus and a row
+leaving the current period filter. Source worktree pinned quality exit0:
+API2286PASS/79optionalSKIP, web823PASS/29optionalSKIP, database28PASS, both
+builds/typechecks. Integrated full quality also PASS, exit0: API2287PASS/78SKIP,
+web823PASS/29SKIP, database28PASS — 3138PASS/107optionalSKIP/0FAIL; typechecks
+and both builds passed with the isolated PGlite check enabled. Final local
+release gate PASS_LOCAL_IMPLEMENTATION; 20/20 source hashes still match. See
+`docs/release-evidence/client-country-created-date-local-2026-11-02.md` and the
+ignored feature artifacts for evidence. No feature version bump, commit/push or
+production mutation.
+
 ## 2026-11-02 — 0.13.3 installed finance loading optimization
 
 Authorized API/web deployment completed from source commit
@@ -16,9 +60,8 @@ scope. VERSION GUARDIAN INSTALLED and final RELEASE INSTALLED both PASS for
 the exact unchanged images/snapshot. Documentation-only publication follows.
 
 Later user requests (clickable client country and order creation-date editor)
-are being implemented uncommitted in the isolated `client-country-inline`
-worktree. They are NOT included in this frozen production release. Do not mix
-their pending reviews with the finance installed identity.
+are implemented locally as described above. They are NOT included in this frozen
+production release. Do not mix their source with the finance installed identity.
 
 ## 2026-11-02 — 0.13.3 deployment preparation (historical)
 
