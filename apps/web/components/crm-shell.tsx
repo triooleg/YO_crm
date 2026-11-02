@@ -21,27 +21,42 @@ import { CrmSearchField } from "./crm/search-field";
 import { CrmAvatar } from "./crm/avatar";
 import { CrmMenu } from "./crm/menu";
 import { CrmLoadingState } from "./crm/loading-state";
+import { beforeFinanceNavigation, invalidateFinanceRequests } from "../lib/finance-request-coordinator";
+import { createVisibilityPolling } from "../lib/visibility-polling";
 import { applyUnreadBrowserState, createUnreadRequestGuard, unreadBadgeText } from "../lib/unread-browser-state";
 
 const items=[["overview",navigationUi.overview,"⌂"],["inbox",navigationUi.inbox,"✉"],["clients",navigationUi.clients,"●"],["orders",navigationUi.orders,"▣"],["production",navigationUi.production,"⚙"],["finance",navigationUi.finance,"₴"],["shipping",navigationUi.shipping,"➜"],["tasks",navigationUi.tasks,"✓"],["settings",navigationUi.settings,"☰"]] as const;
 const topbarItems = [items[0], items[1], items[3], items[4], items[5], items[7], items[8]];
 
+type AuthUser = { id:string; email:string; displayName:string; role:string };
+
 type Lead = { id:string; displayName:string; country?:string; phone?:string; instagram?:string; source?:string; status?:string; createdAt?:string };
 type WebsiteOrderNotice = { id:string; number:string; paymentStatus:string; priceMinor:number; currency:string; websiteNoticeAt:string; client:{displayName:string} };
 
 export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSectionId}){
-  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|{email:string;displayName:string;role:string}>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
+  const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|AuthUser>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
   const [routeVersion,setRouteVersion]=useState(0);
   const routeSequence=useRef(0),committedRoute=useRef({section:initialSectionId,href:typeof window==="undefined"?"/":`${window.location.pathname}${window.location.search}${window.location.hash}`});
   const [inboxSearch,setInboxSearch]=useState(""),[inboxUnreadRequest,setInboxUnreadRequest]=useState(0),[unreadCount,setUnreadCount]=useState(0),[unreadState,setUnreadState]=useState<"loading"|"ready"|"unavailable">("loading");
   const [websiteUnreadCount,setWebsiteUnreadCount]=useState(0);
   const authSequence=useRef(0),unreadRequests=useRef(createUnreadRequestGuard()),websiteNoticeRequests=useRef(createUnreadRequestGuard()),shownWebsiteNotices=useRef(new Set<string>()),baseBrowserTitle=useRef("CRM Yoleotard"),inboxBeforeLeave=useRef<null|(()=>Promise<boolean>)>(null);
+  const unreadPolling=useRef<ReturnType<typeof createVisibilityPolling>|null>(null),websitePolling=useRef<ReturnType<typeof createVisibilityPolling>|null>(null);
+  const refreshUnreadCount=()=>unreadPolling.current?.refresh();
+  const refreshWebsiteNotifications=(delay=0)=>websitePolling.current?.refresh(delay);
+  const authIdentity=useRef<{id:string;role:string}|null>(null);
+  const applyAuth=(next:false|AuthUser,forceInvalidate=false)=>{
+    const previous=authIdentity.current,nextIdentity=next?{id:next.id,role:next.role}:null;
+    if(forceInvalidate||previous?.id!==nextIdentity?.id||previous?.role!==nextIdentity?.role)invalidateFinanceRequests();
+    authIdentity.current=nextIdentity;
+    setAuth(next);
+  };
   const branding=useBranding(Boolean(auth));
-  const verifyAuth=()=>{const sequence=++authSequence.current;return fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(sequence!==authSequence.current)return;if(r.status===401||r.status===403){setAuth(false);setAuthError("");return}if(!r.ok)throw new Error();const x=await r.json();if(sequence!==authSequence.current)return;setAuth(x.user);setAuthError("")}).catch(()=>{if(sequence===authSequence.current)setAuthError(authUi.checkError)})};
-  useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
+  const verifyAuth=()=>{const sequence=++authSequence.current;return fetch("/api/auth/me",{credentials:"include"}).then(async r=>{if(sequence!==authSequence.current)return;if(r.status===401||r.status===403){applyAuth(false,true);setAuthError("");return}if(!r.ok)throw new Error();const x=await r.json();if(sequence!==authSequence.current)return;applyAuth(x.user);setAuthError("")}).catch(()=>{if(sequence===authSequence.current)setAuthError(authUi.checkError)})};
+  useEffect(()=>{void verifyAuth();const timer=window.setInterval(verifyAuth,60_000),focus=()=>void verifyAuth(),changed=()=>{invalidateFinanceRequests();authSequence.current++;void verifyAuth()};window.addEventListener("focus",focus);window.addEventListener("yoleotard-auth-changed",changed);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("yoleotard-auth-changed",changed)}},[]);
+  const authUserId=auth?auth.id:null,authRole=auth?auth.role:null;
   const authenticated=Boolean(auth),unreadAllowed=!!auth&&["OWNER","ADMIN","MANAGER"].includes(auth.role);
-  const refreshUnreadCount=()=>{const request=unreadRequests.current.begin();return fetch("/api/communications/unread-count",{credentials:"include"}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {unreadCount?:number};if(!unreadRequests.current.isCurrent(request))return;if(!Number.isSafeInteger(data.unreadCount)||data.unreadCount! < 0)throw new Error();setUnreadCount(data.unreadCount!);setUnreadState("ready")}).catch(()=>{if(unreadRequests.current.isCurrent(request))setUnreadState("unavailable")})};
-  useEffect(()=>{if(!authenticated||!unreadAllowed){unreadRequests.current.invalidate();setUnreadCount(0);setUnreadState(authenticated?"unavailable":"loading");return}void refreshUnreadCount();const timer=window.setInterval(refreshUnreadCount,5000),focus=()=>void refreshUnreadCount();window.addEventListener("focus",focus);return()=>{unreadRequests.current.invalidate();window.clearInterval(timer);window.removeEventListener("focus",focus)}},[authenticated,unreadAllowed]);
+  const pollUnreadCount=()=>{const request=unreadRequests.current.begin();return fetch("/api/communications/unread-count",{credentials:"include"}).then(async response=>{if(!response.ok)throw new Error();const data=await response.json() as {unreadCount?:number};if(!unreadRequests.current.isCurrent(request))return;if(!Number.isSafeInteger(data.unreadCount)||data.unreadCount! < 0)throw new Error();setUnreadCount(data.unreadCount!);setUnreadState("ready")}).catch(()=>{if(unreadRequests.current.isCurrent(request))setUnreadState("unavailable");return false})};
+  useEffect(()=>{if(!authenticated||!unreadAllowed){unreadRequests.current.invalidate();setUnreadCount(0);setUnreadState(authenticated?"unavailable":"loading");return}const polling=createVisibilityPolling(pollUnreadCount);unreadPolling.current=polling;return()=>{unreadRequests.current.invalidate();polling.stop();unreadPolling.current=null}},[authenticated,unreadAllowed,authUserId,authRole]);
   useEffect(()=>{if(typeof document==="undefined")return;baseBrowserTitle.current=document.title||baseBrowserTitle.current;return applyUnreadBrowserState(unreadState==="ready"?unreadCount:0,baseBrowserTitle.current)},[unreadCount,unreadState]);
 
   const registerInboxBeforeLeave=useCallback((handler:(()=>Promise<boolean>)|null)=>{inboxBeforeLeave.current=handler},[]);
@@ -54,6 +69,7 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
     }
     if(sequence!==routeSequence.current)return;
     const href=createCrmNavigationHref(next,window.location.search,context);
+    beforeFinanceNavigation(sectionId,next);
     window.history.pushState(null,"",href);committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
   };
   const reviewWebsiteNotice=async(orderId:string)=>{
@@ -64,15 +80,16 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
       await refreshWebsiteNotifications();
     }catch{
       shownWebsiteNotices.current.delete(orderId);
-      window.setTimeout(()=>void refreshWebsiteNotifications(),1000);
+      refreshWebsiteNotifications(1000);
     }
   };
-  const refreshWebsiteNotifications=()=>{
+  const pollWebsiteNotifications=()=>{
     const request=websiteNoticeRequests.current.begin();
     return fetch("/api/orders/website-notifications",{credentials:"include"}).then(async response=>{
       if(!response.ok)throw new Error();
       const data=await response.json() as {unreadCount?:number;items?:WebsiteOrderNotice[]};
-      if(!websiteNoticeRequests.current.isCurrent(request)||!Number.isSafeInteger(data.unreadCount)||data.unreadCount!<0||!Array.isArray(data.items))return;
+      if(!websiteNoticeRequests.current.isCurrent(request))return;
+      if(!Number.isSafeInteger(data.unreadCount)||data.unreadCount!<0||!Array.isArray(data.items))throw new Error();
       setWebsiteUnreadCount(data.unreadCount!);
       for(const notice of data.items){
         if(shownWebsiteNotices.current.has(notice.id))continue;
@@ -88,12 +105,12 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
           onClose:()=>void reviewWebsiteNotice(notice.id),
         });
       }
-    }).catch(()=>{});
+    }).catch(()=>false);
   };
   useEffect(()=>{
     if(!authenticated||!unreadAllowed){websiteNoticeRequests.current.invalidate();shownWebsiteNotices.current.clear();setWebsiteUnreadCount(0);return;}
-    void refreshWebsiteNotifications();const timer=window.setInterval(refreshWebsiteNotifications,5000),focus=()=>void refreshWebsiteNotifications();window.addEventListener("focus",focus);return()=>{websiteNoticeRequests.current.invalidate();window.clearInterval(timer);window.removeEventListener("focus",focus)};
-  },[authenticated,unreadAllowed]);
+    const polling=createVisibilityPolling(pollWebsiteNotifications);websitePolling.current=polling;return()=>{websiteNoticeRequests.current.invalidate();polling.stop();websitePolling.current=null};
+  },[authenticated,unreadAllowed,authUserId,authRole]);
   useEffect(()=>{
     const sync=()=>{
       const href=`${window.location.pathname}${window.location.search}${window.location.hash}`,next=parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined),sequence=++routeSequence.current,previous=committedRoute.current;
@@ -104,6 +121,7 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
           if(!saved){window.history.replaceState(window.history.state,"",previous.href);return}
         }
         if(sequence!==routeSequence.current)return;
+        beforeFinanceNavigation(previous.section,next);
         committedRoute.current={section:next,href};setSectionId(next);
         if(previous.section!=="overview"||next!=="overview")setRouteVersion(value=>value+1);
       })();
@@ -112,11 +130,11 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
   },[]);
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:<CrmLoadingState label={authUi.loading}/>}</main>;
-  if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;setAuth(user);setAuthError("")}}/>;
+  if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;applyAuth(user,true);setAuthError("")}}/>;
   const updateGlobalSearch=(value:string)=>{setInboxSearch(value);if(sectionId!=="inbox")navigate("inbox")};
   const showUnread=()=>{if(sectionId!=="inbox")navigate("inbox");setInboxUnreadRequest(value=>value+1)};
   const adjustUnreadCount=(delta:number)=>{unreadRequests.current.invalidate();setUnreadCount(current=>Math.max(0,current+delta))};
-  const logout=async()=>{authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;setAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}};
+  const logout=async()=>{invalidateFinanceRequests();authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;applyAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}};
   const unreadDescription=unreadState==="ready"?(unreadCount?`${communicationsUi.unreadMessages}: ${unreadCount}`:communicationsUi.unreadChats):unreadState==="loading"?communicationsUi.unreadLoading:communicationsUi.unreadUnavailable;
   return <main className="crm-shell inbox-reference-shell">
     <header className="crm-topbar">
@@ -126,7 +144,7 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
       <button type="button" className={`crm-topbar-notifications${unreadState==="ready"&&unreadCount>0?" has-unread":""}`} aria-label={unreadDescription} title={unreadDescription} onClick={showUnread} disabled={!unreadAllowed} aria-busy={unreadState==="loading"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5Zm5 3h4"/></svg>{(unreadState==="ready"?unreadCount>0:unreadState==="unavailable"&&unreadAllowed)&&<span className="crm-topbar-notification-badge" aria-hidden="true">{unreadState==="ready"?unreadBadgeText(unreadCount):"?"}</span>}</button>
       <div className="crm-topbar-user"><CrmAvatar className="crm-topbar-avatar" size={36} name={auth.displayName}/><div className="crm-topbar-user-info"><strong>{auth.displayName}</strong><small>{navigationUi.userRoles[auth.role as keyof typeof navigationUi.userRoles]||navigationUi.unknownRole}</small></div><CrmMenu className="crm-profile-menu-trigger" label={navigationUi.profileMenu} items={[{label:navigationUi.settings,onClick:()=>navigate("settings")},{label:navigationUi.version,onClick:()=>setReleaseHistoryOpen(true)},{label:authUi.logout,onClick:()=>void logout()}]}/></div>
     </header>
-    <section className="crm-content" key={`${sectionId}-${routeVersion}`}>{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="overview"?<OverviewWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="clients"?<ClientWorkspace onNavigate={next=>void navigate(next)}/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} onRegisterBeforeLeave={registerInboxBeforeLeave} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined} onUnreadDelta={adjustUnreadCount} onUnreadRefresh={()=>void refreshUnreadCount()}/>:sectionId==="orders"?<OrdersDashboard role={auth.role} onNavigate={navigate} onWebsiteOrderReviewed={()=>void refreshWebsiteNotifications()}/>:sectionId==="production"?<ProductionWorkspace role={auth.role} onOpenOrder={orderId=>void navigate("orders",{orderId})} onCreateOrder={()=>void navigate("orders",{action:"new-order"})}/>:sectionId==="finance"?<FinanceWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace role={auth.role}/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
+    <section className="crm-content" key={`${auth.id}-${auth.role}-${sectionId}-${routeVersion}`}>{authError&&<div className="phase2-error" role="alert">{authError}</div>}{sectionId==="overview"?<OverviewWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="clients"?<ClientWorkspace onNavigate={next=>void navigate(next)}/>:sectionId==="inbox"?<CommunicationsWorkspace onNavigate={navigate} onRegisterBeforeLeave={registerInboxBeforeLeave} searchQuery={inboxSearch} onSearchChange={setInboxSearch} unreadRequest={inboxUnreadRequest} businessLogoUrl={branding.useInMessages?branding.logoUrl:undefined} onUnreadDelta={adjustUnreadCount} onUnreadRefresh={()=>void refreshUnreadCount()}/>:sectionId==="orders"?<OrdersDashboard role={auth.role} onNavigate={navigate} onWebsiteOrderReviewed={()=>void refreshWebsiteNotifications()}/>:sectionId==="production"?<ProductionWorkspace role={auth.role} onOpenOrder={orderId=>void navigate("orders",{orderId})} onCreateOrder={()=>void navigate("orders",{action:"new-order"})}/>:sectionId==="finance"?<FinanceWorkspace role={auth.role} onNavigate={navigate}/>:sectionId==="shipping"?<ShippingWorkspace/>:sectionId==="tasks"?<TasksWorkspace role={auth.role}/>:sectionId==="settings"?<SettingsWorkspace role={auth.role}/>:<ComingSoon name={section}/>}</section>
     <ReleaseHistoryDialog opened={releaseHistoryOpen} onClose={()=>setReleaseHistoryOpen(false)}/>
   </main>
 }
@@ -145,7 +163,7 @@ function ReleaseHistoryDialog({opened,onClose}:{opened:boolean;onClose:()=>void}
   return <Modal opened={opened} onClose={onClose} centered size={760} padding={0} radius={18} overlayProps={{color:"#241a33",backgroundOpacity:.36,blur:1}} closeButtonProps={{"aria-label":releaseHistoryUi.close}} classNames={{content:"crm-release-dialog",header:"crm-release-header",title:"crm-release-title",close:"crm-release-close",body:"crm-release-list"}} title={<span><small>{releaseHistoryUi.subtitle}</small><strong>{releaseHistoryUi.title}</strong></span>}>{releaseHistoryUi.releases.map(release=>{const isExpanded=expandedVersions.has(release.version),detailsId=`crm-release-${release.version.replaceAll(".","-")}`;return <article className={`${release.version===currentVersion?"current":""}${isExpanded?" expanded":" collapsed"}`} key={release.version}><button type="button" className="crm-release-heading" aria-expanded={isExpanded} aria-controls={detailsId} aria-label={`${isExpanded?releaseHistoryUi.collapseVersion:releaseHistoryUi.expandVersion} CRM v${release.version}`} onClick={()=>toggleVersion(release.version)}><h3>CRM v{release.version}</h3><time>{release.date}</time>{release.version===currentVersion&&<span>{releaseHistoryUi.current}</span>}<i aria-hidden="true">⌄</i></button>{isExpanded&&<div className="crm-release-details" id={detailsId}><h4>{releaseHistoryUi.changes}</h4><ul>{release.changes.map(change=><li key={change}>{change}</li>)}</ul><h4>{releaseHistoryUi.compatibility}</h4><p>{release.compatibility}</p>{release.version===currentVersion&&<small>{releaseHistoryUi.commit}: <code>{commit}</code></small>}</div>}</article>})}</Modal>;
 }
 
-function CrmLogin({onSuccess}:{onSuccess:(user:{email:string;displayName:string;role:string})=>void}){
+function CrmLogin({onSuccess}:{onSuccess:(user:AuthUser)=>void}){
   const[error,setError]=useState(""),[submitting,setSubmitting]=useState(false);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setError("");setSubmitting(true);try{const f=new FormData(e.currentTarget),r=await fetch("/api/auth/login",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:f.get("email"),password:f.get("password")})});if(!r.ok){setError(authUi.invalid);return}const x=await r.json();onSuccess(x.user)}catch{setError(authUi.networkError)}finally{setSubmitting(false)}}
   return <main className="phase2-login"><form onSubmit={submit}><div className="phase2-logo">Y</div><h1>{authUi.title}</h1><p>{authUi.subtitle}</p><label>{authUi.login}<input name="email" type="email" autoComplete="username" required/></label><label>{authUi.password}<input name="password" type="password" autoComplete="current-password" minLength={8} required/></label>{error&&<div className="phase2-error" role="alert">{error}</div>}<button className="phase2-primary" disabled={submitting}>{submitting?authUi.submitting:authUi.submit}</button></form></main>

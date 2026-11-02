@@ -2,9 +2,10 @@ import { moneyLabel, comparisonPercent, type FinanceReport } from './finance-rep
 import { taxIntegrationFinanceUi as ui } from './i18n';
 
 /** Presentation only: all monetary totals and completeness come from the server. */
-export function fiscalReceiptConfirmationCount(report: Pick<FinanceReport,'fiscal'>): number {
+export function fiscalReceiptConfirmationCount(report: Pick<FinanceReport,'fiscal'|'projection'|'receiptConfirmationCount'>): number {
   const fiscal=report.fiscal;
   if(!fiscal?.current.incomplete)return 0;
+  if(report.projection==='summary'&&Number.isSafeInteger(report.receiptConfirmationCount)&&report.receiptConfirmationCount!>=0)return report.receiptConfirmationCount!;
   return new Set(fiscal.rows.filter(row=>row.period===fiscal.current.month&&row.source==='PENDING'&&row.status==='RECEIPT_CONFIRMATION_REQUIRED'&&row.paymentId).map(row=>row.paymentId)).size;
 }
 

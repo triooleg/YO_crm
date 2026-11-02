@@ -10,7 +10,7 @@ type Order = { id: string; number: string; clientId: string; client: { displayNa
 type Expense = { id: string; categoryId: string; category: { name: string }; amountMinor: number; currency: string; incurredAt: DateValue; orderId?: string | null; order?: { number: string } | null; notes?: string | null; archivedAt?: DateValue | null; orderShipment?: { id: string } | null };
 type Invoice = { id: string; number: string; orderId: string; order: { number: string; clientId: string; client: { displayName: string } }; issueDate: DateValue; dueDate?: DateValue | null; totalMinor: number; currency: string; status: string; archivedAt?: DateValue | null };
 export type FinanceReportSources = { orderSources?: Record<string,OrderSource>; orders: Order[]; payments: Payment[]; expenses: Expense[]; invoices: Invoice[]; categories: { id: string; name: string; active?: boolean }[] };
-export type FinanceReportQuery = { source?: string; month?: string; currency?: string; range?: number; tab?: string; taxComponent?: 'UNIFIED'|'MILITARY'|'ESV'; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
+export type FinanceReportQuery = { projection?: 'summary' | 'full'; source?: string; month?: string; currency?: string; range?: number; tab?: string; taxComponent?: 'UNIFIED'|'MILITARY'|'ESV'; page?: number; pageSize?: number; search?: string; status?: string; clientId?: string; categoryId?: string; orderId?: string; from?: string; to?: string; sort?: string; direction?: string; scope?: string; valuationVersion?: string };
 export type FinanceValuation = { provider: string; cache: ExchangeRateCache | null };
 
 const ISO_CURRENCIES = ["EUR", "USD", "UAH"];
@@ -45,6 +45,7 @@ export function assertValuationVersion(query: FinanceReportQuery, valuation: Fin
 }
 
 export function normalizeFinanceQuery(query: FinanceReportQuery, now = new Date()) {
+  if (query.projection !== undefined && !['summary', 'full'].includes(query.projection)) throw new BadRequestException('Недопустимая проекция отчёта');
   const month = query.month || financeBusinessDay(now).slice(0, 7), currency = query.currency || "EUR", range = Number(query.range ?? 6), page = Number(query.page ?? 1), pageSize = Number(query.pageSize ?? 10), tab = query.tab || "payments";
   if (!/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException("Выберите корректный месяц отчёта");
   if (!ISO_CURRENCIES.includes(currency) || ![3, 6, 12].includes(range)) throw new BadRequestException("Недопустимая валюта или период отчёта");

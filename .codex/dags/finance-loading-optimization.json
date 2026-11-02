@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "task": {
+    "id": "finance-loading-optimization",
+    "title": "Six finance loading improvements",
+    "base_ref": "fca28920b448af55c4547eee228a815fcfe1fa68",
+    "no_commit_reason": "Superseded: owner explicitly authorized deployment and standing GitHub publication; scoped source commit/push now authorized.",
+    "deployment": "AUTHORIZED_PREPARATION_0.13.3_NOT_YET_APPLIED",
+    "evidence": "docs/plans/finance-loading-optimization.md",
+    "review_results": {
+      "compatibility": "PASS",
+      "spec": "PASS",
+      "standards": "PASS",
+      "business": "PASS",
+      "visual": "PASS_LOCAL_CHROMIUM",
+      "regression": "PASS",
+      "release": "PASS_LOCAL_IMPLEMENTATION"
+    },
+    "validation": {
+      "quality": "PASS",
+      "passed": 3126,
+      "optionalSkipped": 105,
+      "failed": 0,
+      "browserPassed": 8,
+      "viewports": [
+        1920,
+        1366,
+        390
+      ],
+      "productionCandidate": "NOT_DEPLOYED",
+      "commit": "AUTHORIZED"
+    },
+    "local_acceptance": "READY_FOR_OWNER_REVIEW"
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "status": "DONE",
+      "agent": "COMPATIBILITY",
+      "kind": "analysis",
+      "title": "scope",
+      "description": "Compatibility impact map and safe source-cache seam; PASS before implementation.",
+      "depends_on": [],
+      "affected_paths": [
+        "apps/api/src/finance",
+        "apps/web/components/finance-workspace.tsx",
+        "apps/web/components/overview-workspace.tsx",
+        "apps/web/components/crm-shell.tsx"
+      ],
+      "required": true
+    },
+    {
+      "id": "backend",
+      "status": "DONE",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "title": "backend source cache",
+      "description": "Isolated finance-raw-cache-worker worktree; uncommitted owned patch integrated only by parent INTEGRATOR.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/api/src/finance/finance-report.service.ts",
+        "apps/api/src/finance/finance-source-cache.ts",
+        "apps/api/src/finance/finance-report.dto.ts",
+        "apps/api/src/finance/finance-report-model.ts",
+        "apps/api/tests/finance-source-cache.test.mjs"
+      ],
+      "required": true
+    },
+    {
+      "id": "polling",
+      "status": "DONE",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "title": "visibility polling",
+      "description": "Isolated point6-visibility-polling worktree; owned uncommitted patch integrated by parent INTEGRATOR.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/web/components/crm-shell.tsx",
+        "apps/web/lib/visibility-polling.ts",
+        "apps/web/tests/visibility-polling.test.mjs",
+        "apps/web/tests/auth-workspace.test.mjs",
+        "apps/web/tests/navigation-contract.test.mjs"
+      ],
+      "required": true
+    },
+    {
+      "id": "integration",
+      "status": "DONE",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "title": "progressive frontend and integration",
+      "description": "Parent owns financial request coordinator, summary-first consumers, tests and final integration; no merges or commits.",
+      "depends_on": [
+        "backend",
+        "polling"
+      ],
+      "affected_paths": [
+        "apps/web/components/finance-workspace.tsx",
+        "apps/web/components/overview-workspace.tsx",
+        "apps/web/lib/finance-request-coordinator.ts",
+        "apps/web/lib/finance-report.ts",
+        "apps/web/lib/finance-tax-integration.ts",
+        "CHAT_HANDOFF.md"
+      ],
+      "required": true
+    },
+    {
+      "id": "compatibility",
+      "status": "DONE",
+      "agent": "COMPATIBILITY",
+      "kind": "review",
+      "title": "final compatibility",
+      "depends_on": [
+        "integration"
+      ],
+      "affected_paths": [],
+      "required": true
+    },
+    {
+      "id": "regression",
+      "status": "DONE",
+      "agent": "REGRESSION",
+      "kind": "review",
+      "title": "regression and full quality",
+      "depends_on": [
+        "integration"
+      ],
+      "affected_paths": [],
+      "required": true
+    },
+    {
+      "id": "business",
+      "status": "DONE",
+      "agent": "BUSINESS",
+      "kind": "review",
+      "title": "business and security",
+      "depends_on": [
+        "integration"
+      ],
+      "affected_paths": [],
+      "required": true
+    },
+    {
+      "id": "visual",
+      "status": "DONE",
+      "agent": "VISUAL",
+      "kind": "review",
+      "title": "responsive browser review",
+      "depends_on": [
+        "integration"
+      ],
+      "affected_paths": [],
+      "required": true
+    },
+    {
+      "id": "release",
+      "status": "DONE",
+      "agent": "RELEASE",
+      "kind": "review",
+      "title": "local acceptance gate",
+      "depends_on": [
+        "compatibility",
+        "regression",
+        "business",
+        "visual"
+      ],
+      "affected_paths": [],
+      "required": true
+    }
+  ]
+}

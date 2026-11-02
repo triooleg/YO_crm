@@ -1,4 +1,5 @@
 "use client";
+import { financeRequest } from '../lib/finance-request-coordinator';
 import { OrderImagePreview } from "./orders/order-image-preview";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Avatar, Badge, Button, Checkbox, Loader, MantineProvider, SegmentedControl, Select, Tooltip, UnstyledButton } from '@mantine/core';
@@ -17,7 +18,7 @@ import { OverviewBarChart, OverviewFinanceLegend, OverviewStatusChart, OverviewS
 
 type Panel<T>={data:T|undefined;loading:boolean;error:string;retry:()=>void};
 /** Each overview domain owns its request, cancellation and retry independently. */
-function useOverviewPanel<T>(url:string|null):Panel<T>{
+function useOverviewPanel<T>(url:string|null,scope='overview'):Panel<T>{
  const [state,setState]=useState<{url:string|null;data:T|undefined;loading:boolean;error:string}>({url:null,data:undefined,loading:true,error:''});
  const [version,reload]=useState(0),sequence=useRef(0);
  const retry=useCallback(()=>reload(value=>value+1),[]);
@@ -25,14 +26,16 @@ function useOverviewPanel<T>(url:string|null):Panel<T>{
   const requestId=++sequence.current,controller=new AbortController();
   if(!url){setState({url,data:undefined,loading:false,error:''});return()=>{sequence.current++;controller.abort()}}
   setState({url,data:undefined,loading:true,error:''});
-  void fetch(`/api${url}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{
+  const options={credentials:'include' as const,cache:'no-store' as const,signal:controller.signal};
+  const work=url.startsWith('/finance/report?')?financeRequest(`/api${url}`,scope,options):fetch(`/api${url}`,options);
+  void work.then(async response=>{
    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(Array.isArray(body.message)?body.message.join('; '):body.message||ui.error)}
    return response.json() as Promise<T>;
   }).then(data=>{if(requestId===sequence.current)setState({url,data,loading:false,error:''})}).catch(reason=>{
    if(requestId===sequence.current&&!controller.signal.aborted)setState({url,data:undefined,loading:false,error:(reason as Error).message||ui.error});
   });
   return()=>{sequence.current++;controller.abort()};
- },[url,version]);
+ },[url,version,scope]);
  return {...(state.url===url?state:{data:undefined,loading:Boolean(url),error:''}),retry};
 }
 function PanelStatus({panel,empty,children}:{panel:Panel<unknown>;empty?:boolean;children:ReactNode}){
@@ -58,12 +61,13 @@ export function OverviewWorkspace({role,onNavigate,modeControl}:{role:string;onN
  const taskLocks=useRef(new Set<string>()),mounted=useRef(true);
  useEffect(()=>{mounted.current=true;setSelection(readSelection());setReady(true);setNow(new Date());const timer=setInterval(()=>setNow(new Date()),60_000);const pop=()=>setSelection(readSelection());window.addEventListener('popstate',pop);try{setAttentionHidden(sessionStorage.getItem('overview-attention-hidden')==='1')}catch{}return()=>{mounted.current=false;clearInterval(timer);window.removeEventListener('popstate',pop)}},[]);
  const {month,currency}=selection;
- const query=new URLSearchParams({month,currency,range:String(trendRange)}),financeQuery=new URLSearchParams({month,currency,range:String(Math.max(trendRange,financeRange)),tab:'payments',page:'1',pageSize:'10'});
+ const query=new URLSearchParams({month,currency,range:String(trendRange)}),financeQuery=new URLSearchParams({month,currency,range:String(metric==='income'?Math.max(trendRange,financeRange):financeRange),tab:'payments',page:'1',pageSize:'10'});
  const orders=useOverviewPanel<OverviewOrders>(ready&&permissions.orders?`/overview/orders?${query}`:null);
  const tasks=useOverviewPanel<OverviewTasks>(ready&&permissions.tasks?'/overview/tasks':null);
  const messages=useOverviewPanel<OverviewMessages>(ready&&permissions.messages?'/overview/messages':null);
  const shipments=useOverviewPanel<OverviewShipments>(ready&&permissions.shipments?'/overview/shipments':null);
- const finance=useOverviewPanel<FinanceReport>(ready&&permissions.finance?`/finance/report?${financeQuery}`:null);
+ financeQuery.set('projection','summary');
+ const finance=useOverviewPanel<FinanceReport>(ready&&permissions.finance?`/finance/report?${financeQuery}`:null,role);
  function go(target:OverviewTarget){void onNavigate(target.section,target.context)}
  function updateSelection(next:Partial<typeof selection>){const result={...selection,...next};setSelection(result);const url=new URL(window.location.href);url.searchParams.set('period',result.month);url.searchParams.set('currency',result.currency);url.searchParams.set('sourceChart',result.sourceChart);if(result.sourceTrend)url.searchParams.set('sourceTrend',result.sourceTrend);else url.searchParams.delete('sourceTrend');window.history.pushState(null,'',`${url.pathname}${url.search}${url.hash}`)}
  function toggleAttention(hidden:boolean){setAttentionHidden(hidden);try{sessionStorage.setItem('overview-attention-hidden',hidden?'1':'0')}catch{}}

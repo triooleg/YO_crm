@@ -9,6 +9,13 @@ const labels = url(compile('i18n'));
 const report = url(compile('finance-report').replaceAll("'./order-source-values.mjs'", JSON.stringify(new URL('../lib/order-source-values.mjs', import.meta.url).href)));
 const { fiscalReceiptConfirmationCount, fiscalPresentationNotice, fiscalAmountLabel, fiscalComparison, fiscalExpenseAmount, financeExpenseTable, financeRecentExpenses } = await import(url(compile('finance-tax-integration').replaceAll("'./finance-report'", JSON.stringify(report)).replaceAll("'./i18n'", JSON.stringify(labels))));
 
+test('summary retains confirmed pending-receipt count without downloading tax rows',()=>{
+ const fiscal={current:{month:'2026-11',incomplete:true},rows:[]};
+ assert.equal(fiscalReceiptConfirmationCount({projection:'summary',receiptConfirmationCount:2,fiscal}),2);
+ assert.equal(fiscalReceiptConfirmationCount({projection:'summary',receiptConfirmationCount:2,fiscal:{...fiscal,current:{...fiscal.current,incomplete:false}}}),0);
+ assert.equal(fiscalReceiptConfirmationCount({receiptConfirmationCount:2,fiscal}),0);
+});
+
 test('unknown fiscal amounts are visibly distinct from real zero amounts', () => {
   assert.equal(fiscalAmountLabel(null, 'EUR'), 'Не рассчитано');
   assert.equal(fiscalAmountLabel(undefined, 'UAH'), 'Не рассчитано');

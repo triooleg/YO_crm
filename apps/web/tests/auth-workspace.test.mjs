@@ -16,7 +16,7 @@ test("вся CRM закрыта единым экраном входа", () => {
   assert.match(shell,/addEventListener\("focus",focus\)/);
   assert.match(shell,/authSequence/);
   assert.match(shell,/sequence!==authSequence\.current/);
-  assert.match(shell,/if\(!r\.ok\)throw new Error\(\);authSequence\.current\+\+;setAuth\(false\)/);
+  assert.match(shell,/if\(!r\.ok\)throw new Error\(\);authSequence\.current\+\+;applyAuth\(false\)/);
   assert.match(shell,/setSubmitting\(true\)/);
   assert.match(shell,/finally\{setSubmitting\(false\)\}/);
   assert.match(shell,/disabled=\{submitting\}/);

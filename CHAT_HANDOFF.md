@@ -1,3 +1,56 @@
+## 2026-11-02 — 0.13.3 deployment preparation (authorized)
+
+Owner now explicitly authorizes deployment of the six verified improvements;
+the standing request requires the exact current source on GitHub with deployment.
+Commit/push of this scoped release is authorized. New product version 0.13.3;
+root package, changelog and first UI journal entry agree. API and web must both
+be rebuilt for the additive summary contract. No migrations, seed, production
+restore, payment mutation or new history import is included.
+
+Fresh preflight: healthy installed API/web0.13.2 snapshot
+`adc4f992622c8ede213afa67bf309a77d94d243db8cd38f26f4da2db6def33b2`;
+PostgreSQL/Redis retain their accepted containers, 270 GiB free. Use existing
+backup/restore-drill and retention owners, max five release/rollback/API/web
+artifacts. Frozen source, versioned quality, exact artifact predeploy review and
+new consistent DATA/drill are required before cutover; installed acceptance is
+not yet established. Private preparation lives in `.local/finance-loading-deploy`.
+
+## 2026-11-02 — Six finance loading improvements (local implementation history)
+
+Active branch `codex/finance-loading-optimization`, base `fca28920`; owner
+authorized all six follow-up improvements. This is not another deployment or
+permission to commit/push. Installed production remains frozen 0.13.2 below.
+
+Implemented raw RepeatableRead/MVCC source reuse, optional summary projection,
+shared in-flight financial GETs, summary-first Finance and summary-only Overview,
+table-only refresh/search debounce, and visibility-aware badge polling. Existing
+financial calculations, writes, auth checks and Inbox transport are preserved.
+All completed money responses still require an authorized server read. Auth
+generation is invalidated synchronously on session transitions and old response
+delivery is rejected. See `docs/plans/finance-loading-optimization.md`.
+
+Read-only production query-plan audit found no evidence justifying new indexes;
+no DDL or financial mutation was performed. Final `pnpm quality:check` exit0:
+API 2278 PASS/78 optional SKIP, web 820 PASS/27 optional SKIP, database 28 PASS;
+all typechecks and both builds pass. Isolated PGlite snapshot test executed.
+Final local Chromium acceptance: 8/8 PASS at 1920/1366/390, console/page errors
+checked, including delayed same-role login, debounce/export guards and HTTP503
+retry. Cache retained-data budget is eight entries/16 MiB estimated UTF8/10s;
+known pending raw ledger states stay reusable under MVCC, SQL failures do not.
+Summary keeps confirmation counts. Writable navigation boundaries invalidate
+pre-write flights; aggregate scope mismatches hide old data immediately.
+
+Independent compatibility, regression, business/security, visual, Standards and
+Spec reviews PASS. Final release review: PASS_LOCAL_IMPLEMENTATION, no local
+blockers. Future deployment remains pending separate authorization/versioning
+and exact-artifact gates; no installed candidate claim. The stopped older
+93-test browser suite is incomplete with pre-existing
+contract mismatches confirmed in base source, not a baseline browser rerun.
+See `docs/operations/FINANCE_LOADING_OPTIMIZATION.md` for exact limits and proof.
+Version is not bumped; a future authorized release needs the next version,
+new frozen artifacts and PREDEPLOY/INSTALLED VERSION GUARDIAN gates. Preserve
+unrelated work in all other checkouts.
+
 ## 2026-11-02 — Finance report performance 0.13.2 installed
 
 Authorized deployment completed at 2026-11-01T22:28:34Z. Source commit

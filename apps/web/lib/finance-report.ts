@@ -16,6 +16,8 @@ export type FinanceExpenseView = Omit<ExpenseRow,'amountMinor'|'orderSource'> & 
 export type InvoiceRow = {orderSource?:OrderSource;id:string;orderId:string;number:string;orderNumber:string;clientId:string;clientName:string;date:string;dueDate:string|null;status:string;amountMinor:number;paidMinor:number|null;balanceMinor:number|null;originalCurrency:string;originalAmountMinor:number};
 export type FinanceOrder = {id:string;number:string;archivedAt?:string|null;displayCurrency:string;priceMinor:number;depositRequiredMinor:number;currency:string;requiredDeliveryAt?:string;client:{displayName:string;country?:string;language?:string};payments:{id?:string;displayAmountMinor:number;amountMinor:number;currency:string;appliedAmountMinor?:number;appliedCurrency?:string;receivedAt?:string;method?:string;reference?:string;notes?:string}[];invoices:FinanceInvoice[]};
 export type FinanceReport = {
+ projection?: 'summary';
+ receiptConfirmationCount?: number;
  fiscal?: FiscalReport;
  sourceAnalytics?:{websiteReceivedMinor:number;totalReceivedMinor:number;breakdown:SourceAmount[];trend:{month:string;breakdown:SourceAmount[]}[]};
   month:string;currency:DisplayCurrency;valuationVersion:string;valuation:{provider:string|null;effectiveDate:string|null;fetchedAt:string|null;officialUrl:string|null};today:string;forecastUntil:string;

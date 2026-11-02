@@ -1,3 +1,4 @@
+import { FinanceSourceCache } from "./finance-source-cache";
 import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
 import {classifyOrderSource,orderOriginSelect,loadOrderSourceMap} from '../orders/order-source';
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
@@ -31,7 +32,11 @@ const batchArgs = (cursor?: string) => ({ take: BATCH_SIZE, orderBy: { id: "asc"
 @Injectable()
 export class FinanceReportService {
   private readonly fiscalRateCache = new Map<string, { expiresAt: number; value: Promise<HistoricalRate | Error | null> }>();
+  private readonly sourceCache = new FinanceSourceCache<Awaited<ReturnType<FinanceReportService["readSources"]>>>();
   constructor(private readonly prisma: PrismaService, private readonly taxes?: TaxesService) {}
+
+  /** Aggregate process diagnostics only; no database keys, customer data or HTTP route. */
+  sourceCacheStats() { return this.sourceCache.stats(); }
 
   private async historicalRate(currency: string, date: string) {
     const key = currency + ':' + date, now = Date.now();
@@ -56,60 +61,97 @@ export class FinanceReportService {
     return { provider, cache: cache?.provider === provider ? cache : null };
   }
 
+  private async readSources(tx: Prisma.TransactionClient, query: ReturnType<typeof normalizeFinanceQuery>, from: Date, end: Date) {
+    // Archived orders retain immutable history but are outside every active finance projection.
+    const orders = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { archivedAt: null }, select: orderSelect }));
+    const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null } }, select: paymentSelect }));
+    const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
+    const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, order: { archivedAt: null }, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
+    const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] } } }] }, select: { id: true, name: true, active: true } }));
+    const orderSources=Object.fromEntries(orders.map(order=>[order.id,classifyOrderSource(order)]));
+    const missingIds=[...new Set([...payments.map(row=>row.orderId),...invoices.map(row=>row.orderId),...expenses.map(row=>row.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
+    Object.assign(orderSources,await loadOrderSourceMap(tx,missingIds));
+    let ledger: FiscalLedger = { months: [], links: [], unavailable: true };
+    let fiscalOrders = orders;
+    let fiscalPayments = payments, fiscalExpenses = expenses;
+    if (this.taxes) {
+      // Recover from a failed tax SQL read without aborting the working legacy cash snapshot.
+      await tx.$executeRawUnsafe('SAVEPOINT fiscal_read');
+      try {
+        const months = [];
+        for (const m of monthsBetween(from.toISOString().slice(0, 7), query.month)) months.push(await this.taxes.readReportIn(tx, m));
+        const links = [...new Map(months.flatMap(m => m.settlementOptions).map(l => [l.expenseId, { expenseId: l.expenseId, component: l.component }])).values()];
+        ledger = { months, links };
+        // Extra Kyiv boundary reads belong only to the new fiscal projection.
+        const fiscalFrom = new Date(from.getTime() - 86400000);
+        const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, receivedAt: { gte: fiscalFrom, lt: from } }, select: paymentSelect }));
+        const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: from }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
+        fiscalPayments = [...payments, ...precedingPayments]; fiscalExpenses = [...expenses, ...precedingExpenses];
+        const extraOriginIds = [...new Set([...precedingPayments.map(p=>p.orderId), ...precedingExpenses.map(e=>e.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
+        Object.assign(orderSources, await loadOrderSourceMap(tx, extraOriginIds));
+        const taxOrderIds = [...new Set([...months.flatMap(m => m.entries.map(e => e.orderId)), ...fiscalPayments.map(p => p.orderId), ...fiscalExpenses.map(e => e.orderId)].filter((id): id is string => Boolean(id)))].filter(id => !orders.some(o => o.id === id));
+        if (taxOrderIds.length) {
+          const historical = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { id: { in: taxOrderIds }, archivedAt: null }, select: orderSelect }));
+          fiscalOrders = [...orders, ...historical];
+          Object.assign(orderSources, Object.fromEntries(historical.map(o => [o.id, classifyOrderSource(o)])));
+        }
+        await tx.$executeRawUnsafe('RELEASE SAVEPOINT fiscal_read');
+      } catch {
+        await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT fiscal_read');
+        await tx.$executeRawUnsafe('RELEASE SAVEPOINT fiscal_read');
+        ledger = { months: [], links: [], unavailable: true };
+      }
+    }
+    return { orders, payments, expenses, invoices, categories, orderSources,
+      data: { orders: fiscalOrders, orderSources, payments: fiscalPayments, expenses: fiscalExpenses, ledger } };
+  }
+
+  private async sourceKey(tx: Prisma.TransactionClient, from: Date, end: Date, now: Date): Promise<string | null> {
+    if (typeof tx.$queryRaw !== 'function') return null;
+    await tx.$executeRawUnsafe('SAVEPOINT finance_snapshot_key');
+    try {
+      const rows = await tx.$queryRaw<{ snapshot: string; database: string; schema: string; server: string }[]>`SELECT txid_current_snapshot()::text AS snapshot, current_database() AS database, current_schema() AS schema, pg_postmaster_start_time()::text AS server`;
+      await tx.$executeRawUnsafe('RELEASE SAVEPOINT finance_snapshot_key');
+      const row = rows[0];
+      if (!row || typeof row.database !== 'string' || typeof row.schema !== 'string' || typeof row.server !== 'string' || !/^\d+:\d+:(?:\d+(?:,\d+)*)?$/.test(row.snapshot)) return null;
+      return JSON.stringify([row.database, row.schema, row.server, row.snapshot, from.toISOString(), end.toISOString(), Math.floor(now.getTime() / 10_000)]);
+    } catch {
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT finance_snapshot_key');
+      await tx.$executeRawUnsafe('RELEASE SAVEPOINT finance_snapshot_key');
+      return null;
+    }
+  }
+
   async report(input: FinanceReportQuery, exportAll = false) {
     const now = new Date(), query = normalizeFinanceQuery(input, now), from = financePeriod(query.month, -Math.max(query.range - 1, 1)), end = financePeriod(query.month, 1);
+    let commit!: () => void, abort!: (error: unknown) => void;
+    const committed = new Promise<void>((resolve, reject) => { commit = resolve; abort = reject; });
+    void committed.catch(() => {});
     const snapshot = await this.prisma.$transaction(async tx => {
       const valuation = await this.valuation(tx); assertValuationVersion(query, valuation, now);
-      // Archived orders retain immutable history but are outside every active finance projection.
-      const orders = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { archivedAt: null }, select: orderSelect }));
-      const payments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null } }, select: paymentSelect }));
-      const expenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
-      const invoices = await readBatches(cursor => tx.invoice.findMany({ ...batchArgs(cursor), where: { archivedAt: null, order: { archivedAt: null }, issueDate: { gte: financePeriod(query.month), lt: end } }, select: invoiceSelect }));
-      const categories = await readBatches(cursor => tx.expenseCategory.findMany({ ...batchArgs(cursor), where: { OR: [{ active: true }, { expenses: { some: { archivedAt: null, incurredAt: { gte: from, lt: end }, OR: [{ orderId: null }, { order: { archivedAt: null } }] } } }] }, select: { id: true, name: true, active: true } }));
-      const orderSources=Object.fromEntries(orders.map(order=>[order.id,classifyOrderSource(order)]));
-      const missingIds=[...new Set([...payments.map(row=>row.orderId),...invoices.map(row=>row.orderId),...expenses.map(row=>row.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
-      Object.assign(orderSources,await loadOrderSourceMap(tx,missingIds));
-      // Taxes have their own rows/statuses. Legacy fields always use their established projection.
+      const key = await this.sourceKey(tx, from, end, now);
+      const raw = await this.sourceCache.read(key, () => this.readSources(tx, query, from, end), committed,
+        raw => !this.taxes || !raw.data.ledger.unavailable);
+      // Query-dependent calculations, valuation and time always belong to this request.
       const legacyQuery = query.tab === 'taxes' ? { ...query, tab: 'payments', status: undefined } : query;
-      const result = buildFinanceReport({ orderSources, orders, payments, expenses, invoices: invoices.map(presentInvoice), categories }, legacyQuery, valuation, now, query.tab === 'taxes' ? false : exportAll);
-      let ledger: FiscalLedger = { months: [], links: [], unavailable: true };
-      let fiscalOrders = orders;
-      let fiscalPayments = payments, fiscalExpenses = expenses;
-      if (this.taxes) {
-        // Recover from a failed tax SQL read without aborting the working legacy cash snapshot.
-        await tx.$executeRawUnsafe('SAVEPOINT fiscal_read');
-        try {
-          const months = [];
-          for (const m of monthsBetween(from.toISOString().slice(0, 7), query.month)) months.push(await this.taxes.readReportIn(tx, m));
-          const links = [...new Map(months.flatMap(m => m.settlementOptions).map(l => [l.expenseId, { expenseId: l.expenseId, component: l.component }])).values()];
-          ledger = { months, links };
-          // Extra Kyiv boundary reads belong only to the new fiscal projection.
-          const fiscalFrom = new Date(from.getTime() - 86400000);
-          const precedingPayments = await readBatches(cursor => tx.payment.findMany({ ...batchArgs(cursor), where: { voidedAt: null, order: { archivedAt: null }, receivedAt: { gte: fiscalFrom, lt: from } }, select: paymentSelect }));
-          const precedingExpenses = await readBatches(cursor => tx.expense.findMany({ ...batchArgs(cursor), where: { archivedAt: null, incurredAt: { gte: fiscalFrom, lt: from }, OR: [{ orderId: null }, { order: { archivedAt: null } }] }, select: expenseSelect }));
-          fiscalPayments = [...payments, ...precedingPayments]; fiscalExpenses = [...expenses, ...precedingExpenses];
-          const extraOriginIds = [...new Set([...precedingPayments.map(p=>p.orderId), ...precedingExpenses.map(e=>e.orderId)].filter((id):id is string=>Boolean(id)&&!Object.hasOwn(orderSources,id!)))];
-          Object.assign(orderSources, await loadOrderSourceMap(tx, extraOriginIds));
-          const taxOrderIds = [...new Set([...months.flatMap(m => m.entries.map(e => e.orderId)), ...fiscalPayments.map(p => p.orderId), ...fiscalExpenses.map(e => e.orderId)].filter((id): id is string => Boolean(id)))].filter(id => !orders.some(o => o.id === id));
-          if (taxOrderIds.length) {
-            const historical = await readBatches(cursor => tx.order.findMany({ ...batchArgs(cursor), where: { id: { in: taxOrderIds }, archivedAt: null }, select: orderSelect }));
-            fiscalOrders = [...orders, ...historical];
-            Object.assign(orderSources, Object.fromEntries(historical.map(o => [o.id, classifyOrderSource(o)])));
-          }
-          await tx.$executeRawUnsafe('RELEASE SAVEPOINT fiscal_read');
-        } catch {
-          await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT fiscal_read');
-          await tx.$executeRawUnsafe('RELEASE SAVEPOINT fiscal_read');
-          ledger = { months: [], links: [], unavailable: true };
-        }
-      }
-      return { result, data: { orders: fiscalOrders, orderSources, payments: fiscalPayments, expenses: fiscalExpenses, ledger } };
-    }, { isolationLevel: "RepeatableRead", timeout: 30_000, maxWait: 5_000 });
+      const result = buildFinanceReport({ ...raw, invoices: raw.invoices.map(presentInvoice) }, legacyQuery, valuation, now, query.tab === 'taxes' ? false : exportAll);
+      return { result, data: raw.data };
+    }, { isolationLevel: "RepeatableRead", timeout: 30_000, maxWait: 5_000 }).then(value => { commit(); return value; }, error => { abort(error); throw error; });
     let fiscal = unavailableFiscalReport(query);
     const cashEvidence: Record<string,unknown>[] = [];
     if (!snapshot.data.ledger.unavailable && this.taxes) {
       try { fiscal = await projectFiscalReport(snapshot.data, query, (c, d) => this.historicalRate(c, d), now, evidence => cashEvidence.push(evidence), exportAll && query.tab === 'expenses'); }
       catch (error) { if(error instanceof BadRequestException)throw error; cashEvidence.length = 0; /* The fiscal namespace remains explicitly unavailable; legacy cash is still readable. */ }
+    }
+    if (!exportAll && query.projection === 'summary') {
+      return { ...snapshot.result, projection: 'summary' as const,
+        receiptConfirmationCount: fiscal.current.incomplete ? new Set(fiscal.rows
+          .filter(row => row.period === fiscal.current.month && row.source === 'PENDING' && row.status === 'RECEIPT_CONFIRMATION_REQUIRED' && row.paymentId)
+          .map(row => row.paymentId)).size : 0,
+        table: { ...snapshot.result.table, tab: query.tab, rows: [], total: 0 },
+        options: { clients: [], categories: [], orders: [] }, recentExpenses: [], upcoming: [],
+        fiscal: { ...fiscal, rows: [], expenseValues: [], recentExpenses: [], taxExpenseIds: [],
+          expenseTable: { ...fiscal.expenseTable, rows: [], total: 0 } } };
     }
     if (query.tab === 'taxes') {
       const table = fiscalTaxTable(fiscal, query, exportAll);
