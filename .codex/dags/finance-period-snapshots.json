@@ -4,7 +4,7 @@
     "id": "finance-period-snapshots",
     "title": "Durable revision-guarded finance periods",
     "base_ref": "369d61a17232e601c69a94b9a69a7ab64566c8c6",
-    "deployment": "AUTHORIZED_AFTER_COMPLETION_PREPARATION",
+    "deployment": "INSTALLED_0.14.0_SCHEMA53",
     "evidence": "docs/plans/finance-period-snapshots.md",
     "review_results": {
       "compatibility_scope": "PASS",
@@ -13,9 +13,11 @@
       "business": "PASS",
       "spec": "PASS",
       "standards": "PASS",
-      "visual": "PASS_LOCAL_RESPONSIVE",
+      "visual": "PASS_LOCAL_RESPONSIVE_AND_INSTALLED_CUA",
       "version_candidate": "PASS",
-      "release": "PENDING_EXACT_ARTIFACTS"
+      "version_installed": "PASS",
+      "release": "PASS_INSTALLED",
+      "installed_evidence": "docs/release-evidence/finance-period-cache-deployment-2026-11-03.md"
     }
   },
   "nodes": [
@@ -105,7 +107,7 @@
       "id": "gates",
       "agent": "RELEASE",
       "kind": "review",
-      "status": "RUNNING",
+      "status": "DONE",
       "depends_on": [
         "storage",
         "engine",

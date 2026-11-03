@@ -1,3 +1,31 @@
+## 2026-11-03 — durable finance 0.14.0 installed
+
+Owner-authorized deployment completed. Built application commit8d894ed8f106eb577274afe290bc2102bbe3922a
+was published to GitHub before cutover; frozen sourcebff7949e067dc762bd4e03983f83ecdc9d1acf4f0afae870ce80c90b51043fc0.
+Actual API60f0802ca940/webc6f7390de41b images are healthy with original PG/Redis,
+schema53, coverage true/36 ALWAYS triggers and historical ingress guard1.
+Exact plan8530ae292b18edf4a69b6580d0d9f34a80aae2ea4bef1e4b61f4faef1e13b764
+completed exit0/APPLIED and RUNTIME_GATE_VERIFIED; separate closure proves gate,
+lease and flocks released. No production restore, seed or financial smoke writes.
+
+Fresh DATA-v4, isolated standard restore, full real-DATA shadow qualification,
+old-image forced-rollback financial write seams, restored cache hits and final
+post-shadow cleanup all passed. Canonical qualification4ee55402757d32f0c8ae15528f0b4a1f942df0293ea8ac793bdb239c925ac7bb.
+Quality3243PASS/109optionalSKIP/0FAIL, native PG16, SQL193 comparisons, MVCC21,
+responsive fixtures and independent predeploy reviews passed. Actual browser
+Finance/FOP/Overview/statistics, brand and first journal0.14.0 and console passed.
+Warm browser summary98.692ms/detail70.422ms versus2676.613/1815.387ms baseline;
+first cold summary5494.509ms is explicitly slower and disclosed in the report.
+
+Current pointer reconciled via CAS with preserved old bytes/history:
+3d0c37c020c53baef8acf7af8020e62b92c06a01420030513fd5eae5d0c0ae11.
+Installed proof583b3ad9e19c5301753a37e43d3f9ee2c59d34daa6ed80d0bd0aa5b791539453.
+Post-cutover inventory5 rollback/5 release/5API/5web, no deletion targets; backups
+and volumes preserved. Exact evidence, limitations and final acceptance are in
+docs/release-evidence/finance-period-cache-deployment-2026-11-03.md.
+Private .local helpers, DATA and credentials stay uncommitted. Application bytes
+remain the frozen8d894ed build; subsequent publication is evidence-only.
+
 ## 2026-11-02 — 0.14.0 durable finance candidate, local gates complete
 
 Owner authorized persistent PostgreSQL financial reporting and then deployment

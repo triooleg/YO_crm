@@ -1,7 +1,15 @@
 # Persistent finance report measurements — 2026-11-02
 
-Candidate 0.14.0; installed measurements/acceptance are recorded separately.
+Installed 0.14.0; exact artifacts and acceptance are recorded in
+[the deployment report](../release-evidence/finance-period-cache-deployment-2026-11-03.md).
 Method and operational boundaries: [FINANCE_PERIOD_SNAPSHOTS.md](FINANCE_PERIOD_SNAPSHOTS.md).
+
+Actual production browser reload, November2026/EUR/range6: summary TTFB fell
+from2676.613ms to98.692ms and detail from1815.387ms to70.422ms after warming.
+The first summary construction took5494.509ms. These are individual browser
+samples, not percentiles or isolated server processing time. The baseline shared
+the host with isolated qualification; see the report for comparable query scope,
+cold costs and the separate real-DATA shadow SQL measurements.
 
 ## Existing installed baseline, read only
 
