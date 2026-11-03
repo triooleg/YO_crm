@@ -1,4 +1,18 @@
-## 2026-11-03 — Inbox header cleanup 0.14.1, deployment authorized
+## 2026-11-03 — Inbox header cleanup 0.14.1 installed
+
+Application commit8acb2e489c0180d59d086891c4a5f863b99f8c74 is published on
+origin/main. Frozen source189e4bcc4ab5d6af11d1f6398bb351b4b602ee2e6cbb2e3c7f0ff223b417f29a
+is installed with APIb5fc3b0c/web317494dc images, both healthy. Original
+PostgreSQL/Redis and schema53 remain. Fresh DATA and isolated restore/cleanup
+passed. Existing operator reached RUNTIME_GATE_VERIFIED and emitted terminal
+APPLIED after unwinding; independent PID/gate/lease/flock closure passed (no
+launcher exit-code claim). Post-retention counts5/5/5/5. Actual CUA verifies
+brand/journal0.14.1/full source and removed header duplicates, no console errors.
+Version INSTALLED PASS; browser-verified installed proof931a1a7dbb6f0a1ee3aad9e17233a26fb72e37615421734f874fd202261cfdcc
+published privately. Exact prior-pointer CAS and final provenance completed;
+historical pointer bytes remain in the private intent record. Version and
+RELEASE INSTALLED reviews PASS. Evidence-only GitHub publication follows;
+runtime bytes stay frozen. Public report: docs/release-evidence/inbox-header-deployment-2026-11-03.md.
 
 Separately, an owner-confirmed imported receipt was reconciled through the
 installed TaxesService.confirmSource with normal audit/idempotency. Scoped
@@ -17,8 +31,8 @@ or errors. Compatibility, regression, business and scoped visual reviews PASS.
 Existing multichannel1366 overflow is outside the removal-only patch; no paired
 baseline screenshot establishes an overall overflow pass. Private fixture has
 no production/provider connection. Owner subsequently authorized deployment and
-GitHub publication: preparing0.14.1, rebuilding both API/web with unchanged
-backend logic and schema53. Exact-version full quality and release gates pending.
+GitHub publication. Exact-version full quality, predeploy version/release gates
+passed; both API/web were rebuilt with unchanged backend logic and schema53.
 
 ## 2026-11-03 — durable finance 0.14.0 installed
 
