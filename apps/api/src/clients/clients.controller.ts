@@ -6,29 +6,42 @@ import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateAthleteDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
+import { ClientsWorkspaceReadService, type ClientsWorkspaceQuery } from "./clients-workspace-read";
+import { ClientMergeBatchDto, ClientMergePreviewDto } from "./client-merge-workspace.dto";
 
 type AuthRequest = Request & { user: User };
 
 @Controller("clients")
 @UseGuards(SessionGuard, RolesGuard)
 export class ClientsController {
-  constructor(private readonly clients: ClientsService) {}
+  constructor(private readonly clients: ClientsService, private readonly workspace: ClientsWorkspaceReadService) {}
 
   @Get()
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
-  list(@Query("search") search?: string, @Query("period") period?: string) {
+  list(@Query("search") search?: string, @Query("period") period?: string, @Query() query?: ClientsWorkspaceQuery) {
+    if(query?.view==='workspace')return this.workspace.list({...query,search,period});
+    if(query?.view==='duplicates')return this.workspace.duplicates({...query,search});
     return this.clients.list(search, period);
   }
 
   @Get(":id")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
-  detail(@Param("id") id: string, @Query("orderId") orderId?: string) {
+  detail(@Param("id") id: string, @Query("orderId") orderId?: string, @Query() query?: ClientsWorkspaceQuery) {
+    if(query?.view==='workspace')return this.workspace.detail(id,{...query,orderId});
     return this.clients.detail(id, orderId);
   }
 
   @Get(":id/merge-suggestions")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   mergeSuggestions(@Param("id") id:string){return this.clients.mergeSuggestions(id)}
+
+  @Post(":id/merge-preview")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  previewMerge(@Param("id") id:string,@Body()dto:ClientMergePreviewDto){return this.clients.previewMerge(id,dto)}
+
+  @Post(":id/merge-batch")
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  mergeBatch(@Param("id") id:string,@Body()dto:ClientMergeBatchDto,@Req()request:AuthRequest){return this.clients.mergeBatch(id,dto,request.user)}
 
   @Post(":id/merge")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
@@ -50,7 +63,7 @@ export class ClientsController {
 
   @Patch(":id/notes")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
-  updateNotes(@Param("id") id:string,@Body()dto:UpdateClientNotesDto,@Req()request:AuthRequest){return this.clients.updateNotes(id,dto.notes,request.user)}
+  updateNotes(@Param("id") id:string,@Body()dto:UpdateClientNotesDto,@Req()request:AuthRequest){return dto.visibility===undefined&&dto.expectedUpdatedAt===undefined?this.clients.updateNotes(id,dto.notes,request.user):this.clients.updateNotes(id,dto.notes,request.user,{visibility:dto.visibility,expectedUpdatedAt:dto.expectedUpdatedAt})}
 
   @Patch(":id")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

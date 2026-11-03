@@ -1,0 +1,16 @@
+import type {MeasurementView} from "../measurement-viewer";
+import type {ClientOrderHistoryItem} from "../../lib/client-order-history";
+export type WorkspaceTab="overview"|"orders"|"conversations"|"notes"|"files";
+export type WorkspaceQuery={page:number;pageSize:15|20|50;search:string;country:string;source:string;status:string;sort:"name"|"orderCount"|"latestOrder"|"createdAt";direction:"asc"|"desc";period:string;currency:"EUR"|"USD"|"UAH";clientId:string;tab:WorkspaceTab};
+export type ClientRow={id:string;displayName:string;avatarUrl?:string;country?:string;email?:string;phone?:string;status?:string;createdAt:string;orderCount:number;channels:string[];latestOrder:{id:string;number:string;createdAt:string;sourceSystem?:string;externalNumber?:string|null;externalId?:string|null}|null};
+export type Page<T>={items:T[];total:number;page:number;pageSize:number};
+export type ClientList=Page<ClientRow>&{filters:{countries:string[];sources:string[];statuses:string[]}};
+export type Athlete={id:string;firstName:string;lastName?:string;discipline?:string;measurements:MeasurementView[]};
+export type ClientFile={id:string;name:string;path:string;sizeBytes:number;createdAt:string};
+export type ChannelIdentity={id:string;channel:string;externalId:string};
+export type ClientDetail=Omit<ClientRow,"channels">&{updatedAt:string;managers:{id:string;displayName:string}[];preferences?:{clientNoteVisibility?:"INTERNAL"|"CLIENT"};language?:string;city?:string;preferredChannel?:string;notes?:string;responsibleManager?:{id:string;displayName:string}|null;athletes:Athlete[];orders:ClientOrderHistoryItem[];files?:ClientFile[];channels:ChannelIdentity[];activities:{id:string;summary:string;createdAt:string}[];recentOrders:ClientOrderHistoryItem[];summary:{reportCurrency:string;orderTotalMinor:number|null;paidTotalMinor:number|null;rateDate?:string|null;total:number;completed:number;inProgress:number;cancelled:number;totalsByCurrency:{currency:string;amountMinor:number}[];paidByCurrency:{currency:string;amountMinor:number}[];firstOrderAt:string|null;lastOrderAt:string|null}};
+export type Conversation={id:string;channel:string;subject?:string;lastMessageAt?:string|null;unreadCount:number;lastMessage:{content:string;createdAt:string;sourceSystem?:string;externalNumber?:string|null;externalId?:string|null}|null};
+export type Navigate=(section:"orders"|"inbox",context?:Record<string,string>)=>void;
+export type Request=<T=unknown>(path:string,init?:RequestInit)=>Promise<T>;
+export type Duplicate=ClientRow&{reasons:string[];duplicateIds?:string[];related?:{id:string;reasons:string[]}[];relatedTruncated?:boolean};
+export type MergePreview={token:string;clients:(Partial<ClientDetail>&{id:string;displayName:string;counts:Record<string,number>})[];conflicts:({code:string;clientIds?:string[];field?:string}|string)[];fieldChoices:Record<string,string>};

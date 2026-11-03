@@ -6,6 +6,8 @@ import { createMeasurementData, inheritMeasurementDefinition } from "../clients/
 import { assertAssignmentMutable, assignmentOrderSelect, assertItemAssignmentMutable, assertParentBodyProductionChange } from "./order-assignment-eligibility";
 import {classifyOrderSource,loadOrderSourceMap,matchesOrderSource,persistOrderSourceOverride} from './order-source';
 import {orderListCandidateSelect,buildOrderListPage,normalizeOrderListRead,clientHistoryOrderSelect,normalizeClientHistoryPage,normalizeOrderClientId,requireActiveOrderClient,summarizeClientOrderStatuses,presentClientHistoryOrder,presentClientHistoryCurrencyTotals,type OrderListReadQuery} from './order-list-read-model';
+import {clientHistoryFilters} from './order-client-history';
+import {canonicalWorkspaceClientId} from '../clients/clients-workspace-read';
 import { presentInvoice } from "../finance/invoice-number";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -138,10 +140,11 @@ export class OrdersService {
   }
 
   async clientHistory(clientId: string, query: ClientOrderHistoryQuery = {}): Promise<ClientOrderHistoryPage> {
-    const id = normalizeOrderClientId(clientId), { page: requestedPage, pageSize } = normalizeClientHistoryPage(query);
+    const requestedId = normalizeOrderClientId(clientId), { page: requestedPage, pageSize } = normalizeClientHistoryPage(query), filters=clientHistoryFilters(query);
     return this.prisma.$transaction(async db => {
-      const client = await requireActiveOrderClient(db, id);
-      const where = { clientId: id, archivedAt: null };
+      let client=await db.client.findFirst({where:{id:requestedId,archivedAt:null},select:{id:true,displayName:true,country:true,source:true}});
+      if(!client){const canonicalId=await canonicalWorkspaceClientId(db,requestedId);client=await requireActiveOrderClient(db,canonicalId)}
+      const where:Prisma.OrderWhereInput = { clientId: client.id, archivedAt: null,...filters };
       const groups = await db.order.groupBy({ by: ['salesStatus'], where, _count: { _all: true } });
       const summary = summarizeClientOrderStatuses(groups);
       const currencyGroups = await db.order.groupBy({ by: ['currency'], where, _sum: { priceMinor: true }, orderBy: { currency: 'asc' } });
@@ -696,6 +699,7 @@ export class OrdersService {
     if (!orderBrief) throw new NotFoundException("Заказ не найден");
     if (currency !== orderBrief.currency) await this.exchangeRates.currentOrRefresh(actor);
     const payment = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", "client-merge-global");
       if (currency !== orderBrief.currency) await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true } });
@@ -737,6 +741,7 @@ export class OrdersService {
 
   async voidPayment(orderId: string, paymentId: string, dto: { reason: string; expectedOrderUpdatedAt: string }, actor: User) {
     return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", "client-merge-global");
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } }, productionSlot: true, invoices: { where: { status: "PAID" } }, items: { where: { archivedAt: null }, include: { instances: { where: { archivedAt: null } } } } } });
       if (!order) throw new NotFoundException("Заказ не найден");

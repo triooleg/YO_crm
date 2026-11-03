@@ -1,90 +1,77 @@
-import { readFile } from "node:fs/promises";
+import {readFile} from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
+const read=path=>readFile(new URL(path,import.meta.url),"utf8");
+const workspace=(await read("../components/client-workspace.tsx")).replace(/\s+/g,"");
+const detail=(await read("../components/clients/client-details.tsx")).replace(/\s+/g,"");
+const requests=(await read("../components/clients/use-workspace.ts")).replace(/\s+/g,"");
+const dialogs=(await read("../components/clients/client-dialogs.tsx")).replace(/\s+/g,"");
+const locale=await read("../lib/i18n.ts"),clientLocale=locale+await read("../lib/clients-workspace-i18n.ts");
 
-const workspace = (await readFile(
-  new URL("../components/client-workspace.tsx", import.meta.url),
-  "utf8",
-)).replace(/\s+/g, "");
-const locale = await readFile(
-  new URL("../lib/i18n.ts", import.meta.url),
-  "utf8",
-);
-
-test("форма отправляет только допустимый код дисциплины и пропускает пустое значение", () => {
-  assert.match(workspace, /<CrmNativeSelectname="discipline"/);
-  assert.match(workspace, /RHYTHMIC_GYMNASTICS/);
-  assert.match(workspace, /if\(discipline\)body\.discipline=discipline/);
-  assert.doesNotMatch(workspace, /<inputname="discipline"/);
+test("форма отправляет только допустимый код дисциплины и пропускает пустое значение",()=>{
+ assert.match(workspace,/<CrmNativeSelectname="discipline"/);
+ assert.match(workspace,/RHYTHMIC_GYMNASTICS/);
+ assert.match(workspace,/if\(discipline\)body\.discipline=discipline/);
+ assert.doesNotMatch(workspace,/<inputname="discipline"/);
+ assert.match(workspace,/firstName:String\(f\.get\("firstName"\)\|\|""\)\.trim\(\)/);
 });
-
-test("кнопка спортсменов открывает доступную форму и сохраняет через API клиента", () => {
-  assert.match(workspace, /onAddAthlete=\{\(\)=>setAddingAthlete\(true\)\}/);
-  assert.match(workspace, /role="dialog"/);
-  assert.match(workspace, /aria-modal="true"/);
-  assert.match(workspace, /`\/clients\/\$\{clientId\}\/athletes`/);
-  assert.match(workspace, /disabled=\{saving\}/);
-  assert.match(workspace, /returnFocusRef\.current\?\.focus\(\)/);
-  assert.match(workspace, /buttonRef=\{addAthleteTriggerRef\}/);
+test("кнопка спортсменов открывает доступную форму и сохраняет через API клиента",()=>{
+ assert.match(workspace,/onAddAthlete=\{/);
+ assert.match(detail,/ref=\{addAthleteRef\}[^>]*onClick=\{onAddAthlete\}/);
+ assert.match(workspace,/<ModalopenedonClose=\{close\}title=\{clientAthleteUi\.title\}/);
+ assert.match(workspace,/closeOnEscape=\{!saving\}closeOnClickOutside=\{!saving\}/);
+ assert.match(workspace,/`\/clients\/\$\{clientId\}\/athletes`/);
+ assert.match(workspace,/disabled=\{saving\}/);assert.match(workspace,/returnFocusRef\.current\?\.focus\(\)/);
+ assert.match(workspace,/returnFocusRef=\{addAthleteTriggerRef\}/);
 });
-
-test("после добавления спортсмена карточка выбранного клиента загружается заново", () => {
-  assert.match(
-    workspace,
-    /request\(`\/clients\/\$\{detail\.id\}`\)\.then\(setDetail\)/,
-  );
-  assert.match(workspace, /setAddingAthlete\(false\)/);
+test("после добавления спортсмена список и карточка обновляются без смены выбранного ID",()=>{
+ assert.match(workspace,/<AddAthlete[\s\S]*?done=\{saved\}/);
+ assert.match(workspace,/functionsaved\(\)[\s\S]*?state\.refresh\(\)/);
+ assert.match(requests,/refresh:\(\)=>setRevision\(n=>n\+1\)/);
+ assert.match(requests,/\[ready,listKey,revision,update\]/);
+ assert.match(requests,/\[ready,clientId,query\.currency,revision,update\]/);
 });
-
-test("ошибка необязательных предложений объединения не мешает открыть карточку клиента",()=>{
-  assert.match(workspace,/request\(`\/clients\/\$\{selected\}\$\{contextOrderId\?/);
-  assert.match(workspace,/request\(`\/clients\/\$\{selected\}\/merge-suggestions`\)/);
-  assert.doesNotMatch(workspace,/Promise\.all\(\[request\(`\/clients\/\$\{selected\}`\),request\(`\/clients\/\$\{selected\}\/merge-suggestions`\)\]\)/);
+test("необязательный поиск дубликатов не входит в загрузку выбранной карточки",()=>{
+ assert.match(requests,/clientRequest<ClientDetail>\(`\/clients\/\$\{encodeURIComponent\(clientId\)\}/);
+ assert.doesNotMatch(requests,/merge-suggestions|view:"duplicates"|merge-preview/);
+ assert.match(dialogs,/view:"duplicates"/);assert.match(dialogs,/\/merge-preview/);
+ assert.match(workspace,/\{duplicates&&<Duplicates/);
 });
-
-test("устаревшие ответы карточки и предложений игнорируются после выбора другого клиента",()=>{
-  assert.match(workspace,/constrequestId=\+\+detailRequestId\.current/);
-  assert.match(workspace,/requestId!==detailRequestId\.current/);
-  assert.match(workspace,/requestId===detailRequestId\.current/);
-  assert.match(workspace,/setDetail\(undefined\);setMergeSuggestions\(\[\]\);setMergeSourceId\(""\);setMergeOpen\(false\)/);
-  assert.match(workspace,/constmergeRequestId=detailRequestId\.current,mergeTargetId=selected/);
-  assert.match(workspace,/if\(mergeRequestId===detailRequestId\.current\)setDetail\(value\)/);
-  assert.match(workspace,/if\(mergeRequestId===detailRequestId\.current\)setMergeSuggestions\(suggestions\)/);
-  assert.match(workspace,/if\(!detail\|\|detail\.id!==selected\|\|!mergeSourceId\)return/);
-  assert.match(workspace,/disabled=\{!detail\|\|detail\.id!==selected\}/);
-  assert.match(workspace,/if\(detail\?\.id===selected\)setMergeOpen\(true\)/);
+test("устаревшие ответы карточки и ленивых вкладок не заменяют другого клиента",()=>{
+ assert.match(requests,/detailKey=`\$\{clientId\}:\$\{query\.currency\}`/);
+ assert.match(requests,/if\(!active\)return/);
+ assert.match(requests,/active=false;abort\.abort\(\)/);
+ assert.match(requests,/detailState\.id===detailKey\?detailState\.data:undefined/);
+ assert.match(requests,/state\.path===path&&state\.revision===revision/);
+ assert.match(workspace,/<ClientDetailskey=\{detail\.id\}/);
+ // Merge owns its selected snapshot and requires a server preview token; it
+ // cannot apply an old response to whichever detail happens to be selected.
+ assert.match(dialogs,/if\(lock\.current\|\|!preview\?\.token\|\|!reviewed\|\|unknown\)return/);
+ assert.match(dialogs,/previewToken:preview\.token/);
+ assert.doesNotMatch(dialogs,/\/merge`,/);
 });
-
-test("коды причин и ошибок объединения переводятся только централизованным словарём",()=>{
-  assert.match(workspace,/candidate\.reasons\.map\(mergeReasonLabel\)/);
-  assert.match(workspace,/setError\(mergeErrorLabel\(reason\)\)/);
-  for(const code of ["EMAIL","PHONE","WHATSAPP","INSTAGRAM","FACEBOOK","NAME","CLIENT_MERGE_CHANNEL_CONFLICT","CLIENT_MERGE_AI_RUNTIME_CONFLICT"])assert.match(locale,new RegExp(`${code}:\\s*"[^"]+"`));
-  assert.match(workspace,/channels\.map\(mergeChannelLabel\)/);
-  assert.match(locale,/channelFallback:\s*"[^"]+"/);
+test("причины совпадений и ошибки показываются через русский словарь",()=>{
+ assert.match(dialogs,/candidate\.reasons\?\.map\(reason=>ui\.reasons\[reason\]\?\?ui\.unavailable\)/);
+ assert.match(dialogs,/setError\(failure\(e\)\)/);
+ for(const code of ["EMAIL","PHONE","WHATSAPP","INSTAGRAM","FACEBOOK","NAME"])assert.match(clientLocale,new RegExp(`${code}:\\s*"[^"]+"`));
+ for(const code of ["CLIENT_MERGE_CHANNEL_CONFLICT","CLIENT_MERGE_AI_RUNTIME_CONFLICT"])assert.match(locale,new RegExp(`${code}:\\s*"[^"]+"`));
+ assert.match(clientLocale,/mergeError:\s*"[^"]+"/);assert.match(clientLocale,/mergeUnknown:\s*"[^"]+"/);
 });
-
-test("окно объединения удерживает фокус, закрывается Escape и возвращает фокус на кнопку",()=>{
-  assert.match(workspace,/ref=\{mergeTriggerRef\}/);
-  assert.match(workspace,/ref=\{mergeDialogRef\}/);
-  assert.match(workspace,/event\.key==="Escape"/);
-  assert.match(workspace,/event\.key!=="Tab"/);
-  assert.match(workspace,/mergeTriggerRef\.current\?\.focus\(\)/);
+test("объединение использует Mantine Modal с фокусом и безопасным Escape",()=>{
+ assert.match(dialogs,/<ModalopenedonClose=\{onClose\}title=\{ui\.mergeTitle\}/);assert.match(dialogs,/closeOnEscape=\{!busy\}/);
+ assert.match(dialogs,/closeOnClickOutside=\{!busy\}/);
+ assert.match(workspace,/ref=\{mergeTriggerRef\}/);assert.match(workspace,/mergeTriggerRef\.current\?\.focus\(\)/);
 });
-
-test("все новые подписи формы спортсмена находятся в централизованном словаре", () => {
-  assert.match(workspace, /clientAthleteUi/);
-  for (const key of [
-    "add",
-    "title",
-    "firstName",
-    "lastName",
-    "discipline",
-    "cancel",
-    "save",
-    "saving",
-    "saveError",
-    "close",
-  ]) {
-    assert.match(locale, new RegExp(`${key}:\\s*"[^"]+"`));
-  }
+test("история действий и формы заказа/замеров сохранены рядом с пятью вкладками",()=>{
+ assert.match(detail,/ui\.history/);assert.match(detail,/client\.activities\?\.map/);
+ // The client may be prepared by the stale-snapshot consent helper. Do not
+ // require the old direct-detail assignment or a particular state handler.
+ assert.match(workspace,/<OrderPanel[^>]*client=\{/);
+ assert.match(workspace,/onNewOrder=\{/);
+ assert.match(workspace,/<MeasurementPanel[^>]*client=\{detail\}/);
+ assert.match(detail,/<MeasurementViewer[^>]*measurement=\{measurement\.value\}/);
+});
+test("все подписи legacy AddAthlete остаются централизованными",()=>{
+ assert.match(workspace,/clientAthleteUi/);
+ for(const key of ["add","title","firstName","lastName","discipline","cancel","save","saving","saveError","close"])assert.match(locale,new RegExp(`${key}:\\s*"[^"]+"`));
 });

@@ -10,7 +10,8 @@ const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8")
   shell = await readFile(new URL("../components/crm-shell.tsx", import.meta.url), "utf8"),
   locale = await readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
   layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-  css = await readFile(new URL("../app/phase2.css", import.meta.url), "utf8"),
+  css = await readFile(new URL("../components/clients/styles.css", import.meta.url), "utf8"),
+  clientsLocale = locale + await readFile(new URL("../lib/clients-workspace-i18n.ts", import.meta.url), "utf8"),
   typography = await readFile(new URL("../app/typography.css", import.meta.url), "utf8"),
   sections = await readFile(new URL("../lib/crm-sections.ts", import.meta.url), "utf8");
 
@@ -42,12 +43,15 @@ test("внутренние статусы имеют русские назван
 test("корневой документ использует русскую локаль", () => {
   assert.match(layout, /lang="ru"/);
   assert.match(page, /CrmShell/);
-  assert.match(workspace, /Новый клиент|Новый клиент/);
+  assert.match(workspace, /clientsWorkspaceUi/);
+  assert.match(clientsLocale, /create:\s*"\+ Новый клиент"/);
 });
 
 test("макет клиентов использует согласованное соотношение", () => {
-  assert.match(css, /grid-template-columns: 220px minmax\(0, 1fr\)/);
-  assert.match(css, /@media \(max-width: 720px\)/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0,1\.7fr\) minmax\(0,1fr\)/);
+  assert.match(css, /@media\(max-width:45em\)/);
+  assert.match(workspace, /if\(desktop&&state\.list\?\.items\[0\]&&!query\.clientId\)/);
+  assert.match(workspace, /opened=\{!desktop&&!!query\.clientId\}/);
 });
 
 test("global typography uses Ubuntu family with Cyrillic-safe fallback", () => {

@@ -813,7 +813,7 @@ test("правая панель организована доступными в
   assert.match(css, /\.communications-context-tabs\{[^}]*display:grid/);
   assert.match(component, /communications-context-tasks/);
   assert.match(component, /onNavigate\?\.\("tasks",\{clientId:client\.id,taskId:task\.id\}\)/);
-  assert.match(component, /className="communications-open-client"[\s\S]*navigateFromInbox\("clients",\{clientId:client\.id\}\)/);
+  assert.match(component, /className="communications-open-client" onClick=\{openClientFromInbox\}/);
   for (const key of ["contextClient", "contextOrders", "contextTasks", "contextNotes", "contextFiles", "openClient"])
     assert.match(locale, new RegExp(`${key}:`));
 });

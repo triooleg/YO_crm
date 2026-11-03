@@ -1,7 +1,19 @@
 import { ContactChannel, type Prisma } from "@prisma/client";
 
+export type ClientMergeBatchProvenance = { id:string; index:number; sourceClientIds:string[]; fieldChoices?:Record<string,string> };
+
+export function parseClientMergeBatch(value:Prisma.JsonValue|null|undefined):ClientMergeBatchProvenance|undefined {
+  const moved=parseMergeObject(value),batch=parseMergeObject(moved.batch as Prisma.JsonValue);
+  if(typeof batch.id!=="string"||!/^[a-f0-9]{64}$/.test(batch.id)||!Number.isInteger(batch.index)||
+    !Array.isArray(batch.sourceClientIds)||batch.sourceClientIds.length<1||batch.sourceClientIds.length>9||
+    batch.sourceClientIds.some(id=>typeof id!=="string"||!id)||new Set(batch.sourceClientIds).size!==batch.sourceClientIds.length||
+    (batch.index as number)<0||(batch.index as number)>=batch.sourceClientIds.length)return undefined;
+  return batch as ClientMergeBatchProvenance;
+}
+
 export type MergeMovedEntityIds = {
   version:1;
+  files:string[];
   athletes:string[];
   orders:string[];
   conversations:string[];
@@ -28,7 +40,7 @@ const contactChannels=new Set(Object.values(ContactChannel));
 const snapshotDateFields=new Set(["firstContactAt","nextActionAt","lastContactAt","archivedAt","updatedAt"]);
 
 export function clientMergeSnapshot(client:Record<string,unknown>):Prisma.InputJsonObject {
-  return Object.fromEntries(snapshotFields.map(field=>[field,client[field] instanceof Date?(client[field] as Date).toISOString():client[field]??null])) as Prisma.InputJsonObject;
+  return {...Object.fromEntries(snapshotFields.map(field=>[field,client[field] instanceof Date?(client[field] as Date).toISOString():client[field]??null])),clientNoteVisibility:parseMergeObject(client.preferences as Prisma.JsonValue).clientNoteVisibility==="CLIENT"?"CLIENT":"INTERNAL"} as Prisma.InputJsonObject;
 }
 
 export function parseMergeObject(value:Prisma.JsonValue|null|undefined):Record<string,unknown>{
@@ -41,21 +53,24 @@ export function parseMergeArray(value:Prisma.JsonValue|null|undefined):Record<st
 
 export function parseMovedEntityIds(value:Prisma.JsonValue|null|undefined):MergeMovedEntityIds{
   const source=parseMergeObject(value),list=(key:string)=>Array.isArray(source[key])?(source[key] as unknown[]).filter((item):item is string=>typeof item==="string"):[];
-  return{version:1,athletes:list("athletes"),orders:list("orders"),conversations:list("conversations"),messageDeliveryAttempts:list("messageDeliveryAttempts"),workTasks:list("workTasks"),customerMemories:list("customerMemories"),conversationFacts:list("conversationFacts"),agreements:list("agreements"),aiRuns:list("aiRuns"),activities:list("activities"),keycrmClientLinks:list("keycrmClientLinks"),aiModeOverrides:list("aiModeOverrides"),aiRuntimeSettings:list("aiRuntimeSettings"),incomingRedirects:list("incomingRedirects")};
+  return{version:1,files:list("files"),athletes:list("athletes"),orders:list("orders"),conversations:list("conversations"),messageDeliveryAttempts:list("messageDeliveryAttempts"),workTasks:list("workTasks"),customerMemories:list("customerMemories"),conversationFacts:list("conversationFacts"),agreements:list("agreements"),aiRuns:list("aiRuns"),activities:list("activities"),keycrmClientLinks:list("keycrmClientLinks"),aiModeOverrides:list("aiModeOverrides"),aiRuntimeSettings:list("aiRuntimeSettings"),incomingRedirects:list("incomingRedirects")};
 }
 
 export function hasValidMovedEntityIds(value:Prisma.JsonValue|null|undefined){
   const source=parseMergeObject(value);
+  if(source.batch!==undefined&&!parseClientMergeBatch(value))return false;
   const validIds=(value:unknown)=>Array.isArray(value)&&value.every(item=>typeof item==="string"&&Boolean(item))&&new Set(value).size===value.length;
   const validModes=(key:string)=>Array.isArray(source[key])&&(source[key] as unknown[]).every(item=>Boolean(item)&&typeof item==="object"&&!Array.isArray(item)&&typeof (item as Record<string,unknown>).id==="string"&&Boolean((item as Record<string,unknown>).id)&&aiModes.has(String((item as Record<string,unknown>).before))&&aiModes.has(String((item as Record<string,unknown>).after))&&isIsoDate((item as Record<string,unknown>).beforeUpdatedAt)&&isIsoDate((item as Record<string,unknown>).afterUpdatedAt))&&new Set((source[key] as {id:string}[]).map(item=>item.id)).size===(source[key] as unknown[]).length;
   const sourceModes=Array.isArray(source.sourceAiModes)?source.sourceAiModes as {id:string}[]:[],targetModes=Array.isArray(source.targetAiModes)?source.targetAiModes as {id:string}[]:[];
   const movedModeIds=Array.isArray(source.aiModeOverrides)?source.aiModeOverrides as string[]:[];
-  return source.version===1&&movedArrayFields.every(key=>validIds(source[key]))&&(source.keycrmClientLinks===undefined||validIds(source.keycrmClientLinks))&&validModes("sourceAiModes")&&validModes("targetAiModes")&&new Set([...sourceModes,...targetModes].map(item=>item.id)).size===sourceModes.length+targetModes.length&&movedModeIds.length===sourceModes.length&&movedModeIds.every(id=>sourceModes.some(item=>item.id===id));
+  return source.version===1&&movedArrayFields.every(key=>validIds(source[key]))&&(source.files===undefined||validIds(source.files))&&(source.keycrmClientLinks===undefined||validIds(source.keycrmClientLinks))&&validModes("sourceAiModes")&&validModes("targetAiModes")&&new Set([...sourceModes,...targetModes].map(item=>item.id)).size===sourceModes.length+targetModes.length&&movedModeIds.length===sourceModes.length&&movedModeIds.every(id=>sourceModes.some(item=>item.id===id));
 }
 
 export function hasValidClientMergeSnapshot(value:Prisma.JsonValue|null|undefined){
   const source=parseMergeObject(value);
-  if(Object.keys(source).length!==snapshotFields.length||Object.keys(source).some(field=>!snapshotFields.includes(field as typeof snapshotFields[number])))return false;
+  const hasVisibility=Object.prototype.hasOwnProperty.call(source,"clientNoteVisibility");
+  if(hasVisibility&&source.clientNoteVisibility!=="INTERNAL"&&source.clientNoteVisibility!=="CLIENT")return false;
+  if(Object.keys(source).length!==snapshotFields.length+(hasVisibility?1:0)||Object.keys(source).some(field=>field!=="clientNoteVisibility"&&!snapshotFields.includes(field as typeof snapshotFields[number])))return false;
   if(!snapshotFields.every(field=>Object.prototype.hasOwnProperty.call(source,field)&&(source[field]===null||typeof source[field]==="string")))return false;
   if(typeof source.firstName!=="string"||typeof source.displayName!=="string"||!contactChannels.has(source.source as ContactChannel)||!clientStatuses.has(String(source.status)))return false;
   if(source.preferredChannel!==null&&!contactChannels.has(source.preferredChannel as ContactChannel))return false;
@@ -95,13 +110,19 @@ export function conditionalTargetRestore(current:Record<string,unknown>,beforeVa
     if(comparableSnapshotValue(current[field])===comparableSnapshotValue(after[field]))data[field]=before[field]??null;
   }
   for(const field of ["firstContactAt","nextActionAt","lastContactAt"] as const)if(typeof data[field]==="string")data[field]=new Date(data[field] as string);
+  if(before.clientNoteVisibility!==undefined&&after.clientNoteVisibility!==undefined){
+    const preferences=parseMergeObject(current.preferences as Prisma.JsonValue);
+    const visibility=preferences.clientNoteVisibility==="CLIENT"?"CLIENT":"INTERNAL";
+    if(visibility===after.clientNoteVisibility)data.preferences={...preferences,clientNoteVisibility:before.clientNoteVisibility};
+  }
   return data;
 }
 
-export function sourceRestoreData(value:Prisma.JsonValue){
+export function sourceRestoreData(value:Prisma.JsonValue,currentPreferences?:Prisma.JsonValue){
   const source=parseMergeObject(value),data=Object.fromEntries(snapshotFields.filter(field=>field!=="updatedAt").map(field=>[field,source[field]??null])) as Record<string,unknown>;
   for(const field of ["firstContactAt","nextActionAt","lastContactAt"] as const)if(typeof data[field]==="string")data[field]=new Date(data[field] as string);
   data.archivedAt=null;
+  if(source.clientNoteVisibility!==undefined)data.preferences={...parseMergeObject(currentPreferences),clientNoteVisibility:source.clientNoteVisibility};
   return data;
 }
 

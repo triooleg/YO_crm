@@ -25,6 +25,18 @@ function load(relative) {
 }
 const { ClientsService } = load('../src/clients/clients.service.ts');
 const { clientMergeSnapshot, parseMovedEntityIds } = load('../src/clients/client-merge-provenance.ts');
+function approvedGuardBody(path,name){
+ const sql=readFileSync(new URL(path,import.meta.url),'utf8');
+ return /AS\s+\$\$([\s\S]*?)\$\$/.exec(sql.slice(sql.indexOf(`CREATE FUNCTION "${name}"`)))[1];
+}
+const approvedFileWindow=approvedGuardBody('../../../packages/database/prisma/migrations/20261103160000_client_file_merge_routing/migration.sql','lock_client_merge_workspace');
+const approvedOwnerRouting=approvedGuardBody('../../../packages/database/prisma/migrations/20260908070000_client_merge_redirect/migration.sql','route_merged_client_owner');
+function clientFileProtectionCatalog(){
+  const base={tableName:"ClientFile",tableSchema:"public",schema:"public",enabled:"O",internal:false,conditional:false,columnSpecific:false,triggerArguments:0,functionArguments:0,returnsTrigger:true,language:"plpgsql",functionSchema:"public"};
+  return [{...base,triggerName:"client_file_merge_window",triggerType:30,functionName:"lock_client_merge_workspace",functionBody:approvedFileWindow},
+    {...base,triggerName:"route_merged_client_owner",triggerType:23,functionName:"route_merged_client_owner",functionBody:approvedOwnerRouting}];
+}
+
 const stamp = new Date('2026-10-15T12:00:00.000Z');
 const actor = { id: 'manager' };
 
@@ -61,7 +73,7 @@ function fixture() {
   };
   const prisma = { $transaction: async callback => {
     const draft = structuredClone(state);
-    const tx = { $executeRaw: async () => 1, $queryRaw: async () => [] };
+    const tx = { $executeRaw: async () => 1, $queryRaw: async query => query?.text?.includes("pg_catalog.pg_trigger") ? clientFileProtectionCatalog() : [] };
     for (const [name, rows] of Object.entries(draft)) tx[name] = {
       findFirst: async ({ where }) => rows.find(row => matches(row, where)) ?? null,
       findUnique: async ({ where }) => rows.find(row => matches(row, where)) ?? null,

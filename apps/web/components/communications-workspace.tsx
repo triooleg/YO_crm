@@ -29,6 +29,7 @@ import { inboxDraftNeedsSave, inboxMessageTimestamp, prepareInboxMessages, resto
 import { CrmSearchField } from "./crm/search-field";
 import { CrmActionIcon, CrmButton, CrmNativeSelect } from "./crm/settings-controls";
 import { CrmMenu } from "./crm/menu";
+import { createInboxClientContext } from "../lib/crm-sections";
 type Order = {
   id: string;
   number: string;
@@ -587,6 +588,11 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     if(!navigate)return;
     if(!await flushComposerDraftBeforeNavigation()){setError(ui.draftAutosaveFailed);return}
     navigate(section,context);
+  }
+  function openClientFromInbox(){
+    if(!client)return;
+    const conversation=client.conversations.find(item=>item.channel===activeChannel);
+    void navigateFromInbox("clients",createInboxClientContext(window.location.search,client.id,conversation?.id,conversation?.channel));
   }
   async function changeReplyChannel(nextChannel:string){
     if(nextChannel===activeChannel)return;
@@ -1558,7 +1564,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             {client && availableChannels.length > 1 && (
               <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
             )}
-            {client&&client.status!=="LEAD"&&<button type="button" className="communications-open-client" onClick={()=>void navigateFromInbox("clients",{clientId:client.id})}>{ui.openClient}</button>}
+            {client&&client.status!=="LEAD"&&<button type="button" className="communications-open-client" onClick={openClientFromInbox}>{ui.openClient}</button>}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
           </header>
           <div className="communications-messages" ref={messagesViewport} onScroll={updateMessagesScrollIntent}>
@@ -1772,7 +1778,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
               <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&void navigateFromInbox("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
-              <button type="button" disabled={!client||client.status==="LEAD"} onClick={()=>client&&void navigateFromInbox("clients",{clientId:client.id})}>⌁ {ui.measurementsShortcut}</button>
+              <button type="button" disabled={!client||client.status==="LEAD"} onClick={openClientFromInbox}>⌁ {ui.measurementsShortcut}</button>
               {templates.slice(0,5).map(template=><button type="button" key={template.id} title={template.content} onClick={()=>chooseTemplate(template)}>{template.name}</button>)}
               {templates.length>5&&<button type="button" onClick={()=>{setAiPanelOpen(true);setTemplatesOpen(true)}}>⋯ {ui.moreActions}</button>}
             </div>

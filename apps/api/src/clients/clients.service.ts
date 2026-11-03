@@ -1,17 +1,21 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Discipline, Prisma, type AiMode, type User } from "@prisma/client";
+import { Discipline, Prisma, type ContactChannel, type AiMode, type User } from "@prisma/client";
 import type { SalesStatisticsService } from '../overview/sales-statistics.service';
 import { PrismaService } from "../prisma.service";
 import { presentClientContact } from "../communications/inbound-routing";
 import type { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, PromoteInboxClientDto, UpdateAthleteDto } from "./clients.dto";
 import { planClientAiMerge } from "./client-merge-policy";
-import { clientMergeSnapshot, conditionalTargetRestore, hasValidClientMergeSnapshot, hasValidDeletedAiSettings, hasValidMovedEntityIds, legacyMergeTargetClientId, legacySourceChannels, parseMergeArray, parseMergeObject, parseMovedEntityIds, sourceRestoreData } from "./client-merge-provenance";
+import { assertClientMergeFileProtection } from "./client-merge-database-guards";
+import { clientMergeSnapshot, conditionalTargetRestore, hasValidClientMergeSnapshot, hasValidDeletedAiSettings, hasValidMovedEntityIds, legacyMergeTargetClientId, legacySourceChannels, parseClientMergeBatch, parseMergeArray, parseMergeObject, parseMovedEntityIds, sourceRestoreData, type ClientMergeBatchProvenance } from "./client-merge-provenance";
 import { createMeasurementData, inheritMeasurementDefinition } from "./measurement-data";
+import type { ClientMergeBatchDto, ClientMergePreviewDto } from "./client-merge-workspace.dto";
+import { buildMergePreview, clientMergeWorkspaceInclude, validateMergeSelection } from "./client-merge-workspace";
 
 const ids=(rows?:{id:string}[])=>rows?.map(row=>row.id)||[];
 
 function comparable(value?:string|null){return value?.trim().toLocaleLowerCase("ru").replace(/^@/,"")||""}
 function comparablePhone(value?:string|null){return value?.replace(/\D/g,"")||""}
+function normalizedPhone(value?:string|null){const text=value?.trim();if(!text)return undefined;const digits=text.replace(/\D/g,"");return digits?(text.startsWith("+")?"+":"")+digits:undefined}
 
 @Injectable()
 export class ClientsService {
@@ -93,13 +97,66 @@ export class ClientsService {
   async merge(targetId:string,sourceId:string,actor:User){
     if(targetId===sourceId)throw new BadRequestException("CLIENT_MERGE_SAME_CLIENT");
     return this.prisma.$transaction(async tx=>{
+      return this.mergePair(tx,targetId,sourceId,actor);
+    });
+  }
+
+  private async lockMergeSelection(tx: Prisma.TransactionClient, clientIds: string[]) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+    for (const id of [...clientIds].sort()) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:" + id},0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${id} FOR UPDATE`;
+    }
+  }
+
+  private async mergePreviewInTransaction(tx: Prisma.TransactionClient, targetId: string, dto: ClientMergePreviewDto) {
+    const selection = validateMergeSelection(targetId, dto);
+    await this.lockMergeSelection(tx, [targetId, ...selection.sourceIds]);
+    await assertClientMergeFileProtection(tx);
+    const clients = await Promise.all([targetId, ...selection.sourceIds].map(id => tx.client.findFirst({
+      where: { id, archivedAt: null }, include: clientMergeWorkspaceInclude,
+    })));
+    if (clients.some(client => !client)) throw new NotFoundException("CLIENT_MERGE_NOT_FOUND");
+    return buildMergePreview(targetId, clients as NonNullable<typeof clients[number]>[], selection.fieldChoices);
+  }
+
+  async previewMerge(targetId: string, dto: ClientMergePreviewDto) {
+    return this.prisma.$transaction(async tx => {
+      const { chosenValues: _chosenValues, ...preview } = await this.mergePreviewInTransaction(tx, targetId, dto);
+      return preview;
+    });
+  }
+
+  async mergeBatch(targetId: string, dto: ClientMergeBatchDto, actor: User) {
+    validateMergeSelection(targetId, dto);
+    if (typeof dto.previewToken !== "string" || !/^[a-f0-9]{64}$/.test(dto.previewToken)) throw new BadRequestException("CLIENT_MERGE_PREVIEW_TOKEN_INVALID");
+    const saved = await this.prisma.$transaction(async tx => {
+      const preview = await this.mergePreviewInTransaction(tx, targetId, dto);
+      if (preview.token !== dto.previewToken) throw new ConflictException("CLIENT_MERGE_PREVIEW_STALE");
+      const conflict = preview.conflicts[0];
+      if (conflict) throw new BadRequestException(conflict.code);
+      const sourceIds = [...dto.sourceClientIds].sort();
+      let result;
+      for (const [index, sourceId] of sourceIds.entries()) {
+        result = await this.mergePair(tx, targetId, sourceId, actor,
+          index === sourceIds.length - 1 ? preview.chosenValues as Prisma.ClientUncheckedUpdateInput : {},
+          {id:preview.token,index,sourceClientIds:sourceIds,fieldChoices:preview.fieldChoices as Record<string,string>});
+      }
+      return result!;
+    }, { maxWait: 10000, timeout: 30000 });
+    this.salesStatistics?.invalidate();
+    return saved;
+  }
+
+  private async mergePair(tx: Prisma.TransactionClient, targetId: string, sourceId: string, actor: User, chosenValues: Prisma.ClientUncheckedUpdateInput = {}, batch?: ClientMergeBatchProvenance) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       for(const id of [targetId,sourceId].sort())await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
+      await assertClientMergeFileProtection(tx);
       await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" IN (${targetId},${sourceId}) ORDER BY "id" FOR UPDATE`;
       const [target,source]=await Promise.all([
         tx.client.findFirst({where:{id:targetId,archivedAt:null},include:{conversations:{select:{channel:true}},aiRuntimeSettings:{where:{scope:"CLIENT"},select:{id:true,key:true,value:true}},aiModeOverrides:{select:{id:true,mode:true,conversationId:true,updatedAt:true}}}}),
         tx.client.findFirst({where:{id:sourceId,archivedAt:null},include:{
-          athletes:{select:{id:true}},orders:{select:{id:true}},conversations:{select:{id:true,channel:true}},messageDeliveryAttempts:{select:{id:true}},workTasks:{select:{id:true}},aiMemories:{select:{id:true}},conversationFacts:{select:{id:true}},agreements:{select:{id:true}},aiRuns:{select:{id:true}},activities:{select:{id:true}},keycrmLinks:{select:{id:true}},incomingMergeRedirects:{select:{sourceClientId:true}},
+          files:{select:{id:true}},athletes:{select:{id:true}},orders:{select:{id:true}},conversations:{select:{id:true,channel:true}},messageDeliveryAttempts:{select:{id:true}},workTasks:{select:{id:true}},aiMemories:{select:{id:true}},conversationFacts:{select:{id:true}},agreements:{select:{id:true}},aiRuns:{select:{id:true}},activities:{select:{id:true}},keycrmLinks:{select:{id:true}},incomingMergeRedirects:{select:{sourceClientId:true}},
           aiRuntimeSettings:{where:{scope:"CLIENT"},select:{id:true,key:true,value:true,valueType:true,scope:true,scopeId:true,channel:true,clientId:true,conversationId:true,updatedById:true,createdAt:true,updatedAt:true}},aiModeOverrides:{select:{id:true,mode:true,conversationId:true,updatedAt:true}}
         }}),
       ]);
@@ -113,7 +170,7 @@ export class ClientsService {
       const nextActionAt=[target.nextActionAt,source.nextActionAt].filter((value):value is Date=>Boolean(value)).sort((a,b)=>a.getTime()-b.getTime())[0]||null;
       const notes=[target.notes,source.notes&&`Из объединённой карточки ${source.displayName}:\n${source.notes}`].filter(Boolean).join("\n\n")||null;
       const modeBefore=[...source.aiModeOverrides.map(item=>({...item,owner:"source" as const})),...target.aiModeOverrides.map(item=>({...item,owner:"target" as const}))];
-      const movedEntityIds={version:1,athletes:ids(source.athletes),orders:ids(source.orders),conversations:ids(source.conversations),messageDeliveryAttempts:ids(source.messageDeliveryAttempts),workTasks:ids(source.workTasks),customerMemories:ids(source.aiMemories),conversationFacts:ids(source.conversationFacts),agreements:ids(source.agreements),aiRuns:ids(source.aiRuns),activities:ids(source.activities),keycrmClientLinks:ids(source.keycrmLinks),aiModeOverrides:ids(source.aiModeOverrides),aiRuntimeSettings:aiPlan.runtimeSettingIdsToMove,incomingRedirects:source.incomingMergeRedirects.map(item=>item.sourceClientId),sourceAiModes:[] as {id:string;before:AiMode;after:AiMode;beforeUpdatedAt:string;afterUpdatedAt:string}[],targetAiModes:[] as {id:string;before:AiMode;after:AiMode;beforeUpdatedAt:string;afterUpdatedAt:string}[]};
+      const movedEntityIds={version:1,...(batch?{batch}:{}),files:ids(source.files),athletes:ids(source.athletes),orders:ids(source.orders),conversations:ids(source.conversations),messageDeliveryAttempts:ids(source.messageDeliveryAttempts),workTasks:ids(source.workTasks),customerMemories:ids(source.aiMemories),conversationFacts:ids(source.conversationFacts),agreements:ids(source.agreements),aiRuns:ids(source.aiRuns),activities:ids(source.activities),keycrmClientLinks:ids(source.keycrmLinks),aiModeOverrides:ids(source.aiModeOverrides),aiRuntimeSettings:aiPlan.runtimeSettingIdsToMove,incomingRedirects:source.incomingMergeRedirects.map(item=>item.sourceClientId),sourceAiModes:[] as {id:string;before:AiMode;after:AiMode;beforeUpdatedAt:string;afterUpdatedAt:string}[],targetAiModes:[] as {id:string;before:AiMode;after:AiMode;beforeUpdatedAt:string;afterUpdatedAt:string}[]};
       const sourceSnapshot=clientMergeSnapshot(source as unknown as Record<string,unknown>),targetBeforeSnapshot=clientMergeSnapshot(target as unknown as Record<string,unknown>);
       const deletedAiSettings=source.aiRuntimeSettings.filter(item=>aiPlan.runtimeSettingIdsToDelete.includes(item.id)).map(item=>({...item,createdAt:item.createdAt.toISOString(),updatedAt:item.updatedAt.toISOString()}));
       const updated=await tx.client.update({where:{id:targetId},data:{
@@ -121,16 +178,19 @@ export class ClientsService {
         email:target.email||source.email,phone:target.phone||source.phone,whatsapp:target.whatsapp||source.whatsapp,instagram:target.instagram||source.instagram,instagramUsername:target.instagramUsername||source.instagramUsername,
         facebook:target.facebook||source.facebook,telegram:target.telegram||source.telegram,preferredChannel:target.preferredChannel||source.preferredChannel,language:target.language||source.language,timezone:target.timezone||source.timezone,
         firstContactAt,lastContactAt,nextActionAt,notes,responsibleManagerId:target.responsibleManagerId||source.responsibleManagerId,status:target.status==="LEAD"?source.status:target.status,source:target.source==="MANUAL"?source.source:target.source,
+        ...chosenValues,
+        preferences:{...parseMergeObject(target.preferences),clientNoteVisibility:"INTERNAL"},
       }});
       const moveExact=async(model:{updateMany:(args:never)=>Promise<{count:number}>},entityIds:string[])=>{if(entityIds.length){const result=await model.updateMany({where:{id:{in:entityIds},clientId:sourceId},data:{clientId:targetId}} as never);if(result.count!==entityIds.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}};
       await moveExact(tx.conversation as never,movedEntityIds.conversations);
       await Promise.all([
+        moveExact(tx.clientFile as never,movedEntityIds.files),
         moveExact(tx.athlete as never,movedEntityIds.athletes),moveExact(tx.order as never,movedEntityIds.orders),moveExact(tx.messageDeliveryAttempt as never,movedEntityIds.messageDeliveryAttempts),moveExact(tx.workTask as never,movedEntityIds.workTasks),moveExact(tx.customerMemory as never,movedEntityIds.customerMemories),moveExact(tx.conversationFact as never,movedEntityIds.conversationFacts),moveExact(tx.agreement as never,movedEntityIds.agreements),moveExact(tx.aiRun as never,movedEntityIds.aiRuns),moveExact(tx.activity as never,movedEntityIds.activities),moveExact(tx.keycrmClientLink as never,movedEntityIds.keycrmClientLinks),
       ]);
       if(aiPlan.runtimeSettingIdsToDelete.length){const result=await tx.aiRuntimeSetting.deleteMany({where:{id:{in:aiPlan.runtimeSettingIdsToDelete},clientId:sourceId}});if(result.count!==aiPlan.runtimeSettingIdsToDelete.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}
       if(aiPlan.runtimeSettingIdsToMove.length){const result=await tx.aiRuntimeSetting.updateMany({where:{id:{in:aiPlan.runtimeSettingIdsToMove},clientId:sourceId,scopeId:sourceId},data:{clientId:targetId,scopeId:targetId}});if(result.count!==aiPlan.runtimeSettingIdsToMove.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}
       if(movedEntityIds.aiModeOverrides.length){const result=await tx.aiModeOverride.updateMany({where:{id:{in:movedEntityIds.aiModeOverrides},clientId:sourceId},data:{clientId:targetId}});if(result.count!==movedEntityIds.aiModeOverrides.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}
-      if(aiPlan.consolidatedClientMode){const clientModeIds=[...target.aiModeOverrides,...source.aiModeOverrides].filter(item=>!item.conversationId).map(item=>item.id);if(clientModeIds.length){const result=await tx.aiModeOverride.updateMany({where:{id:{in:clientModeIds},clientId:targetId,conversationId:null},data:{mode:aiPlan.consolidatedClientMode as AiMode}});if(result.count!==clientModeIds.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}}
+      if(aiPlan.consolidatedClientMode){const clientModeIds=[...target.aiModeOverrides,...source.aiModeOverrides].filter(item=>!item.conversationId&&(!batch||item.mode!==aiPlan.consolidatedClientMode)).map(item=>item.id);if(clientModeIds.length){const result=await tx.aiModeOverride.updateMany({where:{id:{in:clientModeIds},clientId:targetId,conversationId:null},data:{mode:aiPlan.consolidatedClientMode as AiMode}});if(result.count!==clientModeIds.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID")}}
       if(modeBefore.length){
         const modeAfter=await tx.aiModeOverride.findMany({where:{id:{in:modeBefore.map(item=>item.id)},clientId:targetId},select:{id:true,mode:true,updatedAt:true}});
         if(modeAfter.length!==modeBefore.length)throw new BadRequestException("CLIENT_MERGE_PROVENANCE_INVALID");
@@ -143,9 +203,8 @@ export class ClientsService {
       const archivedAt=new Date();
       await tx.client.update({where:{id:sourceId},data:{archivedAt}});
       await tx.activity.create({data:{clientId:targetId,type:"CLIENTS_MERGED",summary:`Объединены карточки клиентов: ${target.displayName} и ${source.displayName}`,metadata:{sourceClientId:sourceId,targetClientId:targetId,sourceChannels:source.conversations.map(item=>item.channel)}}});
-      await tx.auditLog.create({data:{actorId:actor.id,action:"MERGE",entityType:"Client",entityId:targetId,before:{targetId,sourceId,sourceDisplayName:source.displayName},after:{targetId,sourceId,sourceArchivedAt:archivedAt.toISOString(),aiRuntimeSettingsMoved:aiPlan.runtimeSettingIdsToMove.length,aiRuntimeSettingsDeduplicated:aiPlan.runtimeSettingIdsToDelete.length,consolidatedClientAiMode:aiPlan.consolidatedClientMode}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"MERGE",entityType:"Client",entityId:targetId,before:{targetId,sourceId,sourceDisplayName:source.displayName},after:{targetId,sourceId,sourceArchivedAt:archivedAt.toISOString(),aiRuntimeSettingsMoved:aiPlan.runtimeSettingIdsToMove.length,aiRuntimeSettingsDeduplicated:aiPlan.runtimeSettingIdsToDelete.length,consolidatedClientAiMode:aiPlan.consolidatedClientMode,...(batch?{batchId:batch.id,batchIndex:batch.index,fieldChoices:batch.fieldChoices||{}}:{})}}});
       return presentClientContact(updated);
-    });
   }
 
   async split(targetId:string,sourceId:string,actor:User){
@@ -153,6 +212,7 @@ export class ClientsService {
     return this.prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
       for(const id of [targetId,sourceId].sort())await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
+      await assertClientMergeFileProtection(tx);
       await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" IN (${targetId},${sourceId}) ORDER BY "id" FOR UPDATE`;
       const [target,source,redirect,operation,legacyMergeActivities,activeRedirects]=await Promise.all([
         tx.client.findFirst({where:{id:targetId,archivedAt:null}}),
@@ -165,6 +225,22 @@ export class ClientsService {
       if(!target||!source||!source.archivedAt||!redirect||redirect.targetClientId!==targetId)throw new NotFoundException("CLIENT_SPLIT_NOT_FOUND");
       if(operation&&operation.targetClientId!==targetId)throw new BadRequestException("CLIENT_SPLIT_ORDER");
       if(operation&&(!hasValidMovedEntityIds(operation.movedEntityIds)||!hasValidClientMergeSnapshot(operation.sourceSnapshot)||!hasValidClientMergeSnapshot(operation.targetBeforeSnapshot)||!hasValidClientMergeSnapshot(operation.targetAfterSnapshot)||!hasValidDeletedAiSettings(operation.deletedAiSettings,sourceId)))throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID");
+      const batch=operation?parseClientMergeBatch(operation.movedEntityIds):undefined;
+      let restorationTarget=target;
+      if(batch&&operation){
+        if(batch.sourceClientIds[batch.index]!==sourceId)throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID");
+        const siblings=await tx.clientMergeOperation.findMany({where:{targetClientId:targetId,splitAt:null,movedEntityIds:{path:["batch","id"],equals:batch.id}},select:{sourceClientId:true,movedEntityIds:true}});
+        if(siblings.some(sibling=>{const other=parseClientMergeBatch(sibling.movedEntityIds);return !other||other.index>batch.index}))throw new BadRequestException("CLIENT_SPLIT_ORDER");
+        if(siblings.length!==batch.index+1||siblings.some(sibling=>{const other=parseClientMergeBatch(sibling.movedEntityIds);return !other||JSON.stringify(other.sourceClientIds)!==JSON.stringify(batch.sourceClientIds)||other.sourceClientIds[other.index]!==sibling.sourceClientId}))throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID");
+        // A prior batch split is an audited restoration, not an operator edit.
+        // Bridge only its exact resulting row version, never value-only ABA.
+        const prior=await tx.auditLog.findFirst({where:{entityType:"Client",entityId:targetId,action:"SPLIT",after:{path:["batchRestore","id"],equals:batch.id}},orderBy:[{createdAt:"desc"},{id:"desc"}],select:{after:true}});
+        const bridge=parseMergeObject(parseMergeObject(prior?.after).batchRestore as Prisma.JsonValue),after=parseMergeObject(operation.targetAfterSnapshot);
+        const currentSnapshot=clientMergeSnapshot(target as unknown as Record<string,unknown>);
+        if(bridge.restored===true&&bridge.index===batch.index+1&&bridge.to===target.updatedAt.toISOString()&&bridge.continues===after.updatedAt&&
+          Object.entries(after).every(([field,value])=>field==="updatedAt"||currentSnapshot[field]===value))restorationTarget={...target,updatedAt:new Date(String(after.updatedAt))};
+      }
+      let targetFieldsRestored=false;
       const moved=operation?parseMovedEntityIds(operation.movedEntityIds):undefined;
       const sourceLegacyActivities=operation?[]:legacyMergeActivities.filter(item=>parseMergeObject(item.metadata).sourceClientId===sourceId);
       if(!operation&&sourceLegacyActivities.length!==1)throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID");
@@ -205,8 +281,12 @@ export class ClientsService {
       const detachedSourceClientIds=[sourceId];
       await tx.clientMergeRedirect.delete({where:{sourceClientId:sourceId}});
       if(operation){
-        await tx.client.update({where:{id:sourceId},data:sourceRestoreData(operation.sourceSnapshot) as Prisma.ClientUncheckedUpdateInput});
-        if(operation.targetClientId===targetId)await tx.client.update({where:{id:targetId},data:conditionalTargetRestore(target as unknown as Record<string,unknown>,operation.targetBeforeSnapshot,operation.targetAfterSnapshot) as Prisma.ClientUncheckedUpdateInput});
+        await tx.client.update({where:{id:sourceId},data:sourceRestoreData(operation.sourceSnapshot,source.preferences) as Prisma.ClientUncheckedUpdateInput});
+        if(operation.targetClientId===targetId){
+          const restore=conditionalTargetRestore(restorationTarget as unknown as Record<string,unknown>,operation.targetBeforeSnapshot,operation.targetAfterSnapshot) as Prisma.ClientUncheckedUpdateInput;
+          targetFieldsRestored=Object.keys(restore).length>0;
+          await tx.client.update({where:{id:targetId},data:restore});
+        }
         if(moved!.incomingRedirects.length){const restored=await tx.clientMergeRedirect.updateMany({where:{sourceClientId:{in:moved!.incomingRedirects},targetClientId:targetId},data:{targetClientId:sourceId}});if(restored.count!==moved!.incomingRedirects.length)throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID");detachedSourceClientIds.push(...moved!.incomingRedirects)}
       }else{
         await tx.client.update({where:{id:sourceId},data:{archivedAt:null}});
@@ -219,6 +299,7 @@ export class ClientsService {
       const updateIds=async(model:{updateMany:(args:never)=>Promise<{count:number}>},entityIds:string[])=>{if(entityIds.length){const result=await model.updateMany({where:{id:{in:entityIds},clientId:targetId},data:{clientId:sourceId}} as never);if(result.count!==entityIds.length)throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID")}};
       await updateIds(tx.conversation as never,conversationIds);
       await Promise.all([
+        updateIds(tx.clientFile as never,moved?.files||[]),
         updateIds(tx.athlete as never,moved?.athletes||[]),updateIds(tx.order as never,moved?.orders||[]),updateIds(tx.messageDeliveryAttempt as never,moved?.messageDeliveryAttempts||[]),updateIds(tx.workTask as never,moved?.workTasks||[]),updateIds(tx.customerMemory as never,moved?.customerMemories||[]),updateIds(tx.conversationFact as never,moved?.conversationFacts||[]),updateIds(tx.agreement as never,moved?.agreements||[]),updateIds(tx.aiRun as never,moved?.aiRuns||[]),updateIds(tx.activity as never,moved?.activities||[]),updateIds(tx.keycrmClientLink as never,moved?.keycrmClientLinks||[]),
       ]);
       const moveConversationOwned=async(model:{findMany:(args:never)=>Promise<{id:string}[]>;updateMany:(args:never)=>Promise<{count:number}>},where:Record<string,unknown>)=>{const rows=await model.findMany({where,select:{id:true}} as never);if(rows.length){const result=await model.updateMany({where:{id:{in:rows.map(row=>row.id)},clientId:targetId},data:{clientId:sourceId}} as never);if(result.count!==rows.length)throw new BadRequestException("CLIENT_SPLIT_PROVENANCE_INVALID")}};
@@ -249,17 +330,19 @@ export class ClientsService {
       }
       await tx.activity.create({data:{clientId:targetId,type:"CLIENTS_SPLIT",summary:`Разделены карточки клиентов: ${target.displayName} и ${source.displayName}`,metadata:{sourceClientId:sourceId,targetClientId:targetId,mode:operation?"FULL":"CHANNELS_ONLY",channels:conversations.map(item=>item.channel)}}});
       await tx.activity.create({data:{clientId:sourceId,type:"CLIENTS_SPLIT",summary:`Карточка восстановлена после объединения с ${target.displayName}`,metadata:{sourceClientId:sourceId,targetClientId:targetId,mode:operation?"FULL":"CHANNELS_ONLY"}}});
-      await tx.auditLog.create({data:{actorId:actor.id,action:"SPLIT",entityType:"Client",entityId:targetId,before:{targetId,sourceId,redirectCreatedAt:redirect.createdAt},after:{targetId,sourceId,splitAt:splitAt.toISOString(),mode:operation?"FULL":"CHANNELS_ONLY",conversationIds}}});
       const [restoredTarget,restoredSource]=await Promise.all([tx.client.findUniqueOrThrow({where:{id:targetId}}),tx.client.findUniqueOrThrow({where:{id:sourceId}})]);
+      await tx.auditLog.create({data:{actorId:actor.id,action:"SPLIT",entityType:"Client",entityId:targetId,before:{targetId,sourceId,redirectCreatedAt:redirect.createdAt},after:{targetId,sourceId,splitAt:splitAt.toISOString(),mode:operation?"FULL":"CHANNELS_ONLY",conversationIds,...(batch&&operation?{batchRestore:{id:batch.id,index:batch.index,restored:targetFieldsRestored,from:target.updatedAt.toISOString(),to:restoredTarget.updatedAt.toISOString(),continues:String(parseMergeObject(operation.targetBeforeSnapshot).updatedAt)}}:{})}}});
       return{target:presentClientContact(restoredTarget),source:presentClientContact(restoredSource),mode:operation?"FULL":"CHANNELS_ONLY",movedConversationIds:conversationIds,movedChannels:[...new Set(conversations.map(item=>item.channel))],detachedSourceClientIds};
     });
   }
 
   create(dto: CreateClientDto, actor: User) {
     const displayName = [dto.firstName.trim(), dto.lastName?.trim()].filter(Boolean).join(" ");
+    const {email:rawEmail,phone:rawPhone,...editable}=dto;
+    const email=rawEmail?.trim().toLowerCase()||undefined,phone=normalizedPhone(rawPhone);
     return this.prisma.$transaction(async tx => {
       const client = await tx.client.create({
-        data: { ...dto, firstName: dto.firstName.trim(), lastName: dto.lastName?.trim(), displayName, responsibleManagerId: actor.id }
+        data: { ...editable, ...(email?{email}:{}), ...(phone?{phone}:{}), firstName: dto.firstName.trim(), lastName: dto.lastName?.trim(), displayName, responsibleManagerId: actor.id }
       });
       await tx.activity.create({ data: { clientId: client.id, type: "CLIENT_CREATED", summary: "Создана карточка клиента" } });
       await tx.auditLog.create({ data: { actorId: actor.id, action: "CREATE", entityType: "Client", entityId: client.id, after: client } });
@@ -272,17 +355,25 @@ export class ClientsService {
     return this.prisma.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-promote:"+id},0))`;const before=await tx.client.findFirst({where:{id,archivedAt:null}});if(!before)throw new NotFoundException("Клиент не найден");if(before.status!=="LEAD")throw new BadRequestException("Карточка клиента уже оформлена");const preserveInstagramSid=before.source==="INSTAGRAM"&&/^\d+$/.test(before.instagram||"");const client=await tx.client.update({where:{id},data:{...editable,source:before.source,...(preserveInstagramSid?{instagram:before.instagram}:{}),firstName,lastName,displayName,status:"ACTIVE",responsibleManagerId:actor.id}});await tx.activity.create({data:{clientId:id,type:"CLIENT_PROMOTED_FROM_INBOX",summary:"Входящий контакт оформлен как клиент"}});await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before,after:client}});return client});
   }
 
-  async updateNotes(id:string,notes:string,actor:User){
+  async updateNotes(id:string,notes:string,actor:User,options?:{visibility?:"INTERNAL"|"CLIENT";expectedUpdatedAt?:string}){
+    const visibility=options?.visibility??"INTERNAL";
+    if(visibility!=="INTERNAL"&&visibility!=="CLIENT")throw new BadRequestException("CLIENT_NOTE_VISIBILITY_INVALID");
+    if(options?.expectedUpdatedAt!==undefined&&!Number.isFinite(new Date(options.expectedUpdatedAt).getTime()))throw new BadRequestException("CLIENT_NOTE_VERSION_INVALID");
     return this.prisma.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge:"+id},0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Client" WHERE "id" = ${id} FOR UPDATE`;
       const before=await tx.client.findFirst({where:{id,archivedAt:null}});
       if(!before)throw new NotFoundException("Клиент не найден");
-      const client=await tx.client.update({where:{id},data:{notes:notes.trim()||null}});
+      if(options?.expectedUpdatedAt!==undefined&&before.updatedAt.toISOString()!==options.expectedUpdatedAt)throw new ConflictException("Карточка клиента уже изменена. Обновите данные и повторите действие");
+      const preferences={...parseMergeObject(before.preferences),clientNoteVisibility:visibility};
+      const client=await tx.client.update({where:{id},data:{notes:notes.trim()||null,preferences}});
       await tx.activity.create({data:{clientId:id,type:"CLIENT_NOTE_UPDATED",summary:notes.trim()?"Обновлена заметка клиента":"Заметка клиента очищена"}});
-      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{notes:before.notes},after:{notes:client.notes}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{notes:before.notes,visibility:parseMergeObject(before.preferences).clientNoteVisibility??"INTERNAL"},after:{notes:client.notes,visibility}}});
       return client;
     });
   }
-  async updateProfile(id:string,dto:{displayName:string;country?:string|null;language?:string|null;phone?:string|null;email?:string|null;expectedUpdatedAt:string},actor:User){
+  async updateProfile(id:string,dto:{displayName:string;country?:string|null;language?:string|null;phone?:string|null;email?:string|null;preferredChannel?:ContactChannel|null;responsibleManagerId?:string|null;expectedUpdatedAt:string},actor:User){
     let countryChanged=false;
     const saved=await this.prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
@@ -292,14 +383,23 @@ export class ClientsService {
       if(!before)throw new NotFoundException("Клиент не найден");
       if(before.updatedAt.toISOString()!==dto.expectedUpdatedAt)throw new ConflictException("Карточка клиента уже изменена. Обновите данные и повторите действие");
       const clean=(value:string|null|undefined)=>value?.trim()||null;
-      const data={displayName:dto.displayName.trim(),country:dto.country===undefined?before.country:clean(dto.country),language:dto.language===undefined?before.language:clean(dto.language),phone:dto.phone===undefined?before.phone:clean(dto.phone),email:dto.email===undefined?before.email:clean(dto.email)?.toLowerCase()||null};
-      if(before.displayName===data.displayName&&before.country===data.country&&before.language===data.language&&before.phone===data.phone&&before.email===data.email)return before;
+      const responsibleManagerId=dto.responsibleManagerId===undefined?before.responsibleManagerId:clean(dto.responsibleManagerId);
+      if(dto.responsibleManagerId!==undefined&&responsibleManagerId&&!await tx.user.findFirst({where:{id:responsibleManagerId,active:true,archivedAt:null},select:{id:true}}))throw new BadRequestException("Ответственный менеджер не найден или неактивен");
+      const phone=dto.phone===undefined?before.phone:normalizedPhone(dto.phone)||null;
+      const email=dto.email===undefined?before.email:clean(dto.email)?.toLowerCase()||null;
+      const legacyFacebookId=before.source==="FACEBOOK"&&before.email?.trim().match(/^(\d+)@facebook\.com$/i)?.[1];
+      const providerIdentity={
+        ...(email!==before.email&&legacyFacebookId&&!before.facebook?{facebook:legacyFacebookId}:{}),
+        ...(phone!==before.phone&&before.source==="WHATSAPP"&&before.phone&&!before.whatsapp?{whatsapp:normalizedPhone(before.phone)||before.phone}:{}),
+      };
+      const data={displayName:dto.displayName.trim(),country:dto.country===undefined?before.country:clean(dto.country),language:dto.language===undefined?before.language:clean(dto.language),phone:dto.phone===undefined?before.phone:phone,email:dto.email===undefined?before.email:email,preferredChannel:dto.preferredChannel===undefined?before.preferredChannel:dto.preferredChannel,responsibleManagerId,...providerIdentity};
+      if(before.displayName===data.displayName&&before.country===data.country&&before.language===data.language&&before.phone===data.phone&&before.email===data.email&&before.preferredChannel===data.preferredChannel&&before.responsibleManagerId===data.responsibleManagerId)return before;
       const changed=await tx.client.updateMany({where:{id,archivedAt:null,updatedAt:before.updatedAt},data});
       if(changed.count!==1)throw new ConflictException("Карточка клиента уже изменена. Обновите данные и повторите действие");
       const client=await tx.client.findUnique({where:{id}});
       if(!client)throw new NotFoundException("Клиент не найден");
       await tx.activity.create({data:{clientId:id,type:"CLIENT_PROFILE_UPDATED",summary:"Изменены данные клиента"}});
-      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{displayName:before.displayName,country:before.country,language:before.language,phone:before.phone,email:before.email},after:{displayName:client.displayName,country:client.country,language:client.language,phone:client.phone,email:client.email}}});
+      await tx.auditLog.create({data:{actorId:actor.id,action:"UPDATE",entityType:"Client",entityId:id,before:{displayName:before.displayName,country:before.country,language:before.language,phone:before.phone,email:before.email,preferredChannel:before.preferredChannel,responsibleManagerId:before.responsibleManagerId,facebook:before.facebook,whatsapp:before.whatsapp},after:{displayName:client.displayName,country:client.country,language:client.language,phone:client.phone,email:client.email,preferredChannel:client.preferredChannel,responsibleManagerId:client.responsibleManagerId,facebook:client.facebook,whatsapp:client.whatsapp}}});
       countryChanged=before.country!==client.country;
       return presentClientContact(client);
     });

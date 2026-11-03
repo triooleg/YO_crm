@@ -18,7 +18,7 @@ test("client detail exposes only active next-action tasks",()=>{
 });
 
 test("карточка клиента догружает точный старый заказ за пределами последних 20",()=>{
-  assert.match(controller,/detail\(@Param\("id"\) id: string, @Query\("orderId"\) orderId\?: string\)/);
+  assert.match(controller,/detail\(@Param\("id"\) id: string, @Query\("orderId"\) orderId\?: string, @Query\(\) query\?: ClientsWorkspaceQuery\)/);
   assert.match(service,/orderId && !client\.orders\.some/);
   assert.match(service,/where: \{ id: orderId, clientId: id, archivedAt: null \}/);
   assert.match(service,/orders: \[requestedOrder, \.\.\.client\.orders\]/);

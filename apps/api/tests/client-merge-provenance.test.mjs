@@ -42,6 +42,9 @@ test("nested merge account ownership is deterministic and follows the deepest so
 test("complete provenance validators reject partial snapshots and AI records",()=>{
   const snapshot=clientMergeSnapshot({firstName:"Lyna",displayName:"Lyna D",source:"INSTAGRAM",status:"ACTIVE",updatedAt:new Date("2026-09-08T00:00:00Z")});
   assert.equal(hasValidClientMergeSnapshot(snapshot),true);
+  const legacySnapshot={...snapshot};delete legacySnapshot.clientNoteVisibility;
+  assert.equal(hasValidClientMergeSnapshot(legacySnapshot),true);
+  assert.equal(hasValidClientMergeSnapshot({...snapshot,clientNoteVisibility:"PUBLIC"}),false);
   assert.equal(hasValidClientMergeSnapshot({updatedAt:"2026-09-08T00:00:00Z"}),false);
   assert.equal(hasValidClientMergeSnapshot({...snapshot,updatedAt:"not-a-date"}),false);
   assert.equal(hasValidClientMergeSnapshot({...snapshot,updatedAt:"2026-09-08"}),false);
@@ -62,6 +65,10 @@ test("complete provenance validators reject partial snapshots and AI records",()
 test("moved provenance rejects empty, duplicate and invalid AI identifiers",()=>{
   const valid={version:1,athletes:[],orders:[],conversations:["conversation"],messageDeliveryAttempts:[],workTasks:[],customerMemories:[],conversationFacts:[],agreements:[],aiRuns:[],activities:[],aiModeOverrides:["mode-source"],aiRuntimeSettings:[],incomingRedirects:[],sourceAiModes:[{id:"mode-source",before:"OFF",after:"SHADOW",beforeUpdatedAt:"2026-09-01T00:00:00.000Z",afterUpdatedAt:"2026-09-02T00:00:00.000Z"}],targetAiModes:[{id:"mode-target",before:"SHADOW",after:"SHADOW",beforeUpdatedAt:"2026-09-01T00:00:00.000Z",afterUpdatedAt:"2026-09-01T00:00:00.000Z"}]};
   assert.equal(hasValidMovedEntityIds(valid),true);
+  assert.equal(hasValidMovedEntityIds({...valid,files:["file-1"]}),true);
+  assert.equal(hasValidMovedEntityIds({...valid,files:["file-1","file-1"]}),false);
+  assert.equal(hasValidMovedEntityIds({...valid,files:null}),false);
+  assert.equal(hasValidMovedEntityIds({...valid,files:[""]}),false);
   assert.equal(hasValidMovedEntityIds({...valid,conversations:["conversation","conversation"]}),false);
   assert.equal(hasValidMovedEntityIds({...valid,conversations:[""]}),false);
   assert.equal(hasValidMovedEntityIds({...valid,sourceAiModes:[{...valid.sourceAiModes[0],before:"INVALID"}]}),false);

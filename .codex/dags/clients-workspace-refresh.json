@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "task": {
+    "id": "clients-workspace-refresh",
+    "title": "Clients table, selected detail and safe merge",
+    "base_ref": "c91c747e01af9239ef1bd36aba02e62950567d83",
+    "no_commit_reason": "Owner subsequently authorized deployment; standing instruction requires current application source published on GitHub. Integrator may commit/push this reviewed task.",
+    "deployment": "AUTHORIZED_2026_11_03",
+    "evidence": "docs/plans/clients-workspace-refresh.md"
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "agent": "COMPATIBILITY",
+      "kind": "analysis",
+      "title": "Existing contracts audit",
+      "description": "Initial blockers incorporated: legacy projection, file provenance, canonical links, atomic batch and notes visibility.",
+      "depends_on": [],
+      "affected_paths": [
+        "apps/api/src/clients",
+        "apps/web/components/client-workspace.tsx"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "read-model",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "title": "Bounded existing API projection",
+      "description": "Integrator read projections and existing order history filters.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/api/src/clients/clients-workspace-read.ts",
+        "apps/api/src/clients/clients.controller.ts",
+        "apps/api/src/clients/clients.dto.ts",
+        "apps/api/src/orders"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "merge",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "title": "Safe merge extension",
+      "description": "Isolated clients-merge-worker worktree; owned uncommitted patch integrated only by INTEGRATOR.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/api/src/clients/clients.service.ts",
+        "apps/api/src/clients/client-merge-provenance.ts",
+        "packages/database/prisma/migrations"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ],
+      "human_approval": true,
+      "approved_at": "2026-11-03T00:00:00Z",
+      "approval_scope": "Owner request authorizes additive local implementation/tests only. Destructive and production operations are not authorized."
+    },
+    {
+      "id": "ui",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "title": "Clients table and card",
+      "description": "Isolated clients-ui-worker worktree; owned uncommitted patch integrated only by INTEGRATOR.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/web/components/client-workspace.tsx",
+        "apps/web/components/clients"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "navigation",
+      "agent": "IMPLEMENTER",
+      "kind": "implementation",
+      "title": "Exact Inbox roundtrip",
+      "description": "Isolated clients-navigation-worker worktree; owned uncommitted patch integrated only by INTEGRATOR.",
+      "depends_on": [
+        "scope"
+      ],
+      "affected_paths": [
+        "apps/web/components/crm-shell.tsx",
+        "apps/web/components/communications-workspace.tsx",
+        "apps/web/lib/crm-sections.ts"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "integration",
+      "agent": "INTEGRATOR",
+      "kind": "implementation",
+      "title": "Integrate and verify",
+      "description": "No worker commits; integrate scoped diffs, validate database, browser and quality checks.",
+      "depends_on": [
+        "read-model",
+        "merge",
+        "ui",
+        "navigation"
+      ],
+      "affected_paths": [
+        "docs/plans/clients-workspace-refresh.md",
+        "CHAT_HANDOFF.md"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "reviews",
+      "agent": "REVIEWER",
+      "kind": "analysis",
+      "title": "Independent review roles",
+      "description": "Compatibility, regression, business/security and visual must pass before release gate.",
+      "depends_on": [
+        "integration"
+      ],
+      "affected_paths": [
+        "apps/api/src/clients",
+        "apps/web/components/clients"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    },
+    {
+      "id": "release",
+      "agent": "RELEASE",
+      "kind": "analysis",
+      "title": "Local acceptance only",
+      "description": "Exact diff and quality evidence; no production deployment authorized.",
+      "depends_on": [
+        "reviews"
+      ],
+      "affected_paths": [
+        "docs/plans/clients-workspace-refresh.md"
+      ],
+      "required": true,
+      "status": "DONE",
+      "acceptance_criteria": [
+        "Existing contracts preserved; task-specific tests pass"
+      ],
+      "validation_commands": [
+        "corepack pnpm quality:check"
+      ]
+    }
+  ]
+}

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import {createRequire} from "node:module";
 import ts from "typescript";
+import { loadTargetModule } from "./website-test-loader.mjs";
 
 function compile(source){
   return ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText;
@@ -19,13 +21,15 @@ vm.runInNewContext(compile(policySource),{module:policyModule,exports:policyModu
 const provenanceModule={exports:{}};
 vm.runInNewContext(compile(provenanceSource),{module:provenanceModule,exports:provenanceModule.exports,require:id=>id==="@prisma/client"?{ContactChannel:Object.fromEntries(["WEBSITE","CHATWOOT","INSTAGRAM","FACEBOOK","WHATSAPP","EMAIL","TELEGRAM","REFERRAL","RETURNING_CUSTOMER","MANUAL","OTHER"].map(value=>[value,value]))}:{},Set,Map,JSON,Date,Object,Array,Error});
 
-const {BadRequestException,NotFoundException}=createRequire(import.meta.url)("@nestjs/common");
+const {BadRequestException,NotFoundException,ConflictException}=createRequire(import.meta.url)("@nestjs/common");
 const serviceModule={exports:{}};
 const measurementModule={exports:{}};
 vm.runInNewContext(compile(await readFile(new URL("../src/clients/measurement-data.ts",import.meta.url),"utf8")),{module:measurementModule,exports:measurementModule.exports,require:()=>({BadRequestException}),Date,Object,Array,Number});
 const localRequire=id=>{
+  if(id==="./client-merge-database-guards")return loadTargetModule("clients/client-merge-database-guards.ts");
+  if(id==="./client-merge-workspace")return loadTargetModule("clients/client-merge-workspace.ts");
   if(id==="./measurement-data")return measurementModule.exports;
-  if(id==="@nestjs/common")return{BadRequestException,NotFoundException,Injectable:()=>target=>target};
+  if(id==="@nestjs/common")return{BadRequestException,NotFoundException,ConflictException,Injectable:()=>target=>target};
   if(id==="../communications/inbound-routing")return{presentClientContact:value=>value};
   if(id==="./client-merge-policy")return policyModule.exports;
   if(id==="./client-merge-provenance")return provenanceModule.exports;
@@ -36,7 +40,7 @@ const localRequire=id=>{
 vm.runInNewContext(compile(serviceSource),{module:serviceModule,exports:serviceModule.exports,require:localRequire,Set,Map,Date,Error,Promise,console});
 const {ClientsService}=serviceModule.exports;
 
-const relationNames=["athlete","order","conversation","messageDeliveryAttempt","workTask","customerMemory","conversationFact","agreement","aiRun","activity","keycrmClientLink"];
+const relationNames=["clientFile","athlete","order","conversation","messageDeliveryAttempt","workTask","customerMemory","conversationFact","agreement","aiRun","activity","keycrmClientLink"];
 
 function initialState(){
   const base={firstName:"",lastName:null,avatarUrl:null,country:null,city:null,address:null,postalCode:null,email:null,phone:null,whatsapp:null,instagram:null,instagramUsername:null,facebook:null,telegram:null,preferredChannel:null,language:null,timezone:null,firstContactAt:null,lastContactAt:null,nextActionAt:null,notes:null,responsibleManagerId:null,status:"ACTIVE",source:"MANUAL",archivedAt:null,updatedAt:new Date("2026-09-01T00:00:00Z")};
@@ -49,8 +53,20 @@ function initialState(){
   };
 }
 
+function approvedGuardBody(path,name){
+ const sql=readFileSync(new URL(path,import.meta.url),'utf8');
+ return /AS\s+\$\$([\s\S]*?)\$\$/.exec(sql.slice(sql.indexOf(`CREATE FUNCTION "${name}"`)))[1];
+}
+const approvedFileWindow=approvedGuardBody('../../../packages/database/prisma/migrations/20261103160000_client_file_merge_routing/migration.sql','lock_client_merge_workspace');
+const approvedOwnerRouting=approvedGuardBody('../../../packages/database/prisma/migrations/20260908070000_client_merge_redirect/migration.sql','route_merged_client_owner');
+function clientFileProtectionCatalog(){
+  const base={tableName:"ClientFile",tableSchema:"public",schema:"public",enabled:"O",internal:false,conditional:false,columnSpecific:false,triggerArguments:0,functionArguments:0,returnsTrigger:true,language:"plpgsql",functionSchema:"public"};
+  return [{...base,triggerName:"client_file_merge_window",triggerType:30,functionName:"lock_client_merge_workspace",functionBody:approvedFileWindow},
+    {...base,triggerName:"route_merged_client_owner",triggerType:23,functionName:"route_merged_client_owner",functionBody:approvedOwnerRouting}];
+}
+
 function fakePrisma(seed,{failRelation,shortCountRelation,shortDelete,failStage}={}){
-  const prisma={state:structuredClone(seed),calls:{aiModeUpdates:new Map()}};
+  const prisma={state:structuredClone(seed),catalogRows:clientFileProtectionCatalog(),calls:{aiModeUpdates:new Map(),businessWrites:0,events:[]}};
   prisma.$transaction=async callback=>{
     const state=structuredClone(prisma.state);
     const clientById=id=>state.clients.find(client=>client.id===id);
@@ -75,14 +91,17 @@ function fakePrisma(seed,{failRelation,shortCountRelation,shortDelete,failStage}
         const order=condition.child.participant.invitation.orderId,athlete=condition.athleteId;
         return (order.in?order.in.includes(row.orderId):!order.notIn.includes(row.orderId))&&(athlete.in?athlete.in.includes(row.athleteId):!athlete.notIn.includes(row.athleteId));
       }))||null},
-      $executeRaw:async()=>0,
-      $queryRaw:async()=>[],
+      $executeRaw:async(_query,...values)=>{prisma.calls.events.push({type:"lock",key:values[0]});return 0;},
+      $queryRaw:async query=>{if(query?.text?.includes("pg_catalog.pg_trigger")){prisma.calls.events.push({type:"catalog"});return structuredClone(prisma.catalogRows);}prisma.calls.events.push({type:"row-lock"});return [];},
       client:{
-        findFirst:async({where})=>{const client=clientById(where.id);if(!client||client.archivedAt)return null;return{...client,athletes:state.relations.athlete.filter(row=>row.clientId===client.id),orders:state.relations.order.filter(row=>row.clientId===client.id),conversations:state.relations.conversation.filter(row=>row.clientId===client.id).map(row=>({...row,channel:row.channel||"WHATSAPP"})),messageDeliveryAttempts:state.relations.messageDeliveryAttempt.filter(row=>row.clientId===client.id),workTasks:state.relations.workTask.filter(row=>row.clientId===client.id),aiMemories:state.relations.customerMemory.filter(row=>row.clientId===client.id),conversationFacts:state.relations.conversationFact.filter(row=>row.clientId===client.id),agreements:state.relations.agreement.filter(row=>row.clientId===client.id),aiRuns:state.relations.aiRun.filter(row=>row.clientId===client.id),activities:state.relations.activity.filter(row=>row.clientId===client.id),keycrmLinks:state.relations.keycrmClientLink.filter(row=>row.clientId===client.id),incomingMergeRedirects:state.redirects.filter(row=>row.targetClientId===client.id),aiRuntimeSettings:state.runtimeSettings.filter(row=>row.clientId===client.id),aiModeOverrides:state.modeOverrides.filter(row=>row.clientId===client.id)}} ,
+        create:async({data})=>{const client={id:"created-client",...data,updatedAt:new Date()};state.clients.push(client);return client},
+        updateMany:async({where,data})=>{const client=clientById(where.id);if(!client||client.archivedAt||client.updatedAt.getTime()!==where.updatedAt.getTime())return{count:0};Object.assign(client,data,{updatedAt:new Date(client.updatedAt.getTime()+1000)});return{count:1}},
+        findFirst:async({where})=>{const client=clientById(where.id);if(!client||client.archivedAt)return null;return{...client,files:state.relations.clientFile.filter(row=>row.clientId===client.id),athletes:state.relations.athlete.filter(row=>row.clientId===client.id).map(row=>({...row,_count:{measurements:row.measurements?.length||0}})),orders:state.relations.order.filter(row=>row.clientId===client.id).map(row=>({...row,_count:{payments:row.payments?.length||0}})),conversations:state.relations.conversation.filter(row=>row.clientId===client.id).map(row=>({...row,channel:row.channel||"WHATSAPP",_count:{messages:row.messages?.length||0}})),messageDeliveryAttempts:state.relations.messageDeliveryAttempt.filter(row=>row.clientId===client.id),workTasks:state.relations.workTask.filter(row=>row.clientId===client.id),aiMemories:state.relations.customerMemory.filter(row=>row.clientId===client.id),conversationFacts:state.relations.conversationFact.filter(row=>row.clientId===client.id),agreements:state.relations.agreement.filter(row=>row.clientId===client.id),aiRuns:state.relations.aiRun.filter(row=>row.clientId===client.id),activities:state.relations.activity.filter(row=>row.clientId===client.id),keycrmLinks:state.relations.keycrmClientLink.filter(row=>row.clientId===client.id),incomingMergeRedirects:state.redirects.filter(row=>row.targetClientId===client.id),aiRuntimeSettings:state.runtimeSettings.filter(row=>row.clientId===client.id),aiModeOverrides:state.modeOverrides.filter(row=>row.clientId===client.id)}} ,
         findUnique:async({where})=>clientById(where.id)||null,
         findUniqueOrThrow:async({where})=>{if((prisma.failStage||failStage)==="split-final-read")throw new Error("forced late-stage failure");const client=clientById(where.id);if(!client)throw new Error("missing client");return client},
         update:async({where,data})=>Object.assign(clientById(where.id),data,{updatedAt:new Date(new Date(clientById(where.id).updatedAt).getTime()+1000)}),
       },
+      user:{findFirst:async({where})=>(state.users||[]).find(user=>user.id===where.id&&user.active===where.active&&user.archivedAt===where.archivedAt)||null},
       aiRuntimeSetting:{
         deleteMany:async({where})=>{const before=state.runtimeSettings.length;state.runtimeSettings=state.runtimeSettings.filter(row=>!matches(row,where));const count=before-state.runtimeSettings.length;return{count:shortDelete?Math.max(0,count-1):count}},
         updateMany:async({where,data})=>{let count=0;for(const row of state.runtimeSettings)if(matches(row,where)){Object.assign(row,data);count++}const short=prisma.shortCountRelation==="aiRuntimeSetting"&&(!prisma.shortCountId||where.id?.in?.includes(prisma.shortCountId));return{count:short?Math.max(0,count-1):count}},
@@ -98,11 +117,12 @@ function fakePrisma(seed,{failRelation,shortCountRelation,shortDelete,failStage}
         delete:async({where})=>{const index=state.redirects.findIndex(row=>row.sourceClientId===where.sourceClientId);return state.redirects.splice(index,1)[0]},
       },
       clientMergeOperation:{
-        create:async({data})=>{const operation={id:`operation-${state.operations.length+1}`,...data,createdAt:new Date(),splitAt:null};state.operations.push(operation);if((prisma.failStage||failStage)==="merge-operation")throw new Error("forced late-stage failure");return operation},
+        findMany:async({where})=>state.operations.filter(row=>row.targetClientId===where.targetClientId&&!row.splitAt&&row.movedEntityIds.batch?.id===where.movedEntityIds.equals),
+        create:async({data})=>{const operation={id:`operation-${state.operations.length+1}`,...data,createdAt:new Date(),splitAt:null};state.operations.push(operation);if((prisma.failStage||failStage)==="merge-operation"||state.operations.length===prisma.failOperationNumber)throw new Error("forced late-stage failure");return operation},
         findFirst:async({where})=>[...state.operations].reverse().find(row=>row.sourceClientId===where.sourceClientId&&(where.targetClientId===undefined||row.targetClientId===where.targetClientId)&&!row.splitAt)||null,
         update:async({where,data})=>{const result=Object.assign(state.operations.find(row=>row.id===where.id),data);if((prisma.failStage||failStage)==="split-operation")throw new Error("forced late-stage failure");return result},
       },
-      auditLog:{create:async({data})=>{state.audits.push(data);if((prisma.failStage||failStage)===`${data.action.toLowerCase()}-audit`)throw new Error("forced late-stage failure");return data}},
+      auditLog:{findFirst:async({where})=>[...state.audits].reverse().find(row=>row.entityType===where.entityType&&row.entityId===where.entityId&&row.action===where.action&&row.after?.batchRestore?.id===where.after.equals)||null,create:async({data})=>{state.audits.push(data);if((prisma.failStage||failStage)===`${data.action.toLowerCase()}-audit`)throw new Error("forced late-stage failure");return data}},
     };
     for(const name of relationNames){
       if(name==="activity")tx.activity={updateMany:async({where,data})=>{const moved=move(name,where,data);for(const row of state.createdActivities)if(matches(row,where)){Object.assign(row,data);moved.count++}return moved},create:async({data})=>{const row={id:`created-activity-${state.createdActivities.length+1}`,...data,createdAt:new Date()};state.createdActivities.push(row);if((prisma.failStage||failStage)===`${data.type.toLowerCase()}-activity`)throw new Error("forced late-stage failure");return row},findMany:async({where})=>state.createdActivities.filter(row=>row.clientId===where.clientId&&row.type===where.type).map(row=>({id:row.id,metadata:row.metadata}))};
@@ -112,6 +132,7 @@ function fakePrisma(seed,{failRelation,shortCountRelation,shortDelete,failStage}
     const orderCondition=(row,condition)=>athleteCondition(row.athleteId,condition.athleteId)||athleteCondition(row.measurementAthleteId,condition.measurement?.athleteId)||(condition.items?.some?.OR||[]).some(itemCondition=>(row.items||[]).some(item=>athleteCondition(item.athleteId,itemCondition.athleteId)||athleteCondition(item.measurementAthleteId,itemCondition.measurement?.athleteId)));
     tx.order.findFirst=async({where})=>state.relations.order.find(row=>row.clientId===where.clientId&&(!where.id.notIn||!where.id.notIn.includes(row.id))&&(!where.id.in||where.id.in.includes(row.id))&&where.OR.some(condition=>orderCondition(row,condition)))||null;
     tx.conversation.findMany=async({where})=>state.relations.conversation.filter(row=>matches({...row,channel:row.channel||"WHATSAPP"},where)).map(row=>({...row,channel:row.channel||"WHATSAPP"}));
+    for(const model of Object.values(tx))if(model&&typeof model==="object")for(const [method,fn] of Object.entries(model))if(/^(?:create|update|delete|upsert)/.test(method)&&typeof fn==="function")model[method]=async(...args)=>{prisma.calls.businessWrites++;return fn(...args);};
     const result=await callback(tx);
     prisma.state=state;
     return result;
@@ -128,6 +149,207 @@ test("merge transaction preserves relations, redirect and fail-closed AI policy"
   assert.equal(prisma.state.runtimeSettings.some(row=>row.id==="source-same"),false);
   assert.equal(prisma.state.runtimeSettings.find(row=>row.id==="source-only").scopeId,"target");
   assert.ok(prisma.state.modeOverrides.every(row=>row.clientId!=="target"||row.mode==="OFF"));
+});
+
+test("preview is read-only and batch uses the approved token without duplicating relations",async()=>{
+  const prisma=fakePrisma(initialState()),service=new ClientsService(prisma),before=structuredClone(prisma.state);
+  const preview=await service.previewMerge("target",{sourceClientIds:["source"]});
+  assert.deepEqual(structuredClone(prisma.state),before);
+  assert.match(preview.token,/^[a-f0-9]{64}$/);
+  assert.equal(preview.clients.length,2);
+  await service.mergeBatch("target",{sourceClientIds:["source"],previewToken:preview.token},{id:"owner"});
+  assert.equal(prisma.state.operations.length,1);
+  for(const name of relationNames){assert.equal(prisma.state.relations[name].length,1);assert.equal(prisma.state.relations[name][0].clientId,"target",name);}
+});
+
+test("notes options preserve unrelated preferences, default INTERNAL, and reject a stale version atomically",async()=>{
+  const seed=initialState();seed.clients[0].preferences={sizes:[1,2],clientNoteVisibility:"CLIENT"};
+  const prisma=fakePrisma(seed),service=new ClientsService(prisma);
+  await service.updateNotes("target","private",{id:"owner"});
+  assert.equal(prisma.state.clients[0].preferences.clientNoteVisibility,"INTERNAL");
+  assert.deepEqual(prisma.state.clients[0].preferences.sizes,[1,2]);
+  const before=structuredClone(prisma.state);
+  await assert.rejects(()=>service.updateNotes("target","stale",{id:"owner"},{visibility:"CLIENT",expectedUpdatedAt:seed.clients[0].updatedAt.toISOString()}),/изменена/);
+  assert.deepEqual(structuredClone(prisma.state),before);
+  await service.updateNotes("target","shared",{id:"owner"},{visibility:"CLIENT",expectedUpdatedAt:prisma.state.clients[0].updatedAt.toISOString()});
+  assert.equal(prisma.state.clients[0].preferences.clientNoteVisibility,"CLIENT");
+  assert.equal(prisma.state.audits.at(-1).after.visibility,"CLIENT");
+});
+
+test("profile CAS accepts a preferred channel and only an active unarchived responsible user",async()=>{
+  const seed=initialState();seed.users=[{id:"manager",active:true,archivedAt:null},{id:"inactive",active:false,archivedAt:null}];
+  const prisma=fakePrisma(seed),service=new ClientsService(prisma);
+  const dto=()=>({displayName:"Основной",expectedUpdatedAt:prisma.state.clients[0].updatedAt.toISOString(),preferredChannel:"EMAIL",responsibleManagerId:"manager"});
+  await service.updateProfile("target",dto(),{id:"owner"});
+  assert.equal(prisma.state.clients[0].preferredChannel,"EMAIL");
+  assert.equal(prisma.state.clients[0].responsibleManagerId,"manager");
+  assert.equal(prisma.state.audits.at(-1).after.responsibleManagerId,"manager");
+  const before=structuredClone(prisma.state);
+  for(const id of ["inactive","missing"]){await assert.rejects(()=>service.updateProfile("target",{...dto(),responsibleManagerId:id},{id:"owner"}));assert.deepEqual(structuredClone(prisma.state),before);}
+});
+
+test("create normalizes real contacts, omits empty ones, and keeps provider fields intact",async()=>{
+  const prisma=fakePrisma(initialState()),service=new ClientsService(prisma);
+  const saved=await service.create({firstName:"  Alice  ",email:"  ALICE@Example.test  ",phone:" +38 (050) 123-45-67 ",instagram:"1234567",source:"INSTAGRAM"},{id:"owner"});
+  assert.equal(saved.email,"alice@example.test");assert.equal(saved.phone,"+380501234567");assert.equal(saved.instagram,"1234567");assert.equal(saved.source,"INSTAGRAM");
+  const empty=await service.create({firstName:"Bob",email:"   ",phone:"   "},{id:"owner"});
+  assert.equal(Object.hasOwn(empty,"email"),false);assert.equal(Object.hasOwn(empty,"phone"),false);
+  const changed=await service.updateProfile("target",{displayName:"Основной",email:"  CONTACT@Example.test ",phone:" +49 (123) 45-67 ",expectedUpdatedAt:prisma.state.clients[0].updatedAt.toISOString()},{id:"owner"});
+  assert.equal(changed.email,"contact@example.test");assert.equal(changed.phone,"+491234567");
+});
+
+test("profile preserves legacy Facebook and WhatsApp provider identity before replacing contact fields",async()=>{
+  for(const [source,original,patch,field,identity] of [
+    ["FACEBOOK",{email:"123456@facebook.com"},{email:"real@example.test"},"facebook","123456"],
+    ["WHATSAPP",{phone:"+380501234567"},{phone:"+491234567"},"whatsapp","+380501234567"],
+  ]){
+    const seed=initialState();Object.assign(seed.clients[0],{source,...original});
+    const prisma=fakePrisma(seed),service=new ClientsService(prisma);
+    await service.updateProfile("target",{displayName:"Основной",...patch,expectedUpdatedAt:seed.clients[0].updatedAt.toISOString()},{id:"owner"});
+    assert.equal(prisma.state.clients[0][field],identity);
+    assert.equal(prisma.state.audits[0].after[field],identity);
+  }
+});
+
+test("merge makes combined notes INTERNAL and split restores only recorded visibility without losing preferences",async()=>{
+  const seed=initialState();
+  seed.clients[0].notes="target note";seed.clients[0].preferences={clientNoteVisibility:"CLIENT",targetSetting:7};
+  seed.clients[1].notes="private source";seed.clients[1].preferences={clientNoteVisibility:"INTERNAL",sourceSetting:8};
+  const prisma=fakePrisma(seed),service=new ClientsService(prisma);
+  await service.merge("target","source",{id:"owner"});
+  assert.equal(prisma.state.clients[0].preferences.clientNoteVisibility,"INTERNAL");
+  assert.equal(prisma.state.operations[0].targetBeforeSnapshot.clientNoteVisibility,"CLIENT");
+  await service.split("target","source",{id:"owner"});
+  assert.equal(prisma.state.clients[0].preferences.clientNoteVisibility,"CLIENT");
+  assert.equal(prisma.state.clients[0].preferences.targetSetting,7);
+  assert.equal(prisma.state.clients[1].preferences.sourceSetting,8);
+});
+
+function batchSeed(){
+  const seed=initialState();
+  seed.clients.push({...seed.clients[1],id:"source2",displayName:"Второй",phone:"+491234",country:"DE"});
+  for(const name of relationNames)seed.relations[name].push({id:`${name}-source2`,clientId:"source2",...(name==="conversation"?{channel:"EMAIL"}:{})});
+  return seed;
+}
+
+test("multi-source merge is deterministic, records choices in provenance, and rolls back the first pair on a second-pair failure",async()=>{
+  const prisma=fakePrisma(batchSeed()),service=new ClientsService(prisma);
+  const input={sourceClientIds:["source2","source"],fieldChoices:{displayName:"source2",country:"source2",phone:"source2"}};
+  const preview=await service.previewMerge("target",input);
+  const reordered=await service.previewMerge("target",{...input,sourceClientIds:["source","source2"]});
+  assert.equal(preview.token,reordered.token);
+  const before=structuredClone(prisma.state);prisma.failOperationNumber=2;
+  await assert.rejects(()=>service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"}),/forced/);
+  assert.deepEqual(structuredClone(prisma.state),before);
+  delete prisma.failOperationNumber;
+  const merged=await service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"});
+  assert.equal(merged.displayName,"Второй");assert.equal(merged.phone,"+491234");
+  assert.equal(prisma.state.operations.length,2);
+  assert.equal(prisma.state.operations[1].targetAfterSnapshot.displayName,"Второй");
+  for(const name of relationNames){assert.equal(prisma.state.relations[name].length,2);assert.equal(new Set(prisma.state.relations[name].map(row=>row.id)).size,2);assert.ok(prisma.state.relations[name].every(row=>row.clientId==="target"));}
+  const completed=structuredClone(prisma.state);
+  await assert.rejects(()=>service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"}));
+  assert.deepEqual(structuredClone(prisma.state),completed);
+});
+
+test("merge preview defaults and explicit empty choices match the values actually saved",async()=>{
+  for(const explicitEmpty of [false,true]){
+    const seed=initialState();seed.clients[0].country=null;seed.clients[1].country="France";
+    const prisma=fakePrisma(seed),service=new ClientsService(prisma),input={sourceClientIds:["source"],fieldChoices:explicitEmpty?{country:"target"}:{}};
+    const preview=await service.previewMerge("target",input);
+    assert.equal(preview.fieldChoices.country,explicitEmpty?"target":"source");
+    const saved=await service.mergeBatch("target",{...input,fieldChoices:preview.fieldChoices,previewToken:preview.token},{id:"owner"});
+    assert.equal(saved.country,explicitEmpty?null:"France");
+  }
+});
+test("nested messages, payments and measurements are informational; stable parent ownership retains new children",async()=>{
+ const seed=initialState();seed.relations.conversation[0].messages=[];seed.relations.order[0].payments=[];seed.relations.athlete[0].measurements=[];
+ const prisma=fakePrisma(seed),service=new ClientsService(prisma),input={sourceClientIds:["source"]};
+ const before=await service.previewMerge("target",input);
+ prisma.state.relations.conversation[0].messages.push({id:"new-message"});prisma.state.relations.order[0].payments.push({id:"new-payment"});prisma.state.relations.athlete[0].measurements.push({id:"new-measurement"});
+ const after=await service.previewMerge("target",input);assert.equal(after.token,before.token);
+ await service.mergeBatch("target",{...input,previewToken:before.token},{id:"owner"});
+ assert.equal(prisma.state.relations.conversation[0].messages[0].id,"new-message");assert.equal(prisma.state.relations.order[0].payments[0].id,"new-payment");assert.equal(prisma.state.relations.athlete[0].measurements[0].id,"new-measurement");
+ assert.ok(["conversation","order","athlete"].every(name=>prisma.state.relations[name][0].clientId==="target"));
+});
+
+test("untouched batch splits in reverse order and restores every target contribution without duplicate identities",async()=>{
+  const seed=batchSeed();seed.clients[0].preferences={clientNoteVisibility:"CLIENT",keep:1};seed.clients[0].notes="original";
+  const prisma=fakePrisma(seed),service=new ClientsService(prisma),input={sourceClientIds:["source","source2"],fieldChoices:{country:"source2",displayName:"source2",phone:"source2"}};
+  const preview=await service.previewMerge("target",input);
+  await service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"});
+  const merged=structuredClone(prisma.state);
+  await assert.rejects(()=>service.split("target","source",{id:"owner"}),/CLIENT_SPLIT_ORDER/);
+  assert.deepEqual(structuredClone(prisma.state),merged);
+  await service.split("target","source2",{id:"owner"});
+  await service.split("target","source",{id:"owner"});
+  const {updatedAt:_restoredVersion,...restored}=prisma.state.clients[0];
+  const {updatedAt:_originalVersion,...original}=seed.clients[0];
+  assert.deepEqual(structuredClone(restored),original);
+  for(const name of relationNames)assert.deepEqual(prisma.state.relations[name].map(row=>[row.id,row.clientId]),seed.relations[name].map(row=>[row.id,row.clientId]));
+});
+
+test("a genuine edit between batch splits breaks restoration lineage and preserves operator intent",async()=>{
+  const prisma=fakePrisma(batchSeed()),service=new ClientsService(prisma),input={sourceClientIds:["source","source2"]};
+  const preview=await service.previewMerge("target",input);
+  await service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"});
+  await service.split("target","source2",{id:"owner"});
+  await service.updateNotes("target","operator's later note",{id:"owner"},{visibility:"CLIENT"});
+  await service.split("target","source",{id:"owner"});
+  assert.equal(prisma.state.clients[0].notes,"operator's later note");
+  assert.equal(prisma.state.clients[0].preferences.clientNoteVisibility,"CLIENT");
+});
+
+test("reverse batch split restores AI modes without treating unchanged consolidation as a later edit",async()=>{
+  const seed=batchSeed();seed.modeOverrides.push({id:"second-mode",clientId:"source2",conversationId:null,mode:"ASSIST",updatedAt:new Date("2026-09-01T00:00:00Z")});
+  const prisma=fakePrisma(seed),service=new ClientsService(prisma),input={sourceClientIds:["source","source2"]};
+  const preview=await service.previewMerge("target",input);
+  await service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"});
+  assert.ok(prisma.state.modeOverrides.every(row=>row.mode==="OFF"));
+  await service.split("target","source2",{id:"owner"});await service.split("target","source",{id:"owner"});
+  assert.deepEqual(prisma.state.modeOverrides.map(row=>[row.id,row.clientId,row.mode]),seed.modeOverrides.map(row=>[row.id,row.clientId,row.mode]));
+});
+
+test("preview token changes for relation IDs, settings, notes, profiles and choices even without updatedAt changes",async()=>{
+  for(const mutate of [
+    seed=>seed.relations.clientFile.push({id:"late-file",clientId:"source"}),
+    seed=>seed.relations.order.push({id:"late-order",clientId:"source"}),
+    seed=>{seed.runtimeSettings[0].value="OFF"},
+    seed=>{seed.modeOverrides[0].mode="OFF"},
+    seed=>{seed.clients[0].notes="changed"},
+    seed=>{seed.clients[0].preferences={clientNoteVisibility:"CLIENT"}},
+    seed=>{seed.clients[0].phone="changed"},
+  ]){
+    const prisma=fakePrisma(initialState()),service=new ClientsService(prisma),input={sourceClientIds:["source"]};
+    const preview=await service.previewMerge("target",input);mutate(prisma.state);
+    const before=structuredClone(prisma.state);
+    await assert.rejects(()=>service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"}),/CLIENT_MERGE_PREVIEW_STALE/);
+    assert.deepEqual(structuredClone(prisma.state),before);
+  }
+});
+
+test("preview reports identity, channel and AI conflicts; batch refuses all writes",async()=>{
+  for(const [change,choices,code] of [
+    [seed=>{seed.clients[0].phone="+111"},{phone:"source"},"CLIENT_MERGE_IDENTITY_CONFLICT"],
+    [seed=>seed.relations.conversation.push({id:"target-chat",clientId:"target",channel:"WHATSAPP"}),{},"CLIENT_MERGE_CHANNEL_CONFLICT"],
+    [seed=>{seed.runtimeSettings[0].value="AUTO_SAFE"},{},"CLIENT_MERGE_AI_RUNTIME_CONFLICT"],
+  ]){
+    const seed=initialState();change(seed);const prisma=fakePrisma(seed),service=new ClientsService(prisma),input={sourceClientIds:["source"],fieldChoices:choices};
+    const preview=await service.previewMerge("target",input);
+    assert.ok(preview.conflicts.some(item=>item.code===code));
+    const before=structuredClone(prisma.state);
+    await assert.rejects(()=>service.mergeBatch("target",{...input,previewToken:preview.token},{id:"owner"}),new RegExp(code));
+    assert.deepEqual(structuredClone(prisma.state),before);
+  }
+});
+
+test("batch and preview reject invalid selections and field choices at the service boundary",async()=>{
+  const prisma=fakePrisma(initialState()),service=new ClientsService(prisma),before=structuredClone(prisma.state);
+  for(const dto of [{sourceClientIds:[]},{sourceClientIds:Array.from({length:10},(_,i)=>`id${i}`)},{sourceClientIds:["source","source"]},{sourceClientIds:["target"]},{sourceClientIds:["source"],fieldChoices:{notes:"source"}},{sourceClientIds:["source"],fieldChoices:{country:"other"}}]){
+    await assert.rejects(()=>service.previewMerge("target",dto));
+    await assert.rejects(()=>service.mergeBatch("target",{...dto,previewToken:"0".repeat(64)},{id:"owner"}));
+  }
+  assert.deepEqual(structuredClone(prisma.state),before);
 });
 
 test("merge followed by split restores recorded ownership and keeps later target edits",async()=>{
@@ -478,4 +700,27 @@ test("conflicting client AI runtime values reject merge without partial writes",
   const prisma=fakePrisma(seed);
   await assert.rejects(()=>new ClientsService(prisma).merge("target","source",{id:"owner"}),/CLIENT_MERGE_AI_RUNTIME_CONFLICT/);
   assert.deepEqual(prisma.state,seed);
+});
+
+test("missing ClientFile catalog guards reject legacy merge, preview, batch and split before any business write",async()=>{
+  for(const action of ["merge","preview","batch","split"]){
+    const prisma=fakePrisma(initialState()),service=new ClientsService(prisma),before=structuredClone(prisma.state);
+    prisma.catalogRows=[];
+    const invoke=()=>action==="merge"?service.merge("target","source",{id:"owner"}):action==="preview"?service.previewMerge("target",{sourceClientIds:["source"]}):action==="batch"?service.mergeBatch("target",{sourceClientIds:["source"],previewToken:"0".repeat(64)},{id:"owner"}):service.split("target","source",{id:"owner"});
+    await assert.rejects(invoke,error=>error.getStatus()===503&&error.message==="CLIENT_MERGE_SCHEMA_NOT_READY",action);
+    assert.equal(prisma.calls.businessWrites,0,action);assert.deepEqual(prisma.state,before,action);
+    const catalog=prisma.calls.events.findIndex(event=>event.type==="catalog");assert.ok(catalog>=0,action);
+    const locked=prisma.calls.events.slice(0,catalog).filter(event=>event.type==="lock").map(event=>event.key);
+    assert.ok(locked.includes("client-merge-global"),action);assert.ok(locked.includes("client-merge:source"),action);assert.ok(locked.includes("client-merge:target"),action);
+  }
+});
+test("losing schema protection after approval blocks batch and split without attempted writes",async()=>{
+  for(const action of ["batch","split"]){
+    const prisma=fakePrisma(initialState()),service=new ClientsService(prisma);
+    const preview=await service.previewMerge("target",{sourceClientIds:["source"]});
+    if(action==="split")await service.merge("target","source",{id:"owner"});
+    const before=structuredClone(prisma.state);prisma.catalogRows[0].enabled="D";prisma.calls.businessWrites=0;
+    await assert.rejects(()=>action==="batch"?service.mergeBatch("target",{sourceClientIds:["source"],previewToken:preview.token},{id:"owner"}):service.split("target","source",{id:"owner"}),error=>error.getStatus()===503&&error.message==="CLIENT_MERGE_SCHEMA_NOT_READY");
+    assert.equal(prisma.calls.businessWrites,0);assert.deepEqual(structuredClone(prisma.state),before);
+  }
 });

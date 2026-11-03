@@ -1,3 +1,38 @@
+## 2026-11-03 — Clients workspace refresh, local implementation
+
+UPDATE: owner has now explicitly authorized deployment. Candidate 0.15.0,
+rebuilt API+web and the single additive ClientFile migration are being prepared;
+source publication is covered by the standing GitHub-at-deployment instruction.
+Fresh installed baseline confirms healthy 0.14.1/schema53. Follow
+docs/release-evidence/clients-workspace-0150-plan.md. Statements below describe
+the earlier completed local-only phase; no installed 0.15.0 claim exists yet.
+
+Active checkout: clients-workspace/YO_crm, branch codex/clients-workspace-refresh,
+base c91c747e01af9239ef1bd36aba02e62950567d83. Owner requested the Clients ZIP
+specification and approved PNG, explicitly excluding deployment. All changes
+remain uncommitted; no push, production access or production migration occurred.
+
+Existing clients module now has opt-in bounded workspace projections, server
+filters/pagination, selected detail and lazy conversations/files. New responsive
+table/right-card UI reuses order/measurement flows and exact Inbox navigation.
+Safe batch merge extends existing merge/split provenance, CAS and audit; it
+does not create a second history or identity store. Only additive ClientFile
+routing migration is required. Catalog validation must pass before merge/split.
+Nested message/payment/measurement counts are informational; stable parent FKs
+preserve concurrently arriving records. Payment lock order changes no amounts.
+
+Quality gate PASS: web845/API2394/database65 tests pass, 110 conditional suite
+skips; all workspace types and builds pass. Explicit browser25/25 and native
+PostgreSQL15/15 pass with no skips. The temporary synthetic loopback PostgreSQL
+cluster has been stopped; shutdown verified. Generated next-env restored.
+See docs/plans/clients-workspace-refresh.md for the audit and
+docs/plans/clients-workspace-verification-2026-11-03.md for evidence and stable
+screenshots in output/clients-workspace. Compatibility, regression, business,
+visual and final Release Gatekeeper reviews all PASS for local acceptance.
+That earlier verdict covered local acceptance only. Deployment is now explicitly
+authorized as recorded above; installed/live acceptance remains UNVERIFIED
+until the 0.15.0 cutover and smoke checks finish.
+
 ## 2026-11-03 — Inbox header cleanup 0.14.1 installed
 
 Application commit8acb2e489c0180d59d086891c4a5f863b99f8c74 is published on

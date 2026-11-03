@@ -1,24 +1,24 @@
 import { BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import {SalesStatus, type Prisma} from '@prisma/client';
 import { isIP } from 'node:net';
 import { isOrderImageName } from './order-image-name';
 
 export const clientHistoryClientSelect = { id: true, displayName: true, country: true, source: true } satisfies Prisma.ClientSelect;
 export const clientHistoryOrderSelect = {
   id: true, clientId: true, number: true, createdAt: true, priceMinor: true, currency: true, salesStatus: true, country: true,
-  modelImagePath: true, externalImageUrl: true, sourceSystem: true,
+  modelImagePath: true, externalImageUrl: true, sourceSystem: true, externalNumber:true, externalId:true,
   compositionOperations: { take: 1, select: { id: true } },
   _count: { select: { items: true } },
   items: { where: { archivedAt: null }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 2, select: { id: true, name: true, modelImagePath: true, externalImageUrl: true } },
 } satisfies Prisma.OrderSelect;
 type HistoryOrderRecord = Prisma.OrderGetPayload<{ select: typeof clientHistoryOrderSelect }>;
 export type ClientOrderHistoryDesign = { id: string; name: string; imageUrl: string | null };
-export type ClientOrderHistoryItem = Pick<HistoryOrderRecord, 'id' | 'clientId' | 'number' | 'createdAt' | 'priceMinor' | 'currency' | 'salesStatus' | 'country'> & { designCount: number; quantity: number; designs: ClientOrderHistoryDesign[] };
+export type ClientOrderHistoryItem = Pick<HistoryOrderRecord, 'id' | 'clientId' | 'number' | 'createdAt' | 'priceMinor' | 'currency' | 'salesStatus' | 'country'> & { sourceSystem?:string;externalNumber?:string|null;externalId?:string|null;designCount: number; quantity: number; designs: ClientOrderHistoryDesign[] };
 export type ClientOrderHistoryCurrencyTotal = { currency: string; totalMinor: number };
 type ActiveItemAggregate = { _count: { _all: number }; _sum: { quantity: number | null } };
 export type OrderClientFilter = Prisma.ClientGetPayload<{ select: typeof clientHistoryClientSelect }>;
 export type ClientOrderHistorySummary = { total: number; completed: number; inProgress: number; cancelled: number };
-export type ClientOrderHistoryQuery = { page?: string | number; pageSize?: string | number };
+export type ClientOrderHistoryQuery = { page?: string | number; pageSize?: string | number; salesStatus?:string; from?:string; to?:string };
 export type ClientOrderHistoryPage = {
   client: OrderClientFilter;
   summary: ClientOrderHistorySummary;
@@ -53,6 +53,19 @@ export async function requireActiveOrderClient(db: Pick<Prisma.TransactionClient
   return client;
 }
 
+export function clientHistoryFilters(query:ClientOrderHistoryQuery):Prisma.OrderWhereInput {
+  const where:Prisma.OrderWhereInput={};
+  if(query.salesStatus){
+    if(!Object.values(SalesStatus).includes(query.salesStatus as SalesStatus))throw new BadRequestException('Некорректный статус заказа');
+    where.salesStatus=query.salesStatus as SalesStatus;
+  }
+  const date=(value:string)=>{if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))throw new BadRequestException('Некорректная дата истории заказов');const parsed=new Date(value+'T00:00:00Z');if(!Number.isFinite(parsed.getTime())||parsed.toISOString().slice(0,10)!==value)throw new BadRequestException('Некорректная дата истории заказов');return parsed};
+  const from=query.from?date(query.from):undefined,to=query.to?date(query.to):undefined;
+  if(from&&to&&from>to)throw new BadRequestException('Начало периода позже окончания');
+  if(from||to)where.createdAt={...(from?{gte:from}:{}),...(to?{lt:new Date(to.getTime()+86400000)}:{})};
+  return where;
+}
+
 export function summarizeClientOrderStatuses(groups: readonly { salesStatus: string; _count: { _all: number } }[]): ClientOrderHistorySummary {
   const summary = { total: 0, completed: 0, inProgress: 0, cancelled: 0 };
   for (const group of groups) {
@@ -84,7 +97,7 @@ function previewName(name: string, fallback: string): string {
 }
 
 export function presentClientHistoryOrder(order: HistoryOrderRecord, active?: ActiveItemAggregate): ClientOrderHistoryItem {
-  const { compositionOperations, _count, items, modelImagePath, externalImageUrl, sourceSystem, ...visible } = order;
+  const { compositionOperations, _count, items, modelImagePath, externalImageUrl, sourceSystem, externalNumber, externalId, ...visible } = order;
   const managed = Boolean(compositionOperations?.length || _count?.items);
   const designCount = active?._count._all ?? (managed ? 0 : 1);
   const quantity = active ? active._sum.quantity : managed ? 0 : 1;
@@ -92,7 +105,7 @@ export function presentClientHistoryOrder(order: HistoryOrderRecord, active?: Ac
   const designs: ClientOrderHistoryDesign[] = active ? items.filter(item => previewId(item.id)).map(item => ({ id: item.id, name: previewName(item.name, order.number), imageUrl: historyDesignImage(item, sourceSystem) }))
     : managed || !previewId(order.id) ? [] : [{ id: order.id, name: previewName(order.number, order.id), imageUrl: historyDesignImage({ modelImagePath, externalImageUrl }, sourceSystem) }];
   const country = typeof visible.country === 'string' && (visible.country.length > 100 || /\p{Cc}/u.test(visible.country)) ? null : visible.country;
-  return { ...visible, country, designCount, quantity, designs };
+  return { ...visible, ...(sourceSystem?{sourceSystem,externalNumber:externalNumber??null,externalId:externalId??null}:{}), country, designCount, quantity, designs };
 }
 
 export function presentClientHistoryCurrencyTotals(groups: readonly { currency: string; _sum: { priceMinor: number | null } }[]): ClientOrderHistoryCurrencyTotal[] {

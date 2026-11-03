@@ -4,6 +4,12 @@ import {ClientOrderHistoryCache, ClientOrderHistoryStaleError, ClientOrderHistor
 const row=(clientId='client-a',id='order-z',createdAt='2026-10-29T10:00:00.000Z')=>({id,clientId,number:'YO-123',createdAt,priceMinor:12500,currency:'EUR',salesStatus:'NEW_LEAD'});
 const response=(clientId='client-a',page=1)=>({client:{id:clientId,displayName:'Юнікод client',country:null,source:'INSTAGRAM'},summary:{total:1,completed:0,inProgress:1,cancelled:0},items:page===1?[row(clientId)]:[],page,pageSize:20,total:1});
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+
+test('history keeps website display-number provenance without replacing stable order IDs',async()=>{
+ const data=response();Object.assign(data.items[0],{number:'legacy',sourceSystem:'YOLEOTARD_WEBSITE',externalNumber:'22732',externalId:'22732'});
+ const result=await new ClientOrderHistoryCache(async()=>data).get('client-a');
+ assert.equal(result.items[0].id,'order-z');assert.equal(result.items[0].number,'legacy');assert.equal(result.items[0].externalNumber,'22732');assert.equal(result.items[0].sourceSystem,'YOLEOTARD_WEBSITE');
+});
 test('duplicate client rows share one load and expose the complete typed response',async()=>{
  const held=deferred(),calls=[];const cache=new ClientOrderHistoryCache((id,page)=>{calls.push([id,page]);return held.promise;});
  const first=cache.get('client-a'),second=cache.get('client-a');await Promise.resolve();assert.deepEqual(calls,[['client-a',1]]);held.resolve(response());

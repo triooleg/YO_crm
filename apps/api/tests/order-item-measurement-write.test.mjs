@@ -46,6 +46,8 @@ const orderRequire = specifier => {
   if (specifier === "./production-context") return { loadProductionOrders: async () => [] };
   if (specifier === "sharp") return () => ({});
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
+  if (specifier === "./order-client-history") return loadTargetModule("orders/order-client-history.ts");
+  if (specifier === "../clients/clients-workspace-read") return loadTargetModule("clients/clients-workspace-read.ts");
   if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
 };

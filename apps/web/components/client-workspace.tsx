@@ -1,600 +1,58 @@
-﻿"use client";
-import { OrderImagePreview } from "./orders/order-image-preview";
-
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Alert, Group } from "@mantine/core";
-import { MeasurementPanel } from "./measurement-panel";
-import { OrderPanel } from "./order-panel";
-import { MeasurementViewer, type MeasurementView } from "./measurement-viewer";
-import { clientAthleteUi, clientMergeUi, clientWorkspaceUi, overviewContextUi } from "../lib/i18n";
-import { orderLabel } from "../lib/orders-i18n";
-import { orderDisplayNumber } from "../lib/order-source";
-import { ClientAvatar } from "./client-avatar";
-import { CrmActionIcon, CrmButton, CrmNativeSelect, CrmTextInput } from "./crm/settings-controls";
-import { CrmTabList } from "./crm/tab-list";
-
-type Client = {
-  id: string;
-  displayName: string;
-  avatarUrl?: string;
-  status?: string;
-  files?: {id:string;name:string;path:string;sizeBytes:number;createdAt:string}[];
-  country?: string;
-  city?: string;
-  phone?: string;
-  email?: string;
-  instagram?: string;
-  whatsapp?: string;
-  telegram?: string;
-  language?: string;
-  athletes: Athlete[];
-  orders: Order[];
-  activities: Activity[];
-};
-type Athlete = {
-  id: string;
-  firstName: string;
-  lastName?: string;
-  discipline?: string;
-  measurements: MeasurementView[];
-};
-type Order = {
-  id: string;
-  number: string;
-  sourceSystem?:string;
-  externalNumber?:string|null;
-  externalId?:string|null;
-  salesStatus: string;
-  priceMinor: number;
-  currency: string;
-  modelImagePath?: string;
-};
-type Activity = { id: string; summary: string; createdAt: string };
-type MergeReasonCode=keyof typeof clientMergeUi.reasonLabels;
-type MergeSuggestion = Client & { reasons:MergeReasonCode[]; channels:string[] };
-function mergeReasonLabel(reason:MergeReasonCode){return clientMergeUi.reasonLabels[reason]}
-function mergeErrorLabel(reason:unknown){const code=reason instanceof Error?reason.message:"";return clientMergeUi.errors[code as keyof typeof clientMergeUi.errors]||clientMergeUi.errorFallback}
-function mergeChannelLabel(channel:string){return clientMergeUi.channelLabels[channel as keyof typeof clientMergeUi.channelLabels]||clientMergeUi.channelFallback}
-
-export function ClientWorkspace({onNavigate}:{onNavigate?:(section:"orders")=>void}={}) {
-  const addAthleteTriggerRef = useRef<HTMLButtonElement>(null);
-  const createClientTriggerRef = useRef<HTMLButtonElement>(null);
-  const mergeTriggerRef = useRef<HTMLButtonElement>(null);
-  const mergeDialogRef = useRef<HTMLElement>(null);
-  const mergeSelectRef = useRef<HTMLSelectElement>(null);
-  const mergeBusyRef = useRef(false);
-  const detailRequestId=useRef(0);
-  const listRequestId=useRef(0);
-  const [createdPeriod,setCreatedPeriod]=useState(()=>{
-    const period=typeof window==="undefined"?null:new URLSearchParams(window.location.search).get("period");
-    return period&&/^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(period)?period:"";
-  });
-  const initialClientId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("clientId")||undefined);
-  const initialOrderId=useRef(typeof window==="undefined"?undefined:new URLSearchParams(window.location.search).get("orderId")||undefined);
-  const pendingOrderClientId=useRef(typeof window==="undefined"?undefined:(()=>{const params=new URLSearchParams(window.location.search);return params.get("action")==="new-order"?params.get("clientId")||undefined:undefined})());
-  const [auth, setAuth] = useState<boolean | null>(null),
-    [clients, setClients] = useState<Client[]>([]),
-    [selected, setSelected] = useState<string>(),
-    [detail, setDetail] = useState<Client>(),
-    [search, setSearch] = useState(""),
-    [collapsed, setCollapsed] = useState(false),
-    [creating, setCreating] = useState(false),
-    [addingAthlete, setAddingAthlete] = useState(false),
-    [measuring, setMeasuring] = useState(false),
-    [ordering, setOrdering] = useState(false),
-    [mergeOpen,setMergeOpen]=useState(false),
-    [mergeSuggestions,setMergeSuggestions]=useState<MergeSuggestion[]>([]),
-    [mergeSourceId,setMergeSourceId]=useState(""),
-    [mergeBusy,setMergeBusy]=useState(false),
-    [error, setError] = useState("");
-  mergeBusyRef.current=mergeBusy;
-  async function request(path: string, init?: RequestInit) {
-    const r = await fetch(`/api${path}`, {
-      credentials: "include",
-      ...init,
-      headers: { "Content-Type": "application/json" },
-    });
-    if (r.status === 401) {
-      setAuth(false);
-      throw new Error("Требуется вход");
-    }
-    if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      throw new Error(b.message ?? "Не удалось выполнить запрос");
-    }
-    return r.json();
-  }
-  async function load(q = "") {
-    const requestId=++listRequestId.current;
-    const query=new URLSearchParams();if(q)query.set("search",q);if(createdPeriod)query.set("period",createdPeriod);
-    let data:Client[];
-    try{data=await request(`/clients${query.size?`?${query}`:""}`)}catch(reason){if(requestId===listRequestId.current)throw reason;return}
-    if(requestId!==listRequestId.current)return;
-    if(createdPeriod)setError("");
-    setClients(data);
-    setAuth(true);
-    if (!selected && data[0]) setSelected(pendingOrderClientId.current||initialClientId.current||data[0].id);
-  }
-  useEffect(() => {
-    let cancelled=false;
-    request("/auth/me")
-      .then(async () => {
-        if(cancelled)return;
-        try{await load()}catch(reason){if(!cancelled){if(!createdPeriod){setAuth(false);return}setAuth(current=>current===false?false:true);setError((reason as Error).message)}}
-      })
-      .catch(() => {if(!cancelled)setAuth(false)});
-    return()=>{cancelled=true;listRequestId.current++};
-  }, []);
-  useEffect(() => {
-    if (!auth) return;
-    const t = setTimeout(
-      () => load(search).catch((e) => setError(e.message)),
-      250,
-    );
-    return () => {clearTimeout(t);listRequestId.current++};
-  }, [search, auth, createdPeriod]);
-  function clearCreatedPeriod(){
-    listRequestId.current++;setCreatedPeriod("");setError("");
-    const url=new URL(window.location.href);url.searchParams.delete("period");
-    window.history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`);
-  }
-  useEffect(() => {
-    const requestId=++detailRequestId.current;
-    setDetail(undefined);setMergeSuggestions([]);setMergeSourceId("");setMergeOpen(false);
-    if (!selected || !auth) {
-      setDetail(undefined);
-      return;
-    }
-    const contextOrderId=selected===initialClientId.current?initialOrderId.current:undefined;
-    request(`/clients/${selected}${contextOrderId?`?orderId=${encodeURIComponent(contextOrderId)}`:""}`)
-      .then(value=>{if(requestId!==detailRequestId.current)return;if(contextOrderId&&!value.orders.some((order:Order)=>order.id===contextOrderId)){setError(clientWorkspaceUi.contextOrderUnavailable);initialOrderId.current=undefined;clearClientContextAction()}setDetail(value);if(pendingOrderClientId.current===value.id){pendingOrderClientId.current=undefined;setOrdering(true);clearClientContextAction()}})
-      .catch((e) => {if(requestId===detailRequestId.current){if(selected===initialClientId.current){setError(clientWorkspaceUi.contextClientUnavailable);initialClientId.current=undefined;initialOrderId.current=undefined;clearClientContextAction()}else setError(e.message)}});
-    request(`/clients/${selected}/merge-suggestions`).then(value=>{if(requestId===detailRequestId.current)setMergeSuggestions(value)}).catch(()=>{if(requestId===detailRequestId.current)setMergeSuggestions([])});
-  }, [selected, auth]);
-  useEffect(()=>{
-    if(!mergeOpen)return;
-    mergeSelectRef.current?.focus();
-    function keydown(event:KeyboardEvent){
-      if(event.key==="Escape"&&!mergeBusyRef.current){event.preventDefault();setMergeOpen(false);return}
-      if(event.key!=="Tab"||!mergeDialogRef.current)return;
-      const controls=[...mergeDialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),select:not([disabled]),input:not([disabled]),textarea:not([disabled]),a[href]')];
-      if(!controls.length)return;
-      const first=controls[0]!,last=controls[controls.length-1]!;
-      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
-      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
-    }
-    document.addEventListener("keydown",keydown);
-    return()=>{document.removeEventListener("keydown",keydown);mergeTriggerRef.current?.focus()};
-  },[mergeOpen]);
-  async function mergeClient(){
-    if(!detail||detail.id!==selected||!mergeSourceId)return;
-    const mergeRequestId=detailRequestId.current,mergeTargetId=selected;
-    setMergeBusy(true);setError("");
-    try{await request(`/clients/${mergeTargetId}/merge`,{method:"POST",body:JSON.stringify({sourceClientId:mergeSourceId})});setMergeOpen(false);setMergeSourceId("");await load(search);const value=await request(`/clients/${mergeTargetId}`);if(mergeRequestId===detailRequestId.current)setDetail(value);request(`/clients/${mergeTargetId}/merge-suggestions`).then(suggestions=>{if(mergeRequestId===detailRequestId.current)setMergeSuggestions(suggestions)}).catch(()=>{if(mergeRequestId===detailRequestId.current)setMergeSuggestions([])})}catch(reason){if(mergeRequestId===detailRequestId.current)setError(mergeErrorLabel(reason))}finally{setMergeBusy(false)}
-  }
-  if (auth === null) return <div className="phase2-loading">Загрузка CRM…</div>;
-  if (!auth)
-    return (
-      <Login
-        onSuccess={() => {
-          setAuth(true);
-          load().catch((e) => setError(e.message));
-        }}
-      />
-    );
-  return (
-    <main className={`phase2-shell ${collapsed ? "is-collapsed" : ""}`}>
-      <aside className="phase2-nav">
-        <div className="phase2-brand">
-          <span>Y</span>
-          <div>
-            <strong>Yoleotard</strong>
-            <small>CRM</small>
-          </div>
-        </div>
-        {[
-          "Обзор",
-          "Входящие",
-          "Клиенты",
-          "Заказы",
-          "Производство",
-          "Финансы",
-          "Доставка",
-          "Задачи",
-        ].map((x) => (
-          <button
-            className={x === "Клиенты" ? "active" : ""}
-            onClick={() => x === "Заказы" && onNavigate?.("orders")}
-            key={x}
-          >
-            {x}
-          </button>
-        ))}
-      </aside>
-      <section className="phase2-main">
-        <header className="phase2-header">
-          <div>
-            <p>РАБОТА С КЛИЕНТАМИ</p>
-            <h1>Клиенты</h1>
-            <span>Контакты, спортсмены, заказы и вся история работы</span>
-          </div>
-          <div className="phase2-card-actions phase2-client-header-actions">
-            <CrmButton tone="secondary" ref={mergeTriggerRef} disabled={!detail||detail.id!==selected} onClick={()=>{if(detail?.id===selected)setMergeOpen(true)}}>{clientMergeUi.action}{mergeSuggestions.length?` · ${mergeSuggestions.length} ${clientMergeUi.suggestionBadge}`:""}</CrmButton>
-            <CrmButton ref={createClientTriggerRef} onClick={() => setCreating(true)}>+ Новый клиент</CrmButton>
-          </div>
-        </header>
-        {createdPeriod&&<Alert role="status" color="violet"><Group justify="space-between"><span>{overviewContextUi.clientsCreatedPeriod}: {new Intl.DateTimeFormat("ru-RU",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(`${createdPeriod}-01T12:00:00Z`)).replace(/\s?г\.$/,"")}</span><CrmButton tone="secondary" onClick={clearCreatedPeriod}>{overviewContextUi.clearPeriod}</CrmButton></Group></Alert>}
-        {error && (
-          <div className="phase2-error">
-            {error}
-            <button onClick={() => setError("")}>Закрыть</button>
-          </div>
-        )}
-        <div className="phase2-workspace">
-          <section className="phase2-list">
-            <div className="phase2-list-tools">
-              {!collapsed && (
-                <CrmTextInput
-                  className="phase2-client-search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Имя, телефон, Instagram…"
-                />
-              )}
-              <CrmActionIcon
-                aria-label={collapsed ? clientWorkspaceUi.expandList : clientWorkspaceUi.collapseList}
-                onClick={() => setCollapsed((v) => !v)}
-              >
-                {collapsed ? "›" : "‹"}
-              </CrmActionIcon>
-            </div>
-            {clients.map((c) => (
-              <button
-                className={`phase2-client ${selected === c.id ? "selected" : ""}`}
-                key={c.id}
-                onClick={() => setSelected(c.id)}
-              >
-                <ClientAvatar className="phase2-avatar" displayName={c.displayName} avatarUrl={c.avatarUrl} />
-                {!collapsed && (
-                  <span>
-                    <strong>{c.displayName}</strong>
-                    <small>
-                      {c.country || channel(c) || "Контакты не указаны"}
-                    </small>
-                  </span>
-                )}
-              </button>
-            ))}
-            {!clients.length && !collapsed && (
-              <div className="phase2-empty">Клиенты не найдены</div>
-            )}
-          </section>
-          <Card
-            detail={detail}
-          focusedOrderId={initialOrderId.current}
-          onMeasure={() => setMeasuring(true)}
-          onOrder={() => setOrdering(true)}
-          onAddAthlete={() => setAddingAthlete(true)}
-          addAthleteTriggerRef={addAthleteTriggerRef}
-          />
-        </div>
-      </section>
-      {creating && (
-        <Create
-          request={request}
-          returnFocusRef={createClientTriggerRef}
-          close={() => setCreating(false)}
-          done={(c) => {
-            setCreating(false);
-            load().then(() => setSelected(c.id));
-          }}
-        />
-      )}
-      {mergeOpen&&detail&&<div className="phase2-overlay"><section ref={mergeDialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="client-merge-title"><div><h2 id="client-merge-title">{clientMergeUi.title}</h2><CrmActionIcon type="button" aria-label={clientAthleteUi.close} disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>×</CrmActionIcon></div><p>{clientMergeUi.hint}</p>{!mergeSuggestions.length&&<p>{clientMergeUi.noSuggestions}</p>}<CrmNativeSelect ref={mergeSelectRef} label={clientMergeUi.source} value={mergeSourceId} onChange={event=>setMergeSourceId(event.target.value)} data={[{value:"",label:clientMergeUi.choose},...[...mergeSuggestions,...clients.filter(client=>client.id!==detail.id&&!mergeSuggestions.some(item=>item.id===client.id)).map(client=>({...client,reasons:[],channels:[]} as MergeSuggestion))].map(candidate=>({value:candidate.id,label:`${candidate.displayName}${candidate.reasons.length?` — ${candidate.reasons.map(mergeReasonLabel).join(", ")}`:""}`}))]}/>{mergeSourceId&&mergeSuggestions.find(item=>item.id===mergeSourceId)&&<div><strong>{clientMergeUi.reasons}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.reasons.map(mergeReasonLabel).join(" · ")}</p><strong>{clientMergeUi.channels}</strong><p>{mergeSuggestions.find(item=>item.id===mergeSourceId)!.channels.map(mergeChannelLabel).join(" · ")||"—"}</p></div>}<footer><CrmButton type="button" tone="secondary" disabled={mergeBusy} onClick={()=>setMergeOpen(false)}>{clientMergeUi.cancel}</CrmButton><CrmButton type="button" disabled={mergeBusy||!mergeSourceId} onClick={()=>void mergeClient()}>{mergeBusy?clientMergeUi.merging:clientMergeUi.confirm}</CrmButton></footer></section></div>}
-      {addingAthlete && detail && (
-        <AddAthlete
-          clientId={detail.id}
-          request={request}
-          returnFocusRef={addAthleteTriggerRef}
-          close={() => setAddingAthlete(false)}
-          done={() => {
-            setAddingAthlete(false);
-            request(`/clients/${detail.id}`).then(setDetail);
-            load();
-          }}
-        />
-      )}
-      {ordering && detail && (
-        <OrderPanel
-          client={detail}
-          request={request}
-          onClose={() => setOrdering(false)}
-          onSaved={() => {
-            setOrdering(false);
-            request(`/clients/${detail.id}`).then(setDetail);
-            load();
-          }}
-        />
-      )}
-      {measuring && detail && (
-        <MeasurementPanel
-          client={detail}
-          request={request}
-          onClose={() => setMeasuring(false)}
-          onSaved={() => {
-            setMeasuring(false);
-            request(`/clients/${detail.id}`).then(setDetail);
-            load();
-          }}
-        />
-      )}
-    </main>
-  );
+"use client";
+import {useEffect,useRef,useState,type FormEvent} from "react";
+import {Alert,Button,Drawer,Group,Modal,Select,Text,TextInput,Title} from "@mantine/core";
+import {useMediaQuery} from "@mantine/hooks";
+import {MeasurementPanel} from "./measurement-panel";
+import {OrderPanel} from "./order-panel";
+import {clientAthleteUi} from "../lib/i18n";
+import {clientsWorkspaceUi as ui} from "../lib/clients-workspace-i18n";
+import {CrmActionIcon,CrmButton,CrmNativeSelect,CrmTextInput} from "./crm/settings-controls";
+import {ClientDetails} from "./clients/client-details";
+import {ClientsTable} from "./clients/clients-table";
+import {CreateClient,Duplicates,MergeClients} from "./clients/client-dialogs";
+import {clientRequest} from "./clients/api";
+import {RequestState} from "./clients/presentation";
+import {measurementIsStale,clientForNewOrder} from "./clients/helpers.mjs";
+import {useWorkspace} from "./clients/use-workspace";
+import type {ClientRow,Navigate,WorkspaceTab} from "./clients/types";
+import "./clients/styles.css";
+export function ClientWorkspace({onNavigate}:{onNavigate?:Navigate}={}){
+ const state=useWorkspace(),{query,update,detail}=state;
+ const desktop=useMediaQuery("(min-width: 75em)",false),mobile=useMediaQuery("(max-width: 45em)",false);
+ const [checked,setChecked]=useState(new Map<string,ClientRow>()),[creating,setCreating]=useState(false),[duplicates,setDuplicates]=useState(false),[mergeRows,setMergeRows]=useState<ClientRow[]>(),[flow,setFlow]=useState<"order"|"measure"|"athlete"|"review-measurements">(),[allowStale,setAllowStale]=useState(false),[initialAthleteId,setInitialAthleteId]=useState<string>(),[overlay,setOverlay]=useState(false),[moreFilters,setMoreFilters]=useState(false);
+ const addAthleteTriggerRef=useRef<HTMLButtonElement>(null),createClientTriggerRef=useRef<HTMLButtonElement>(null),mergeTriggerRef=useRef<HTMLButtonElement>(null),duplicateTriggerRef=useRef<HTMLButtonElement>(null);
+ const originOrder=useRef<string|undefined>(undefined);
+ const [returnChat,setReturnChat]=useState<{conversationId:string;channel:string}>();
+ useEffect(()=>{const params=new URLSearchParams(window.location.search),conversationId=params.get("returnConversationId"),channel=params.get("returnChannel");if(conversationId&&channel&&ui.channels[channel])setReturnChat({conversationId,channel});},[]);
+ useEffect(()=>{originOrder.current=new URLSearchParams(window.location.search).get("orderId")??undefined;if(originOrder.current&&!new URLSearchParams(window.location.search).has("tab"))update({tab:"orders"});},[]);
+ useEffect(()=>{if(desktop&&state.list?.items[0]&&!query.clientId)update({clientId:state.list.items[0].id});},[desktop,state.list,query.clientId,update]);
+ useEffect(()=>{if(!detail)return;const url=new URL(window.location.href);if(url.searchParams.get("action")==="new-order"){newOrder();url.searchParams.delete("action");url.searchParams.delete("clientName");window.history.replaceState(null,"",url.pathname+url.search+url.hash);}},[detail]);
+ useEffect(()=>{setFlow(undefined);setOverlay(false);setInitialAthleteId(undefined);setAllowStale(false);},[query.clientId]);
+ function select(id:string,tab:WorkspaceTab="overview"){originOrder.current=undefined;update({clientId:id,tab},true);}
+ function onCheck(rows:ClientRow[],value:boolean){setChecked(previous=>{const next=new Map(previous);for(const row of rows)if(value)next.set(row.id,row);else next.delete(row.id);return next;});}
+ function onOrder(id:string){if(onNavigate)onNavigate("orders",{orderId:id});else window.location.assign(`/?section=orders&orderId=${encodeURIComponent(id)}`);}
+ function newOrder(athleteId?:string){setInitialAthleteId(athleteId);setAllowStale(false);setFlow(detail?.athletes.some(athlete=>athlete.measurements[0]&&measurementIsStale(athlete.measurements[0]))?"review-measurements":"order");}
+ function saved(){setFlow(undefined);setInitialAthleteId(undefined);state.refresh();}
+ function closeDetail(){update({clientId:"",tab:"overview"});}
+ const detailContent=detail?<ClientDetails key={detail.id} currency={query.currency} onCurrency={currency=>update({currency})} client={detail} tab={query.tab} onTab={tab=>update({tab})} onOrder={onOrder} onNewOrder={newOrder} onMeasure={()=>setFlow("measure")} onAddAthlete={()=>setFlow("athlete")} onRefresh={state.refresh} revision={state.revision} onNavigate={onNavigate} addAthleteRef={addAthleteTriggerRef} focusedOrderId={originOrder.current} onOverlayChange={setOverlay}/>:query.clientId?<RequestState error={state.detailError} retry={state.refresh} loading={!state.detailError}/>:<Text c="dimmed" p="xl" ta="center">{ui.choose}</Text>;
+ const options=state.list?.filters;
+ return <main className="clients-workspace">
+  <header className="clients-page-header"><div><Text size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><Title order={1}>{ui.title}</Title><Text size="sm" c="dimmed">{ui.subtitle}</Text></div><Group gap="xs" className="clients-header-actions"><Button ref={duplicateTriggerRef} variant="default" onClick={()=>setDuplicates(true)}>{ui.findDuplicates}</Button><Button ref={mergeTriggerRef} variant="default" disabled={checked.size<2} onClick={()=>setMergeRows([...checked.values()])}>{ui.merge}{checked.size?` (${checked.size})`:""}</Button><Button ref={createClientTriggerRef} onClick={()=>setCreating(true)}>{ui.create}</Button></Group></header>
+  {returnChat&&<Button mb="sm" variant="subtle" onClick={()=>onNavigate?.("inbox",{...returnChat,clientId:query.clientId,clientsReturn:window.location.pathname+window.location.search})}>{ui.returnChat}</Button>}
+  <div className="clients-toolbar"><TextInput aria-label={ui.search} placeholder={ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button></div>
+  {(moreFilters||query.period)&&<Group mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
+  <div className="clients-columns"><ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder}/>{desktop&&<aside className="clients-detail-panel">{detailContent}</aside>}</div>
+  <Drawer opened={!desktop&&!!query.clientId} onClose={closeDetail} position="right" size={mobile?"100%":600} title={ui.client} closeButtonProps={{"aria-label":ui.back,disabled:!!flow||overlay}} classNames={{content:"clients-drawer",header:"clients-drawer-header",body:"clients-drawer-body"}} closeOnEscape={!flow&&!overlay} closeOnClickOutside={!flow&&!overlay} trapFocus={!flow&&!overlay} returnFocus>{!desktop&&detailContent}</Drawer>
+  {creating&&<CreateClient onClose={()=>{setCreating(false);createClientTriggerRef.current?.focus();}} onCreated={client=>{setCreating(false);update({clientId:client.id,tab:"overview"},true);state.refresh();createClientTriggerRef.current?.focus();}}/>}
+  {duplicates&&<Duplicates onClose={()=>{setDuplicates(false);duplicateTriggerRef.current?.focus();}} onSelect={rows=>{setDuplicates(false);setChecked(new Map(rows.map(row=>[row.id,row])));setMergeRows(rows);}}/>}
+  {mergeRows&&<MergeClients clients={mergeRows} onClose={()=>{setMergeRows(undefined);mergeTriggerRef.current?.focus();}} onMerged={id=>{setMergeRows(undefined);setChecked(new Map());update({clientId:id,tab:"overview"},true);state.refresh();mergeTriggerRef.current?.focus();}}/>}
+  {flow==="athlete"&&detail&&<AddAthlete clientId={detail.id} request={clientRequest} returnFocusRef={addAthleteTriggerRef} close={()=>setFlow(undefined)} done={saved}/>}
+  {flow==="review-measurements"&&detail&&<Modal opened onClose={()=>setFlow(undefined)} title={ui.staleMeasurements} centered><Text size="sm" mb="md">{ui.staleWarning}</Text><Group justify="flex-end"><Button variant="default" onClick={()=>setFlow("measure")}>{ui.measure}</Button><Button variant="default" onClick={()=>{setAllowStale(true);setFlow("order");}}>{ui.verifiedStale}</Button><Button onClick={()=>{setAllowStale(false);setFlow("order");}}>{ui.withoutStale}</Button></Group></Modal>}
+  {flow==="order"&&detail&&<OrderPanel client={clientForNewOrder(detail,allowStale)} initialAthleteId={initialAthleteId} request={clientRequest} onClose={()=>setFlow(undefined)} onSaved={saved}/>}
+  {flow==="measure"&&detail&&<MeasurementPanel client={detail} request={clientRequest} onClose={()=>setFlow(undefined)} onSaved={saved}/>}
+ </main>;
 }
 
-function clearClientContextAction(){const url=new URL(window.location.href);for(const key of["action","clientId","clientName","orderId"])url.searchParams.delete(key);window.history.replaceState(null,"",url)}
-function Login({ onSuccess }: { onSuccess: () => void }) {
-  const [error, setError] = useState("");
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const d = new FormData(e.currentTarget),
-      r = await fetch("/api/auth/login", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: d.get("email"),
-          password: d.get("password"),
-        }),
-      });
-    if (!r.ok) {
-      setError("Неверная почта или пароль");
-      return;
-    }
-    onSuccess();
-  }
-  return (
-    <main className="phase2-login">
-      <form onSubmit={submit}>
-        <div className="phase2-logo">Y</div>
-        <h1>Вход в Yoleotard CRM</h1>
-        <p>Внутренняя рабочая система</p>
-        <label>
-          Электронная почта
-          <input name="email" type="email" required />
-        </label>
-        <label>
-          Пароль
-          <input name="password" type="password" minLength={8} required />
-        </label>
-        {error && <div className="phase2-error">{error}</div>}
-        <button className="phase2-primary">Войти</button>
-      </form>
-    </main>
-  );
-}
-function Card({
-  detail,
-  focusedOrderId,
-  onMeasure,
-  onOrder,
-  onAddAthlete,
-  addAthleteTriggerRef,
-}: {
-  detail?: Client;
-  focusedOrderId?: string;
-  onMeasure: () => void;
-  onOrder: () => void;
-  onAddAthlete: () => void;
-  addAthleteTriggerRef: React.RefObject<HTMLButtonElement | null>;
-}) {
-  const [tab, setTab] = useState(focusedOrderId ? "orders" : "main"),
-    [viewing, setViewing] = useState<{
-      athleteName: string;
-      measurement: MeasurementView;
-    }>();
-  useEffect(() => { if (focusedOrderId && detail?.orders.some((order) => order.id === focusedOrderId)) setTab("orders"); }, [detail?.id, focusedOrderId]);
-  if (!detail)
-    return (
-      <section className="phase2-card phase2-empty">
-        Выберите клиента слева
-      </section>
-    );
-  return (
-    <section className="phase2-card">
-      <div className="phase2-card-head">
-        <div className="phase2-person">
-          <ClientAvatar className="phase2-avatar big" displayName={detail.displayName} avatarUrl={detail.avatarUrl} />
-          <div>
-            <h2>{detail.displayName}</h2>
-            <em>{clientWorkspaceUi.statuses[detail.status as keyof typeof clientWorkspaceUi.statuses]||clientWorkspaceUi.statusUnknown}</em>
-          </div>
-        </div>
-        <div className="phase2-card-actions">
-          <button onClick={onOrder}>+ Новый заказ</button>
-          <button onClick={onMeasure}>+ Замеры</button>
-        </div>
-      </div>
-      <CrmTabList className="phase2-tabs" ariaLabel={clientWorkspaceUi.tabList} value={tab} onChange={setTab} tabs={[{value:"main",label:"Главное"},{value:"orders",label:"Заказы"},{value:"history",label:"История"},{value:"files",label:"Файлы"}]}/>
-      {tab === "main" && (
-        <div className="phase2-card-content">
-          <div className="phase2-facts">
-            <Fact
-              l="Предпочтительный канал"
-              v={channel(detail) || "Не указан"}
-            />
-            <Fact l="Язык общения" v={detail.language || "Не указан"} />
-            <Fact l="Телефон" v={detail.phone || "Не указан"} />
-            <Fact
-              l="Местоположение"
-              v={
-                [detail.city, detail.country].filter(Boolean).join(", ") ||
-                "Не указано"
-              }
-            />
-          </div>
-          <Title
-            t="Спортсмены"
-            a={clientAthleteUi.add}
-            onClick={onAddAthlete}
-            buttonRef={addAthleteTriggerRef}
-          />
-          {detail.athletes.map((a) => (
-            <div className="phase2-row" key={a.id}>
-              <div>
-                <strong>
-                  {a.firstName} {a.lastName}
-                </strong>
-                <small>{a.discipline || "Дисциплина не указана"}</small>
-              </div>
-              <Age
-                m={a.measurements[0]}
-                onView={() =>
-                  a.measurements[0] &&
-                  setViewing({
-                    athleteName: `${a.firstName} ${a.lastName || ""}`.trim(),
-                    measurement: a.measurements[0],
-                  })
-                }
-              />
-            </div>
-          ))}
-          {!detail.athletes.length && <Empty t="Спортсмены ещё не добавлены" />}
-          <Title t="Последние заказы" a="Все заказы" onClick={()=>setTab("orders")} />
-          {detail.orders.slice(0, 3).map((o) => (
-            <OrderLine o={o} key={o.id} />
-          ))}
-          {!detail.orders.length && <Empty t="Заказов пока нет" />}
-        </div>
-      )}
-      {tab === "orders" && (
-        <div className="phase2-card-content">
-          {detail.orders.length ? (
-            detail.orders.map((o) => <OrderLine o={o} key={o.id} focused={o.id === focusedOrderId} />)
-          ) : (
-            <Empty t="Заказов пока нет" />
-          )}
-        </div>
-      )}
-      {tab === "history" && (
-        <div className="phase2-card-content">
-          {detail.activities.length ? (
-            detail.activities.map((a) => (
-              <div className="phase2-history" key={a.id}>
-                <i />
-                <div>
-                  <strong>{a.summary}</strong>
-                  <small>{date(a.createdAt)}</small>
-                </div>
-              </div>
-            ))
-          ) : (
-            <Empty t="История появится после первого действия" />
-          )}
-        </div>
-      )}
-      {tab === "files" && <div className="phase2-card-content">{detail.files?.length?detail.files.map(file=><a key={file.id} href={`/api/order-tabs/client-files/${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">{file.name}</a>):<Empty t={detail.files?clientWorkspaceUi.noFiles:clientWorkspaceUi.filesUnavailable}/>}</div>}
-      {viewing && (
-        <MeasurementViewer
-          athleteName={viewing.athleteName}
-          measurement={viewing.measurement}
-          onClose={() => setViewing(undefined)}
-        />
-      )}{" "}
-    </section>
-  );
-}
-function Create({
-  close,
-  done,
-  request,
-  returnFocusRef,
-}: {
-  close: () => void;
-  done: (c: Client) => void;
-  request: (p: string, i?: RequestInit) => Promise<any>;
-  returnFocusRef: React.RefObject<HTMLButtonElement | null>;
-}) {
-  const [error, setError] = useState("");
-  const dialogRef = useRef<HTMLFormElement>(null);
-  const firstNameRef = useRef<HTMLInputElement>(null);
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    firstNameRef.current?.focus();
-    function keydown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeRef.current();
-        return;
-      }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const controls = [
-        ...dialogRef.current.querySelectorAll<HTMLElement>(
-          "button:not([disabled]),input:not([disabled]),select:not([disabled])",
-        ),
-      ];
-      if (!controls.length) return;
-      const first = controls[0]!, last = controls[controls.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", keydown);
-    return () => {
-      document.removeEventListener("keydown", keydown);
-      returnFocusRef.current?.focus();
-    };
-  }, [returnFocusRef]);
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    try {
-      done(
-        await request("/clients", {
-          method: "POST",
-          body: JSON.stringify(
-            Object.fromEntries(new FormData(e.currentTarget)),
-          ),
-        }),
-      );
-    } catch (x) {
-      setError(x instanceof Error ? x.message : "Ошибка");
-    }
-  }
-  return (
-    <div className="phase2-overlay" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <form ref={dialogRef} className="phase2-modal" role="dialog" aria-modal="true" aria-labelledby="create-client-title" onSubmit={submit}>
-        <div>
-          <h2 id="create-client-title">Новый клиент</h2>
-          <CrmActionIcon
-            type="button"
-            aria-label={clientWorkspaceUi.closeCreateClient}
-            onClick={close}
-          >
-            ×
-          </CrmActionIcon>
-        </div>
-        <CrmTextInput ref={firstNameRef} label="Имя" name="firstName" required />
-        <CrmTextInput label="Фамилия" name="lastName" />
-        <CrmTextInput label="Страна" name="country" />
-        <CrmTextInput label="Телефон" name="phone" />
-        <CrmTextInput label="Instagram" name="instagram" />
-        <CrmTextInput label="Язык общения" name="language" />
-        {error && <div className="phase2-error">{error}</div>}
-        <footer>
-          <CrmButton type="button" tone="secondary" onClick={close}>
-            Отмена
-          </CrmButton>
-          <CrmButton type="submit">Создать клиента</CrmButton>
-        </footer>
-      </form>
-    </div>
-  );
-}
 export function AddAthlete({
   clientId,
   close,
@@ -612,11 +70,13 @@ export function AddAthlete({
     [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLFormElement>(null);
   const firstNameRef = useRef<HTMLInputElement>(null);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeRef = useRef(close),
     savingRef = useRef(saving);
   closeRef.current = close;
   savingRef.current = saving;
   useEffect(() => {
+    if (restoreTimerRef.current !== undefined) clearTimeout(restoreTimerRef.current);
     firstNameRef.current?.focus();
     function keydown(e: KeyboardEvent) {
       if (e.key === "Escape" && !savingRef.current) closeRef.current();
@@ -640,7 +100,12 @@ export function AddAthlete({
     document.addEventListener("keydown", keydown);
     return () => {
       document.removeEventListener("keydown", keydown);
-      returnFocusRef.current?.focus();
+      // The containing Mantine Drawer reactivates its focus trap on close.
+      // Restore the initiating control after that commit, not during cleanup.
+      const trigger = returnFocusRef.current;
+      restoreTimerRef.current = setTimeout(() => {
+        if (trigger?.isConnected && returnFocusRef.current === trigger) returnFocusRef.current?.focus();
+      }, 10);
     };
   }, [returnFocusRef]);
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -667,30 +132,14 @@ export function AddAthlete({
     }
   }
   return (
-    <div
-      className="phase2-overlay"
-      onMouseDown={(e) => e.target === e.currentTarget && !saving && close()}
-    >
+    <Modal opened onClose={close} title={clientAthleteUi.title} centered
+      closeOnEscape={!saving} closeOnClickOutside={!saving}
+      closeButtonProps={{disabled:saving,"aria-label":clientAthleteUi.close}}>
       <form
         ref={dialogRef}
-        className="phase2-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-athlete-title"
         onSubmit={submit}
       >
-        <div>
-          <h2 id="add-athlete-title">{clientAthleteUi.title}</h2>
-          <CrmActionIcon
-            type="button"
-            onClick={close}
-            disabled={saving}
-            aria-label={clientAthleteUi.close}
-          >
-            ×
-          </CrmActionIcon>
-        </div>
-        <CrmTextInput ref={firstNameRef} label={clientAthleteUi.firstName} name="firstName" required />
+        <CrmTextInput data-autofocus ref={firstNameRef} label={clientAthleteUi.firstName} name="firstName" required />
         <CrmTextInput label={clientAthleteUi.lastName} name="lastName" />
         <CrmNativeSelect
           name="discipline"
@@ -719,103 +168,6 @@ export function AddAthlete({
           </CrmButton>
         </footer>
       </form>
-    </div>
+    </Modal>
   );
-}
-function Fact({ l, v }: { l: string; v: string }) {
-  return (
-    <div>
-      <small>{l}</small>
-      <strong>{v}</strong>
-    </div>
-  );
-}
-function Title({
-  t,
-  a,
-  onClick,
-  buttonRef,
-}: {
-  t: string;
-  a: string;
-  onClick?: () => void;
-  buttonRef?: React.RefObject<HTMLButtonElement | null>;
-}) {
-  return (
-    <div className="phase2-section-title">
-      <h3>{t}</h3>
-      <button ref={buttonRef} type="button" onClick={onClick}>
-        {a}
-      </button>
-    </div>
-  );
-}
-function Empty({ t }: { t: string }) {
-  return <div className="phase2-empty-line">{t}</div>;
-}
-function OrderLine({ o, focused = false }: { o: Order; focused?: boolean }) {
-  return (
-    <div className={`phase2-row${focused ? " is-context" : ""}`}>
-      {o.modelImagePath && (
-        <OrderImagePreview order={o}
-          className="phase2-order-thumb"
-          src={`/api/orders/images/${o.modelImagePath}`}
-          alt="Модель заказа"
-        />
-      )}
-      <div>
-        <strong title={o.number}>{orderDisplayNumber(o)}</strong>
-        <small>
-          {new Intl.NumberFormat("ru-RU", {
-            style: "currency",
-            currency: o.currency,
-          }).format(o.priceMinor / 100)}
-        </small>
-      </div>
-      <em>{orderLabel("sales",o.salesStatus)}</em>
-    </div>
-  );
-}
-function Age({ m, onView }: { m?: MeasurementView; onView: () => void }) {
-  if (!m) return <span className="phase2-warning">Нет замеров</span>;
-  const old = (Date.now() - new Date(m.measuredAt).getTime()) / 86400000 > 180;
-  return (
-    <button
-      type="button"
-      className={`phase2-measure-link ${old ? "phase2-warning" : ""}`}
-      onClick={onView}
-      title="Просмотреть замеры"
-    >
-      Замеры: {date(m.measuredAt)}
-      {old ? " · устарели" : ""}
-    </button>
-  );
-}
-function initials(n: string) {
-  return n
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((x) => x[0])
-    .join("")
-    .toUpperCase();
-}
-function channel(c: Partial<Client>) {
-  return c.instagram
-    ? "Instagram"
-    : c.whatsapp
-      ? "WhatsApp"
-      : c.telegram
-        ? "Telegram"
-        : c.email
-          ? "Email"
-          : c.phone
-            ? "Телефон"
-            : "";
-}
-function date(v: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(v));
 }

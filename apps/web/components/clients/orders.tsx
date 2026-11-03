@@ -1,0 +1,22 @@
+"use client";
+import {useState} from "react";
+import {Badge,Button,Group,NativeSelect,Pagination,Select,Text,TextInput} from "@mantine/core";
+import {OrderImagePreview} from "../orders/order-image-preview";
+import {CrmStatusBadge} from "../crm/status-badge";
+import {orderDisplayNumber} from "../../lib/order-source";
+import {orderLabels} from "../../lib/orders-i18n";
+import {clientsWorkspaceUi as ui} from "../../lib/clients-workspace-i18n";
+import type {ClientOrderHistoryItem} from "../../lib/client-order-history";
+import {money,RequestState,stamp} from "./presentation";
+import {useClientPage} from "./use-workspace";
+import type {Page} from "./types";
+export function OrderCards({items,onOrder,focusedOrderId,onPreviewChange}:{onPreviewChange?:(opened:boolean)=>void;items:readonly ClientOrderHistoryItem[];onOrder:(id:string)=>void;focusedOrderId?:string}){
+ return <div className="clients-order-list">{items.map(order=><article key={order.id} className={`clients-order ${order.id===focusedOrderId?"is-context":""}`}><div className="clients-order-designs">{order.designs?.length?order.designs.slice(0,2).map(design=><OrderImagePreview key={design.id} src={design.imageUrl} alt={design.name} order={order} className="clients-order-thumb" onPreviewChange={onPreviewChange} onOpenOrder={()=>onOrder(order.id)}/>):<span className="clients-order-thumb clients-missing-image" role="img" aria-label={ui.noImage}>—</span>}{(order.designCount??0)>2&&<Badge size="xs" variant="light">+{order.designCount!-2}</Badge>}</div><div className="clients-order-meta"><Button variant="subtle" size="compact-xs" title={order.number} onClick={()=>onOrder(order.id)}>{orderDisplayNumber(order)}</Button><Text size="xs" c="dimmed">{stamp(order.createdAt)}</Text>{order.quantity!==undefined&&<Text size="xs" c="dimmed">{ui.quantity}: {order.quantity}</Text>}</div><div className="clients-order-value"><Text size="xs" fw={600}>{money(order.priceMinor,order.currency)}</Text><CrmStatusBadge domain="sales" status={order.salesStatus}/></div></article>)}{!items.length&&<Text size="sm" c="dimmed">{ui.noOrders}</Text>}</div>;
+}
+export function ClientOrders({clientId,onOrder,revision,focusedOrderId,onPreviewChange,contextOrder}:{contextOrder?:ClientOrderHistoryItem;onPreviewChange?:(opened:boolean)=>void;clientId:string;onOrder:(id:string)=>void;revision:number;focusedOrderId?:string}){
+ const [filters,setFilters]=useState({page:1,pageSize:20,salesStatus:"",from:"",to:""});
+ const invalid=!!filters.from&&!!filters.to&&filters.from>filters.to;
+ const query=new URLSearchParams({page:String(filters.page),pageSize:String(filters.pageSize)});for(const key of ["salesStatus","from","to"] as const)if(filters[key]&&!invalid)query.set(key,filters[key]);
+ const {data,error,retry}=useClientPage<Page<ClientOrderHistoryItem>>(`/orders/client-history/${encodeURIComponent(clientId)}?${query}`,revision);
+ return <><div className="clients-order-filters"><Select label={ui.status} clearable value={filters.salesStatus||null} onChange={value=>setFilters({...filters,page:1,salesStatus:value??""})} data={Object.entries(orderLabels.sales).map(([value,label])=>({value,label}))}/><TextInput type="date" label={ui.from} value={filters.from} onChange={e=>setFilters({...filters,page:1,from:e.currentTarget.value})}/><TextInput type="date" label={ui.to} value={filters.to} error={invalid?ui.dateInvalid:undefined} onChange={e=>setFilters({...filters,page:1,to:e.currentTarget.value})}/></div><RequestState error={error} retry={retry} loading={!data&&!error}/>{data&&!invalid&&<>{contextOrder&&!filters.salesStatus&&!filters.from&&!filters.to&&!data.items.some(order=>order.id===contextOrder.id)&&<section aria-label={ui.contextOrder}><Text size="xs" c="dimmed" mb="xs">{ui.contextOrder}</Text><OrderCards items={[contextOrder]} onOrder={onOrder} focusedOrderId={focusedOrderId} onPreviewChange={onPreviewChange}/></section>}<OrderCards items={data.items} onOrder={onOrder} focusedOrderId={focusedOrderId} onPreviewChange={onPreviewChange}/><Group justify="space-between" mt="md"><NativeSelect aria-label={ui.pageSize} value={filters.pageSize} data={["20","50"]} onChange={e=>setFilters({...filters,page:1,pageSize:Number(e.currentTarget.value)})}/><Pagination total={Math.max(1,Math.ceil(data.total/data.pageSize))} value={data.page} onChange={page=>setFilters({...filters,page})} size="xs" siblings={0} aria-label={ui.ordersPage}/></Group></>}</>;
+}

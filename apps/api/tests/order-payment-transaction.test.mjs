@@ -41,6 +41,8 @@ const orderRequire = specifier => {
   if (specifier === './order-assignment-eligibility' || specifier === './order-source' || specifier === './order-list-read-model' || specifier === './website-order-fee') return loadTargetModule('orders/'+specifier.slice(2)+'.ts');
   if (specifier === "../finance/invoice-number") return loadTargetModule("finance/invoice-number.ts");
   if (specifier === "../clients/measurement-data") return loadTargetModule("clients/measurement-data.ts");
+  if (specifier === "./order-client-history") return loadTargetModule("orders/order-client-history.ts");
+  if (specifier === "../clients/clients-workspace-read") return loadTargetModule("clients/clients-workspace-read.ts");
   if (specifier === "../website-orders/website-order-number") return loadTargetModule("website-orders/website-order-number.ts");
   return nativeRequire(specifier);
 };
@@ -61,7 +63,10 @@ test("ручная отмена оплаты сохраняет чек, пере
   assert.equal(writes.activities[0].data.type, "PAYMENT_VOIDED");
   assert.equal(writes.activities[0].data.actorId, "owner-void");
   assert.ok(writes.audits.some(entry => entry.data.entityType === "Payment"));
-  assert.equal(writes.locks[0][1], order.id);
+  assert.equal(writes.locks[0][1], "client-merge-global");
+  assert.match(writes.locks[0][0], /pg_advisory_xact_lock_shared/);
+  assert.equal(writes.locks[1][1], order.id);
+  assert.match(writes.locks[1][0], /pg_advisory_xact_lock\(hashtext/);
 });
 
 function cancellationFixture({paymentPatch={},orderPatch={},remaining=[]}={}) {

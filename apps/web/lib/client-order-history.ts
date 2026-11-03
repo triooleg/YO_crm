@@ -4,6 +4,7 @@ type HistoryDetails = {country?: string | null; designCount?: number; quantity?:
 export type ClientOrderHistoryItem = Readonly<{
   id: string; clientId: string; number: string; createdAt: string;
   priceMinor: number; currency: string; salesStatus: string;
+  sourceSystem?:string;externalNumber?:string|null;externalId?:string|null;
 } & HistoryDetails>;
 export type ClientOrderHistoryPage = Readonly<{
   client: Readonly<{id: string; displayName: string; country?: string | null; source: string}>;
@@ -81,7 +82,12 @@ function validate(value: unknown, clientId: string, page: number): ClientOrderHi
     requireValue(text(item.id) && item.clientId === clientId && text(item.number) && validDate(item.createdAt));
     requireValue(integer(item.priceMinor) && typeof item.currency === 'string' && /^[A-Z]{3}$/.test(item.currency) && text(item.salesStatus));
     requireValue(!ids.has(item.id)); ids.add(item.id);
-    return Object.freeze({...details(item), id: item.id, clientId, number: item.number, createdAt: item.createdAt,
+    const provenance:{sourceSystem?:string;externalNumber?:string|null;externalId?:string|null}={};
+    if(item.sourceSystem!=null){
+      requireValue(typeof item.sourceSystem==='string'&&item.sourceSystem.length<=100&&!/\p{Cc}/u.test(item.sourceSystem));provenance.sourceSystem=item.sourceSystem;
+      for(const key of ['externalNumber','externalId'] as const){const value=item[key];if(value!==undefined){requireValue(value===null||typeof value==='string'&&value.length<=200&&!/\p{Cc}/u.test(value));provenance[key]=value;}}
+    }
+    return Object.freeze({...details(item), ...provenance, id: item.id, clientId, number: item.number, createdAt: item.createdAt,
       priceMinor: item.priceMinor, currency: item.currency, salesStatus: item.salesStatus});
   });
   for (let i = 1; i < items.length; i++) {

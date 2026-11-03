@@ -25,6 +25,8 @@ export class CreateClientDto {
 export class PromoteInboxClientDto extends CreateClientDto {}
 export class UpdateClientNotesDto {
   @ApiProperty() @IsString() @MaxLength(2000) notes!: string;
+  @ApiPropertyOptional() @IsOptional() @IsIn(['INTERNAL','CLIENT']) visibility?: 'INTERNAL'|'CLIENT';
+  @ApiPropertyOptional() @IsOptional() @IsDateString() expectedUpdatedAt?: string;
 }
 export class UpdateClientProfileDto {
   @ApiProperty() @Transform(({ value }) => optionalText(value)) @IsString() @Length(1, 200) displayName!: string;
@@ -32,6 +34,8 @@ export class UpdateClientProfileDto {
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) language?: string | null;
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsString() @MaxLength(100) phone?: string | null;
   @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsEmail({}, { message: "Введите корректный e-mail" }) email?: string | null;
+  @ApiPropertyOptional({enum:ContactChannel,nullable:true}) @IsOptional() @IsEnum(ContactChannel) preferredChannel?:ContactChannel|null;
+  @ApiPropertyOptional({nullable:true}) @IsOptional() @IsString() @MaxLength(100) responsibleManagerId?:string|null;
   @ApiProperty() @IsDateString() expectedUpdatedAt!: string;
 }
 export class MergeClientDto {
