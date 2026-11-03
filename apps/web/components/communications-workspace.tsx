@@ -1549,17 +1549,15 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
-                {client&&<span className="communications-chat-badges">{availableChannels.map(item=>{const channelText=`${item.label}${item.accountName?` / ${item.accountName}`:""}`;return <span className="is-channel" aria-label={channelText} title={channelText} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b>{item.accountName&&<small> / {item.accountName}</small>}</span>})}{client.country&&<span><InboxCountryFlag country={client.country}/> {client.country}</span>}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.waitingForReply&&<span className="waiting-reply">{ui.waitingReply}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
+                {client&&<span className="communications-chat-badges">{availableChannels.map(item=>{const channelText=`${item.label}${item.accountName?` / ${item.accountName}`:""}`;return <span className="is-channel" aria-label={channelText} title={channelText} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b>{item.accountName&&<small> / {item.accountName}</small>}</span>})}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.waitingForReply&&<span className="waiting-reply">{ui.waitingReply}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={activeChannel === "INSTAGRAM" ? ui.instagramProfileHint : ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
             {client&&<CrmButton type="button" tone="secondary" onClick={()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}>{client.inboxSpamAt?ui.restoreSpam:ui.markSpam}</CrmButton>}
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={openSplitDialog}>⇄</CrmActionIcon>:null}
-            {client && (availableChannels.length > 1 ? (
+            {client && availableChannels.length > 1 && (
               <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
-            ) : (
-              <span className="communications-active-channel" title={`${active.label}${active.accountName?` / ${active.accountName}`:""}`} aria-label={`${active.label}${active.accountName?` / ${active.accountName}`:""}`}>{active.icon} {active.label}{active.accountName?` / ${active.accountName}`:""}</span>
-            ))}
+            )}
             {client&&client.status!=="LEAD"&&<button type="button" className="communications-open-client" onClick={()=>void navigateFromInbox("clients",{clientId:client.id})}>{ui.openClient}</button>}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
           </header>

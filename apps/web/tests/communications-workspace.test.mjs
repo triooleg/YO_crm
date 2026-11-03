@@ -917,3 +917,18 @@ test("post, story and comment engagement is visible and replyable in CRM",()=>{
   assert.match(locale,/replyingToComment:/);
   assert.match(locale,/openSocialContent:/);
 });
+
+
+test("шапка диалога показывает источник один раз и оставляет страну в карточке клиента", () => {
+  const header = component.split('<header className="communications-chat-header">')[1].split('</header>')[0];
+  assert.match(header, /availableChannels\.map/);
+  assert.match(header, /className="is-channel"/);
+  assert.match(header, /item\.accountName/);
+  assert.doesNotMatch(header, /client\.country|InboxCountryFlag|communications-active-channel/);
+  assert.match(header, /className="communications-chat-account"/);
+  assert.match(header, /href=\{accountUrl\}/);
+  assert.match(header, /availableChannels\.length > 1/);
+  assert.match(header, /changeReplyChannel\(event\.target\.value\)/);
+  for (const action of [/setSpamTarget/, /openSplitDialog/, /ui\.openClient/, /ui\.clientCard/]) assert.match(header, action);
+  assert.match(component, /client\.country&&<p><span>\{ui\.country\}<\/span><b><InboxCountryFlag country=\{client\.country\}/);
+});

@@ -1,3 +1,25 @@
+## 2026-11-03 — Inbox header cleanup 0.14.1, deployment authorized
+
+Separately, an owner-confirmed imported receipt was reconciled through the
+installed TaxesService.confirmSource with normal audit/idempotency. Scoped
+preflight and atomic postconditions passed: original payment and historical
+ledger unchanged, two zero-amount confirmation entries appended. October live
+Finance now reports complete calculation and no pending tax sources. Private
+operational evidence stays under ignored .local; no application deployment.
+
+Uncommitted UI patch removes the country chip beneath the chat name and the
+single-channel source/@username repeat beside header actions. Primary channel
+badges/profile link, multi-channel reply selector, actions and sidebar country
+remain. Focused Inbox regressions96/96 and full quality PASS (3244 tests,
+109 optional skips, typecheck and production build). Real local browser
+screenshots cover single/multiple channels at1920,1366,390; no console warnings
+or errors. Compatibility, regression, business and scoped visual reviews PASS.
+Existing multichannel1366 overflow is outside the removal-only patch; no paired
+baseline screenshot establishes an overall overflow pass. Private fixture has
+no production/provider connection. Owner subsequently authorized deployment and
+GitHub publication: preparing0.14.1, rebuilding both API/web with unchanged
+backend logic and schema53. Exact-version full quality and release gates pending.
+
 ## 2026-11-03 — durable finance 0.14.0 installed
 
 Owner-authorized deployment completed. Built application commit8d894ed8f106eb577274afe290bc2102bbe3922a
