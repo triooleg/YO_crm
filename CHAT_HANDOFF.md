@@ -1,11 +1,22 @@
 ## 2026-11-03 — Clients workspace refresh, local implementation
 
-UPDATE: owner has now explicitly authorized deployment. Candidate 0.15.0,
-rebuilt API+web and the single additive ClientFile migration are being prepared;
-source publication is covered by the standing GitHub-at-deployment instruction.
-Fresh installed baseline confirms healthy 0.14.1/schema53. Follow
-docs/release-evidence/clients-workspace-0150-plan.md. Statements below describe
-the earlier completed local-only phase; no installed 0.15.0 claim exists yet.
+UPDATE: owner-authorized 0.15.0 is installed, with healthy API/web and schema54.
+Application commit a739ed84ee79fb3058282703d2d860b9a8fa8ada is published on
+origin/main. Frozen source83b4d312fc6b53d3cd3dcf41b387d972c2afc51cc162f9daed70a5a77c45d35b;
+API5c47fad6841b/webd125db63c480. Original PostgreSQL/Redis retained. Fresh
+consistent DATA backup, isolated official restore/cleanup and real-DATA shadow
+qualification passed. The single additive ClientFile migration is applied;
+application rollback retains schema54. Old0.14.1 cannot split new-format merges.
+Actual CUA confirms Clients table/right card, lazy tabs, order photos/full-image
+popup, exact Inbox/client roundtrip and brand/journal0.15.0/full source, with
+zero console warnings/errors. Retention counts5/5/5/5; backups untouched.
+Installed runtime/browser proof14bc215e94e99d988245f8dbfbf1aa22c9f30012cb1b49ec824dfbda5916c577;
+pointer CAS verified, historical receipts preserved. Final provenance recorded:
+b033b37f64eb7c722eed8ba3c0e0315467dfbdb4e5b13c2b1a529de5e1c9cf46.
+Version Guardian INSTALLED PASS; final independent Release Gatekeeper INSTALLED PASS. No real-client
+merge, customer send, production
+restore or seed was performed. The paragraphs below preserve the earlier local
+implementation record; their uncommitted/local-only wording is historical.
 
 Active checkout: clients-workspace/YO_crm, branch codex/clients-workspace-refresh,
 base c91c747e01af9239ef1bd36aba02e62950567d83. Owner requested the Clients ZIP
@@ -30,8 +41,8 @@ docs/plans/clients-workspace-verification-2026-11-03.md for evidence and stable
 screenshots in output/clients-workspace. Compatibility, regression, business,
 visual and final Release Gatekeeper reviews all PASS for local acceptance.
 That earlier verdict covered local acceptance only. Deployment is now explicitly
-authorized as recorded above; installed/live acceptance remains UNVERIFIED
-until the 0.15.0 cutover and smoke checks finish.
+authorized and executed as recorded above; consult the deployment evidence for
+the final installed acceptance, separate from this earlier local-only verdict.
 
 ## 2026-11-03 — Inbox header cleanup 0.14.1 installed
 
