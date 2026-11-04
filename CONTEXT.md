@@ -336,6 +336,10 @@ retains its artifact and audit history.
 customer card, order summary or another client-facing order document. Templates
 select keys from the server-owned public field catalogue and may store seller and
 payment text. They cannot execute HTML, JavaScript or arbitrary template code.
+Built-in templates can be customized under their existing identity. A saved
+customization takes precedence over its original built-in definition, including
+when inactive or archived. Template edits apply to future documents; existing
+document snapshots and saved artifacts keep their original contents.
 
 `OrderDocument` is a generated non-invoice document linked to one active order.
 It stores the selected template and allowed order data as immutable snapshots;

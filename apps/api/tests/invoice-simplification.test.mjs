@@ -321,3 +321,107 @@ test('multipage PDF keeps payment and note headings with their first text chunk'
  }
  assert.ok(multipage>0,'exercises real multipage output');
 });
+
+
+test('built-in templates can be edited in place without duplicate choices or changes to saved invoices',async()=>{
+ const f=fixture(),key='builtin-invoice-en-sepa';
+ const initial=(await f.documents.templates()).find(t=>t.id===key);
+ const oldPreview=await f.documents.invoicePreview({orderId:'order-1',templateKey:key},user);
+ const oldInvoice=await f.documents.invoiceFromTemplate({previewToken:oldPreview.previewToken,idempotencyKey:'before-template-edit'},user);
+ const savedPdf=await new FinanceService(f.db,undefined,f.documents).document(oldInvoice.id);
+ const updated=await f.documents.updateTemplate(key,{name:'My SEPA',expectedRevision:1,config:{...initial.config,seller:{name:'Updated Seller',address:'Updated address'},notes:'Updated invoice note'}},user);
+ assert.equal(updated.id,key);assert.equal(updated.config.revision,2);assert.equal(updated.builtIn,false);
+ const choices=await f.documents.templates();assert.equal(choices.filter(t=>t.id===key).length,1);
+ assert.equal(choices.find(t=>t.id===key).name,'My SEPA');
+ const next=await f.documents.invoicePreview({orderId:'order-1',templateKey:key},user);
+ assert.match(next.html,/Updated Seller/);assert.match(next.html,/Updated invoice note/);assert.equal(next.templateRevision,2);
+ assert.deepEqual((await new FinanceService(f.db,undefined,f.documents).document(oldInvoice.id)).pdf,savedPdf.pdf);
+ assert.equal(oldInvoice.templateSnapshot.seller.name,'Test Seller');
+ assert.ok(f.db.state.auditLog.some(a=>a.entityType==='DocumentTemplate'&&a.entityId===key));
+});
+
+
+test('first built-in edit inherits current seller defaults, then respects saved seller values',async()=>{
+ const f=fixture(),key='builtin-invoice-en-swift';
+ const listed=(await f.documents.templates()).find(t=>t.id===key);
+ assert.deepEqual(listed.config.seller,{name:'Test Seller',address:'Test seller address'});
+ const edited=await f.documents.updateTemplate(key,{name:'Renamed SWIFT',expectedRevision:1},user);
+ assert.deepEqual(edited.config.seller,listed.config.seller);
+ f.db.state.appSetting.find(x=>x.key==='sellerName').value='Different global seller';
+ const p=await f.documents.invoicePreview({orderId:'order-1',templateKey:key},user);
+ assert.match(p.html,/Test Seller/);assert.doesNotMatch(p.html,/Different global seller/);
+ await f.documents.updateTemplate(key,{config:{...edited.config,seller:{name:edited.config.seller.name,address:''}},expectedRevision:2},user);
+ await assert.rejects(f.documents.invoicePreview({orderId:'order-1',templateKey:key},user),/продавца/);
+});
+
+test('simultaneous built-in edits create one override and reject stale revision and unknown IDs',async()=>{
+ const f=fixture(),key='builtin-invoice-fr-sepa';
+ const results=await Promise.allSettled(['First','Second'].map(name=>f.documents.updateTemplate(key,{name,expectedRevision:1},user)));
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+ assert.match(results.find(x=>x.status==='rejected').reason.message,/уже изменён/);
+ assert.equal(f.db.state.documentTemplate.filter(x=>x.id===key).length,1);
+ const current=(await f.documents.templates()).find(t=>t.id===key);assert.equal(current.config.revision,2);
+ await assert.rejects(f.documents.updateTemplate('builtin-unrecognized',{name:'Unknown',expectedRevision:1},user),/не найден/);
+ assert.equal(f.db.state.documentTemplate.length,1);
+});
+
+test('inactive and archived built-in overrides never resurrect defaults or allow an unsaved frozen preview',async()=>{
+ for(const action of ['inactive','archive']) {
+  const f=fixture(),key='builtin-invoice-en-sepa';
+  const pending=await f.documents.invoicePreview({orderId:'order-1',templateKey:key},user);
+  await f.documents.updateTemplate(key,{name:'Edited template',expectedRevision:1,active:action!=='inactive'},user);
+  if(action==='archive')await f.documents.templateAction(key,{expectedRevision:2},user,true);
+  const rows=(await f.documents.templates()).filter(x=>x.id===key);
+  assert.equal(rows.length,action==='archive'?0:1);
+  if(rows.length)assert.equal(rows[0].active,false);
+  await assert.rejects(f.documents.invoicePreview({orderId:'order-1',templateKey:key},user),/не найден/);
+  await assert.rejects(f.documents.invoiceFromTemplate({previewToken:pending.previewToken,idempotencyKey:'unavailable'},user),/не активен/);
+  if(action==='archive')await assert.rejects(f.documents.updateTemplate(key,{name:'Resurrect',expectedRevision:2},user),/не найден/);
+  assert.equal(f.db.state.invoice.length,0);
+ }
+});
+
+test('frozen built-in previews retain old content after editing and saved replays survive archiving',async()=>{
+ const f=fixture(),key='builtin-invoice-en-sepa';
+ const p=await f.documents.invoicePreview({orderId:'order-1',templateKey:key},user);
+ await f.documents.updateTemplate(key,{expectedRevision:1,config:config({notes:'New template content'})},user);
+ const saved=await f.documents.invoiceFromTemplate({previewToken:p.previewToken,idempotencyKey:'frozen-builtin'},user);
+ assert.equal(saved.documentOptions.templateRevision,1);assert.notEqual(saved.templateSnapshot.notes,'New template content');
+ await f.documents.templateAction(key,{expectedRevision:2},user,true);
+ const replay=await f.documents.invoiceFromTemplate({previewToken:p.previewToken,idempotencyKey:'frozen-builtin'},user);
+ assert.equal(replay.id,saved.id);assert.equal(f.db.state.invoice.length,1);
+});
+
+
+test('built-in customer card can be edited without invoice seller details; invoices still require seller',async()=>{
+ const f=fixture(),key='builtin-customer-card-ru';
+ const initial=(await f.documents.templates()).find(t=>t.id===key);
+ assert.deepEqual(initial.config.seller,{name:'',address:''});
+ const updated=await f.documents.updateTemplate(key,{expectedRevision:1,config:{...initial.config,title:'Моя карточка'}},user);
+ assert.equal(updated.kind,'CUSTOMER_CARD');assert.equal(updated.config.title,'Моя карточка');
+ const invoiceKey='builtin-invoice-en-sepa',invoice=(await f.documents.templates()).find(t=>t.id===invoiceKey);
+ await f.documents.updateTemplate(invoiceKey,{expectedRevision:1,config:{...invoice.config,seller:{name:'',address:''}}},user);
+ await assert.rejects(f.documents.invoicePreview({orderId:'order-1',templateKey:invoiceKey},user),/продавца/);
+});
+
+
+test('first built-in materialization rolls back when audit fails',async()=>{
+ const f=fixture(),key='builtin-invoice-en-sepa';
+ f.db.auditLog.create=async()=>{throw Error('audit-write-failed')};
+ await assert.rejects(f.documents.updateTemplate(key,{name:'Not committed',expectedRevision:1},user),/audit-write-failed/);
+ assert.equal(f.db.state.documentTemplate.length,0);
+ const row=(await f.documents.templates()).find(t=>t.id===key);assert.equal(row.builtIn,true);assert.equal(row.config.revision,1);
+});
+
+test('generic document save rechecks a built-in tombstone inside the saving transaction',async()=>{
+ const f=fixture(),key='builtin-customer-card-ru';
+ f.db.state.orderDocument=[];
+ f.db.orderDocument={create:async({data})=>{f.db.state.orderDocument.push(data);return {id:'doc-1',...data}}};
+ const transaction=f.db.$transaction.bind(f.db);
+ f.db.$transaction=run=>{
+  f.db.state.documentTemplate.push({id:key,name:'Archived card',kind:'CUSTOMER_CARD',language:'ru',active:false,archivedAt:new Date(),config:{}});
+  return transaction(run);
+ };
+ await assert.rejects(f.documents.create({orderId:'order-1',templateKey:key},user),/шаблон документа не найден/);
+ assert.equal(f.db.state.orderDocument.length,0);
+});

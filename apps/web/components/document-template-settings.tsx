@@ -50,7 +50,6 @@ export function DocumentTemplateSettings() {
   const [orderId, setOrderId] = useState<string | null>(null), [orderSearch, setOrderSearch] = useState(""), [orders, setOrders] = useState<OrderOption[]>([]), [orderPage, setOrderPage] = useState(1), [orderPages, setOrderPages] = useState(1), [ordersLoading, setOrdersLoading] = useState(false), [orderError, setOrderError] = useState(""), [ordersRetry, setOrdersRetry] = useState(0);
   const [preview, setPreview] = useState(""), [previewHtml, setPreviewHtml] = useState("");
   const previewUrl = useRef(""), locked = useRef(false), codeLayer = useRef<HTMLPreElement>(null), selectedOrder = useRef<OrderOption | null>(null);
-  const readOnly = Boolean(editing?.builtIn);
   let config: TemplateConfig | null = null;
   try { config = parseConfig(source); } catch { /* Invalid JSON remains editable. */ }
   const groups = Object.keys(financeUi.fieldGroups) as FieldDefinition["group"][];
@@ -99,7 +98,7 @@ export function DocumentTemplateSettings() {
     setValid(true); return parsed;
   }
   async function save(event: FormEvent) {
-    event.preventDefault(); if (!editing || readOnly) return;
+    event.preventDefault(); if (!editing) return;
     await run(async () => {
       const draft = await validateConfig();
       const body = editing.id ? { name: editing.name.trim(), language: editing.language, active: editing.active, config: draft, expectedRevision: editing.config.revision ?? 1 } : { name: editing.name.trim(), kind: editing.kind, language: editing.language, config: draft };
@@ -138,27 +137,27 @@ export function DocumentTemplateSettings() {
     {loading ? <p role="status">{ui.loading}</p> : !visible.length ? <p>{ui.empty}</p> : <div className="invoice-template-list">{visible.map(row => <article key={row.id} data-template-id={row.id}>
       <div className="invoice-template-summary"><strong>{row.name}</strong><span>{settingsUi.documentTemplateKinds[row.kind]} · {languageLabel(row.language)} · {row.config.currency || ui.orderCurrency}</span><span>{row.config.purpose || ui.noPurpose}</span><code>{row.id}</code><small>{ui.revision}: {row.config.revision ?? 1} · {ui.updatedAt}: {row.updatedAt ? new Date(row.updatedAt).toLocaleString("ru-RU") : ui.notSpecified}</small></div>
       <div className="invoice-template-actions"><Group gap="xs"><Badge color={row.active ? "teal" : "gray"}>{row.active ? settingsUi.documentTemplateActiveBadge : ui.archivedBadge}</Badge>{row.config.isDefault && <Badge>{ui.defaultBadge}</Badge>}{row.builtIn && <Badge variant="outline">{settingsUi.documentTemplateBuiltIn}</Badge>}</Group><Group gap="xs">
-        <Button size="compact-xs" variant="light" disabled={busy} onClick={() => open(row)}>{row.builtIn ? ui.view : settingsUi.documentTemplateEdit}</Button>
+        <Button size="compact-xs" variant="light" disabled={busy} onClick={() => open(row)}>{settingsUi.documentTemplateEdit}</Button>
         <Button size="compact-xs" variant="default" disabled={busy} onClick={() => open(row, true)}>{ui.duplicate}</Button>
         <Button size="compact-xs" variant="default" disabled={busy} onClick={() => { open(row); setTab("code"); }}>{ui.test}</Button>
         {!row.builtIn && <><Button size="compact-xs" variant="subtle" disabled={busy || !row.active || Boolean(row.config.isDefault)} onClick={() => void lifecycle(row, "default")}>{ui.makeDefault}</Button><Button size="compact-xs" variant="subtle" color="red" disabled={busy} onClick={() => setArchive(row)}>{ui.archive}</Button></>}
       </Group></div>
     </article>)}</div>}
-    <Modal opened={Boolean(editing)} onClose={close} title={editing?.builtIn ? ui.viewTitle : editing?.id ? settingsUi.documentTemplateEdit : settingsUi.documentTemplateAdd} size="min(1280px, 96vw)" closeOnClickOutside={!busy} closeOnEscape={!busy} withCloseButton={!busy} className="invoice-template-modal">
+    <Modal opened={Boolean(editing)} onClose={close} title={editing?.id ? settingsUi.documentTemplateEdit : settingsUi.documentTemplateAdd} size="min(1280px, 96vw)" closeOnClickOutside={!busy} closeOnEscape={!busy} withCloseButton={!busy} className="invoice-template-modal">
       {editing && <form onSubmit={save}>
         {editorError && <CrmAlert>{editorError}</CrmAlert>}
-        {readOnly && <p className="invoice-template-readonly">{ui.builtinHint} <Button variant="light" size="compact-sm" disabled={busy} onClick={() => open(editing, true)}>{ui.duplicate}</Button></p>}
+        {editing.builtIn && <p className="invoice-template-readonly">{ui.builtinHint} <Button variant="light" size="compact-sm" disabled={busy} onClick={() => open(editing, true)}>{ui.duplicate}</Button></p>}
         <div className="invoice-template-editor-grid"><div className="invoice-template-editor-fields">
-          <fieldset disabled={busy || readOnly} className="invoice-template-fieldset"><SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <TextInput required maxLength={120} disabled={readOnly} label={ui.name} value={editing.name} onChange={event => setEditing({ ...editing, name: event.currentTarget.value })}/>
-            <Select required label={settingsUi.documentTemplateKind} value={editing.kind} disabled={Boolean(editing.id) || readOnly} onChange={value => value && setEditing({ ...editing, kind: value as Kind })} data={(Object.keys(settingsUi.documentTemplateKinds) as Kind[]).map(value => ({ value, label: settingsUi.documentTemplateKinds[value] }))}/>
+          <fieldset disabled={busy} className="invoice-template-fieldset"><SimpleGrid cols={{ base: 1, sm: 2 }}>
+            <TextInput required maxLength={120} label={ui.name} value={editing.name} onChange={event => setEditing({ ...editing, name: event.currentTarget.value })}/>
+            <Select required label={settingsUi.documentTemplateKind} value={editing.kind} disabled={Boolean(editing.id)} onChange={value => value && setEditing({ ...editing, kind: value as Kind })} data={(Object.keys(settingsUi.documentTemplateKinds) as Kind[]).map(value => ({ value, label: settingsUi.documentTemplateKinds[value] }))}/>
             <Select required label={settingsUi.documentTemplateLanguage} value={editing.language} onChange={value => { if (value) { setEditing({ ...editing, language: value as Language }); setValid(false); clearPreview(); } }} data={(["ru", "uk", "en", "fr"] as Language[]).map(value => ({ value, label: languageLabel(value) }))}/>
             <Select label={ui.currency} value={config?.currency || "ORDER"} disabled={!config} onChange={value => patchConfig({ currency: value === "ORDER" ? null : value })} data={[{ value: "ORDER", label: ui.orderCurrency }, ...["EUR", "USD", "UAH"].map(value => ({ value, label: value }))]} description={ui.currencyHint}/>
             <TextInput label={ui.purpose} value={config?.purpose || ""} disabled={!config} onChange={event => patchConfig({ purpose: event.currentTarget.value })}/>
             <TextInput readOnly label={ui.revision} value={editing.config.revision ?? 1}/>
           </SimpleGrid>{editing.id && <Switch mt="sm" label={settingsUi.documentTemplateActive} checked={editing.active} onChange={event => setEditing({ ...editing, active: event.currentTarget.checked })}/>}</fieldset>
           <Tabs value={tab} onChange={setTab}><Tabs.List><Tabs.Tab value="fields">{ui.fieldsTab}</Tabs.Tab><Tabs.Tab value="code">{ui.code}</Tabs.Tab></Tabs.List>
-            <Tabs.Panel value="fields" pt="md"><fieldset disabled={busy || readOnly || !config} className="invoice-template-fieldset">
+            <Tabs.Panel value="fields" pt="md"><fieldset disabled={busy || !config} className="invoice-template-fieldset">
               {!config ? <p role="alert">{ui.fixJsonFirst}</p> : <>
                 <TextInput required label={financeUi.documentTitle} value={config.title} onChange={event => patchConfig({ title: event.currentTarget.value })}/>
                 <Switch mt="sm" label={financeUi.showLogo} checked={config.showLogo} onChange={event => patchConfig({ showLogo: event.currentTarget.checked })}/>
@@ -168,7 +167,7 @@ export function DocumentTemplateSettings() {
                 <Textarea mt="sm" label={ui.footer} value={config.footer || ""} onChange={event => patchConfig({ footer: event.currentTarget.value })}/>
               </>}
             </fieldset></Tabs.Panel>
-            <Tabs.Panel value="code" pt="md"><p className="invoice-template-code-hint">{ui.codeHint}</p><div className="invoice-template-code"><pre ref={codeLayer} aria-hidden="true">{highlightedJson(source + "\n")}</pre><Textarea aria-label={ui.code} readOnly={readOnly} disabled={busy} value={source} spellCheck={false} wrap="off" onChange={event => changeSource(event.currentTarget.value)} onScroll={event => { if (codeLayer.current) { codeLayer.current.scrollTop = event.currentTarget.scrollTop; codeLayer.current.scrollLeft = event.currentTarget.scrollLeft; } }} classNames={{ input: "invoice-template-code-input" }}/></div><p>{ui.variablesHint}</p><div className="invoice-template-token-list">{definitions.map(field => <code key={field.key} title={field.label.ru}>{field.key}</code>)}</div></Tabs.Panel>
+            <Tabs.Panel value="code" pt="md"><p className="invoice-template-code-hint">{ui.codeHint}</p><div className="invoice-template-code"><pre ref={codeLayer} aria-hidden="true">{highlightedJson(source + "\n")}</pre><Textarea aria-label={ui.code} disabled={busy} value={source} spellCheck={false} wrap="off" onChange={event => changeSource(event.currentTarget.value)} onScroll={event => { if (codeLayer.current) { codeLayer.current.scrollTop = event.currentTarget.scrollTop; codeLayer.current.scrollLeft = event.currentTarget.scrollLeft; } }} classNames={{ input: "invoice-template-code-input" }}/></div><p>{ui.variablesHint}</p><div className="invoice-template-token-list">{definitions.map(field => <code key={field.key} title={field.label.ru}>{field.key}</code>)}</div></Tabs.Panel>
           </Tabs>
           <Group mt="md"><Button variant="light" type="button" disabled={busy} onClick={() => void run(async () => { await validateConfig(); }, true)}>{ui.validate}</Button>{valid && <span role="status">{ui.valid}</span>}</Group>
         </div><aside className="invoice-template-preview-panel"><h3>{ui.testTitle}</h3><p>{ui.previewHint}</p>
@@ -178,7 +177,7 @@ export function DocumentTemplateSettings() {
           <Button mt="sm" fullWidth variant="light" disabled={!orderId || busy} onClick={() => void testPreview()}>{ui.previewPdf}</Button>
           {previewHtml ? <><a href={preview} target="_blank" rel="noopener noreferrer">{ui.openPdf}</a><iframe sandbox="" referrerPolicy="no-referrer" srcDoc={previewHtml} title={ui.previewTitle}/></> : <div className="invoice-template-preview-empty">{ui.previewEmpty}</div>}
         </aside></div>
-        <Group justify="flex-end" className="invoice-template-footer"><Button variant="default" disabled={busy} onClick={close}>{financeUi.close}</Button>{!readOnly && <Button type="submit" loading={busy} disabled={!editing.name.trim() || !config}>{settingsUi.documentTemplateSave}</Button>}</Group>
+        <Group justify="flex-end" className="invoice-template-footer"><Button variant="default" disabled={busy} onClick={close}>{financeUi.close}</Button><Button type="submit" loading={busy} disabled={!editing.name.trim() || !config}>{settingsUi.documentTemplateSave}</Button></Group>
       </form>}
     </Modal>
     <Modal opened={Boolean(archive)} onClose={() => !busy && setArchive(null)} title={ui.archiveTitle} closeOnClickOutside={!busy} closeOnEscape={!busy}><p>{ui.archiveHint}</p><strong>{archive?.name}</strong>{error && <CrmAlert>{error}</CrmAlert>}<Group justify="flex-end" mt="md"><Button variant="default" disabled={busy} onClick={() => setArchive(null)}>{financeUi.close}</Button><Button color="red" loading={busy} onClick={() => archive && void lifecycle(archive, "archive")}>{ui.archive}</Button></Group></Modal>

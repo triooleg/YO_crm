@@ -6,7 +6,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 
-test('invoice template settings: draft JSON, readonly copies, validation, PDF and lifecycle', { skip: process.env.YO_TEMPLATE_SETTINGS_BROWSER !== '1', timeout: 180000 }, async t => {
+test('invoice template settings: built-in editing, persisted JSON, copies, validation, PDF and lifecycle', { skip: process.env.YO_TEMPLATE_SETTINGS_BROWSER !== '1', timeout: 180000 }, async t => {
   const require = createRequire(import.meta.url), { chromium, expect } = require('@playwright/test');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'), web = resolve(root, 'apps/web'), out = resolve(root, '.local/invoice-template-settings-browser');
   await mkdir(out, { recursive: true });
@@ -32,6 +32,14 @@ test('invoice template settings: draft JSON, readonly copies, validation, PDF an
       if(url.pathname.endsWith('/preview-html'))return send({html:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:14px sans-serif;margin:24px;color:#241f2b}h1{color:#6c4ad1}table{width:100%;border-collapse:collapse}td{padding:12px;border-bottom:1px solid #eee}</style></head><body><h1>INVOICE</h1><p>TEST-1</p><table><tr><td>Synthetic item</td><td>1</td><td>100 EUR</td></tr></table><p>Unsaved &lt;script&gt; draft</p><script>parent.document.body.dataset.unsafePreview="executed"</script></body></html>'});
       if(url.pathname.endsWith('/preview')){res.writeHead(200,{'content-type':'application/pdf'});return res.end('%PDF-1.4\n%%EOF');}
       if(url.pathname==='/api/finance/document-templates'&&req.method==='POST'){const row={...body,id:'custom-1',active:true,builtIn:false};templates.push(row);return send(row);}
+      if(url.pathname==='/api/finance/document-templates/builtin'&&req.method==='PATCH'){
+        const current=templates.find(row=>row.id==='builtin');
+        if(body.expectedRevision!==current.config.revision)return send({message:'Конфликт редакции'},409);
+        if(body.kind!==undefined)return send({message:'Тип документа нельзя изменить'},400);
+        const row={...current,name:body.name,language:body.language,active:body.active,builtIn:false,
+          updatedAt:'2026-11-04T00:00:00Z',config:{...body.config,revision:current.config.revision+1}};
+        templates=templates.map(item=>item.id===row.id?row:item);return send(row);
+      }
       if(url.pathname==='/api/finance/document-templates/generic'&&req.method==='PATCH'){
         if(rejectUpdate){rejectUpdate=false;return send({message:'Конфликт редакции'},409);}
         templates=templates.map(row=>row.id==='generic'?{...row,...body,config:{...body.config,revision:4}}:row);return send(templates.find(row=>row.id==='generic'));
@@ -51,8 +59,12 @@ test('invoice template settings: draft JSON, readonly copies, validation, PDF an
   await page.goto(base);
   await expect(page.getByRole('heading',{name:'Шаблоны инвойсов'})).toBeVisible();
   await expect(page.locator('[data-template-id]').first()).toHaveAttribute('data-template-id','generic');
-  await page.locator('[data-template-id="builtin"]').getByRole('button',{name:'Просмотреть',exact:true}).click();
-  await expect(page.getByRole('textbox',{name:'Название шаблона',exact:true})).toBeDisabled();
+  await expect(page.locator('[data-template-id]')).toHaveCount(2);
+  await expect(page.getByRole('button',{name:'Изменить шаблон',exact:true})).toHaveCount(2);
+  await page.locator('[data-template-id="builtin"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Название шаблона',exact:true})).toBeEnabled();
+  await expect(page.getByRole('combobox',{name:'Тип документа',exact:true})).toBeDisabled();
+  await expect(page.getByText('Изменения встроенного шаблона применяются только к новым инвойсам. Сохранённые документы останутся без изменений.')).toBeVisible();
   await page.getByRole('button',{name:'Дублировать',exact:true}).last().click();
   await page.getByRole('textbox',{name:'Название шаблона',exact:true}).fill('My draft');
   await page.getByRole('tab',{name:'JSON-конфигурация'}).click();
@@ -90,6 +102,48 @@ test('invoice template settings: draft JSON, readonly copies, validation, PDF an
   await page.locator('[data-template-id="custom-1"]').getByRole('button',{name:'Архивировать',exact:true}).click();
   await page.getByRole('dialog').getByRole('button',{name:'Архивировать',exact:true}).click();
   await expect(page.locator('[data-template-id="custom-1"]')).toHaveCount(0);
+  // PATCH materializes an override under the same built-in ID; reload uses its new revision.
+  await page.locator('[data-template-id="builtin"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
+  await expect(page.getByRole('combobox',{name:'Тип документа',exact:true})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Название шаблона',exact:true}).fill('Configured English invoice');
+  await page.getByRole('textbox',{name:'Продавец',exact:true}).fill('Synthetic updated atelier');
+  await page.getByRole('textbox',{name:'Адрес продавца',exact:true}).fill('Synthetic seller address');
+  await page.getByRole('textbox',{name:'Получатель платежа',exact:true}).fill('Synthetic receiver');
+  await page.getByRole('textbox',{name:'IBAN',exact:true}).fill('SYNTHETIC-IBAN');
+  await page.getByRole('tab',{name:'JSON-конфигурация'}).click();
+  const builtinJson={...JSON.parse(await editor.inputValue()),footer:'Saved built-in footer',notes:'Saved built-in notes'};
+  await editor.fill(JSON.stringify(builtinJson,null,2));
+  await expect(editor).toBeEditable();
+  await page.screenshot({path:resolve(out,'builtin-editor.png'),fullPage:true});
+  await page.getByRole('button',{name:'Сохранить шаблон',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const builtinPatch=calls.findLast(c=>c.method==='PATCH'&&c.path.endsWith('/builtin'));
+  assert.equal(builtinPatch.body.expectedRevision,1);assert.equal(builtinPatch.body.kind,undefined);
+  assert.equal(builtinPatch.body.config.payment.iban,'SYNTHETIC-IBAN');
+  assert.equal(templates.filter(row=>row.id==='builtin').length,1);
+  assert.equal(templates.find(row=>row.id==='builtin').builtIn,false);
+  await page.reload();
+  await page.locator('[data-template-id="builtin"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Название шаблона',exact:true})).toHaveValue('Configured English invoice');
+  await expect(page.getByRole('textbox',{name:'Продавец',exact:true})).toHaveValue('Synthetic updated atelier');
+  await expect(page.getByRole('textbox',{name:'Адрес продавца',exact:true})).toHaveValue('Synthetic seller address');
+  await expect(page.getByRole('textbox',{name:'Получатель платежа',exact:true})).toHaveValue('Synthetic receiver');
+  await expect(page.getByRole('textbox',{name:'IBAN',exact:true})).toHaveValue('SYNTHETIC-IBAN');
+  await expect(page.getByRole('textbox',{name:'Редакция',exact:true})).toHaveValue('2');
+  await expect(page.getByRole('combobox',{name:'Тип документа',exact:true})).toBeDisabled();
+  await page.getByRole('tab',{name:'JSON-конфигурация'}).click();
+  const reloadedJson=JSON.parse(await editor.inputValue());
+  assert.equal(reloadedJson.footer,'Saved built-in footer');assert.equal(reloadedJson.notes,'Saved built-in notes');
+  assert.deepEqual(reloadedJson.seller,builtinJson.seller);assert.deepEqual(reloadedJson.payment,builtinJson.payment);
+  assert.deepEqual(reloadedJson.appearance,builtinJson.appearance);assert.deepEqual(reloadedJson.editableMetadata,builtinJson.editableMetadata);
+  await editor.fill(JSON.stringify({...reloadedJson,footer:'Second saved footer'},null,2));
+  await page.getByRole('button',{name:'Сохранить шаблон',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const secondBuiltinPatch=calls.findLast(c=>c.method==='PATCH'&&c.path.endsWith('/builtin'));
+  assert.equal(secondBuiltinPatch.body.expectedRevision,2);assert.equal(secondBuiltinPatch.body.kind,undefined);
+  await page.reload();
+  await expect(page.locator('[data-template-id="builtin"]')).toContainText('Редакция: 3');
+  assert.equal(templates.find(row=>row.id==='builtin').config.footer,'Second saved footer');
   await page.locator('[data-template-id="generic"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
   await page.getByRole('textbox',{name:'Название шаблона',exact:true}).fill('Updated generic');
   await page.getByRole('button',{name:'Сохранить шаблон',exact:true}).click();

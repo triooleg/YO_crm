@@ -23,8 +23,17 @@ export class OrderDocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async templates(): Promise<DocumentTemplateView[]> {
-    const custom = await this.prisma.documentTemplate.findMany({ where: { archivedAt: null }, orderBy: [{ active: "desc" }, { name: "asc" }, { id: "asc" }] });
-    return [...builtInDocumentTemplates().map(item=>templateView(item)), ...custom.map(item => templateView({ ...item, kind: normalizeDocumentKind(item.kind), language: normalizeDocumentLanguage(item.language), builtIn: false, config: normalizeTemplateConfig(item.config, item.language) }))].sort((a,b)=>Number(b.isDefault)-Number(a.isDefault));
+    const builtIns = await this.configuredBuiltIns();
+    // Archived overrides remain tombstones: never resurrect their built-in choice.
+    const stored = await this.prisma.documentTemplate.findMany({ where: { OR: [{ archivedAt: null }, { id: { in: builtIns.map(item => item.id) } }] }, orderBy: [{ active: "desc" }, { name: "asc" }, { id: "asc" }] });
+    const overridden = new Set(stored.map(item => item.id));
+    return [...builtIns.filter(item => !overridden.has(item.id)).map(item=>templateView(item)), ...stored.filter(item => !item.archivedAt).map(item => templateView({ ...item, kind: normalizeDocumentKind(item.kind), language: normalizeDocumentLanguage(item.language), builtIn: false, config: normalizeTemplateConfig(item.config, item.language) }))].sort((a,b)=>Number(b.isDefault)-Number(a.isDefault));
+  }
+
+  private async configuredBuiltIns(store: Pick<Prisma.TransactionClient, "appSetting"> = this.prisma): Promise<DocumentTemplateView[]> {
+    const settings = await store.appSetting.findMany({ where: { section: "finance", key: { in: ["sellerName", "sellerAddress"] } } });
+    const value = (key: string) => { const item = settings.find(item => item.key === key); return typeof item?.value === "string" ? item.value.trim() : ""; };
+    return builtInDocumentTemplates().map(item => item.kind === "INVOICE" ? { ...item, config: { ...item.config, seller: { name: value("sellerName"), address: value("sellerAddress") } } } : item);
   }
 
   validateTemplate(dto: ValidateDocumentTemplateDto) {
@@ -78,8 +87,10 @@ export class OrderDocumentsService {
   async updateTemplate(id: string, dto: UpdateDocumentTemplateDto, user: User) {
     return this.prisma.$transaction(async tx => {
       await this.lockTemplates(tx);
-      const before = await tx.documentTemplate.findFirst({ where: { id, archivedAt: null } });
-      if (!before) throw new NotFoundException("Шаблон документа не найден; встроенный шаблон можно скопировать");
+      const stored = await tx.documentTemplate.findFirst({ where: { id } });
+      if (stored?.archivedAt) throw new NotFoundException("Шаблон документа не найден");
+      const before = stored ?? (await this.configuredBuiltIns(tx)).find(item => item.id === id);
+      if (!before) throw new NotFoundException("Шаблон документа не найден");
       const previous=normalizeTemplateConfig(before.config,before.language);
       if(dto.expectedRevision!==undefined && dto.expectedRevision!==previous.revision)throw new ConflictException("Шаблон уже изменён; обновите его перед сохранением");
       const language=normalizeDocumentLanguage(dto.language??before.language);
@@ -87,7 +98,10 @@ export class OrderDocumentsService {
       if(dto.active===false)config.isDefault=false;
       if(config.isDefault && !(dto.active??before.active))throw new BadRequestException("Шаблон по умолчанию должен быть активен");
       if(config.isDefault)await this.clearDefaultTemplates(tx,user,before.kind,config.currency,id);
-      const updated = await tx.documentTemplate.update({ where: { id }, data: { name: dto.name?.trim(), active: dto.active, language, config: config as unknown as Prisma.InputJsonValue } });
+      const data = { name: dto.name?.trim() ?? before.name, active: dto.active ?? before.active, language, config: config as unknown as Prisma.InputJsonValue };
+      const updated = stored
+        ? await tx.documentTemplate.update({ where: { id }, data })
+        : await tx.documentTemplate.create({ data: { id, kind: before.kind, ...data } });
       await tx.auditLog.create({ data: { actorId: user.id, action: "UPDATE", entityType: "DocumentTemplate", entityId: id, before: before as unknown as Prisma.InputJsonValue, after: updated as unknown as Prisma.InputJsonValue } });
       return templateView({...updated,builtIn:false,kind:normalizeDocumentKind(updated.kind),language,config});
     });
@@ -129,11 +143,6 @@ export class OrderDocumentsService {
       if(!source)throw new NotFoundException("Исходный инвойс этого заказа не найден");
     }
     let config=template.config;
-    if(template.builtIn) {
-      const settings=await this.prisma.appSetting.findMany({where:{section:"finance",key:{in:["sellerName","sellerAddress"]}}});
-      const value=(key:string)=>{const item=settings.find(item=>item.key===key);return typeof item?.value==="string"?item.value.trim():""};
-      config={...config,seller:{name:value("sellerName"),address:value("sellerAddress")}};
-    }
     const metadata=dto.metadata??{};
     for(const key of Object.keys(metadata))if(!config.editableMetadata.includes(key))throw new BadRequestException("Шаблон запрещает изменение поля "+key);
     if(metadata.showLogo!==undefined)config={...config,showLogo:metadata.showLogo};
@@ -204,10 +213,7 @@ export class OrderDocumentsService {
       const order=await tx.order.findFirst({where:{id:frozen.orderId,archivedAt:null},select:{id:true,clientId:true,number:true}});
       if(!order)throw new NotFoundException("Заказ не найден");
       if(order.number!==invoiceDisplayNumber(frozen))throw new ConflictException("Номер заказа изменён; создайте новый предпросмотр");
-      if(!builtInDocumentTemplates().some(item=>item.id===frozen.templateKey)) {
-        const template=await tx.documentTemplate.findFirst({where:{id:frozen.templateKey,active:true,archivedAt:null}});
-        if(!template)throw new BadRequestException("Шаблон больше не активен; выберите другой");
-      }
+      if (!await this.templateActive(frozen.templateKey, tx)) throw new BadRequestException("Шаблон больше не активен; выберите другой");
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('yoleotard-invoice-number'))");
       if(await tx.invoice.findUnique({where:{number:frozen.number}}))throw new ConflictException("Номер инвойса уже занят; создайте новый предпросмотр");
       const invoice=await tx.invoice.create({data:{...frozen,status:"ISSUED",issueDate:new Date(frozen.issueDate),dueDate:frozen.dueDate?new Date(frozen.dueDate):null,documentOptions:frozen.documentOptions} as unknown as Prisma.InvoiceUncheckedCreateInput});
@@ -276,10 +282,8 @@ export class OrderDocumentsService {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", prepared.order.id);
       const activeOrder = await tx.order.findFirst({ where: { id: prepared.order.id, archivedAt: null }, select: { id: true, clientId: true } });
       if (!activeOrder) throw new NotFoundException("Заказ не найден");
-      if (!prepared.template.builtIn) {
-        const activeTemplate = await tx.documentTemplate.findFirst({ where: { id: prepared.template.id, active: true, archivedAt: null }, select: { id: true } });
-        if (!activeTemplate) throw new NotFoundException("Активный шаблон документа не найден");
-      }
+      await this.lockTemplates(tx);
+      if (!await this.templateActive(prepared.template.id, tx)) throw new NotFoundException("Активный шаблон документа не найден");
       const document = await tx.orderDocument.create({ data: { orderId: prepared.order.id, templateKey: prepared.template.id, kind: prepared.template.kind as OrderDocumentKind, title, language: dto.language || prepared.template.language, templateSnapshot: prepared.template.config as unknown as Prisma.InputJsonValue, dataSnapshot: dataSnapshot as unknown as Prisma.InputJsonValue } });
       await tx.activity.create({ data: { clientId: activeOrder.clientId, orderId: activeOrder.id, type: "ORDER_DOCUMENT_CREATED", summary: `Создан документ «${title}»`, metadata: { documentId: document.id, kind: document.kind } } });
       await tx.auditLog.create({ data: { actorId: user.id, action: "CREATE", entityType: "OrderDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue } });
@@ -327,12 +331,20 @@ export class OrderDocumentsService {
     return { order, template: { ...template, language: normalizeDocumentLanguage(dto.language || template.language), config: normalizedConfig }, dataSnapshot };
   }
 
+  private async templateActive(key: string, store: Pick<Prisma.TransactionClient, "documentTemplate"> = this.prisma) {
+    const stored = await store.documentTemplate.findFirst({ where: { id: key } });
+    return stored ? stored.active && !stored.archivedAt : builtInDocumentTemplates().some(item => item.id === key);
+  }
+
   private async resolveTemplate(key: string) {
-    const builtIn = builtInDocumentTemplates().find(item => item.id === key);
-    if (builtIn) return builtIn;
-    const item = await this.prisma.documentTemplate.findFirst({ where: { id: key, archivedAt: null, active: true } });
-    if (!item) throw new NotFoundException("Активный шаблон документа не найден");
-    return { id: item.id, name: item.name, kind: normalizeDocumentKind(item.kind), language: normalizeDocumentLanguage(item.language), active: item.active, builtIn: false, config: normalizeTemplateConfig(item.config, item.language) } as DocumentTemplateView;
+    const item = await this.prisma.documentTemplate.findFirst({ where: { id: key } });
+    if (item) {
+      if (!item.active || item.archivedAt) throw new NotFoundException("Активный шаблон документа не найден");
+      return { id: item.id, name: item.name, kind: normalizeDocumentKind(item.kind), language: normalizeDocumentLanguage(item.language), active: item.active, builtIn: false, config: normalizeTemplateConfig(item.config, item.language) } as DocumentTemplateView;
+    }
+    const builtIn = (await this.configuredBuiltIns()).find(item => item.id === key);
+    if (!builtIn) throw new NotFoundException("Активный шаблон документа не найден");
+    return builtIn;
   }
 
   private async order(orderId: string) {

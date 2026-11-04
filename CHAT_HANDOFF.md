@@ -1,3 +1,14 @@
+## 2026-11-05 - Invoice template editing release 0.15.1 preparation
+
+Owner authorized deployment and standing GitHub source publication. Clean release
+from origin/main 4a1e2ae excludes all unfinished project-hardening work. Invoice
+editing preserves built-in identity, inactive/archive overrides, audit/revisions,
+saved invoice/PDF snapshots and required invoice seller validation. No migration,
+financial formula, dependency, Dockerfile or Compose changes. Both API and web
+will rebuild. Original local reviews and full quality PASS; clean release quality,
+backup, exact artifact reviews and installed checks are pending. No installed
+acceptance claimed. See docs/operations/INVOICE_TEMPLATE_EDITING.md.
+
 ## 2026-11-03 — Clients workspace refresh, local implementation
 
 UPDATE: owner-authorized 0.15.0 is installed, with healthy API/web and schema54.
