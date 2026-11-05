@@ -8,6 +8,28 @@ The existing preview, provider checks, audit, immutable retry scope and duplicat
 protection are reused. The order-specific options response is additive. No
 schema migration or live provider send was performed.
 
+Installed as 0.17.0 from application commit
+`e39825e377035f315ad23e1ea66df7438a3e3399` and frozen snapshot
+`1ee56fe61f28b895a62ce2eb5772f38adeaf29cc15a95415c840168ec5337767`.
+Homepage and API health returned HTTP 200. The browser verified the header,
+first journal entry and notification preview with both channels, then closed
+the preview without submitting. A tracked parcel without dispatch evidence
+did not offer the action.
+Quality checks passed (3322 passed, 111 conditional skips), including typecheck
+and build. Three synthetic browser cases covered chat, email and both channels.
+The pre-release DATA backup and isolated restore drill passed. Installed
+retention verified two ordinary source sets, two rollback sets, two protected
+service archives and five images each for API and web.
+Installed proof `9eff4731251e81a20aeed4aa94de580a690ae53e6c2be243cf8842f49d53baed`
+and closure `74b02b3f1475f208ca7aef1c3617a9ae303c58942d7060043f7d28cec638e1d0`
+are in the private invoice-template release worktree under
+`.local/deploy-v0170/cutover-v4`.
+
+Version Guardian and Release Gatekeeper accepted the installed release. The
+current-release pointer was verified. Release provenance SHA-256
+`6d3942015fc7d762f3419052bb366da59361212018e9b8ed875cd6ecb4349b9b`.
+The post-cutover retention receipt is `retention-installed-verified.py.result.json`.
+
 ## 2026-11-05 - Nova Global notification tracking links
 
 New Nova Global previews and messages use `https://nova.global/track/?Tracking_ID=<number>`.
