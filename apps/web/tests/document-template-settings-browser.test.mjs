@@ -105,6 +105,46 @@ test('invoice template settings: built-in editing, persisted JSON, copies, valid
   // PATCH materializes an override under the same built-in ID; reload uses its new revision.
   await page.locator('[data-template-id="builtin"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
   await expect(page.getByRole('combobox',{name:'Тип документа',exact:true})).toBeDisabled();
+  const typographyTab = page.getByRole('tab', { name: 'Типографика' });
+  const selectOption = async (label, option) => {
+    await page.getByRole('combobox', { name: label, exact: true }).click();
+    await page.getByRole('option', { name: option, exact: true }).click();
+  };
+  await typographyTab.click();
+  await selectOption('Размер шрифта документа', '12 пт');
+  await selectOption('Шрифт документа', 'Noto Serif');
+  await selectOption('Начертание документа', 'Полужирное');
+  const sectionSize = page.getByRole('combobox', { name: 'Размер шрифта раздела', exact: true });
+  await expect(sectionSize).toHaveValue('Как в документе');
+  await selectOption('Размер шрифта раздела', '24 пт');
+  await selectOption('Шрифт раздела', 'Ubuntu');
+  await selectOption('Раздел инвойса', 'Подвал');
+  await expect(sectionSize).toHaveValue('Как в документе');
+  await selectOption('Начертание раздела', 'Обычное');
+  await selectOption('Раздел инвойса', 'Шапка');
+  await expect(sectionSize).toHaveValue('24 пт');
+  await selectOption('Размер шрифта раздела', 'Как в документе');
+  await expect(page.getByRole('combobox', { name: 'Шрифт раздела', exact: true })).toHaveValue('Ubuntu');
+  await selectOption('Шрифт раздела', 'Как в документе');
+  await page.getByRole('tab',{name:'JSON-конфигурация'}).click();
+  const typographyDraft = JSON.parse(await editor.inputValue());
+  assert.deepEqual(typographyDraft.appearance, {
+    ...config.appearance, fontSize: 12, fontFamily: 'noto-serif', fontWeight: 'bold',
+    sections: { footer: { fontWeight: 'normal' } },
+  });
+  typographyDraft.appearance.sections.footer.fontSize = 17;
+  await editor.fill(JSON.stringify(typographyDraft, null, 2));
+  await typographyTab.click();
+  await selectOption('Раздел инвойса', 'Подвал');
+  await expect(sectionSize).toHaveValue('17 пт');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('combobox', { name: 'Начертание раздела', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(out, 'typography-390.png'), fullPage: true });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await typographyTab.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(out, 'typography-desktop.png'), fullPage: true });
+  await page.getByRole('tab',{name:'Реквизиты и поля'}).click();
   await page.getByRole('textbox',{name:'Название шаблона',exact:true}).fill('Configured English invoice');
   await page.getByRole('textbox',{name:'Продавец',exact:true}).fill('Synthetic updated atelier');
   await page.getByRole('textbox',{name:'Адрес продавца',exact:true}).fill('Synthetic seller address');
@@ -145,6 +185,7 @@ test('invoice template settings: built-in editing, persisted JSON, copies, valid
   await expect(page.locator('[data-template-id="builtin"]')).toContainText('Редакция: 3');
   assert.equal(templates.find(row=>row.id==='builtin').config.footer,'Second saved footer');
   await page.locator('[data-template-id="generic"]').getByRole('button',{name:'Изменить шаблон',exact:true}).click();
+  await expect(typographyTab).toHaveCount(0);
   await page.getByRole('textbox',{name:'Название шаблона',exact:true}).fill('Updated generic');
   await page.getByRole('button',{name:'Сохранить шаблон',exact:true}).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Конфликт редакции');

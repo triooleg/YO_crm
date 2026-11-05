@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Button, Checkbox, Group, Modal, Select, SimpleGrid, Switch, Tabs, TextInput, Textarea } from "@mantine/core";
+import { Badge, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Switch, Tabs, TextInput, Textarea } from "@mantine/core";
 import { financeUi, settingsUi, invoiceTemplateUi as ui } from "../lib/i18n";
 import { invoiceErrorMessage } from "../lib/invoice-errors";
 import { CrmAlert } from "./crm/alert";
@@ -42,6 +42,74 @@ function parseConfig(source: string): TemplateConfig {
   if (value.currency != null && !["EUR", "USD", "UAH"].includes(value.currency)) throw new Error(ui.invalidCurrency);
   return value;
 }
+
+const typography = ui.typography;
+const fontOptions = (labels: Readonly<Record<string, string>>) =>
+  Object.entries(labels).map(([value, label]) => ({ value, label }));
+const fontSizes = (max: number) => Array.from({ length: max - 7 }, (_, index) => {
+  const size = String(index + 8);
+  return { value: size, label: `${size} ${typography.points}` };
+});
+const documentSizes = fontSizes(12), sectionSizes = fontSizes(24);
+const families = fontOptions(typography.families), weights = fontOptions(typography.weights);
+const sectionOptions = fontOptions(typography.sections);
+const inheritOption = { value: "inherit", label: typography.inherit };
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+}
+
+function InvoiceTypography({ config, busy, patchConfig }: {
+  config: TemplateConfig | null;
+  busy: boolean;
+  patchConfig: (patch: Partial<TemplateConfig>) => void;
+}) {
+  const [section, setSection] = useState("header");
+  if (!config) return <p role="alert">{ui.fixJsonFirst}</p>;
+
+  const appearance = asRecord(config.appearance);
+  const sections = asRecord(appearance?.sections);
+  const override = asRecord(sections?.[section]);
+  const documentSize = typeof appearance?.fontSize === "number" ? appearance.fontSize : 9;
+  const documentFamily = typeof appearance?.fontFamily === "string" ? appearance.fontFamily : "ubuntu";
+  const documentWeight = typeof appearance?.fontWeight === "string" ? appearance.fontWeight : "normal";
+  const patchAppearance = (patch: Record<string, unknown>) => patchConfig({ appearance: { ...appearance, ...patch } });
+  function setSectionStyle(key: "fontSize" | "fontFamily" | "fontWeight", value: string | null) {
+    if (value === null) return;
+    const next = { ...override };
+    if (value === inheritOption.value) delete next[key];
+    else next[key] = key === "fontSize" ? Number(value) : value;
+
+    const nextSections = { ...sections };
+    if (Object.keys(next).length) nextSections[section] = next;
+    else delete nextSections[section];
+
+    const nextAppearance = { ...appearance };
+    if (Object.keys(nextSections).length) nextAppearance.sections = nextSections;
+    else delete nextAppearance.sections;
+    patchConfig({ appearance: nextAppearance });
+  }
+
+  return <Stack gap="lg">
+    <fieldset disabled={busy} className="invoice-template-fieldset">
+      <legend><strong>{typography.document}</strong></legend>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} mt="xs">
+        <Select label={typography.documentSize} value={String(documentSize)} data={documentSizes} allowDeselect={false} onChange={value => value && patchAppearance({ fontSize: Number(value) })}/>
+        <Select label={typography.documentFamily} value={documentFamily} data={families} allowDeselect={false} onChange={value => value && patchAppearance({ fontFamily: value })}/>
+        <Select label={typography.documentWeight} value={documentWeight} data={weights} allowDeselect={false} onChange={value => value && patchAppearance({ fontWeight: value })}/>
+      </SimpleGrid>
+    </fieldset>
+    <fieldset disabled={busy} className="invoice-template-fieldset">
+      <Select label={typography.section} value={section} data={sectionOptions} allowDeselect={false} onChange={value => value && setSection(value)}/>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} mt="sm">
+        <Select label={typography.sectionSize} value={typeof override?.fontSize === "number" ? String(override.fontSize) : inheritOption.value} data={[inheritOption, ...sectionSizes]} allowDeselect={false} onChange={value => setSectionStyle("fontSize", value)}/>
+        <Select label={typography.sectionFamily} value={typeof override?.fontFamily === "string" ? override.fontFamily : inheritOption.value} data={[inheritOption, ...families]} allowDeselect={false} onChange={value => setSectionStyle("fontFamily", value)}/>
+        <Select label={typography.sectionWeight} value={typeof override?.fontWeight === "string" ? override.fontWeight : inheritOption.value} data={[inheritOption, ...weights]} allowDeselect={false} onChange={value => setSectionStyle("fontWeight", value)}/>
+      </SimpleGrid>
+    </fieldset>
+  </Stack>;
+}
+
 export function DocumentTemplateSettings() {
   const [templates, setTemplates] = useState<Template[]>([]), [definitions, setDefinitions] = useState<FieldDefinition[]>([]);
   const [editing, setEditing] = useState<Template | null>(null), [source, setSource] = useState(""), [tab, setTab] = useState<string | null>("fields");
@@ -150,13 +218,17 @@ export function DocumentTemplateSettings() {
         <div className="invoice-template-editor-grid"><div className="invoice-template-editor-fields">
           <fieldset disabled={busy} className="invoice-template-fieldset"><SimpleGrid cols={{ base: 1, sm: 2 }}>
             <TextInput required maxLength={120} label={ui.name} value={editing.name} onChange={event => setEditing({ ...editing, name: event.currentTarget.value })}/>
-            <Select required label={settingsUi.documentTemplateKind} value={editing.kind} disabled={Boolean(editing.id)} onChange={value => value && setEditing({ ...editing, kind: value as Kind })} data={(Object.keys(settingsUi.documentTemplateKinds) as Kind[]).map(value => ({ value, label: settingsUi.documentTemplateKinds[value] }))}/>
+            <Select required label={settingsUi.documentTemplateKind} value={editing.kind} disabled={Boolean(editing.id)} onChange={value => {
+              if (!value) return;
+              setEditing({ ...editing, kind: value as Kind });
+              if (value !== "INVOICE" && tab === "typography") setTab("fields");
+            }} data={(Object.keys(settingsUi.documentTemplateKinds) as Kind[]).map(value => ({ value, label: settingsUi.documentTemplateKinds[value] }))}/>
             <Select required label={settingsUi.documentTemplateLanguage} value={editing.language} onChange={value => { if (value) { setEditing({ ...editing, language: value as Language }); setValid(false); clearPreview(); } }} data={(["ru", "uk", "en", "fr"] as Language[]).map(value => ({ value, label: languageLabel(value) }))}/>
             <Select label={ui.currency} value={config?.currency || "ORDER"} disabled={!config} onChange={value => patchConfig({ currency: value === "ORDER" ? null : value })} data={[{ value: "ORDER", label: ui.orderCurrency }, ...["EUR", "USD", "UAH"].map(value => ({ value, label: value }))]} description={ui.currencyHint}/>
             <TextInput label={ui.purpose} value={config?.purpose || ""} disabled={!config} onChange={event => patchConfig({ purpose: event.currentTarget.value })}/>
             <TextInput readOnly label={ui.revision} value={editing.config.revision ?? 1}/>
           </SimpleGrid>{editing.id && <Switch mt="sm" label={settingsUi.documentTemplateActive} checked={editing.active} onChange={event => setEditing({ ...editing, active: event.currentTarget.checked })}/>}</fieldset>
-          <Tabs value={tab} onChange={setTab}><Tabs.List><Tabs.Tab value="fields">{ui.fieldsTab}</Tabs.Tab><Tabs.Tab value="code">{ui.code}</Tabs.Tab></Tabs.List>
+          <Tabs value={tab} onChange={setTab}><Tabs.List><Tabs.Tab value="fields">{ui.fieldsTab}</Tabs.Tab>{editing.kind === "INVOICE" && <Tabs.Tab value="typography">{typography.tab}</Tabs.Tab>}<Tabs.Tab value="code">{ui.code}</Tabs.Tab></Tabs.List>
             <Tabs.Panel value="fields" pt="md"><fieldset disabled={busy || !config} className="invoice-template-fieldset">
               {!config ? <p role="alert">{ui.fixJsonFirst}</p> : <>
                 <TextInput required label={financeUi.documentTitle} value={config.title} onChange={event => patchConfig({ title: event.currentTarget.value })}/>
@@ -167,6 +239,7 @@ export function DocumentTemplateSettings() {
                 <Textarea mt="sm" label={ui.footer} value={config.footer || ""} onChange={event => patchConfig({ footer: event.currentTarget.value })}/>
               </>}
             </fieldset></Tabs.Panel>
+            {editing.kind === "INVOICE" && <Tabs.Panel value="typography" pt="md"><InvoiceTypography key={editing.id} config={config} busy={busy} patchConfig={patchConfig}/></Tabs.Panel>}
             <Tabs.Panel value="code" pt="md"><p className="invoice-template-code-hint">{ui.codeHint}</p><div className="invoice-template-code"><pre ref={codeLayer} aria-hidden="true">{highlightedJson(source + "\n")}</pre><Textarea aria-label={ui.code} disabled={busy} value={source} spellCheck={false} wrap="off" onChange={event => changeSource(event.currentTarget.value)} onScroll={event => { if (codeLayer.current) { codeLayer.current.scrollTop = event.currentTarget.scrollTop; codeLayer.current.scrollLeft = event.currentTarget.scrollLeft; } }} classNames={{ input: "invoice-template-code-input" }}/></div><p>{ui.variablesHint}</p><div className="invoice-template-token-list">{definitions.map(field => <code key={field.key} title={field.label.ru}>{field.key}</code>)}</div></Tabs.Panel>
           </Tabs>
           <Group mt="md"><Button variant="light" type="button" disabled={busy} onClick={() => void run(async () => { await validateConfig(); }, true)}>{ui.validate}</Button>{valid && <span role="status">{ui.valid}</span>}</Group>

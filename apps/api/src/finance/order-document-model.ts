@@ -7,6 +7,29 @@ export type DocumentFieldDefinition = {
   kind: "text" | "date" | "money" | "table";
 };
 export type DocumentPaymentDetails = { receiver: string; iban: string; bic: string; instructions: string };
+export const documentFontFamilies = ["ubuntu", "noto-serif"] as const;
+export const documentFontWeights = ["normal", "bold"] as const;
+export const invoiceTypographySections = [
+  "header", "seller", "customer", "order", "items", "totals", "payments",
+  "paymentDetails", "instructions", "notes", "footer",
+] as const;
+export type InvoiceTypographySection = typeof invoiceTypographySections[number];
+export type DocumentTypography = {
+  fontFamily: typeof documentFontFamilies[number];
+  fontWeight: typeof documentFontWeights[number];
+  fontSize: number;
+};
+
+function normalizeTypography(value: unknown, maxSize: number): Partial<DocumentTypography> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const { fontFamily, fontWeight, fontSize } = value as Partial<DocumentTypography>;
+  return {
+    ...(fontFamily && documentFontFamilies.includes(fontFamily) ? { fontFamily } : {}),
+    ...(fontWeight && documentFontWeights.includes(fontWeight) ? { fontWeight } : {}),
+    ...(typeof fontSize === "number" && fontSize >= 8 && fontSize <= maxSize ? { fontSize } : {}),
+  };
+}
+
 export type DocumentTemplateConfig = {
   version: 1;
   title: string;
@@ -20,7 +43,7 @@ export type DocumentTemplateConfig = {
   revision: number;
   editableMetadata: string[];
   notes: string;
-  appearance: { accentColor: string; mutedColor: string; fontSize: number; logoText: string };
+  appearance: { accentColor: string; mutedColor: string; fontSize: number; logoText: string; sections?: Partial<Record<InvoiceTypographySection, Partial<DocumentTypography>>> } & Partial<DocumentTypography>;
   footer: string;
   requiredFields: string[];
   labels: Record<string, string>;
@@ -105,6 +128,12 @@ export function normalizeTemplateConfig(value: unknown, language: unknown = "en"
   const normalizedLanguage = normalizeDocumentLanguage(language);
   const appearance = source.appearance && typeof source.appearance === "object" ? source.appearance as Record<string, unknown> : {};
   const color = (value: unknown, fallback: string) => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value) ? value : fallback;
+  const sections = appearance.sections && typeof appearance.sections === "object" ? appearance.sections as Record<string, unknown> : {};
+  const typography = normalizeTypography(appearance, 12);
+  const sectionStyles = Object.fromEntries(invoiceTypographySections.flatMap(section => {
+    const style = normalizeTypography(sections[section], 24);
+    return Object.keys(style).length ? [[section, style]] : [];
+  }));
   return {
     version: 1,
     title: text(source.title, 160) || ({ ru: "Документ заказа", uk: "Документ замовлення", en: "Order document", fr: "Document de commande" }[normalizedLanguage]),
@@ -118,7 +147,7 @@ export function normalizeTemplateConfig(value: unknown, language: unknown = "en"
     editableMetadata: Array.isArray(source.editableMetadata) ? [...new Set(source.editableMetadata.filter((key): key is string => ["issueDate", "dueDate", "notes", "showLogo"].includes(String(key))))] : [],
     notes: text(source.notes, 2000), footer: text(source.footer, 2000),
     requiredFields: Array.isArray(source.requiredFields) ? source.requiredFields.filter((key): key is string => ["seller.name","seller.address","customer.name","customer.address","order.items.name"].includes(String(key))) : ["seller.name","seller.address","customer.name","order.items.name"],
-    appearance: { logoText: appearance.logoText === undefined ? "YOLEOTARD" : text(appearance.logoText, 80), accentColor: color(appearance.accentColor, "#211a2d"), mutedColor: color(appearance.mutedColor, "#655d70"), fontSize: typeof appearance.fontSize === "number" && appearance.fontSize >= 8 && appearance.fontSize <= 12 ? appearance.fontSize : 9 },
+    appearance: { logoText: appearance.logoText === undefined ? "YOLEOTARD" : text(appearance.logoText, 80), accentColor: color(appearance.accentColor, "#211a2d"), mutedColor: color(appearance.mutedColor, "#655d70"), fontSize: 9, ...typography, ...(Object.keys(sectionStyles).length ? { sections: sectionStyles } : {}) },
     labels: Object.fromEntries(Object.entries(source.labels && typeof source.labels === "object" ? source.labels : {}).filter(([key]) => ["seller", "billTo", "date", "due", "product", "qty", "unit", "amount", "payment", "receiver", "iban", "bic", "instructions", "payments", "number", "order", "notes", "shipping", "giftWrap", "discount", "discountIncluded", "cardFee", "adjustment", ...FIELD_DEFINITIONS.map(field=>field.key)].includes(key)).map(([key, value]) => [key, text(value, 160)])),
   };
 }

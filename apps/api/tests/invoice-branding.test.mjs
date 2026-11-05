@@ -91,7 +91,7 @@ test('simplified HTML and real PDF embed the same image, respect showLogo and ig
  const content = [...widePdf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)].flatMap(match => {
   try { return [inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1')]; } catch { return []; }
  }).find(stream => /\/I\d+ Do/.test(stream));
- assert.match(content, /165 0 0 -55 48 102 cm/, 'wide image is fitted into header without stretching');
+ assert.match(content, /132 0 0 -44 48 78 cm/, 'wide image is fitted into header without stretching');
  const hidden = source({ ...branding, templateSnapshot: { showLogo: false } });
  assert.doesNotMatch(renderSimplifiedInvoiceHtml(hidden), /<img\b/);
  assert.doesNotMatch((await renderSimplifiedInvoicePdf(hidden)).toString('latin1'), /\/Subtype \/Image/);

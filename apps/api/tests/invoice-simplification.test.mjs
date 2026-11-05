@@ -307,6 +307,66 @@ function pdfPages(buffer) {
  }
  return pages;
 }
+test('a standard invoice fits its payment instructions on the first page', async () => {
+ const {renderOrderDocumentPdf, renderSimplifiedInvoiceHtml}=load('finance/order-document-pdf.ts');
+ const values={'client.name':'Test buyer','client.email':'buyer@example.test','client.phone':'+1234567890','delivery.address':'Test street 1\nTest city','finance.itemsTotal':{minor:35000,currency:'EUR'},'finance.total':{minor:35000,currency:'EUR'}};
+ for(const field of ['finance.discount','finance.delivery','finance.tax']) values[field]={minor:0,currency:'EUR'};
+ const source={title:'INVOICE',number:'TEST-713',language:'en',issueDate:new Date('2026-11-05'),
+  templateSnapshot:config({seller:{name:'Test Seller',address:'Test street 2\nTest city\nTest region\nTest country'},appearance:{fontSize:10},payment:{receiver:'Test receiver',iban:'TEST-IBAN',bic:'TEST-BIC',instructions:'Please include the invoice number in the payment description.\n\nPayment for custom leotard by invoice {{invoice.number}} from {{invoice.date}}.\n\nIf payment is made in parts, please specify Part 1, Part 2 or Final.'}}),
+  dataSnapshot:{immutableInvoice:true,currency:'EUR',orderNumber:'TEST-713',fieldKeys:['order.number','table.items',...Object.keys(values)],values,items:[{description:'Custom leotard',quantity:1,amountMinor:35000}]}};
+ const pages=pdfPages(await renderOrderDocumentPdf(source));
+ assert.equal(pages.length,1);
+ assert.match(pages[0],/Payment Instructions/);
+ assert.match(pages[0],/Part 1, Part 2 or Final/);
+ const html=renderSimplifiedInvoiceHtml(source);
+ assert.match(html,/<div class="parties">[\s\S]*?buyer@example\.test[\s\S]*?\+1234567890[\s\S]*?<div class="metadata">/);
+});
+
+test('invoice typography survives validation and selects embedded Unicode fonts per section', async () => {
+ const {documents}=fixture();
+ const {renderOrderDocumentPdf, renderSimplifiedInvoiceHtml}=load('finance/order-document-pdf.ts');
+ const appearance={fontFamily:'noto-serif',fontSize:11,fontWeight:'bold',sections:{customer:{fontFamily:'ubuntu',fontWeight:'normal',fontSize:12},instructions:{fontSize:14}}};
+ const template=documents.validateTemplate({language:'en',config:config({appearance,payment:{instructions:'Payment details for the order.'}})});
+ for(const key of ['fontFamily','fontWeight','fontSize','sections']) assert.deepEqual(template.appearance[key],appearance[key]);
+ for(const invalid of [{fontFamily:'url(https://example.test/font)'},{fontWeight:'light'},{sections:{instructions:{fontSize:25}}},{sections:{unknown:{fontSize:12}}}]) {
+  assert.throws(() => documents.validateTemplate({language:'en',config:config({appearance:invalid})}), /Некорректная настройка шаблона/);
+ }
+ const source={title:'INVOICE',number:'TEST-1',language:'en',templateSnapshot:template,
+  dataSnapshot:{immutableInvoice:true,currency:'EUR',fieldKeys:['client.name'],values:{'client.name':'Олена Іваненко'}}};
+ const pdf=(await renderOrderDocumentPdf(source)).toString('latin1');
+ assert.match(pdf,/\/BaseFont \/[A-Z]+\+NotoSerif-Bold/);
+ assert.match(pdf,/\/BaseFont \/[A-Z]+\+Ubuntu/);
+ const html=renderSimplifiedInvoiceHtml(source);
+ assert.match(html,/\.customer\{font-family:Ubuntu, Arial, sans-serif;font-size:12pt;font-weight:normal/);
+ assert.match(html,/\.instructions\{font-family:"Noto Serif", Georgia, serif;font-size:14pt;font-weight:bold/);
+ assert.match(html,/font-src data:/);
+ assert.match(html,/@font-face\{font-family:"Noto Serif";font-weight:bold;src:url\(data:font\/woff2;base64,/);
+ assert.match(html,/@font-face\{font-family:Ubuntu;font-weight:normal;src:url\(data:font\/woff2;base64,/);
+ const legacyHtml=renderSimplifiedInvoiceHtml({...source,dataSnapshot:{...source.dataSnapshot,immutableInvoice:false}});
+ assert.match(legacyHtml,/padding:17mm 17mm 19mm/);
+ assert.doesNotMatch(legacyHtml,/@font-face|font-src data:/);
+});
+
+test('large fonts and long column headings keep the item and prices on the same page', async () => {
+ const {renderOrderDocumentPdf}=load('finance/order-document-pdf.ts');
+ const source={title:'INVOICE',number:'TEST-1',language:'en',
+  templateSnapshot:config({appearance:{fontFamily:'noto-serif',fontWeight:'bold',sections:{items:{fontSize:24}}},labels:{qty:'Quantity '.repeat(17)}}),
+  dataSnapshot:{immutableInvoice:true,currency:'EUR',fieldKeys:['table.items'],values:{},items:[{description:'Test costume',quantity:2,amountMinor:15000}]}};
+ const pages=pdfPages(await renderOrderDocumentPdf(source));
+ assert.equal(pages.length,1);
+ assert.match(pages[0],/2€150\.00€300\.00Test costume/);
+});
+
+test('invoice shows both selected customer and delivery addresses when different', async () => {
+ const {renderOrderDocumentPdf, renderSimplifiedInvoiceHtml}=load('finance/order-document-pdf.ts');
+ const values={'client.address':'Billing street 1','delivery.address':'Shipping street 2'};
+ const source={title:'INVOICE',number:'TEST-1',language:'en',templateSnapshot:config(),
+  dataSnapshot:{immutableInvoice:true,currency:'EUR',fieldKeys:Object.keys(values),values}};
+ for(const rendered of [pdfPages(await renderOrderDocumentPdf(source)).join(''),renderSimplifiedInvoiceHtml(source)]) {
+  assert.match(rendered,/Billing street 1[\s\S]*Shipping street 2/);
+ }
+});
+
 test('multipage PDF keeps payment and note headings with their first text chunk',async()=>{
  const {renderOrderDocumentPdf}=load('finance/order-document-pdf.ts');
  let multipage=0;

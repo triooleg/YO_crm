@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsDefined, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Length, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import { InvoiceStatus, OrderDocumentKind } from "@prisma/client";
+import { documentFontFamilies, documentFontWeights } from "./order-document-model";
 const CURRENCIES=["EUR","USD","UAH"] as const;
 export class InvoicePreviewMetadataDto {
  @IsOptional() @IsDateString() issueDate?:string;
@@ -20,7 +21,28 @@ export class InvoiceFromTemplateDto {
  @IsString() @Length(1,120) idempotencyKey!:string;
 }
 export class TemplateRevisionDto { @IsOptional() @IsInt() @Min(1) expectedRevision?:number; }
-export class DocumentAppearanceDto {
+class DocumentFontDto {
+ @IsOptional() @IsIn(documentFontFamilies) fontFamily?: typeof documentFontFamilies[number];
+ @IsOptional() @IsIn(documentFontWeights) fontWeight?: typeof documentFontWeights[number];
+}
+class DocumentSectionFontDto extends DocumentFontDto {
+ @IsOptional() @IsInt() @Min(8) @Max(24) fontSize?: number;
+}
+class DocumentSectionFontsDto {
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) header?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) seller?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) customer?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) order?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) items?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) totals?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) payments?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) paymentDetails?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) instructions?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) notes?: DocumentSectionFontDto;
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontDto) footer?: DocumentSectionFontDto;
+}
+export class DocumentAppearanceDto extends DocumentFontDto {
+ @IsOptional() @IsObject() @ValidateNested() @Type(() => DocumentSectionFontsDto) sections?: DocumentSectionFontsDto;
  @IsOptional() @IsString() @MaxLength(80) logoText?:string;
  @IsOptional() @IsString() @Length(7,7) accentColor?:string;
  @IsOptional() @IsString() @Length(7,7) mutedColor?:string;

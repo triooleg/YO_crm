@@ -1,3 +1,12 @@
+## 2026-11-05 - Compact invoice layout and template typography 0.16.0
+
+New invoice PDFs and previews use smaller margins, align customer contact
+details with the seller, and keep payment instructions together where they
+fit. Invoice templates support a base family, point size, and weight with
+independent overrides by section. Ubuntu and Noto Serif fonts and licenses
+are bundled for PDF and print preview. Saved invoice artifacts and calculations are
+preserved. No migration is required. Owner authorized release after checks.
+
 ## 2026-11-05 - Invoice template editing 0.15.1 installed and verified
 
 Owner-authorized narrow release is installed at https://crm.yoleotard.com/.
