@@ -163,7 +163,12 @@ function invoiceParties(view: InvoiceView) {
     .map(key => safe(values[key], 1000)));
   const contacts = view.fields.filter(field => field.key.startsWith("client.")
     && !["client.name", "client.address"].includes(field.key));
-  const customer = [name, ...addresses, ...contacts.map(field => `${template.labels[field.key] ?? field.label}: ${field.value}`)]
+  const contactLines = contacts.map(field => {
+    const customLabel = template.labels[field.key];
+    if (customLabel === undefined && (field.key === "client.email" || field.key === "client.phone")) return field.value;
+    return `${customLabel ?? field.label}: ${field.value}`;
+  });
+  const customer = [name, ...addresses, ...contactLines]
     .filter(Boolean).join("\n");
   const seller = [template.seller.name, template.seller.address].filter(Boolean).join("\n");
   return { seller, customer };

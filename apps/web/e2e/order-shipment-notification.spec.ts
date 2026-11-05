@@ -18,7 +18,6 @@ for (const [width, delivery] of [[1920, 'chat'], [1366, 'both'], [390, 'email']]
     const fixture = await financeFixture(page);
     const order = fixture.order;
     const posts: Record<string, unknown>[] = [];
-    await page.route('**/api/orders/discount-order/website-notification/read', route => route.fulfill({json:{}}));
     const chats = [{ id:'chat-1', channel:'INSTAGRAM', subject:'QA Instagram' }, { id:'chat-2', channel:'FACEBOOK' }];
     const parcels = [parcel, { ...parcel, id:'s2', trackingNumber:'SYNTHETIC456', trackingUrl:trackingUrl.replace('123','456') }];
     await page.route('**/api/shipment-notifications/**', async route => {
@@ -52,12 +51,14 @@ for (const [width, delivery] of [[1920, 'chat'], [1366, 'both'], [390, 'email']]
     const header = region.locator('.orders-shipment-column > header');
     await page.goto(url);
     await expect(header.getByRole('button', { name:addParcelLabel })).toBeVisible();
+    await expect(region.getByRole('button', { name:addParcelLabel })).toHaveCount(1);
     await expect(header.getByRole('button', { name:openLabel })).toHaveCount(0);
     Object.assign(order, { shippingStatus:'LABEL_CREATED', deliveryTrackingCode:trackingNumber,
       orderShipments:parcels.map(item => ({ ...item, status:'LABEL_CREATED', instances:[], customerChargeMinor:0,
         atelierCostMinor:0, currency:'EUR', isPrimary:item.id === 's1' })) });
     await page.reload();
     await expect(header.getByRole('button', { name:addParcelLabel })).toBeVisible();
+    await expect(region.getByRole('button', { name:addParcelLabel })).toHaveCount(1);
     await expect(header.getByRole('button', { name:openLabel })).toHaveCount(0);
     Object.assign(order, { shippingStatus:'SHIPPED', deliveryTrackingCode:trackingNumber,
       orderShipments:parcels.map(item => ({ ...item, status:'SHIPPED', instances:[], customerChargeMinor:0,
@@ -65,6 +66,7 @@ for (const [width, delivery] of [[1920, 'chat'], [1366, 'both'], [390, 'email']]
     await page.reload();
     await expect(header.getByRole('button', { name:openLabel })).toBeVisible();
     await expect(header.getByRole('button', { name:addParcelLabel })).toBeVisible();
+    await expect(region.getByRole('button', { name:addParcelLabel })).toHaveCount(1);
     await page.screenshot({ path:info.outputPath('delivery-header.png') });
     await header.getByRole('button', { name:openLabel }).click();
     const dialog = page.getByRole('dialog');

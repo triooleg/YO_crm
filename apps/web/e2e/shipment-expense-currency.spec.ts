@@ -143,8 +143,9 @@ for (const currency of ['UAH', 'USD']) test(`order expense POST keeps original $
     const body = route.request().postDataJSON(); writes.push(body); f.state.mutated = true;
     await route.fulfill({ json: { id: 'added-expense', ...body } });
   });
-  await openFinance(page); const retained = await rememberFinance(page);
-  await page.getByRole('button', { name: 'Добавить расход', exact: true }).first().click();
+  const region = await openFinance(page);
+  const retained = await rememberFinance(page);
+  await region.getByRole('button', { name: '＋ Добавить расход', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('textbox', { name: 'Сумма', exact: true }).fill('34,50');
   await dialog.getByRole('combobox', { name: 'Валюта', exact: true }).selectOption(currency);
@@ -165,6 +166,9 @@ async function reportFixture(page: Page, originalCurrency: 'UAH' | 'USD') {
   let reportReads = 0;
   await page.route('**/api/finance/**', async route => {
     const request = route.request(), url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname === '/api/finance/exchange-rates/ensure-current') {
+      return route.fulfill({ json: {} });
+    }
     if ((url.pathname === '/api/finance/expenses' && request.method() === 'POST') || (url.pathname === '/api/finance/expenses/original-expense' && request.method() === 'PATCH')) {
       const body = request.postDataJSON(); writes.push({ method: request.method(), body });
       return route.fulfill({ json: { id: expense.id, ...body } });

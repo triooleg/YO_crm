@@ -320,6 +320,19 @@ test('a standard invoice fits its payment instructions on the first page', async
  assert.match(pages[0],/Part 1, Part 2 or Final/);
  const html=renderSimplifiedInvoiceHtml(source);
  assert.match(html,/<div class="parties">[\s\S]*?buyer@example\.test[\s\S]*?\+1234567890[\s\S]*?<div class="metadata">/);
+ assert.match(pages[0], /buyer@example\.test/);
+ assert.match(pages[0], /\+1234567890/);
+ for (const rendered of [pages[0], html]) assert.doesNotMatch(rendered, /Customer (email|phone)/);
+ const customized = {
+  ...source,
+  templateSnapshot: {...source.templateSnapshot, labels:{'client.email':'Billing contact','client.city':''}},
+  dataSnapshot: {...source.dataSnapshot, fieldKeys:[...source.dataSnapshot.fieldKeys,'client.city'],
+    values:{...values,'client.city':'Paris'}},
+ };
+ for (const rendered of [pdfPages(await renderOrderDocumentPdf(customized)).join(''), renderSimplifiedInvoiceHtml(customized)]) {
+  assert.match(rendered, /Billing contact: buyer@example\.test/);
+  assert.match(rendered, /: Paris/);
+ }
 });
 
 test('invoice typography survives validation and selects embedded Unicode fonts per section', async () => {

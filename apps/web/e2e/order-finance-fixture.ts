@@ -63,6 +63,7 @@ export async function financeFixture(page: Page, options: {
   }
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), p = url.pathname, method = request.method();
+    if (method === 'POST' && p === '/api/orders/discount-order/website-notification/read') return route.fulfill({ json: {} });
     if (method !== 'GET') {
       const body = request.postDataJSON(); calls.push({ method, path: p, body });
       if (method === 'POST' && p === '/api/orders/discount-order/composition/discount/preview') {
