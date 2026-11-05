@@ -5,10 +5,14 @@ export class ShipmentNotificationScopeDto {
   @IsOptional() @IsString() @Length(1,100) conversationId?: string;
   @IsOptional() @IsString() @Length(1,30) channel?: string;
 }
+export class ShipmentNotificationOptionsDto extends ShipmentNotificationScopeDto {
+  @IsOptional() @IsString() @Length(1,100) orderId?: string;
+}
 export class ShipmentNotificationPreviewDto extends ShipmentNotificationScopeDto {
   @IsString() @Length(1,100) orderId!: string;
   @IsString() @Length(1,100) shipmentId!: string;
   @IsOptional() @IsString() @Length(2,8) language?: string;
+  @IsOptional() @IsBoolean() fromOrder?: boolean;
 }
 export class ShipmentNotificationSendDto extends ShipmentNotificationPreviewDto {
   @IsString() @Length(64,64) scopeToken!: string;

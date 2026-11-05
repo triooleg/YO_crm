@@ -147,3 +147,94 @@ test('an available channel with no previous delivery can be added to the immutab
   assert.equal(posts[0].content,'Original reviewed chat text');assert.equal(posts[0].subject,'Original reviewed subject');
   assert.equal(session.getSnapshot().result.deliveries.find(d=>d.channel==='CHAT').status,'SENT');
 });
+
+
+test('order entry fixes the order, allows chat and email independently and resets approval after changing chat', async () => {
+  const posts = [];
+  let failChatPreview = true;
+  const chats = [{id:'chat-1', channel:'FACEBOOK'}, {id:'chat-2', channel:'INSTAGRAM'}];
+  const session = createShipmentNotificationSession({clientId:'client-1', orderId:'o1'}, {
+    options: async scope => {
+      assert.equal(scope.orderId, 'o1');
+      return {...options, conversations:chats, orders:[...options.orders, {id:'o2', number:'other', shipments:[parcel]}]};
+    },
+    preview: async body => {
+      if (body.conversationId && failChatPreview) {
+        failChatPreview = false;
+        throw new Error('Preview interrupted');
+      }
+      return {...preview, ...body, chatAvailable:Boolean(body.conversationId)};
+    },
+    send: async body => { posts.push(body); return {id:'n1', deliveries:[{channel:'CHAT', status:'FAILED'}]}; },
+  });
+  await session.open();
+  assert.deepEqual(session.getSnapshot().options.orders.map(order => order.id), ['o1']);
+  assert.equal(session.canSend(), false);
+  assert.equal(session.getSnapshot().preview.chatAvailable, false);
+  session.edit({sendEmail:true, confirmClientEmail:true, content:'Reviewed draft', subject:'Reviewed subject'});
+  assert.equal(session.canSend(), true);
+  await session.selectConversation('chat-2');
+  assert.equal(session.getSnapshot().error, 'preview');
+  await session.selectShipment('s1');
+  assert.equal(session.getSnapshot().confirmClientEmail, false);
+  assert.equal(session.getSnapshot().sendEmail, false);
+  assert.equal(session.getSnapshot().content, 'Reviewed draft');
+  assert.equal(session.getSnapshot().subject, 'Reviewed subject');
+  session.edit({sendChat:true});
+  assert.equal(await session.send(), true);
+  assert.equal(posts[0].conversationId, 'chat-2');
+  assert.equal(posts[0].orderId, 'o1');
+  assert.equal(posts[0].sendEmail, false);
+  assert.equal(session.getSnapshot().sendEmail, false);
+  assert.equal(await session.send(), true);
+  assert.equal(posts[1].sendEmail, false);
+});
+
+test('order entry restores immutable conversation binding, including saved email-only and unavailable chat', async () => {
+  for (const [originalChat, available] of [['chat-2', true], [null, true], ['inbox-email', true], ['archived-chat', false]]) {
+    const requests = [];
+    const session = createShipmentNotificationSession({clientId:'client-1', orderId:'o1'}, {
+      options: async () => ({...options, conversations:[{id:'chat-2', channel:'INSTAGRAM'}, {id:'inbox-email', channel:'EMAIL'}]}),
+      preview: async body => {
+        requests.push(body.conversationId);
+        return {...preview, ...body, chatAvailable:body.conversationId === 'chat-2', previous:{
+          id:'n1', conversationId:originalChat, content:'Saved content', subject:'Saved subject',
+          deliveries:[{channel:'EMAIL', status:'FAILED'}],
+        }};
+      },
+    });
+    await session.open();
+    const result = session.getSnapshot();
+    assert.equal(result.conversationId, originalChat ?? undefined);
+    assert.equal(result.originalChatUnavailable, !available);
+    assert.equal(result.content, 'Saved content');
+    if (available) assert.equal(requests.at(-1), originalChat ?? undefined);
+    session.edit({sendEmail:true, confirmClientEmail:true});
+    assert.equal(session.canSend(), available);
+  }
+});
+
+
+test('clearing a parcel with an unavailable original chat restores the default chat for another parcel', async () => {
+  const session = createShipmentNotificationSession({clientId:'client-1', orderId:'o1'}, {
+    options: async () => ({...options, orders:[{...options.orders[0], shipments:[parcel, {...parcel, id:'s2'}]}], conversations:[{id:'chat-2', channel:'INSTAGRAM'}]}),
+    preview: async body => {
+      assert.equal(body.conversationId, undefined);
+      return {...preview, ...body, previous:body.shipmentId === 's1' ? {
+        id:'n1', conversationId:'archived-chat', content:'Saved', subject:'Saved', deliveries:[{channel:'CHAT', status:'FAILED'}],
+      } : undefined};
+    },
+  });
+  await session.open();
+  await session.selectShipment('s1');
+  assert.equal(session.getSnapshot().originalChatUnavailable, true);
+  session.close();
+  await session.open();
+  assert.equal(session.getSnapshot().originalChatUnavailable, false);
+  await session.selectShipment('s1');
+  await session.selectShipment('');
+  assert.equal(session.getSnapshot().originalChatUnavailable, false);
+  await session.selectShipment('s2');
+  assert.equal(session.getSnapshot().preview.shipmentId, 's2');
+  assert.equal(session.getSnapshot().originalChatUnavailable, false);
+});

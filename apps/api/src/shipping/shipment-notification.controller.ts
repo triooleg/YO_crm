@@ -5,14 +5,14 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionGuard } from '../auth/session.guard';
 import { ShipmentNotificationService } from './shipment-notification.service';
-import { ShipmentNotificationPreviewDto, ShipmentNotificationScopeDto, ShipmentNotificationSendDto, ShipmentTrackingUrlDto } from './shipment-notification.dto';
+import { ShipmentNotificationOptionsDto, ShipmentNotificationPreviewDto, ShipmentNotificationSendDto, ShipmentTrackingUrlDto } from './shipment-notification.dto';
 
 @Controller('shipment-notifications')
 @UseGuards(SessionGuard, RolesGuard)
 @Roles('OWNER','ADMIN','MANAGER')
 export class ShipmentNotificationController {
   constructor(private readonly notifications: ShipmentNotificationService) {}
-  @Get('options') options(@Query() scope: ShipmentNotificationScopeDto, @Req() req: Request & {user:User}) { return this.notifications.options(scope,req.user); }
+  @Get('options') options(@Query() scope: ShipmentNotificationOptionsDto, @Req() req: Request & {user:User}) { return this.notifications.options(scope,req.user); }
   @Post('preview') preview(@Body() input: ShipmentNotificationPreviewDto, @Req() req: Request & {user:User}) { return this.notifications.preview(input,req.user); }
   @Post('send') send(@Body() input: ShipmentNotificationSendDto, @Req() req: Request & {user:User}) { return this.notifications.send(input,req.user); }
   @Put('tracking-url') @Roles('OWNER','ADMIN') trackingUrl(@Body() input: ShipmentTrackingUrlDto,@Req() req: Request & {user:User}) { return this.notifications.saveTrackingUrl(input,req.user); }

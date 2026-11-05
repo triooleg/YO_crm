@@ -4,6 +4,7 @@ import { OrderContactCopy } from "./order-contact-copy";
 import { OrderImagePreview } from "./order-image-preview";
 import { useMediaQuery } from "@mantine/hooks";
 import { expenseEurEquivalent, type ExpenseRateCache } from "../../lib/expense-eur-equivalent";
+import { ShipmentNotificationAction } from "../shipment-notification-action";
 import { ShipmentTrackingUrl } from "./shipment-tracking-url";
 import { ClientContactEditor, type ClientContactActions } from "./client-contact-editor";
 import { orderClientContactUi } from "../../lib/i18n";
@@ -641,6 +642,19 @@ function OrderDeliveryTab({ order, items, onDelivery, onDeliveryContact, onCreat
     return () => cancelAnimationFrame(frame);
   }, [targetShipmentExists, targetShipmentId]);
   const tracking = trackingNumber(order);
+  const timeline = orderTimelinePresentation(order);
+  const dispatchedStatuses = ["SHIPPED", "IN_TRANSIT", "DELIVERED"];
+  const orderDispatched = dispatchedStatuses.includes(order.shippingStatus)
+    || (!timeline.partial && dispatchedStatuses.includes(timeline.shippingStatus));
+  const legacyTracking = order.sourceSystem === 'KEYCRM' && order.deliveryTrackingCode?.trim();
+  const hasDispatchedParcel = order.orderShipments?.some(shipment => {
+    const tracking = shipment.trackingNumber?.trim();
+    if (!tracking) return false;
+    const legacyDispatch = shipment.status === "NOT_READY" && tracking === legacyTracking
+      && !["READY", "LABEL_CREATED"].includes(order.shippingStatus);
+    return dispatchedStatuses.includes(shipment.status) || shipment.shippedAt || shipment.deliveredAt || legacyDispatch;
+  });
+  const canNotify = orderDispatched && Boolean(hasDispatchedParcel) && ["OWNER", "ADMIN", "MANAGER"].includes(taxRole ?? "");
   const trackingShipment = order.orderShipments?.find(shipment => shipment.trackingNumber?.trim() === tracking);
   const [shipmentEditor, setShipmentEditor] = useState<{ shipment?: OrderShipmentView }>();
   const editingShipment = shipmentEditor?.shipment;
@@ -650,7 +664,12 @@ function OrderDeliveryTab({ order, items, onDelivery, onDeliveryContact, onCreat
       <FieldGrid single><Field label={ui.recipient} value={deliveryRecipient(order)} copyValue={order.deliveryAddressSet ? order.deliveryRecipient : order.client.displayName} /><Field label={ui.address} value={deliveryPlace(order)} copyValue={deliveryPlace(order)===ui.addressMissing ? undefined : deliveryPlace(order)} /><Field label={ui.country} value={countryLabel(deliveryCountry(order)) || ui.notSpecifiedFeminine} /><EditableField label={ui.phone} value={order.deliveryRecipientPhone || order.client.phone || ui.notSpecified} copyValue={order.deliveryRecipientPhone || order.client.phone} onClick={onDeliveryContact} /><Field label={ui.email} value={(order as ExpandedOrderView & { deliveryEmail?: string }).deliveryEmail || order.client.email || ui.notSpecified} copyValue={(order as ExpandedOrderView & { deliveryEmail?: string }).deliveryEmail || order.client.email} /></FieldGrid>
     </TabCard>
     <div className="orders-shipment-column">
-      <header className="orders-tab-section-header"><div><h3>{ui.shipments}</h3><p>{ui.shipmentsRealDataHint}</p></div>{onCreateShipment && <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>＋ {ui.addShipment}</CrmButton>}</header>
+      <header className="orders-tab-section-header"><div><h3>{ui.shipments}</h3><p>{ui.shipmentsRealDataHint}</p></div>
+        <Group gap="xs" justify="flex-end">
+          {canNotify && <ShipmentNotificationAction clientId={order.client.id} orderId={order.id} refreshKey={order.updatedAt} canSend />}
+          {onCreateShipment && <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>＋ {ui.addShipment}</CrmButton>}
+        </Group>
+      </header>
       {targetShipmentId && !targetShipmentExists && <CrmAlert className="orders-shipment-context-missing">{overviewContextUi.shipmentUnavailable}</CrmAlert>}
       {order.orderShipments?.length ? order.orderShipments.map((shipment, index) => <article className="orders-shipment-card" key={shipment.id} data-shipment-id={shipment.id} data-context-selected={shipment.id === targetShipmentId ? "true" : undefined} tabIndex={shipment.id === targetShipmentId ? -1 : undefined} ref={shipment.id === targetShipmentId ? targetShipmentRef : undefined}><header><span>{index + 1}</span><div><h4>{ui.shipmentNumber} {index + 1}</h4><CrmStatusBadge domain="shipping" status={shipment.status} /></div>{onUpdateShipment && <CrmButton tone="secondary" size="compact-xs" onClick={() => setShipmentEditor({ shipment })}>{ui.editShipment}</CrmButton>}</header><FieldGrid><Field label={ui.method} value={shipmentMethodLabel(shipment)} /><Field label={ui.tracking} value={shipment.trackingNumber || ui.notSpecified} copyValue={shipment.trackingNumber} /><Field label={ui.actualShipping} value={shipment.shippedAt ? formatDate(shipment.shippedAt) : ui.notSpecifiedFeminine} /><Field label={ui.actualDelivery} value={shipment.deliveredAt ? formatDate(shipment.deliveredAt) : ui.notSpecifiedFeminine} /><Field label={ui.shipmentWeight} value={shipment.weightGrams ? `${shipment.weightGrams} ${ui.grams}` : ui.notSpecified} /><Field label={ui.shipmentDimensions} value={shipment.lengthMm && shipment.widthMm && shipment.heightMm ? `${shipment.lengthMm} × ${shipment.widthMm} × ${shipment.heightMm} ${ui.millimeters}` : ui.notSpecified} /><Field label={ui.shippingPaidByClient} value={<>{money(shipment.customerChargeOriginalMinor ?? shipment.customerChargeMinor, shipment.customerChargeOriginalCurrency || shipment.currency)}{shipment.customerChargeOriginalCurrency && shipment.customerChargeOriginalCurrency !== shipment.currency && <small>{ui.shipmentAppliedCharge.replace("{amount}", money(shipment.customerChargeMinor, shipment.currency))}</small>}</>} /><Field label={ui.shippingAtelierExpense} value={<>{money(shipment.atelierExpense ? shipment.atelierExpense.archivedAt ? 0 : shipment.atelierExpense.amountMinor : shipment.atelierCostMinor, shipment.atelierExpense?.currency || shipment.currency)}{expenseActions && shipment.atelierExpense && !shipment.atelierExpense.archivedAt && <OrderExpenseCancellation key={shipment.atelierExpense.id} expense={shipment.atelierExpense} actions={expenseActions} cancelledExpenseIds={cancelledExpenseIds} />}</>} /></FieldGrid><ShipmentTrackingUrl orderId={order.id} shipment={shipment} canEdit={taxRole === "OWNER" || taxRole === "ADMIN"} onSaved={compositionActions?.onSaved} /><div className="orders-shipment-contents"><strong>{ui.shipmentContents}</strong>{shipment.instances.length ? shipment.instances.map((instance) => { const item = items.find((candidate) => candidate.id === instance.orderItemId); return <span key={instance.id}>{item?.name || ui.item} · {item ? displayInstanceNumber(items, item, instance.ordinal) : instance.ordinal}</span>; }) : <small>{ui.noShipmentContents}</small>}</div></article>) : <EmptyState text={ui.noShipment} action={onCreateShipment ? <CrmButton size="compact-sm" onClick={() => setShipmentEditor({})}>{ui.addShipment}</CrmButton> : <CrmButton tone="secondary" size="compact-sm" onClick={onDelivery}>{ui.editDeliveryAddress}</CrmButton>} />}
       {onCreateShipment && <UnstyledButton className="orders-add-shipment-card" onClick={() => setShipmentEditor({})}>＋ {ui.addShipment}</UnstyledButton>}

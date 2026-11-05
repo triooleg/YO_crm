@@ -1,3 +1,13 @@
+## 2026-11-05 - Shipment notifications from Order Delivery
+
+The Delivery tab offers the shared Inbox shipment-notification dialog beside
+Add parcel for shipped orders with an eligible tracked shipment. It fixes the
+order, lets staff choose among tracked parcels and active client conversations,
+and requires explicit chat/email selection. Label-only shipments are excluded.
+The existing preview, provider checks, audit, immutable retry scope and duplicate
+protection are reused. The order-specific options response is additive. No
+schema migration or live provider send was performed.
+
 ## 2026-11-05 - Nova Global notification tracking links
 
 New Nova Global previews and messages use `https://nova.global/track/?Tracking_ID=<number>`.

@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import { Alert, Anchor, Badge, Button, Checkbox, Group, Loader, Modal, NativeSelect, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { shipmentNotificationsUi as ui, shippingUi } from '../lib/i18n';
+import { clientMergeUi, shipmentNotificationsUi as ui, shippingUi } from '../lib/i18n';
 import { createShipmentNotificationSession, shipmentChannelCanSend, type ShipmentNotificationScope } from '../lib/shipment-notifications';
 
 const carrierLabel = (carrier: string) => shippingUi.carrierLabels[carrier as keyof typeof shippingUi.carrierLabels] || carrier;
 
-export type ShipmentNotificationActionProps = ShipmentNotificationScope & { canSend: boolean; onSent?: () => void };
+export type ShipmentNotificationActionProps = ShipmentNotificationScope & { canSend: boolean; orderId?: string; refreshKey?: string; onSent?: () => void };
 
 function TruckIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 5h11v12H3zM14 9h4l3 4v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>;
@@ -18,21 +18,31 @@ function TruckIcon() {
 export function ShipmentNotificationAction(props: ShipmentNotificationActionProps) {
   if (!props.canSend) return null;
   // Remount on every identity/account scope change, discarding stale asynchronous responses.
-  return <ShipmentNotificationScopeAction key={JSON.stringify([props.clientId, props.conversationId, props.channel])} {...props}/>;
+  return <ShipmentNotificationScopeAction key={JSON.stringify([props.clientId, props.conversationId, props.channel, props.orderId])} {...props}/>;
 }
 
-function ShipmentNotificationScopeAction({ clientId, conversationId, channel, onSent }: ShipmentNotificationActionProps) {
+function ShipmentNotificationScopeAction({ clientId, conversationId, channel, orderId, refreshKey, onSent }: ShipmentNotificationActionProps) {
   const mobile = useMediaQuery('(max-width: 48em)');
   const controlSize = mobile ? 'lg' : 'sm';
-  const session = useMemo(() => createShipmentNotificationSession({ clientId, conversationId, channel }), [clientId, conversationId, channel]);
+  const session = useMemo(() => createShipmentNotificationSession({ clientId, conversationId, channel, orderId }), [clientId, conversationId, channel, orderId]);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   useEffect(() => {
-    void session.refresh();
     const refreshWhenClosed = () => { if (!session.getSnapshot().open) void session.refresh(); };
     window.addEventListener('focus',refreshWhenClosed);
     return () => { window.removeEventListener('focus',refreshWhenClosed); session.dispose(); };
   }, [session]);
+  useEffect(() => {
+    if (!session.getSnapshot().open) void session.refresh();
+  }, [session, refreshKey]);
   const orders = state.options?.orders ?? [];
+  const conversations = state.options?.conversations?.filter(chat => chat.channel !== 'EMAIL') ?? [];
+  const boundEmailConversation = state.options?.conversations?.find(chat => chat.id === state.conversationId && chat.channel === 'EMAIL');
+  const conversationOptions = conversations.map((chat, index) => {
+    const channelLabel = clientMergeUi.channelLabels[chat.channel as keyof typeof clientMergeUi.channelLabels] ?? ui.chat;
+    const lastMessage = chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleString('ru-RU') : null;
+    const number = conversations.filter(item => item.channel === chat.channel).length > 1 ? `#${index + 1}` : null;
+    return { value: chat.id, label: [channelLabel, number, chat.subject, lastMessage].filter(Boolean).join(' · ') };
+  });
   const order = orders.find(item => item.id === state.orderId);
   const preview = state.preview;
   const hasUnknown = state.uncertain || state.result?.deliveries.some(delivery => delivery.status === 'UNKNOWN');
@@ -47,7 +57,7 @@ function ShipmentNotificationScopeAction({ clientId, conversationId, channel, on
   }
 
   return <>
-    <Button size={controlSize} type="button" variant="subtle" leftSection={<TruckIcon/>} onClick={() => void session.open()}>{ui.action}</Button>
+    <Button size={controlSize} type="button" variant={orderId ? 'default' : 'subtle'} leftSection={<TruckIcon/>} onClick={() => void session.open()}>{ui.action}</Button>
     <Modal opened={state.open} onClose={session.close} title={ui.title} size="lg" centered closeButtonProps={{ 'aria-label': ui.close }} closeOnClickOutside={!state.busy} closeOnEscape={!state.busy}>
       <Stack gap="sm" aria-busy={state.busy}>
         {state.error && <Alert color="red" role="alert">{ui.errors[state.error]}</Alert>}
@@ -57,6 +67,12 @@ function ShipmentNotificationScopeAction({ clientId, conversationId, channel, on
         {order && order.shipments.length > 1 && <NativeSelect size={controlSize} label={ui.parcel} value={state.shipmentId} disabled={state.busy} onChange={event => void session.selectShipment(event.currentTarget.value)} data={[{ value: '', label: ui.chooseParcel }, ...order.shipments.map(item => ({ value: item.id, label: `${carrierLabel(item.carrier)} · ${item.trackingNumber}` }))]}/>}
         {(state.error === 'preview' || state.error === 'rejected') && <Button size={controlSize} type="button" variant="default" onClick={() => void session.selectShipment(state.shipmentId)}>{ui.previewRetry}</Button>}
         {state.error === 'load' && <Button size={controlSize} type="button" variant="default" onClick={() => void session.open()}>{ui.previewRetry}</Button>}
+        {orderId && order && conversations.length > 0 && <NativeSelect size={controlSize} label={ui.conversation}
+          value={state.conversationId ?? ''} disabled={state.busy || locked}
+          data={[{ value: boundEmailConversation?.id ?? '', label: ui.emailOnly }, ...conversationOptions, ...(state.originalChatUnavailable && state.conversationId
+            ? [{ value: state.conversationId, label: ui.originalChatUnavailable }] : [])]}
+          onChange={event => void session.selectConversation(event.currentTarget.value)}/>}
+        {state.originalChatUnavailable && <Alert color="yellow">{ui.originalChatUnavailable}</Alert>}
         {preview && <>
           <Text size="sm" fw={600}>{ui.order} {preview.orderNumber} · {carrierLabel(preview.carrier)} · {preview.trackingNumber}</Text>
           <Anchor href={preview.trackingUrl} target="_blank" rel="noopener noreferrer" size="sm" style={{ overflowWrap: 'anywhere' }} aria-label={ui.trackingLink}>{preview.trackingUrl}</Anchor>

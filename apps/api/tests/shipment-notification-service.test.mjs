@@ -116,7 +116,7 @@ function fixture() {
   const attempts = mutableModel('attempts');
   const db = {
     client: { findFirst: async ({ where }) => copy(state.clients.find(row => matches(row, where)) || null) },
-    conversation: { findFirst: async ({ where }) => copy(state.conversations.find(row => matches(row, where)) || null) },
+    conversation: { findMany: async ({ where }) => state.conversations.filter(row => matches(row, where)).map(({ id, channel, subject, lastMessageAt }) => ({ id, channel, subject: subject ?? null, lastMessageAt: lastMessageAt ?? null })), findFirst: async ({ where }) => copy(state.conversations.find(row => matches(row, where)) || null) },
     order: { ...mutableModel('orders'), findMany: async ({ where, select }) => copy(state.orders.filter(row => matches(row, where)).map(row => ({ ...row,
       orderShipments: state.parcels.filter(p => p.orderId === row.id && matches(p, select?.orderShipments?.where)),
     }))) },
@@ -219,6 +219,48 @@ function configureChatwoot(h, available) {
     .map(([key, value]) => ({ section: 'integration.chatwoot', key, value, updatedAt: new Date() })));
   h.chatwoot.available = available;
 }
+
+test('order notification options are limited to the selected order and active client chats', async () => {
+  const h = fixture();
+  h.state.conversations.push(
+    { id: 'archived-chat', clientId: 'client-1', channel: 'FACEBOOK', archivedAt: new Date() },
+    { id: 'email-chat', clientId: 'client-1', channel: 'EMAIL', archivedAt: null },
+  );
+  Object.assign(h.state.parcels.find(parcel => parcel.id === 'parcel-1'), {status:'SHIPPED'});
+  Object.assign(h.state.parcels.find(parcel => parcel.id === 'parcel-2'), {status:'READY', shippedAt:null, deliveredAt:null});
+  const result = await h.service.options({ clientId: 'client-1', orderId: 'order-1' }, actor);
+  assert.deepEqual(sorted(result.orders[0].shipments.map(parcel => parcel.id)), ['parcel-1']);
+  assert.deepEqual(sorted(result.orders.map(order => order.id)), ['order-1']);
+  assert.deepEqual(sorted(result.conversations), [
+    { id: 'chat-1', channel: 'FACEBOOK', subject: null, lastMessageAt: null },
+    { id: 'email-chat', channel: 'EMAIL', subject: null, lastMessageAt: null },
+  ]);
+  for (const orderId of ['order-other', 'order-archived']) {
+    const unavailable = await h.service.options({ clientId: 'client-1', orderId }, actor);
+    assert.equal(unavailable.orders.length, 0);
+    assert.equal(unavailable.conversations.length, 0);
+  }
+  const importedOrder = h.state.orders.find(order => order.id === 'order-2');
+  importedOrder.deliveryTrackingCode = 'PC0000020000072056NPG';
+  Object.assign(h.state.parcels.find(parcel => parcel.id === 'parcel-3'), {status:'NOT_READY'});
+  assert.equal((await h.service.options({ clientId:'client-1', orderId:'order-2' }, actor)).orders.length, 0);
+  importedOrder.sourceSystem = 'KEYCRM';
+  assert.deepEqual(sorted((await h.service.options({ clientId:'client-1', orderId:'order-2' }, actor)).orders[0].shipments.map(parcel => parcel.id)), ['parcel-3']);
+  assert.equal((await h.service.options(scope, actor)).conversations, undefined);
+});
+
+test('order preview tokens cannot send after the parcel loses dispatch eligibility', async () => {
+  const h = fixture();
+  const parcel = h.state.parcels.find(item => item.id === 'parcel-1');
+  parcel.status = 'SHIPPED';
+  const input = await h.input({fromOrder:true, sendChat:false});
+  await assert.rejects(h.service.send({...input, fromOrder:undefined}, actor), {status:409});
+  parcel.status = 'READY';
+  await assert.rejects(h.service.send(input, actor), {status:409});
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.state.notifications.length, 0);
+  assert.equal((await h.service.preview(selection, actor)).shipmentId, 'parcel-1');
+});
 
 test('options lists all eligible orders and parcels, including completed orders, excluding archived/invalid/foreign candidates', async () => {
   const h = fixture(), result = await h.service.options(scope, actor);

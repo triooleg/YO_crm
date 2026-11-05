@@ -1,4 +1,6 @@
 export type ShipmentNotificationScope = { clientId: string; conversationId?: string; channel?: string };
+type ShipmentNotificationOptionsScope = ShipmentNotificationScope & { orderId?: string };
+export type ShipmentNotificationConversation = { id: string; channel: string; subject?: string | null; lastMessageAt?: string | null };
 export type ShipmentNotificationDelivery = {
   channel: 'CHAT' | 'EMAIL'; status: 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'UNKNOWN';
   sentAt?: string | null; error?: string | null;
@@ -10,6 +12,7 @@ export type ShipmentNotificationParcel = {
 export type ShipmentNotificationOrder = { id: string; number: string; shipments: ShipmentNotificationParcel[] };
 export type ShipmentNotificationOptions = {
   orders: ShipmentNotificationOrder[];
+  conversations?: ShipmentNotificationConversation[];
   chat: { available: boolean; reason?: string };
   email: { available: boolean; recipient?: string; requiresConfirmation: boolean; reason?: string };
   languages: { value: string; label: string }[];
@@ -19,10 +22,11 @@ export type ShipmentNotificationPreview = Omit<ShipmentNotificationParcel, 'id'>
   language: string; content: string; subject: string; emailRecipient?: string;
   emailRequiresConfirmation: boolean; chatAvailable: boolean; emailAvailable: boolean;
   chatReason?: string; emailReason?: string;
-  previous?: ShipmentNotificationResult & { content: string; subject: string };
+  previous?: ShipmentNotificationResult & { content: string; subject: string; conversationId?: string | null };
 };
-export type ShipmentNotificationSend = ShipmentNotificationScope & {
-  orderId: string; shipmentId: string; language: string; scopeToken: string;
+type ShipmentNotificationPreviewRequest = ShipmentNotificationScope & { orderId: string; shipmentId: string; language?: string; fromOrder?: boolean };
+export type ShipmentNotificationSend = ShipmentNotificationPreviewRequest & {
+  language: string; scopeToken: string;
   content: string; subject: string; sendChat: boolean; sendEmail: boolean; confirmClientEmail: boolean;
 };
 
@@ -65,8 +69,8 @@ export function createShipmentNotificationsApi(fetcher: typeof fetch = fetch) {
     return response.json() as Promise<T>;
   }
   return {
-    options: (scope: ShipmentNotificationScope) => api<ShipmentNotificationOptions>(`/options?${new URLSearchParams(Object.entries(scope).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))}`),
-    preview: (body: ShipmentNotificationScope & { orderId: string; shipmentId: string; language?: string }) => api<ShipmentNotificationPreview>('/preview', { method: 'POST', body: JSON.stringify(body) }),
+    options: (scope: ShipmentNotificationOptionsScope) => api<ShipmentNotificationOptions>(`/options?${new URLSearchParams(Object.entries(scope).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))}`),
+    preview: (body: ShipmentNotificationPreviewRequest) => api<ShipmentNotificationPreview>('/preview', { method: 'POST', body: JSON.stringify(body) }),
     send: (body: ShipmentNotificationSend) => api<ShipmentNotificationResult>('/send', { method: 'POST', body: JSON.stringify(body) }),
     status: (id: string) => api<ShipmentNotificationResult>(`/${encodeURIComponent(id)}`),
   };
@@ -74,15 +78,18 @@ export function createShipmentNotificationsApi(fetcher: typeof fetch = fetch) {
 
 type ShipmentNotificationState = {
   options?: ShipmentNotificationOptions; open: boolean; busy: boolean; error?: 'load' | 'preview' | 'send' | 'status' | 'rejected';
-  orderId: string; shipmentId: string; preview?: ShipmentNotificationPreview; result?: ShipmentNotificationResult;
+  orderId: string; shipmentId: string; conversationId?: string; originalChatUnavailable?: boolean; preview?: ShipmentNotificationPreview; result?: ShipmentNotificationResult;
   content: string; subject: string; sendChat: boolean; sendEmail: boolean; confirmClientEmail: boolean; uncertain: boolean;
 };
-export function createShipmentNotificationSession(scope: ShipmentNotificationScope, api = createShipmentNotificationsApi()) {
+export function createShipmentNotificationSession(scope: ShipmentNotificationOptionsScope, api = createShipmentNotificationsApi()) {
+  const requestScope = () => scope.orderId ? { clientId: scope.clientId, conversationId: state.conversationId, fromOrder: true } : scope;
   let state: ShipmentNotificationState = { open: false, busy: false, orderId: '', shipmentId: '', content: '', subject: '', sendChat: false, sendEmail: false, confirmClientEmail: false, uncertain: false };
   let generation = 0;
   let previewSequence = 0;
+  let optionsSequence = 0;
+  let conversationDraft: { shipmentId: string; language: string; content?: string; subject?: string } | undefined;
   const listeners = new Set<() => void>();
-  const known = new Map<string, ShipmentNotificationResult & { content: string; subject: string; language: string }>();
+  const known = new Map<string, ShipmentNotificationResult & { content: string; subject: string; language: string; conversationId?: string | null }>();
   const uncertain = new Set<string>();
   const key = (preview: ShipmentNotificationPreview) => JSON.stringify([preview.orderId, preview.shipmentId, preview.trackingRevision]);
   function update(patch: Partial<ShipmentNotificationState>) { state = { ...state, ...patch }; listeners.forEach(listener => listener()); }
@@ -91,34 +98,49 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
     if (!result) return old;
     const next = { ...result, content: old?.content ?? preview.previous?.content ?? state.content,
       subject: old?.subject ?? preview.previous?.subject ?? state.subject, language: old?.language ?? preview.language,
+      conversationId: preview.previous ? preview.previous.conversationId : old ? old.conversationId : state.conversationId,
       deliveries: mergeShipmentDeliveries(old?.deliveries ?? [], result.deliveries) };
     known.set(key(preview), next);
     return next;
   }
   async function loadPreview(orderId: string, shipmentId: string, language?: string) {
+    if (conversationDraft?.shipmentId !== shipmentId) conversationDraft = undefined;
+    const draft = conversationDraft;
+    language ??= draft?.language;
     const sequence = ++previewSequence, run = generation;
-    update({ busy: true, error: undefined, preview: undefined, result: undefined, orderId, shipmentId, content: '', subject: '', confirmClientEmail: false, sendChat: false, sendEmail: false });
+    update({ busy: true, error: undefined, originalChatUnavailable: false, preview: undefined, result: undefined, orderId, shipmentId, content: '', subject: '', confirmClientEmail: false, sendChat: false, sendEmail: false });
     try {
-      let preview = await api.preview({ ...scope, orderId, shipmentId, ...(language ? { language } : {}) });
+      let preview = await api.preview({ ...requestScope(), orderId, shipmentId, ...(language ? { language } : {}) });
       if (sequence !== previewSequence || run !== generation) return;
-      // An existing operation can use another language than the current profile.
-      // Bind the token to the language returned for that immutable operation.
-      if (preview.previous && !language) preview = await api.preview({ ...scope, orderId, shipmentId, language: preview.language });
+      const previous = preview.previous ?? known.get(key(preview));
+      const originalChatId = previous?.conversationId ?? undefined;
+      const originalChatUnavailable = Boolean(scope.orderId && originalChatId &&
+        !state.options?.conversations?.some(chat => chat.id === originalChatId));
+      const restoreOriginalChat = Boolean(scope.orderId && previous && originalChatId !== state.conversationId);
+      // A saved operation can only be retried in its original scope and language.
+      if (restoreOriginalChat) update({ conversationId: originalChatId });
+      if (previous && !originalChatUnavailable && (restoreOriginalChat || !language)) {
+        preview = await api.preview({ ...requestScope(), orderId, shipmentId, language: preview.language });
+      }
+      if (originalChatUnavailable) preview = { ...preview, chatAvailable: false, emailAvailable: false };
       if (sequence !== previewSequence || run !== generation) return;
       if (preview.orderId !== orderId || preview.shipmentId !== shipmentId || !preview.scopeToken || !preview.trackingNumber?.trim() || !usableShipmentTrackingUrl(preview.trackingUrl)) throw new Error('invalid-preview-scope');
+      conversationDraft = undefined;
       const result = remember(preview, preview.previous);
       if (preview.previous) uncertain.delete(key(preview));
-      update({ preview: result ? { ...preview, language: result.language } : preview, result, content: result?.content ?? preview.content, subject: result?.subject ?? preview.subject,
-        uncertain: uncertain.has(key(preview)), sendChat: shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result), sendEmail: shipmentChannelCanSend(preview.emailAvailable && Boolean(preview.emailRecipient), 'EMAIL', result) });
+      update({ preview: result ? { ...preview, language: result.language } : preview, result, content: result?.content ?? draft?.content ?? preview.content, subject: result?.subject ?? draft?.subject ?? preview.subject,
+        originalChatUnavailable, uncertain: uncertain.has(key(preview)),
+        sendChat: !scope.orderId && shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result),
+        sendEmail: !scope.orderId && shipmentChannelCanSend(preview.emailAvailable && Boolean(preview.emailRecipient), 'EMAIL', result) });
     } catch { if (sequence === previewSequence && run === generation) update({ error: 'preview' }); }
     finally { if (sequence === previewSequence && run === generation) update({ busy: false }); }
   }
   async function refresh() {
-    const run = generation;
+    const run = generation, sequence = ++optionsSequence;
     try {
       const options = await api.options(scope);
-      if (run === generation) update({ options: { ...options, orders: eligibleShipmentOrders(options.orders) }, error: undefined });
-    } catch { if (run === generation) update({ options: undefined, error: 'load' }); }
+      if (run === generation && sequence === optionsSequence) update({ options: { ...options, orders: eligibleShipmentOrders(options.orders.filter(order => !scope.orderId || order.id === scope.orderId)) }, error: undefined });
+    } catch { if (run === generation && sequence === optionsSequence) update({ options: undefined, error: 'load' }); }
   }
   function canSend() {
     const p = state.preview;
@@ -133,7 +155,8 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
     open: async () => {
       if (state.busy) return;
       const run = generation;
-      update({ open: true, busy: true, preview: undefined, result: undefined, error: undefined, orderId: '', shipmentId: '' });
+      conversationDraft = undefined;
+      update({ open: true, busy: true, originalChatUnavailable: false, preview: undefined, result: undefined, error: undefined, orderId: '', shipmentId: '' });
       // Refresh availability/revision on every opening; never silently pick one of several parcels.
       await refresh();
       if (run !== generation) return;
@@ -142,7 +165,7 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
       if (!state.open) return;
       const onlyOrder = orders.length === 1 ? orders[0] : undefined;
       if (onlyOrder) {
-        update({ orderId: onlyOrder.id });
+        update({ orderId: onlyOrder.id, conversationId: undefined });
         const onlyShipment = onlyOrder.shipments.length === 1 ? onlyOrder.shipments[0] : undefined;
         if (onlyShipment) await loadPreview(onlyOrder.id, onlyShipment.id);
       }
@@ -156,7 +179,29 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
       if (onlyShipment) await loadPreview(orderId, onlyShipment.id);
     },
     selectShipment: async (shipmentId: string) => {
-      if (!state.busy && state.options?.orders.find(order => order.id === state.orderId)?.shipments.some(shipment => shipment.id === shipmentId)) await loadPreview(state.orderId, shipmentId);
+      if (state.busy) return;
+      if (scope.orderId && state.result && shipmentId !== state.shipmentId) {
+        update({ conversationId: undefined });
+      }
+      if (state.options?.orders.find(order => order.id === state.orderId)?.shipments.some(shipment => shipment.id === shipmentId)) {
+        await loadPreview(state.orderId, shipmentId);
+      } else if (scope.orderId && !shipmentId) {
+        conversationDraft = undefined;
+        update({ shipmentId, preview: undefined, result: undefined, error: undefined, originalChatUnavailable: false });
+      }
+    },
+    selectConversation: async (conversationId: string) => {
+      if (!scope.orderId || state.busy || state.result || state.uncertain ||
+          (conversationId && !state.options?.conversations?.some(chat => chat.id === conversationId && chat.channel !== 'EMAIL'))) return;
+      update({ conversationId: conversationId || undefined });
+      const preview = state.preview;
+      if (preview) conversationDraft = {
+        shipmentId: state.shipmentId,
+        language: preview.language,
+        content: state.content !== preview.content ? state.content : undefined,
+        subject: state.subject !== preview.subject ? state.subject : undefined,
+      };
+      if (state.shipmentId) await loadPreview(state.orderId, state.shipmentId, preview?.language);
     },
     language: async (language: string) => { if (!state.busy && !state.result && !state.uncertain && state.options?.languages.some(item => item.value === language)) await loadPreview(state.orderId, state.shipmentId, language); },
     edit: (patch: Partial<Pick<ShipmentNotificationState, 'content' | 'subject' | 'sendChat' | 'sendEmail' | 'confirmClientEmail'>>) => {
@@ -169,7 +214,7 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
     send: async () => {
       if (!canSend() || !state.preview) return false;
       const preview = state.preview, run = generation;
-      const body: ShipmentNotificationSend = { ...scope, orderId: preview.orderId, shipmentId: preview.shipmentId, language: preview.language,
+      const body: ShipmentNotificationSend = { ...requestScope(), orderId: preview.orderId, shipmentId: preview.shipmentId, language: preview.language,
         scopeToken: preview.scopeToken, content: state.content, subject: state.subject, sendChat: state.sendChat, sendEmail: state.sendEmail, confirmClientEmail: state.confirmClientEmail };
       update({ busy: true, error: undefined });
       // Until a definitive response arrives the request may have reached a provider.
@@ -180,7 +225,8 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
         if (!fresh.id || !Array.isArray(fresh.deliveries) || !fresh.deliveries.length) throw new Error('invalid-operation');
         const result = remember(preview, fresh);
         uncertain.delete(key(preview));
-        update({ result, uncertain: false, sendChat: shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result), sendEmail: shipmentChannelCanSend(preview.emailAvailable, 'EMAIL', result) });
+        update({ result, uncertain: false, sendChat: (!scope.orderId || state.sendChat) && shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result),
+          sendEmail: (!scope.orderId || state.sendEmail) && shipmentChannelCanSend(preview.emailAvailable, 'EMAIL', result) });
         return true;
       } catch (error) {
         if (run === generation) {
@@ -204,7 +250,8 @@ export function createShipmentNotificationSession(scope: ShipmentNotificationSco
         if (fresh.id !== id) throw new Error('invalid-operation');
         const result = remember(preview, fresh);
         uncertain.delete(key(preview));
-        update({ result, uncertain: false, sendChat: shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result), sendEmail: shipmentChannelCanSend(preview.emailAvailable && Boolean(preview.emailRecipient), 'EMAIL', result) });
+        update({ result, uncertain: false, sendChat: (!scope.orderId || state.sendChat) && shipmentChannelCanSend(preview.chatAvailable, 'CHAT', result),
+          sendEmail: (!scope.orderId || state.sendEmail) && shipmentChannelCanSend(preview.emailAvailable && Boolean(preview.emailRecipient), 'EMAIL', result) });
       } catch { if (run === generation) update({ error: 'status' }); }
       finally { if (run === generation) update({ busy: false }); }
     },

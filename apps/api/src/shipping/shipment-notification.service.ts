@@ -8,10 +8,23 @@ import { normalizeClientLanguageCode } from '../communications/ai-language';
 import { metaRecipientIdForReceivers } from '../communications/meta-send';
 import { shipmentEmailAccountIdentity } from '../communications/shipment-email-account';
 import { trackingLink, validTrackingLink, trackingLanguageOptions } from './tracking-link';
-import type { ShipmentNotificationPreviewDto, ShipmentNotificationScopeDto, ShipmentNotificationSendDto, ShipmentTrackingUrlDto } from './shipment-notification.dto';
+import type { ShipmentNotificationOptionsDto, ShipmentNotificationPreviewDto, ShipmentNotificationScopeDto, ShipmentNotificationSendDto, ShipmentTrackingUrlDto } from './shipment-notification.dto';
 
 type Db = Prisma.TransactionClient;
 const channels = ['FACEBOOK','INSTAGRAM','WHATSAPP','CHATWOOT'];
+const dispatchedStatuses = ['SHIPPED', 'IN_TRANSIT', 'DELIVERED'];
+const dispatchOrderFields = { shippingStatus:true, sourceSystem:true, deliveryTrackingCode:true } as const;
+
+function dispatchedParcel(
+  parcel: {status:string; trackingNumber:string | null; shippedAt:Date | null; deliveredAt:Date | null},
+  order: {shippingStatus:string; sourceSystem:string | null; deliveryTrackingCode:string | null},
+): boolean {
+  // The original imported waybill is independent of the mutable primary parcel projection.
+  const importedWaybill = order.sourceSystem === 'KEYCRM' && order.deliveryTrackingCode?.trim();
+  return dispatchedStatuses.includes(parcel.status) || Boolean(parcel.shippedAt || parcel.deliveredAt ||
+    (parcel.status === 'NOT_READY' && importedWaybill && parcel.trackingNumber?.trim() === importedWaybill
+      && !['READY', 'LABEL_CREATED'].includes(order.shippingStatus)));
+}
 const emailAddress = (value: string | null | undefined) => value && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value.trim()) ? value.trim() : undefined;
 const languageLabels: Record<string,string> = {en:'Английский',ru:'Русский',uk:'Украинский',de:'Немецкий',fr:'Французский',es:'Испанский',pl:'Польский',it:'Итальянский',nl:'Нидерландский',pt:'Португальский'};
 const defaults: Record<string,string> = {
@@ -76,19 +89,35 @@ export class ShipmentNotificationService {
   private async templates(db:Db=this.p) {
     return db.messageTemplate.findMany({where:{archivedAt:null,name:'Уведомление об отправке'},orderBy:[{updatedAt:'desc'},{id:'asc'}]});
   }
-  async options(input:ShipmentNotificationScopeDto,actor:User) {
+  async options(input:ShipmentNotificationOptionsDto,actor:User) {
     this.authorize(actor);
     const cap = await this.capabilities(input);
     const [orders,templates] = await Promise.all([
-      this.p.order.findMany({where:{clientId:input.clientId,archivedAt:null},select:{id:true,number:true,orderShipments:{where:{archivedAt:null,trackingNumber:{not:null}},orderBy:{createdAt:'asc'}}},orderBy:{createdAt:'desc'}}),this.templates(),
+      this.p.order.findMany({where:{...(input.orderId ? {id:input.orderId} : {}),clientId:input.clientId,archivedAt:null},select:{
+        id:true,number:true,...dispatchOrderFields,
+        orderShipments:{where:{archivedAt:null,trackingNumber:{not:null}},orderBy:{createdAt:'asc'}},
+      },orderBy:{createdAt:'desc'}}),this.templates(),
     ]);
-    return {orders:orders.map(o=>({id:o.id,number:o.number,shipments:o.orderShipments.flatMap(s=>{const url=trackingLink(s);return url?[{id:s.id,carrier:s.carrier,trackingNumber:s.trackingNumber,trackingUrl:url,trackingRevision:s.trackingRevision}]:[];})})).filter(o=>o.shipments.length),chat:{available:cap.chatAvailable,reason:cap.chatReason},email:{available:cap.emailAvailable,recipient:emailAddress(cap.client.email),requiresConfirmation:true,reason:cap.emailReason},languages:[...new Set([...Object.keys(defaults),...templates.map(t=>t.language)])].map(value=>({value,label:languageLabels[value]||value}))};
+    const conversations = input.orderId && orders.length ? await this.p.conversation.findMany({
+      where:{clientId:input.clientId,archivedAt:null,channel:{in:[...channels, "EMAIL"] as ContactChannel[]}},
+      select:{id:true,channel:true,subject:true,lastMessageAt:true},
+      orderBy:[{lastMessageAt:{sort:'desc',nulls:'last'}},{id:'asc'}],
+    }) : [];
+    const eligibleOrders = orders.flatMap(order => {
+      const shipments = order.orderShipments.flatMap(parcel => {
+        const url = (!input.orderId || dispatchedParcel(parcel, order)) && trackingLink(parcel);
+        return url ? [{id:parcel.id,carrier:parcel.carrier,trackingNumber:parcel.trackingNumber,trackingUrl:url,trackingRevision:parcel.trackingRevision}] : [];
+      });
+      return shipments.length ? [{id:order.id,number:order.number,shipments}] : [];
+    });
+    return {...(input.orderId ? {conversations} : {}),orders:eligibleOrders,chat:{available:cap.chatAvailable,reason:cap.chatReason},email:{available:cap.emailAvailable,recipient:emailAddress(cap.client.email),requiresConfirmation:true,reason:cap.emailReason},languages:[...new Set([...Object.keys(defaults),...templates.map(t=>t.language)])].map(value=>({value,label:languageLabels[value]||value}))};
   }
   private async projection(input:ShipmentNotificationPreviewDto,db:Db=this.p) {
     const cap = await this.capabilities(input,db);
-    const shipment = await db.orderShipment.findFirst({where:{id:input.shipmentId,orderId:input.orderId,archivedAt:null,order:{clientId:input.clientId,archivedAt:null}},include:{order:{select:{number:true,deliveryEmail:true}}}});
+    const shipment = await db.orderShipment.findFirst({where:{id:input.shipmentId,orderId:input.orderId,archivedAt:null,order:{clientId:input.clientId,archivedAt:null}},include:{order:{select:{number:true,deliveryEmail:true,...dispatchOrderFields}}}});
     const currentUrl=shipment && trackingLink(shipment);
     if (!shipment || !currentUrl || !shipment.trackingNumber) throw new BadRequestException('Выберите активную посылку с проверенной ссылкой отслеживания');
+    if (input.fromOrder && !dispatchedParcel(shipment, shipment.order)) throw new ConflictException('Посылка ещё не отправлена');
     const previous=await db.shipmentNotification.findUnique({where:{shipmentId_trackingRevision:{shipmentId:shipment.id,trackingRevision:shipment.trackingRevision}},include:{deliveries:true}});
     // Preserve the confirmed URL and scope token when only the generated route changed.
     const url=previous && trackingLink({...shipment,trackingUrl:previous.trackingUrl})===currentUrl
@@ -100,7 +129,7 @@ export class ShipmentNotificationService {
     const content=(template?.content||defaults[language]||defaults.en!).replace(/\{\{?(tracking_url|tracking_number|order_number|carrier)\}?\}/g,(_,k:string)=>substitutions[k]!);
     const recipient=emailAddress(shipment.order.deliveryEmail)||emailAddress(cap.client.email);
     const emailRequiresConfirmation=!emailAddress(shipment.order.deliveryEmail) && !!recipient;
-    const scopeToken=createHash('sha256').update(JSON.stringify({clientId:input.clientId,orderId:input.orderId,shipmentId:shipment.id,revision:shipment.trackingRevision,url,recipient,emailRequiresConfirmation,language,emailAccountIdentity:cap.emailAccountIdentity,conversation:cap.conversation&&[cap.conversation.id,cap.conversation.externalId,cap.conversation.channel],settings:cap.settingsVersion,template:template&&[template.id,template.updatedAt.toISOString()]})).digest('hex');
+    const scopeToken=createHash('sha256').update(JSON.stringify({...(input.fromOrder ? {fromOrder:true} : {}),clientId:input.clientId,orderId:input.orderId,shipmentId:shipment.id,revision:shipment.trackingRevision,url,recipient,emailRequiresConfirmation,language,emailAccountIdentity:cap.emailAccountIdentity,conversation:cap.conversation&&[cap.conversation.id,cap.conversation.externalId,cap.conversation.channel],settings:cap.settingsVersion,template:template&&[template.id,template.updatedAt.toISOString()]})).digest('hex');
     return {...cap,shipment,previous,trackingUrl:url,scopeToken,language,content,subject:trackingSubject(language,shipment.order.number),emailRecipient:recipient,emailRequiresConfirmation};
   }
   async preview(input:ShipmentNotificationPreviewDto,actor:User) {
