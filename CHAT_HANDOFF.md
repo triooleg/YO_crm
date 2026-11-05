@@ -5,6 +5,26 @@ Verified legacy URLs resolve to the canonical route at read time, with no data m
 Saved localized links, confirmed notification snapshots and replay scope remain intact.
 The order delivery links use the same official domain. Owner authorized deployment after checks.
 
+Installed at https://crm.yoleotard.com/ as 0.16.1 from application commit
+`67e5d004ed414698bf4562fc92d5fd746a2bf9b3` and frozen snapshot
+`f3630d249a3380300bcacf0a7fb5d2c2eb61e564db7869af383a9d9d91976468`.
+The homepage and API health returned HTTP 200. The CRM header and first release
+journal entry showed 0.16.1. Both delivery links for order 26-642 resolved to
+the canonical domain with the full tracking number. No order or notification
+writes were made during browser verification.
+Quality checks passed (3317 tests, 111 conditional skips), including typecheck
+and build. Synthetic notification previews passed on desktop and mobile.
+The pre-release DATA backup and isolated restore drill passed. Retention
+verified two ordinary and two rollback source sets plus protected SERVICE
+sets, with five API and five web images.
+Installed proof `33e803ba7552a9b7b2701d9826c5e810b696039d28c32ab8d9ee1ee42d43f2a7`
+and runtime closure `e657587e82269474275af75e313d119f2b0202fd0f27712e9d82ee0178a5074c`
+are recorded in the private `.local/deploy-v0161` evidence directory in the
+invoice-template release worktree.
+Independent Version Guardian and Release Gatekeeper accepted the installed
+release. The guarded current-release pointer and provenance were verified
+(provenance SHA-256 `bac6004a960c67ac81dcb611e38afef4265ac327cc46e9682c67cd9471a94552`).
+
 ## 2026-11-05 - Compact invoice layout and template typography 0.16.0
 
 New invoice PDFs and previews use smaller margins, align customer contact
