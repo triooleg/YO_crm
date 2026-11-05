@@ -52,8 +52,11 @@ test('Inbox client action restores Clients filters and the exact Back conversati
   await page.locator('.communications-open-client').click();
   await expect(page).toHaveURL(/section=clients/);
   const params = new URL(page.url()).searchParams;
-  for (const [key, value] of Object.entries({ clientId: 'canonical', returnConversationId: 'dialogue-exact', returnChannel: 'INSTAGRAM', page: '3', pageSize: '50', search: 'Anna', country: 'UA' })) expect(params.get(key), key).toBe(value);
+  for (const [key, value] of Object.entries({ clientId: 'canonical', returnConversationId: 'dialogue-exact', returnChannel: 'INSTAGRAM', page: '3', pageSize: '50', search: 'Anna', country: 'UA', clientName: 'Navigation fixture' })) expect(params.get(key), key).toBe(value);
   expect(params.has('clientsReturn')).toBe(false);
+  await page.getByRole('button', { name: 'Вернуться к переписке' }).click();
+  await expect(page.locator('.communications-search-field input')).toHaveValue('Navigation fixture');
+  await expect(page).toHaveURL(/conversationId=dialogue-exact/);
   expect(state.writes.filter(path => /send|messages/.test(path))).toEqual([]);
   expect(state.consoleErrors).toEqual([]);
 });

@@ -10,7 +10,7 @@ test("клиенты видны в общей навигации, остальн
   assert.match(shell,/const topbarItems = \[items\[0\], items\[1\], items\[2\], items\[3\], items\[4\], items\[5\], items\[7\], items\[8\]\]/);
   assert.doesNotMatch(shell,/const topbarItems = .*items\[6\]/);
 });
-test("поиск и уведомления из общей шапки открывают входящие",()=>{assert.match(shell,/updateGlobalSearch/);assert.match(shell,/sectionId!=="inbox"\)navigate\("inbox"\)/);assert.match(shell,/onClick=\{showUnread\}/)});
+test("поиск и уведомления из общей шапки открывают входящие",()=>{assert.match(shell,/updateGlobalSearch/);assert.match(shell,/navigate\("inbox",\{search:value\}\)/);assert.match(shell,/onClick=\{showUnread\}/)});
 test("колокольчик, пункт Входящие и вкладка браузера показывают общий счётчик непрочитанных",()=>{
   assert.match(shell,/fetch\("\/api\/communications\/unread-count"/);
   assert.match(shell,/createVisibilityPolling\(pollUnreadCount\)/);

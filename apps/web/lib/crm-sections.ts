@@ -17,6 +17,12 @@ export function parseCrmSection(value: string | string[] | undefined): CrmSectio
   return crmSectionIds.includes(candidate as CrmSectionId) ? candidate as CrmSectionId : "overview";
 }
 
+/** The visible search is separate from the exact client and conversation IDs. */
+export function inboxSearchFromLocation(search: string): string {
+  const params = new URLSearchParams(search);
+  return (params.get('search') ?? params.get('clientName') ?? '').trim();
+}
+
 export function crmSectionHref(section: CrmSectionId, currentSearch = "") {
   const params = new URLSearchParams(currentSearch);
   params.set("section", section);
@@ -37,7 +43,7 @@ const clientsReturnFilterKeys = ['search', 'source', 'country', 'status', 'sort'
 const clientsRoundtripKeys = ['clientsReturn', 'returnConversationId', 'returnChannel'] as const;
 
 /** Keep list filters, but derive selection and Back from the currently opened Inbox dialogue. */
-export function createInboxClientContext(currentSearch: string, clientId: string, conversationId?: string, channel?: string): Record<string, string> {
+export function createInboxClientContext(currentSearch: string, clientId: string, conversationId?: string, channel?: string, clientName?: string): Record<string, string> {
   const context: Record<string, string> = {};
   const clientsReturn = validateClientsReturnHref(new URLSearchParams(currentSearch).get('clientsReturn'));
   if (clientsReturn) {
@@ -51,6 +57,7 @@ export function createInboxClientContext(currentSearch: string, clientId: string
   if (conversationId && channel) {
     context.returnConversationId = conversationId;
     context.returnChannel = channel;
+    if (clientName) context.clientName = clientName;
   }
   return context;
 }

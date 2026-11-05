@@ -23,21 +23,62 @@ test('task deep link opens the exact dialog and restores my assignee after refre
 
 const conversations=[{id:'ig',channel:'INSTAGRAM',unreadCount:0,unreadVersion:0,lastMessageAt:'2026-10-14T12:00:00Z',messages:[]},{id:'fb',channel:'FACEBOOK',unreadCount:0,unreadVersion:0,lastMessageAt:'2026-10-15T12:00:00Z',messages:[]}];
 const contact={id:'client',displayName:'Точный клиент',status:'LEAD',source:'FACEBOOK',preferredChannel:'FACEBOOK',orders:[],conversations,linkedChannels:['FACEBOOK','INSTAGRAM']};
-async function inbox(page:Page){
+async function inbox(page:Page, withNamesake=false){
  const calls:{path:string;query:URLSearchParams;method:string}[]=[];
  await page.route('**/api/**',route=>{
   const request=route.request(),url=new URL(request.url()),path=url.pathname;calls.push({path,query:url.searchParams,method:request.method()});
   if(path==='/api/auth/me')return route.fulfill({json:{user:{id:'me',role:'OWNER',displayName:'QA'}}});
   if(path==='/api/communications/unread-count')return route.fulfill({json:{unreadCount:0}});
-  if(path==='/api/communications')return route.fulfill({json:{items:[contact],total:1,hasMore:false,scopeCounts:{all:1,unread:1,waiting:0},channelCounts:{}}});
+  if(path==='/api/communications')return route.fulfill({json:{items:withNamesake?[{...contact,id:'namesake',conversations:conversations.map(conversation=>({...conversation,id:'namesake-'+conversation.id}))},contact]:[contact],total:withNamesake?2:1,hasMore:false,scopeCounts:{all:1,unread:1,waiting:0},channelCounts:{}}});
   if(path==='/api/communications/client')return route.fulfill({json:url.searchParams.has('channel')?{...conversations.find(c=>c.channel===url.searchParams.get('channel')),clientId:'client',messages:[]}:{messages:[]}});
   return route.fulfill({json:path.includes('templates')?[]:{}});
  });return calls;
 }
-test('Inbox deep link selects the requested conversation channel even when another is newer',async({page})=>{
- await inbox(page);await page.goto('/?section=inbox&clientId=client&conversationId=ig&channel=INSTAGRAM');
+test('Inbox deep link keeps the name filter and opens the exact client and channel after reload',async({page})=>{
+ const calls=await inbox(page,true);
+ await page.goto('/?'+new URLSearchParams({section:'inbox',clientId:'client',clientName:contact.displayName,conversationId:'ig',channel:'INSTAGRAM'}));
+ const search=page.locator('.communications-search-field input');
+ await expect(search).toHaveValue(contact.displayName);
  await expect(page.getByLabel('Канал ответа',{exact:true})).toHaveValue('INSTAGRAM');
- await page.reload();await expect(page.getByLabel('Канал ответа',{exact:true})).toHaveValue('INSTAGRAM');
+ await expect.poll(()=>calls.filter(call=>call.path==='/api/communications').at(-1)?.query.get('search')).toBe(contact.displayName);
+ expect(calls.some(call=>call.path==='/api/communications/namesake')).toBe(false);
+ await page.reload();
+ await expect(search).toHaveValue(contact.displayName);
+ await expect(page.getByLabel('Канал ответа',{exact:true})).toHaveValue('INSTAGRAM');
+});
+
+test('typing a trailing space does not cancel a pending Inbox search',async({page})=>{
+ const calls=await inbox(page);
+ await page.goto('/?section=inbox');
+ const search=page.locator('.communications-search-field input');
+ await expect.poll(()=>calls.some(call=>call.path==='/api/communications')).toBe(true);
+ await search.fill('Анна');
+ await search.press('End');
+ await search.press('Space');
+ await expect(search).toHaveValue('Анна ');
+ await expect.poll(()=>calls.filter(call=>call.path==='/api/communications').at(-1)?.query.get('search')).toBe('Анна');
+});
+
+test('global search starts a fresh Inbox search and browser Back restores the client link',async({page})=>{
+ await inbox(page);
+ await page.route('**/api/tasks/board*', route=>route.fulfill({json:board}));
+ await page.goto('/?'+new URLSearchParams({section:'inbox',clientId:'client',clientName:contact.displayName,conversationId:'ig',channel:'INSTAGRAM'}));
+ const search=page.locator('.communications-search-field input');
+ await expect(search).toHaveValue(contact.displayName);
+ await page.locator('.crm-topbar-nav').getByRole('button',{name:'Задачи',exact:true}).click();
+ await expect(page).toHaveURL(/section=tasks/);
+ await page.locator('.crm-topbar-search input').fill('Другой клиент');
+ await expect(search).toHaveValue('Другой клиент');
+ await expect(page).toHaveURL(/search=/);
+ await page.goBack();
+ await expect(page).toHaveURL(/section=tasks/);
+ await page.goBack();
+ await expect(search).toHaveValue(contact.displayName);
+ await expect(page.getByLabel('Канал ответа',{exact:true})).toHaveValue('INSTAGRAM');
+ await page.goForward();
+ await expect(page).toHaveURL(/section=tasks/);
+ await page.goForward();
+ await expect(search).toHaveValue('Другой клиент');
 });
 
 test('history flush saves edits made while its first draft PUT is pending',async({page})=>{

@@ -15,7 +15,7 @@ import { authUi, navigationUi, releaseHistoryUi, communicationsUi, websiteOrderN
 import { ShippingWorkspace } from "./shipping-workspace";
 import { CommunicationsWorkspace } from "./communications-workspace";
 import { TasksWorkspace } from "./tasks-workspace";
-import { createCrmNavigationHref, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
+import { createCrmNavigationHref, inboxSearchFromLocation, parseCrmSection, type CrmSectionId } from "../lib/crm-sections";
 import { useBranding, type Branding } from "../lib/branding";
 import { CrmSearchField } from "./crm/search-field";
 import { CrmAvatar } from "./crm/avatar";
@@ -37,7 +37,7 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
   const[sectionId,setSectionId]=useState<CrmSectionId>(initialSectionId),[auth,setAuth]=useState<null|false|AuthUser>(null),[authError,setAuthError]=useState(""),[releaseHistoryOpen,setReleaseHistoryOpen]=useState(false);
   const [routeVersion,setRouteVersion]=useState(0);
   const routeSequence=useRef(0),committedRoute=useRef({section:initialSectionId,href:typeof window==="undefined"?"/":`${window.location.pathname}${window.location.search}${window.location.hash}`});
-  const [inboxSearch,setInboxSearch]=useState(""),[inboxUnreadRequest,setInboxUnreadRequest]=useState(0),[unreadCount,setUnreadCount]=useState(0),[unreadState,setUnreadState]=useState<"loading"|"ready"|"unavailable">("loading");
+  const [inboxSearch,setInboxSearch]=useState(() => initialSectionId === "inbox" && typeof window !== "undefined" ? inboxSearchFromLocation(window.location.search) : ""),[inboxUnreadRequest,setInboxUnreadRequest]=useState(0),[unreadCount,setUnreadCount]=useState(0),[unreadState,setUnreadState]=useState<"loading"|"ready"|"unavailable">("loading");
   const [websiteUnreadCount,setWebsiteUnreadCount]=useState(0);
   const authSequence=useRef(0),unreadRequests=useRef(createUnreadRequestGuard()),websiteNoticeRequests=useRef(createUnreadRequestGuard()),shownWebsiteNotices=useRef(new Set<string>()),baseBrowserTitle=useRef("CRM Yoleotard"),inboxBeforeLeave=useRef<null|(()=>Promise<boolean>)>(null);
   const unreadPolling=useRef<ReturnType<typeof createVisibilityPolling>|null>(null),websitePolling=useRef<ReturnType<typeof createVisibilityPolling>|null>(null);
@@ -70,7 +70,9 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
     if(sequence!==routeSequence.current)return;
     const href=createCrmNavigationHref(next,window.location.search,context);
     beforeFinanceNavigation(sectionId,next);
-    window.history.pushState(null,"",href);committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
+    window.history.pushState(null,"",href);
+    if(next==="inbox")setInboxSearch(inboxSearchFromLocation(window.location.search));
+    committedRoute.current={section:next,href};setSectionId(next);setRouteVersion(value=>value+1);
   };
   const reviewWebsiteNotice=async(orderId:string)=>{
     websiteNoticeRequests.current.invalidate();
@@ -113,7 +115,8 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
   },[authenticated,unreadAllowed,authUserId,authRole]);
   useEffect(()=>{
     const sync=()=>{
-      const href=`${window.location.pathname}${window.location.search}${window.location.hash}`,next=parseCrmSection(new URLSearchParams(window.location.search).get("section")||undefined),sequence=++routeSequence.current,previous=committedRoute.current;
+      const search=window.location.search;
+      const href=`${window.location.pathname}${search}${window.location.hash}`,next=parseCrmSection(new URLSearchParams(search).get("section")||undefined),sequence=++routeSequence.current,previous=committedRoute.current;
       void(async()=>{
         if(previous.section==="inbox"&&inboxBeforeLeave.current){
           let saved=false;try{saved=await inboxBeforeLeave.current()}catch{/* A failed save must not discard the current composer. */}
@@ -122,6 +125,7 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
         }
         if(sequence!==routeSequence.current)return;
         beforeFinanceNavigation(previous.section,next);
+        if(next==="inbox")setInboxSearch(inboxSearchFromLocation(search));
         committedRoute.current={section:next,href};setSectionId(next);
         if(previous.section!=="overview"||next!=="overview")setRouteVersion(value=>value+1);
       })();
@@ -131,7 +135,10 @@ export function CrmShell({initialSectionId="overview"}:{initialSectionId?:CrmSec
   const section=items.find(([id])=>id===sectionId)?.[1]||navigationUi.clients;
   if(auth===null)return <main className="phase2-loading">{authError?<div className="phase2-error" role="alert">{authError}<button type="button" onClick={()=>void verifyAuth()}>{authUi.retry}</button></div>:<CrmLoadingState label={authUi.loading}/>}</main>;
   if(auth===false)return <CrmLogin onSuccess={user=>{authSequence.current++;applyAuth(user,true);setAuthError("")}}/>;
-  const updateGlobalSearch=(value:string)=>{setInboxSearch(value);if(sectionId!=="inbox")navigate("inbox")};
+  const updateGlobalSearch=(value:string)=>{
+    if(sectionId==="inbox")setInboxSearch(value);
+    else void navigate("inbox",{search:value});
+  };
   const showUnread=()=>{if(sectionId!=="inbox")navigate("inbox");setInboxUnreadRequest(value=>value+1)};
   const adjustUnreadCount=(delta:number)=>{unreadRequests.current.invalidate();setUnreadCount(current=>Math.max(0,current+delta))};
   const logout=async()=>{invalidateFinanceRequests();authSequence.current++;try{const r=await fetch("/api/auth/logout",{method:"POST",credentials:"include"});if(!r.ok)throw new Error();authSequence.current++;applyAuth(false);setAuthError("")}catch{setAuthError(authUi.logoutError)}};

@@ -29,7 +29,7 @@ import { inboxDraftNeedsSave, inboxMessageTimestamp, prepareInboxMessages, resto
 import { CrmSearchField } from "./crm/search-field";
 import { CrmActionIcon, CrmButton, CrmNativeSelect } from "./crm/settings-controls";
 import { CrmMenu } from "./crm/menu";
-import { createInboxClientContext } from "../lib/crm-sections";
+import { createInboxClientContext, inboxSearchFromLocation } from "../lib/crm-sections";
 type Order = {
   id: string;
   number: string;
@@ -292,7 +292,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [reactionPickerMessageId,setReactionPickerMessageId]=useState<string>(),
     [deleteTarget,setDeleteTarget]=useState<Message>(),
     [deleteBusy,setDeleteBusy]=useState(false),
-    [search, setSearch] = useState(()=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get("clientName")||""),
+    [search, setSearch] = useState(()=>searchQuery ?? (typeof window==="undefined"?"":inboxSearchFromLocation(window.location.search))),
     [socialFilters,setSocialFilters]=useState<SocialChannel[]>([]),
     [orderScope,setOrderScope]=useState<OrderScope>(),
     [conversationScope,setConversationScope]=useState<ConversationScope>(()=>{const scope=typeof window!=="undefined"?new URLSearchParams(window.location.search).get("conversationScope"):null;return scope&&["UNREAD","WAITING","CLIENTS"].includes(scope)?scope as ConversationScope:"ALL"}),
@@ -354,7 +354,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     listRequestSequence = useRef(0),
     refreshRequestSequence = useRef(0),
     skipNextFilterReload=useRef(false),
-    filterReloadReady=useRef(false),
+    lastFilterScope=useRef<string | undefined>(undefined),
     listLoading = useRef(false),
     clientListViewport=useRef<HTMLDivElement|null>(null),
     clientListSentinel=useRef<HTMLDivElement|null>(null),
@@ -592,7 +592,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   function openClientFromInbox(){
     if(!client)return;
     const conversation=client.conversations.find(item=>item.channel===activeChannel);
-    void navigateFromInbox("clients",createInboxClientContext(window.location.search,client.id,conversation?.id,conversation?.channel));
+    void navigateFromInbox("clients",createInboxClientContext(window.location.search,client.id,conversation?.id,conversation?.channel,client.displayName));
   }
   async function changeReplyChannel(nextChannel:string){
     if(nextChannel===activeChannel)return;
@@ -1095,12 +1095,15 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))void appendClientPage()},{root,rootMargin:"0px 0px 80px 0px"});
     observer.observe(target);return()=>observer.disconnect();
   },[loading,clientsAppending,clientsAppendError,clientsHasMore,clients.length,search,socialFilters,orderScope,conversationScope,spamScope,mobileClientListOpen]);
+  const filterScope=clientScopeKey(search,socialFilters,orderScope,conversationScope,spamScope);
   useEffect(()=>{
-    if(!filterReloadReady.current){filterReloadReady.current=true;return}
+    const scope=filterScope;
+    const previousScope=lastFilterScope.current;
+    lastFilterScope.current=scope;
+    if(previousScope===undefined||previousScope===scope)return;
     if(skipNextFilterReload.current){skipNextFilterReload.current=false;return}
     listRequestSequence.current++;refreshRequestSequence.current++;
     let cancelled=false;
-    const scope=clientScopeKey();
     const timer=setTimeout(()=>{void(async()=>{
       if(!await flushComposerDraftBeforeNavigation())return;
       if(cancelled||scope!==clientScopeKey())return;
@@ -1111,7 +1114,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       await loadClients(undefined,15,search,socialFilters,orderScope,conversationScope);
     })()},250);
     return()=>{cancelled=true;clearTimeout(timer)};
-  },[search,socialFilters,orderScope,conversationScope,spamScope]);
+  },[filterScope]);
   function resize(side: Side, e: PointerEvent<HTMLDivElement>) {
     const h = e.currentTarget,
       start = e.clientX,

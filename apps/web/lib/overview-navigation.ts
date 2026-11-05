@@ -11,7 +11,7 @@ export const overviewTargets={
  tasks:(taskId?:string):OverviewTarget=>({section:'tasks',context:{assignee:'me',...(taskId?{taskId}:{})}}),
  shipment:(orderId:string,shipmentId?:string|null):OverviewTarget=>({section:'orders',context:{orderId,tab:'delivery',...(shipmentId?{shipmentId}:{})}}),
  shipping:(days?:number):OverviewTarget=>({section:'shipping',context:{filter:'upcoming',...(days?{horizon:String(days)}:{})}}),
- message:(clientId:string,conversationId:string,channel:string):OverviewTarget=>({section:'inbox',context:{clientId,conversationId,channel}}),
+ message:(clientId:string,conversationId:string,channel:string,clientName:string):OverviewTarget=>({section:'inbox',context:{clientId,clientName,conversationId,channel}}),
  unread:():OverviewTarget=>({section:'inbox',context:{conversationScope:'UNREAD'}}),
  order:(orderId:string):OverviewTarget=>({section:'orders',context:{orderId}}),
 };

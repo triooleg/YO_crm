@@ -6,10 +6,10 @@ import {orderInitialTab,shipmentContextId} from '../lib/order-context.ts';
 import {readFileSync} from 'node:fs';
 test('new start page and exact target links survive reload without leaking stale context',()=>{
  assert.equal(parseCrmSection(undefined),'overview');
- const target=overviewTargets.message('c','dialog','INSTAGRAM');
+ const target=overviewTargets.message('c','dialog','INSTAGRAM','Ирина + Анна');
  const href=createCrmNavigationHref(target.section,'?section=orders&orderId=old&tab=finance&period=2026-10&theme=light',target.context);
  const p=new URL(href,'https://crm.test').searchParams;
- assert.equal(p.get('section'),'inbox');assert.equal(p.get('clientId'),'c');assert.equal(p.get('conversationId'),'dialog');assert.equal(p.get('channel'),'INSTAGRAM');
+ assert.equal(p.get('section'),'inbox');assert.equal(p.get('clientId'),'c');assert.equal(p.get('conversationId'),'dialog');assert.equal(p.get('channel'),'INSTAGRAM');assert.equal(p.get('clientName'),'Ирина + Анна');
  assert.equal(p.get('orderId'),null);assert.equal(p.get('tab'),null);assert.equal(p.get('period'),null);assert.equal(p.get('theme'),'light');
 });
 test('cash and expense links carry actual month and currency; shipment links select exact parcel without a mutation action',()=>{

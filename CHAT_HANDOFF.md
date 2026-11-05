@@ -1,3 +1,14 @@
+## 2026-11-06 - Inbox client search from CRM links (0.18.1)
+
+Task, Order, Client and Overview links prefill Inbox with the client name.
+The existing client and conversation IDs still determine the exact target.
+The shell restores the filter on reload and browser history traversal.
+Equivalent normalized filters do not cancel or duplicate the initial lookup.
+
+Five browser cases passed with simulated data, covering a namesake, reload,
+Clients round trip, global search and browser history, and unread filters.
+The release contains no provider or database changes.
+
 ## 2026-11-05 - Invoice heading typography and totals 0.18.0
 
 Installed from application commit `9ca7598074050aaa3af2398f5ba58ba33cf84f8a`
