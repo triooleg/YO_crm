@@ -292,9 +292,54 @@ test('preview uses order deliveryEmail before profile email and has no sending o
   assert.equal(preview.emailRecipient, 'order@example.test');
   assert.equal(preview.emailRequiresConfirmation, false);
   assert.equal(preview.orderNumber, 'YO-100');
-  assert.match(preview.content, /https:\/\/novaposhtaglobal\.ua\/track\/\?Tracking_ID=PC0000020000072054NPG/);
+  const url = 'https://nova.global/track/?Tracking_ID=PC0000020000072054NPG';
+  assert.equal(preview.trackingUrl, url);
+  assert.ok(preview.content.includes(url));
   assert.equal(preview.subject, 'Your Yoleotard order YO-100 has been shipped');
   assert.equal(h.calls.length + h.state.notifications.length + h.state.activities.length + h.state.audits.length, 0);
+});
+
+test('new preview and message canonicalize a verified legacy URL without changing stored tracking', async () => {
+  const h = fixture(), parcel = h.state.parcels[0];
+  const legacy = `https://novaposhtaglobal.ua/track/?Tracking_ID=${parcel.trackingNumber}`;
+  const canonical = `https://nova.global/track/?Tracking_ID=${parcel.trackingNumber}`;
+  parcel.trackingUrl = legacy;
+  const preview = await h.service.preview(selection, actor);
+  assert.equal(preview.trackingUrl, canonical);
+  assert.ok(preview.content.includes(canonical));
+  assert.equal(parcel.trackingUrl, legacy);
+  assert.equal(h.calls.length + h.state.notifications.length, 0);
+  const notification = await h.service.send(await h.input(), actor);
+  assert.equal(notification.trackingUrl, canonical);
+  assert.equal(notification.content, preview.content);
+  assert.equal(h.calls.length, 2);
+  for (const call of h.calls) assert.equal(call.input.content, preview.content);
+  assert.equal(parcel.trackingUrl, legacy);
+});
+
+test('confirmed legacy notification retains its preview and replay link', async () => {
+  const h = fixture(), parcel = h.state.parcels[0];
+  const legacy = `https://novaposhtaglobal.ua/track/?Tracking_ID=${parcel.trackingNumber}`;
+  const canonical = `https://nova.global/track/?Tracking_ID=${parcel.trackingNumber}`;
+  parcel.trackingUrl = legacy;
+  const input = await h.input();
+  const first = await h.service.send(input, actor);
+  // Represent a confirmation created before the canonical route changed.
+  const stored = h.state.notifications[0];
+  stored.trackingUrl = legacy;
+  stored.content = stored.content.replace(canonical, legacy);
+  const frozen = copy(stored);
+  const calls = h.calls.length;
+  const preview = await h.service.preview(selection, actor);
+  assert.equal(preview.trackingUrl, legacy);
+  assert.equal(preview.content, stored.content);
+  const replay = await h.service.send({...input, ...preview}, actor);
+  assert.equal(replay.id, first.id);
+  assert.equal(replay.trackingUrl, legacy);
+  assert.equal(replay.content, frozen.content);
+  assert.deepEqual(h.state.notifications[0], frozen);
+  assert.equal(h.calls.length, calls);
+  assert.equal(parcel.trackingUrl, legacy);
 });
 
 test('profile email fallback needs explicit confirmation and failed confirmation rolls back the whole operation', async () => {

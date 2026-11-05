@@ -1,8 +1,10 @@
 // Official carrier routes, verified 2026-10-27. Conservative supported subsets;
 // a rejected format must be verified manually, never guessed from its number.
+const novaGlobalLink = (number: string) => `https://nova.global/track/?Tracking_ID=${encodeURIComponent(number)}`;
+
 const rules: Record<string, { pattern: RegExp; build: (number: string) => string }> = {
   NOVA_POSHTA: { pattern: /^(?:\d{14}|PC\d+NPG)$/, build: n => /^PC\d+NPG$/.test(n) ? `https://nova.global/ua-ua/track/?Tracking_ID=${n}` : `https://tracking.novaposhta.ua/#/uk/${n}` },
-  NOVA_GLOBAL: { pattern: /^[A-Za-z0-9]{1,40}$/, build: n => `https://novaposhtaglobal.ua/track/?Tracking_ID=${n}` },
+  NOVA_GLOBAL: { pattern: /^[A-Za-z0-9]{1,40}$/, build: novaGlobalLink },
   UKRPOSHTA: { pattern: /^(?:\d{13}|[RLCVESBN][A-Z]\d{9}[A-Z]{2})$/, build: n => `https://track.ukrposhta.ua/?barcode=${n}` },
   DHL: { pattern: /^[A-Za-z0-9][A-Za-z0-9-]{4,119}$/, build: n => `https://www.dhl.com/us-en/home/tracking.html?submit=1&tracking-id=${n}` },
   UPS: { pattern: /^(?:1Z[A-Z0-9]{16}|\d{12}|T\d{10}|\d{9})$/, build: n => `https://www.ups.com/track?loc=en_US&tracknum=${n}` },
@@ -36,7 +38,12 @@ export function trackingLanguageOptions(parcel: {carrier:string;trackingNumber?:
 export function trackingLink(parcel: {carrier: string; trackingNumber?: string | null; trackingUrl?: string | null}): string | undefined {
   const number = parcel.trackingNumber?.trim();
   if (!number) return;
-  if (parcel.trackingUrl) return validTrackingLink(parcel.carrier,number,parcel.trackingUrl) ? parcel.trackingUrl : undefined;
+  if (parcel.trackingUrl) {
+    if (!validTrackingLink(parcel.carrier, number, parcel.trackingUrl)) return;
+    return new URL(parcel.trackingUrl).hostname === 'novaposhtaglobal.ua'
+      ? novaGlobalLink(number)
+      : parcel.trackingUrl;
+  }
   const rule = rules[parcel.carrier];
   return rule?.pattern.test(number) ? rule.build(number) : undefined;
 }

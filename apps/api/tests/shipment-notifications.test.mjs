@@ -9,7 +9,11 @@ const exports = {}; vm.runInNewContext(code,{exports,URL});
 const { trackingLink, validTrackingLink } = exports;
 test('official parcel-bound tracking links preserve number and reject hostile or mismatched URLs',()=>{
  const n='PC0000020000072054NPG';
- assert.equal(trackingLink({carrier:'NOVA_GLOBAL',trackingNumber:n}),`https://novaposhtaglobal.ua/track/?Tracking_ID=${n}`);
+ const canonical=`https://nova.global/track/?Tracking_ID=${n}`;
+ assert.equal(trackingLink({carrier:'NOVA_GLOBAL',trackingNumber:n}),canonical);
+ assert.equal(trackingLink({carrier:'NOVA_GLOBAL',trackingNumber:n,trackingUrl:`https://novaposhtaglobal.ua/track/?Tracking_ID=${n}`}),canonical);
+ const localized=`https://nova.global/en-ua/track/?Tracking_ID=${n}`;
+ assert.equal(trackingLink({carrier:'NOVA_GLOBAL',trackingNumber:n,trackingUrl:localized}),localized);
  assert.equal(trackingLink({carrier:'UPS',trackingNumber:'1Z999AA10123456784'}),'https://www.ups.com/track?loc=en_US&tracknum=1Z999AA10123456784');
  for(const url of ['http://novaposhtaglobal.ua/track/?Tracking_ID='+n,'https://novaposhtaglobal.ua.evil.test/track/?Tracking_ID='+n,'https://novaposhtaglobal.ua@evil.test/'+n,'https://novaposhtaglobal.ua/track/?Tracking_ID=wrong','https://novaposhtaglobal.ua/track/?Tracking_ID='+n+'&redirect=https://evil.test']) assert.equal(validTrackingLink('NOVA_GLOBAL',n,url),false,url);
  assert.equal(trackingLink({carrier:'NOVA_GLOBAL',trackingNumber:n,trackingUrl:'https://evil.test/'+n}),undefined,'invalid saved URL cannot silently fall back');

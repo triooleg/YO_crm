@@ -16,7 +16,7 @@ test('shipment notification action: selection, fallback, partial retry, uncertai
   const webpack = require('next/dist/compiled/webpack/webpack').webpack;
   await new Promise((ok, fail) => webpack({ mode:'development',devtool:false,entry:resolve(out,'entry.tsx'),output:{path:out,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[resolve(web,'node_modules'),'node_modules']},module:{rules:[{test:/\.tsx?$/,use:resolve(out,'loader.cjs')}] }}, (err,stats) => err || stats.hasErrors() ? fail(err ?? Error(stats.toString({all:false,errors:true}))) : ok()));
   const css=Buffer.concat(await Promise.all([readFile(require.resolve('@mantine/core/styles.css')), ...['app/styles.css','app/mantine-overrides.css'].map(path=>readFile(resolve(web,path)))]));
-  const parcel={id:'s1',carrier:'UPS',trackingNumber:'SYNTHETIC-123',trackingUrl:'https://www.ups.com/track?tracknum=SYNTHETIC-123',trackingRevision:1};
+  const parcel={id:'s1',carrier:'NOVA_GLOBAL',trackingNumber:'SYNTHETIC123',trackingUrl:'https://nova.global/track/?Tracking_ID=SYNTHETIC123',trackingRevision:1};
   const options={orders:[{id:'o1',number:'YO-101',shipments:[parcel]}],chat:{available:true},email:{available:true,recipient:'synthetic@example.test',requiresConfirmation:true},languages:[{value:'en',label:'Английский'},{value:'ru',label:'Русский'}]};
   const preview={...parcel,scopeToken:'synthetic-scope',orderId:'o1',orderNumber:'YO-101',shipmentId:'s1',language:'en',content:'Your order has been shipped! 📦\n\nYou can track your package using the link below:\n\n'+parcel.trackingUrl+'\n\nThank you for choosing Yoleotard! ❤️',subject:'Your Yoleotard order YO-101 has been shipped',emailRecipient:'synthetic@example.test',emailRequiresConfirmation:true,chatAvailable:true,emailAvailable:true};
   const posts=[],errors=[],requests=[];let mode='normal',previous,sendCount=0;
@@ -52,6 +52,8 @@ test('shipment notification action: selection, fallback, partial retry, uncertai
   mode='normal';await page.goto(base);
   try { await action().click({timeout:10000}); } catch(error) { console.error({requests,errors,html:await page.locator('body').innerText()});await page.screenshot({path:resolve(out,'debug.png')});throw error; }
   await expect(page.getByLabel('Текст уведомления')).toBeVisible();await expect(page.getByRole('button',{name:'Отправить уведомление',exact:true})).toBeDisabled();
+  await expect(page.getByRole('link',{name:'Ссылка отслеживания'})).toHaveAttribute('href',parcel.trackingUrl);
+  await expect(page.getByLabel('Текст уведомления')).toHaveValue(preview.content);
   for(const [width,height] of [[1920,1080],[1366,768],[390,844]]){
     await page.setViewportSize({width,height});await page.screenshot({path:resolve(out,`preview-${width}.png`),fullPage:true});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

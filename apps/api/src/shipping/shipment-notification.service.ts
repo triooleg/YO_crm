@@ -87,8 +87,12 @@ export class ShipmentNotificationService {
   private async projection(input:ShipmentNotificationPreviewDto,db:Db=this.p) {
     const cap = await this.capabilities(input,db);
     const shipment = await db.orderShipment.findFirst({where:{id:input.shipmentId,orderId:input.orderId,archivedAt:null,order:{clientId:input.clientId,archivedAt:null}},include:{order:{select:{number:true,deliveryEmail:true}}}});
-    const url=shipment && trackingLink(shipment);
-    if (!shipment || !url || !shipment.trackingNumber) throw new BadRequestException('Выберите активную посылку с проверенной ссылкой отслеживания');
+    const currentUrl=shipment && trackingLink(shipment);
+    if (!shipment || !currentUrl || !shipment.trackingNumber) throw new BadRequestException('Выберите активную посылку с проверенной ссылкой отслеживания');
+    const previous=await db.shipmentNotification.findUnique({where:{shipmentId_trackingRevision:{shipmentId:shipment.id,trackingRevision:shipment.trackingRevision}},include:{deliveries:true}});
+    // Preserve the confirmed URL and scope token when only the generated route changed.
+    const url=previous && trackingLink({...shipment,trackingUrl:previous.trackingUrl})===currentUrl
+      ? previous.trackingUrl : currentUrl;
     const templates=await this.templates(db), requested=normalizeClientLanguageCode(input.language)||normalizeClientLanguageCode(cap.client.language)||'en';
     const template = templates.find(t=>t.language===requested && (!t.channel||t.channel===cap.conversation?.channel)) || (!defaults[requested] ? templates.find(t=>t.language==='en' && !t.channel) : undefined);
     const language=template?.language || (defaults[requested]?requested:'en');
@@ -97,14 +101,14 @@ export class ShipmentNotificationService {
     const recipient=emailAddress(shipment.order.deliveryEmail)||emailAddress(cap.client.email);
     const emailRequiresConfirmation=!emailAddress(shipment.order.deliveryEmail) && !!recipient;
     const scopeToken=createHash('sha256').update(JSON.stringify({clientId:input.clientId,orderId:input.orderId,shipmentId:shipment.id,revision:shipment.trackingRevision,url,recipient,emailRequiresConfirmation,language,emailAccountIdentity:cap.emailAccountIdentity,conversation:cap.conversation&&[cap.conversation.id,cap.conversation.externalId,cap.conversation.channel],settings:cap.settingsVersion,template:template&&[template.id,template.updatedAt.toISOString()]})).digest('hex');
-    return {...cap,shipment,scopeToken,language,content,subject:trackingSubject(language,shipment.order.number),emailRecipient:recipient,emailRequiresConfirmation};
+    return {...cap,shipment,previous,trackingUrl:url,scopeToken,language,content,subject:trackingSubject(language,shipment.order.number),emailRecipient:recipient,emailRequiresConfirmation};
   }
   async preview(input:ShipmentNotificationPreviewDto,actor:User) {
     this.authorize(actor);
     const p=await this.projection(input);
-    const previous=await this.p.shipmentNotification.findUnique({where:{shipmentId_trackingRevision:{shipmentId:p.shipment.id,trackingRevision:p.shipment.trackingRevision}},include:{deliveries:true}});
+    const {previous}=p;
     if (previous) await this.refresh(previous.id,actor);
-    return {scopeToken:p.scopeToken,orderId:input.orderId,orderNumber:p.shipment.order.number,shipmentId:p.shipment.id,carrier:p.shipment.carrier,trackingNumber:p.shipment.trackingNumber,trackingUrl:trackingLink(p.shipment),trackingRevision:p.shipment.trackingRevision,language:previous?.language||p.language,content:previous?.content||p.content,subject:previous?.subject||p.subject,emailRecipient:p.emailRecipient,emailRequiresConfirmation:p.emailRequiresConfirmation,chatAvailable:p.chatAvailable,emailAvailable:p.emailAvailable&&!!p.emailRecipient,chatReason:p.chatReason,emailReason:p.emailRecipient?p.emailReason:'Email получателя не указан. Можно отправить только в чат',previous:previous?await this.p.shipmentNotification.findUnique({where:{id:previous.id},include:{deliveries:true}}):undefined};
+    return {scopeToken:p.scopeToken,orderId:input.orderId,orderNumber:p.shipment.order.number,shipmentId:p.shipment.id,carrier:p.shipment.carrier,trackingNumber:p.shipment.trackingNumber,trackingUrl:p.trackingUrl,trackingRevision:p.shipment.trackingRevision,language:previous?.language||p.language,content:previous?.content||p.content,subject:previous?.subject||p.subject,emailRecipient:p.emailRecipient,emailRequiresConfirmation:p.emailRequiresConfirmation,chatAvailable:p.chatAvailable,emailAvailable:p.emailAvailable&&!!p.emailRecipient,chatReason:p.chatReason,emailReason:p.emailRecipient?p.emailReason:'Email получателя не указан. Можно отправить только в чат',previous:previous?await this.p.shipmentNotification.findUnique({where:{id:previous.id},include:{deliveries:true}}):undefined};
   }
   private async history(db:Db, input:ShipmentNotification,actor:User,type:string,metadata:Prisma.InputJsonObject) {
     const snapshot = {notificationId:input.id,orderId:input.orderId,shipmentId:input.shipmentId,conversationId:input.conversationId,carrier:input.carrier,trackingNumber:input.trackingNumber,trackingUrl:input.trackingUrl,content:input.content,subject:input.subject,language:input.language,...metadata};
@@ -117,17 +121,16 @@ export class ShipmentNotificationService {
     if (!input.content.trim() || !input.subject.trim() || /[\r\n]/.test(input.subject)) throw new BadRequestException('Проверьте текст уведомления и тему письма');
     const projected=await this.projection(input);
     if (input.scopeToken!==projected.scopeToken) throw new ConflictException('Данные изменились. Откройте предпросмотр заново');
-    if (!input.content.includes(trackingLink(projected.shipment)!)) throw new BadRequestException('В тексте должна остаться полная ссылка выбранной посылки');
-    const prior=await this.p.shipmentNotification.findUnique({where:{shipmentId_trackingRevision:{shipmentId:input.shipmentId,trackingRevision:projected.shipment.trackingRevision}}});
-    if (prior) await this.refresh(prior.id,actor);
+    if (!input.content.includes(projected.trackingUrl)) throw new BadRequestException('В тексте должна остаться полная ссылка выбранной посылки');
+    if (projected.previous) await this.refresh(projected.previous.id,actor);
     const id = await this.p.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'shipment-notification:'+input.shipmentId},0))`;
       await tx.$queryRaw`SELECT "id" FROM "OrderShipment" WHERE "id"=${input.shipmentId} FOR UPDATE`;
       const p=await this.projection(input,tx);
       if (p.scopeToken!==input.scopeToken) throw new ConflictException('Данные посылки или получателя изменились');
-      let notification=await tx.shipmentNotification.findUnique({where:{shipmentId_trackingRevision:{shipmentId:input.shipmentId,trackingRevision:p.shipment.trackingRevision}},include:{deliveries:true}});
+      let notification=p.previous;
       if (notification && (notification.content!==input.content || notification.subject!==input.subject || notification.language!==p.language || notification.conversationId!==(p.conversation?.id||null) || notification.conversationExternalId!==(p.conversation?.externalId||null))) throw new ConflictException('Уведомление уже подтверждено. Используйте сохранённый текст и исходную переписку');
-      if (!notification) notification=await tx.shipmentNotification.create({data:{shipmentId:input.shipmentId,orderId:input.orderId,clientId:input.clientId,conversationId:p.conversation?.id,conversationExternalId:p.conversation?.externalId,conversationChannel:p.conversation?.channel,trackingRevision:p.shipment.trackingRevision,trackingNumber:p.shipment.trackingNumber!,trackingUrl:trackingLink(p.shipment)!,carrier:p.shipment.carrier,language:p.language,content:input.content,subject:input.subject,actorId:actor.id},include:{deliveries:true}});
+      if (!notification) notification=await tx.shipmentNotification.create({data:{shipmentId:input.shipmentId,orderId:input.orderId,clientId:input.clientId,conversationId:p.conversation?.id,conversationExternalId:p.conversation?.externalId,conversationChannel:p.conversation?.channel,trackingRevision:p.shipment.trackingRevision,trackingNumber:p.shipment.trackingNumber!,trackingUrl:p.trackingUrl,carrier:p.shipment.carrier,language:p.language,content:input.content,subject:input.subject,actorId:actor.id},include:{deliveries:true}});
       for (const channel of ['CHAT','EMAIL'] as const) {
         if (!(channel==='CHAT'?input.sendChat:input.sendEmail)) continue;
         const existing=notification.deliveries.find(d=>d.channel===channel);

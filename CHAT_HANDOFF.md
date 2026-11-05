@@ -1,3 +1,10 @@
+## 2026-11-05 - Nova Global notification tracking links
+
+New Nova Global previews and messages use `https://nova.global/track/?Tracking_ID=<number>`.
+Verified legacy URLs resolve to the canonical route at read time, with no data migration.
+Saved localized links, confirmed notification snapshots and replay scope remain intact.
+The order delivery links use the same official domain. Owner authorized deployment after checks.
+
 ## 2026-11-05 - Compact invoice layout and template typography 0.16.0
 
 New invoice PDFs and previews use smaller margins, align customer contact
