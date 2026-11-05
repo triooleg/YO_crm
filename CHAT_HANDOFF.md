@@ -1,3 +1,32 @@
+## 2026-11-05 - Delivery and invoice contact formatting 0.17.1
+
+Delivery keeps one Add parcel action in the header. New invoice HTML and PDF
+show customer email and phone without default labels, preserving explicit
+template overrides and stored invoice artifacts. No migrations.
+
+Installed from application commit `46ba17ad322568d14790341d165a67016c43d4c1`
+and source snapshot `146f328d5df847da9e7854e750d1cba3874e065c6e7aac94405304e26786a145`.
+The homepage and API health returned HTTP 200. In the browser, the brand and
+first release journal entry showed 0.17.1, Delivery had one Add parcel button
+beside Send tracking number, and the read-only invoice template preview showed
+both contact values without the default labels. Nothing was saved or sent.
+
+Quality gate passed with 3322 tests and 111 conditional skips, including
+typecheck and build. The four Finance browser failures reproduced on 0.17.0
+and were fixed in the test selectors and fixture. All nine shipment-expense
+scenarios passed. The DATA backup and isolated restore drill passed.
+Retention verified two ordinary source sets, two rollback sets, two protected
+service archives, and five API and five web images.
+
+Installed proof `98339949fb2f9137edd312a641c96b8d9f18fdb82284046283b75c149cbec969`
+and closure `7319fd0887b85111d2e148ae9d96d6d4716f5e349f7e055c96a5356b71be0b99`
+are recorded in the private invoice-template release worktree under
+`.local/deploy-v0171/cutover-v4`.
+
+Version Guardian and Release Gatekeeper accepted the installed release.
+The current-release pointer was verified and provenance recorded as SHA-256
+`2f07bc85ff0f54e6ccb49803dd3179ab8ca2daddbfa49ef924daa3be384d4876`.
+
 ## 2026-11-05 - Shipment notifications from Order Delivery
 
 The Delivery tab offers the shared Inbox shipment-notification dialog beside
