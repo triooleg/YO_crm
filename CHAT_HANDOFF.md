@@ -1,3 +1,36 @@
+## 2026-11-05 - Invoice template editing 0.15.1 installed and verified
+
+Owner-authorized narrow release is installed at https://crm.yoleotard.com/.
+Frozen application source commit929da7e3ed5bd234ca8b2037007c1b04579db52f,
+snapshotfd672e07c5b8823967c51ac2ef5bd36b58549994923f7c25aaca489cd7d76756;
+API2b6a951153b7/webf84a1b5b1491. Four services healthy; PostgreSQL/Redis and
+schema54 preserved. No migrations or financial formula changes. Consistent DATA
+backup and isolated official restore/cleanup PASS; production RTO not claimed.
+Quality3311PASS/111conditionalSKIP/0FAIL, types/builds and browser test PASS.
+Actual installed CUA verified four editable builtins, SEPA fields/JSON/save action,
+brand and first journal0.15.1/full snapshot, console errors absent. Closed without
+saving any template. Existing saved invoice/PDF snapshots remain unchanged.
+Native retry03 completed; gate/lease/flocks closed. Installed proof7fbe08e8e63fff2425e78b7384ac2823bdc2404cbc611d073b4142e9f4a12ca8;
+pointerCAS verified, provenance06f5eb6677d58410b51ce0f2f5871b6869415ea4be5b30333425bbdf4713398b.
+Version Guardian and Release Gatekeeper INSTALLED PASS. Application commit929da7e
+was published to main; the v0.15.1 tag and runtime stay pinned to that commit. Main
+may advance with documentation-only acceptance records, which do not change the
+frozen runtime source. Earlier preparation entries are historical.
+
+Standing retention policy: keep at most2 ordinary source archive sets and2 rollback
+sets. Two separately protected service/recovery source archives remain (raw4 total),
+not ordinary release sources; do not delete them without dependency audit. API/web
+image limit remains5 each. Existing retention owner executed narrow cleanup and
+fresh inventory reports2/2, service2, images5/5, no excess. Backups/data/volumes
+untouched. Future deployment preparation must use these limits rather than5 source
+sets. Preserve immutable attempt/receipt evidence and unrelated projects.
+
+The shared-user cron check now pins only the exact CRM backup job and its effective
+environment; other projects' jobs are read-only audit and were never modified.
+Failed retry02 was safely closed by reviewed CRM-only manual recovery and natural
+lease expiry before retry03; no lingering owner/fence. No unfinished hardening was
+deployed or published. Details: docs/release-evidence/invoice-template-editing-deployment-2026-11-05.md.
+
 ## 2026-11-05 - Invoice template editing release 0.15.1 preparation
 
 Owner authorized deployment and standing GitHub source publication. Clean release
