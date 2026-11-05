@@ -1,17 +1,30 @@
-## Local follow-up to 0.17.1 - Invoice headings and shipping
+## 2026-11-05 - Invoice heading typography and totals 0.18.0
 
-New invoice templates can set a section heading's weight independently of
-the section body. Inheritance remains the default. Both HTML and PDF honor
-the override. New English invoices default to Bill To / Customer. A selected
-customer country appears without the default label; explicit labels still
-work. Shipping appears once, in totals, with its amount still included in
-the agreed-price reconciliation. Stored invoice artifacts and payment
-calculations are unchanged. No migration.
+Installed from application commit `9ca7598074050aaa3af2398f5ba58ba33cf84f8a`
+and frozen snapshot `d9b40b76425561d5f1e10c123a542a7cddb7ba89f797be13910dba93fbf95e78`.
+Invoice templates now support separate heading weight. New English invoices
+default to Bill To / Customer and show a selected country without its default
+label. Shipping appears once, in totals. Issued artifacts, payment policy,
+agreed order totals, and the database schema are unchanged.
 
-Verification: 36 invoice tests passed, including rendered PDF text and font
-checks; the local invoice-template browser test passed at desktop and 390 px.
-The full quality gate (tests, typecheck, build) passed. Production was not
-changed for this follow-up.
+The quality gate passed (3322 tests, 111 conditional skips), including typecheck
+and builds. The exact staged API invoice probe and isolated DATA restore passed.
+After cutover the homepage and API health returned HTTP 200. The browser showed
+the installed version and first journal entry, the heading control, and a
+read-only 26-668 preview with EUR 25 shipping and EUR 390 total. PDF generation
+succeeded with zero console errors; no business records were written by the
+smoke checks. PostgreSQL and Redis kept their original containers.
+
+Verified retention: two ordinary source sets, two rollback sets, two protected
+service archives, and five images each for API and web. Installed proof
+`0af8c562e80dcf1e3eef2f5e2533cd5c723a427f0828588f37e73cf6d9e3244f`
+and plan `94c1ed450ac54dc28ebef18587087074932a23cc44f03033bbe986a07f61a374`
+are recorded in the private `.local/deploy-v0180` evidence directory.
+
+Version Guardian and Release Gatekeeper accepted the installed release. The
+current-release pointer was verified and provenance recorded as SHA-256
+`dfeeaab3f984d96825aa164fac417726f10f06872b4077346fa91ba92aeecf28`.
+
 
 ## 2026-11-05 - Delivery and invoice contact formatting 0.17.1
 
