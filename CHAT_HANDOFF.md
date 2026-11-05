@@ -7,6 +7,28 @@ independent overrides by section. Ubuntu and Noto Serif fonts and licenses
 are bundled for PDF and print preview. Saved invoice artifacts and calculations are
 preserved. No migration is required. Owner authorized release after checks.
 
+Installed at https://crm.yoleotard.com/ with commit
+20f4a9c4511156ec9721f238df4e8d22af94bdc0 and source snapshot
+4d66de78cc35f1ad017b36698aed8d64fe000ca892c6790dcc6fb44ab300937a.
+API b96addeab5b7 and web 4718b80853a6 match staging. All four services
+healthy. PostgreSQL and Redis identities and schema 54 verified.
+Quality 3315 pass, 111 conditional skips, 0 fail. Typecheck and builds pass.
+Linux operator tests 64/64. Consistent DATA backup and isolated restore
+and cleanup passed. Production RTO was not measured.
+
+Installed proof 6f6419af09c7ceb10a832d34795d4623d47cc830dd48818478b067c4bc7b277e,
+coordination closure 4a9cbd4631df2a8e32da987267e141fe1303099387958c69bd5b0ed79af45c6e.
+Browser verified version and full snapshot, first release journal entry,
+document and section typography controls, and zero console errors. Closed
+without saving a template. Post-cutover retention owner confirmed two ordinary
+source and two rollback sets, two protected service archives, five API and
+five web images, and no excess. Private records are in .local/deploy-v0160-r2/
+(installed-proof.py.result.json, installed-cua-observation.txt,
+publish-closure.py.result.json and retention-installed.py.result.json).
+Version Guardian and Release Gatekeeper installed PASS. Guarded pointer CAS
+verified. Current provenance 1d02652d280fb53736328ab55f5765429ddd26f71b59aced2768ec4d94039b06.
+
+
 ## 2026-11-05 - Invoice template editing 0.15.1 installed and verified
 
 Owner-authorized narrow release is installed at https://crm.yoleotard.com/.
