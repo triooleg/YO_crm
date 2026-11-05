@@ -5,7 +5,13 @@ import { buildOrderDocumentSnapshot, type DocumentTemplateConfig } from "./order
 
 type Order = Parameters<typeof buildOrderDocumentSnapshot>[0];
 export function invoiceTemplateSnapshot(order: Order, config: DocumentTemplateConfig, language: string) {
- const snapshot=buildOrderDocumentSnapshot(order,[...config.fieldKeys,"client.name","client.address","table.items","finance.total","finance.paid","finance.balance"]);
+ const deliveryMinor = order.deliveryMinor ?? 0;
+ const fieldKeys = [...config.fieldKeys];
+ if (deliveryMinor && !fieldKeys.includes("finance.delivery")) {
+   const totalIndex = fieldKeys.indexOf("finance.total");
+   fieldKeys.splice(totalIndex < 0 ? fieldKeys.length : totalIndex, 0, "finance.delivery");
+ }
+ const snapshot=buildOrderDocumentSnapshot(order,[...fieldKeys,"client.name","client.address","table.items","finance.total","finance.paid","finance.balance"]);
  const addresses=String(snapshot.values["client.address"]??"");
  const required=[...new Set(["seller.name","customer.name","order.items.name",...config.requiredFields])];
  const present:Record<string,boolean>={"seller.name":!!config.seller.name.trim(),"seller.address":!!config.seller.address.trim(),"customer.name":!!order.client.displayName.trim(),"customer.address":!!addresses.trim(),"order.items.name":!!order.items?.length&&!order.items.some(item=>!item.name.trim())};
@@ -16,19 +22,19 @@ export function invoiceTemplateSnapshot(order: Order, config: DocumentTemplateCo
  if (config.currency && config.currency !== order.currency) throw new BadRequestException("Валюта шаблона не совпадает с валютой заказа");
  const financial=[order.priceMinor,order.deliveryMinor??0,order.giftWrapMinor??0,order.discountMinor??0,...(order.items??[]).flatMap(item=>[item.priceMinor,item.quantity])];
  if (financial.some(value=>!Number.isSafeInteger(value)) || order.priceMinor < 0 || order.priceMinor > 2147483647 || order.items?.some(item=>item.quantity<1||item.priceMinor<0)) throw new BadRequestException("Некорректная сумма или количество позиций заказа");
- const names:Record<string,string[]>={ru:["Доставка","Подарочная упаковка","Скидка","Корректировка согласованной стоимости"],uk:["Доставка","Подарункова упаковка","Знижка","Коригування погодженої вартості"],en:["Shipping","Gift wrap","Discount","Agreed price adjustment"],fr:["Livraison","Emballage cadeau","Remise","Ajustement du prix convenu"]};
+ const names:Record<string,string[]>={ru:["Подарочная упаковка","Скидка","Корректировка согласованной стоимости"],uk:["Подарункова упаковка","Знижка","Коригування погодженої вартості"],en:["Gift wrap","Discount","Agreed price adjustment"],fr:["Emballage cadeau","Remise","Ajustement du prix convenu"]};
  const labels=names[language]??names.en!;
  const add=(description:string,amountMinor:number)=>{if(amountMinor) snapshot.items.push({description,quantity:1,amountMinor,sku:"",designNumber:null,properties:[]})};
- add(config.labels.shipping??labels[0]!,order.deliveryMinor??0);add(config.labels.giftWrap??labels[1]!,order.giftWrapMinor??0);
+ add(config.labels.giftWrap??labels[0]!,order.giftWrapMinor??0);
  const websiteNet=order.sourceSystem==="YOLEOTARD_WEBSITE";
- if(!websiteNet)add(config.labels.discount??labels[2]!,-(order.discountMinor??0));
+ if(!websiteNet)add(config.labels.discount??labels[1]!,-(order.discountMinor??0));
  const cardFee=websiteOrderCardFee({sourceSystem:order.sourceSystem??null,externalData:order.externalData,priceMinor:order.priceMinor});
  const feeNames:Record<string,string>={ru:"Комиссия за оплату картой",uk:"Комісія за оплату карткою",en:"Card payment fee",fr:"Frais de paiement par carte"};
  if(cardFee)add(config.labels.cardFee??feeNames[language]??feeNames.en!,cardFee);
 
- const lineTotal=snapshot.items.reduce((sum,item)=>sum+item.quantity*item.amountMinor,0);
+ const lineTotal=snapshot.items.reduce((sum,item)=>sum+item.quantity*item.amountMinor,deliveryMinor);
  if(!Number.isSafeInteger(lineTotal))throw new BadRequestException("Сумма позиций превышает допустимое значение");
- add(config.labels.adjustment??labels[3]!,order.priceMinor-lineTotal);
+ add(config.labels.adjustment??labels[2]!,order.priceMinor-lineTotal);
  // Use the payment policy, including signed same-currency corrections. REFUNDED
  // status alone is not a refund ledger and never synthesizes a receipt.
  const paid=(order.payments??[]).reduce((sum,payment)=>sum+appliedPaymentMinor(payment,order.currency),0);
@@ -37,5 +43,5 @@ export function invoiceTemplateSnapshot(order: Order, config: DocumentTemplateCo
  snapshot.values["finance.paid"]={minor:paid,currency:order.currency};
  snapshot.values["finance.balance"]={minor:order.priceMinor-paid,currency:order.currency};
  snapshot.payments=snapshot.payments.map((payment,index)=>({...payment,amountMinor:order.payments![index]!.amountMinor,appliedAmountMinor:order.payments![index]!.appliedAmountMinor??null}));
- return {...snapshot,fieldKeys:[...config.fieldKeys],discountIncludedInItems:websiteNet,immutableInvoice:true};
+ return {...snapshot,fieldKeys,discountIncludedInItems:websiteNet,immutableInvoice:true};
 }

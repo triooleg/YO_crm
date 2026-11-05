@@ -118,7 +118,12 @@ test('invoice template settings: built-in editing, persisted JSON, copies, valid
   await expect(sectionSize).toHaveValue('Как в документе');
   await selectOption('Размер шрифта раздела', '24 пт');
   await selectOption('Шрифт раздела', 'Ubuntu');
+  const headingWeightLabel = 'Начертание заголовка раздела';
+  const headingWeight = page.getByRole('combobox', { name: headingWeightLabel, exact: true });
+  await expect(headingWeight).toHaveValue('Как в тексте раздела');
+  await selectOption(headingWeightLabel, 'Обычное');
   await selectOption('Раздел инвойса', 'Подвал');
+  await expect(headingWeight).toHaveCount(0);
   await expect(sectionSize).toHaveValue('Как в документе');
   await selectOption('Начертание раздела', 'Обычное');
   await selectOption('Раздел инвойса', 'Шапка');
@@ -130,15 +135,17 @@ test('invoice template settings: built-in editing, persisted JSON, copies, valid
   const typographyDraft = JSON.parse(await editor.inputValue());
   assert.deepEqual(typographyDraft.appearance, {
     ...config.appearance, fontSize: 12, fontFamily: 'noto-serif', fontWeight: 'bold',
-    sections: { footer: { fontWeight: 'normal' } },
+    sections: { footer: { fontWeight: 'normal' }, header: { headingWeight: 'normal' } },
   });
   typographyDraft.appearance.sections.footer.fontSize = 17;
   await editor.fill(JSON.stringify(typographyDraft, null, 2));
   await typographyTab.click();
   await selectOption('Раздел инвойса', 'Подвал');
   await expect(sectionSize).toHaveValue('17 пт');
+  await selectOption('Раздел инвойса', 'Шапка');
+  await expect(headingWeight).toHaveValue('Обычное');
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('combobox', { name: 'Начертание раздела', exact: true }).scrollIntoViewIfNeeded();
+  await headingWeight.scrollIntoViewIfNeeded();
   await page.screenshot({ path: resolve(out, 'typography-390.png'), fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.setViewportSize({ width: 1440, height: 1000 });

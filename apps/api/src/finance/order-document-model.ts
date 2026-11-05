@@ -20,6 +20,8 @@ export type DocumentTypography = {
   fontSize: number;
 };
 
+type InvoiceSectionTypography = Partial<DocumentTypography> & { headingWeight?: DocumentTypography["fontWeight"] };
+
 function normalizeTypography(value: unknown, maxSize: number): Partial<DocumentTypography> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const { fontFamily, fontWeight, fontSize } = value as Partial<DocumentTypography>;
@@ -43,7 +45,7 @@ export type DocumentTemplateConfig = {
   revision: number;
   editableMetadata: string[];
   notes: string;
-  appearance: { accentColor: string; mutedColor: string; fontSize: number; logoText: string; sections?: Partial<Record<InvoiceTypographySection, Partial<DocumentTypography>>> } & Partial<DocumentTypography>;
+  appearance: { accentColor: string; mutedColor: string; fontSize: number; logoText: string; sections?: Partial<Record<InvoiceTypographySection, InvoiceSectionTypography>> } & Partial<DocumentTypography>;
   footer: string;
   requiredFields: string[];
   labels: Record<string, string>;
@@ -131,7 +133,10 @@ export function normalizeTemplateConfig(value: unknown, language: unknown = "en"
   const sections = appearance.sections && typeof appearance.sections === "object" ? appearance.sections as Record<string, unknown> : {};
   const typography = normalizeTypography(appearance, 12);
   const sectionStyles = Object.fromEntries(invoiceTypographySections.flatMap(section => {
-    const style = normalizeTypography(sections[section], 24);
+    const raw = sections[section] as InvoiceSectionTypography | undefined;
+    const headingWeight = raw?.headingWeight;
+    const style: InvoiceSectionTypography = normalizeTypography(raw, 24);
+    if (headingWeight && documentFontWeights.includes(headingWeight)) style.headingWeight = headingWeight;
     return Object.keys(style).length ? [[section, style]] : [];
   }));
   return {

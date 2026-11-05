@@ -53,6 +53,7 @@ const fontSizes = (max: number) => Array.from({ length: max - 7 }, (_, index) =>
 const documentSizes = fontSizes(12), sectionSizes = fontSizes(24);
 const families = fontOptions(typography.families), weights = fontOptions(typography.weights);
 const sectionOptions = fontOptions(typography.sections);
+const sectionsWithHeadings = new Set(["header", "seller", "customer", "items", "payments", "paymentDetails", "instructions", "notes"]);
 const inheritOption = { value: "inherit", label: typography.inherit };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -74,7 +75,7 @@ function InvoiceTypography({ config, busy, patchConfig }: {
   const documentFamily = typeof appearance?.fontFamily === "string" ? appearance.fontFamily : "ubuntu";
   const documentWeight = typeof appearance?.fontWeight === "string" ? appearance.fontWeight : "normal";
   const patchAppearance = (patch: Record<string, unknown>) => patchConfig({ appearance: { ...appearance, ...patch } });
-  function setSectionStyle(key: "fontSize" | "fontFamily" | "fontWeight", value: string | null) {
+  function setSectionStyle(key: "fontSize" | "fontFamily" | "fontWeight" | "headingWeight", value: string | null) {
     if (value === null) return;
     const next = { ...override };
     if (value === inheritOption.value) delete next[key];
@@ -105,6 +106,7 @@ function InvoiceTypography({ config, busy, patchConfig }: {
         <Select label={typography.sectionSize} value={typeof override?.fontSize === "number" ? String(override.fontSize) : inheritOption.value} data={[inheritOption, ...sectionSizes]} allowDeselect={false} onChange={value => setSectionStyle("fontSize", value)}/>
         <Select label={typography.sectionFamily} value={typeof override?.fontFamily === "string" ? override.fontFamily : inheritOption.value} data={[inheritOption, ...families]} allowDeselect={false} onChange={value => setSectionStyle("fontFamily", value)}/>
         <Select label={typography.sectionWeight} value={typeof override?.fontWeight === "string" ? override.fontWeight : inheritOption.value} data={[inheritOption, ...weights]} allowDeselect={false} onChange={value => setSectionStyle("fontWeight", value)}/>
+        {sectionsWithHeadings.has(section) && <Select label={typography.sectionHeadingWeight} value={typeof override?.headingWeight === "string" ? override.headingWeight : inheritOption.value} data={[{ ...inheritOption, label: typography.inheritHeadingWeight }, ...weights]} allowDeselect={false} onChange={value => setSectionStyle("headingWeight", value)}/>}
       </SimpleGrid>
     </fieldset>
   </Stack>;

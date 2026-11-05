@@ -127,9 +127,14 @@ function interpolateDocumentText(value: string, source: DocumentSource, view: Re
 // layout above. All content is text from structured JSON, never executable HTML.
 type InvoiceView = ReturnType<typeof orderDocumentPdfStrings>;
 
-function invoiceTypography(view: InvoiceView, section?: InvoiceTypographySection): DocumentTypography {
+function invoiceTypography(view: InvoiceView, section?: InvoiceTypographySection, heading = false): DocumentTypography {
   const { fontFamily = "ubuntu", fontWeight = "normal", fontSize, sections } = view.template.appearance;
-  return { fontFamily, fontWeight, fontSize, ...(section ? sections?.[section] : undefined) };
+  const override = section ? sections?.[section] : undefined;
+  return {
+    fontFamily: override?.fontFamily ?? fontFamily,
+    fontSize: override?.fontSize ?? fontSize,
+    fontWeight: (heading ? override?.headingWeight : undefined) ?? override?.fontWeight ?? fontWeight,
+  };
 }
 
 function invoiceFontAsset(style: DocumentTypography) {
@@ -165,7 +170,7 @@ function invoiceParties(view: InvoiceView) {
     && !["client.name", "client.address"].includes(field.key));
   const contactLines = contacts.map(field => {
     const customLabel = template.labels[field.key];
-    if (customLabel === undefined && (field.key === "client.email" || field.key === "client.phone")) return field.value;
+    if (customLabel === undefined && ["client.email", "client.phone", "client.country"].includes(field.key)) return field.value;
     return `${customLabel ?? field.label}: ${field.value}`;
   });
   const customer = [name, ...addresses, ...contactLines]
@@ -195,8 +200,8 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
   const lineGap = 1.5;
   let y = top;
 
-  function setFont(section: InvoiceTypographySection, size?: number) {
-    const style = invoiceTypography(view, section);
+  function setFont(section: InvoiceTypographySection, size?: number, heading = false) {
+    const style = invoiceTypography(view, section, heading);
     const name = invoiceFontAsset(style);
     if (!registeredFonts.has(name)) {
       doc.registerFont(name, invoiceFontPath(name + ".ttf"));
@@ -204,28 +209,28 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
     }
     return doc.font(name).fontSize(size ?? style.fontSize);
   }
-  function height(value: string, w: number, section: InvoiceTypographySection, size?: number) {
-    return value ? setFont(section, size).heightOfString(value, { width: w, lineGap }) : 0;
+  function height(value: string, w: number, section: InvoiceTypographySection, size?: number, heading = false) {
+    return value ? setFont(section, size, heading).heightOfString(value, { width: w, lineGap }) : 0;
   }
-  function text(value: string, x: number, at: number, w: number, section: InvoiceTypographySection, color = body, align: "left" | "right" = "left", size?: number, maxHeight?: number) {
+  function text(value: string, x: number, at: number, w: number, section: InvoiceTypographySection, color = body, align: "left" | "right" = "left", size?: number, maxHeight?: number, heading = false) {
     const bounds = maxHeight === undefined ? {} : { height: maxHeight, ellipsis: true };
-    setFont(section, size).fillColor(color).text(value, x, at, { width: w, align, lineGap, ...bounds });
+    setFont(section, size, heading).fillColor(color).text(value, x, at, { width: w, align, lineGap, ...bounds });
   }
   function page() { doc.addPage(); y = top; }
   function ensure(space: number) { if (y + space > bottom && y > top) page(); }
   function rule(color = "#e7e7e7") {
     doc.moveTo(left, y).lineTo(left + width, y).lineWidth(.6).strokeColor(color).stroke();
   }
-  function paragraph(value: string, section: InvoiceTypographySection, color = body) {
-    text(value, left, y, width, section, color);
+  function paragraph(value: string, section: InvoiceTypographySection, color = body, heading = false) {
+    text(value, left, y, width, section, color, "left", undefined, undefined, heading);
     y = doc.y + 5;
   }
   function titled(heading: string, value: string, section: InvoiceTypographySection, color = body) {
-    const headingHeight = height(heading, width, section);
+    const headingHeight = height(heading, width, section, undefined, true);
     const full = headingHeight + 5 + height(value, width, section);
     const first = headingHeight + 5 + setFont(section).currentLineHeight(true) + lineGap;
     ensure(full <= bottom - top ? full : first);
-    paragraph(heading, section, accent);
+    paragraph(heading, section, accent, true);
     paragraph(value, section, color);
   }
   function detail(name: string, value: string, section: "order" | "totals", total = false) {
@@ -247,7 +252,7 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
   if (logo) doc.image(logo, left, top, { fit: [220, 44], valign: "center" });
   const title = source.title || template.title;
   const titleSize = template.appearance.sections?.header?.fontSize ?? template.appearance.fontSize + 11;
-  text(title, 298, top, 249, "header", accent, "right", titleSize);
+  text(title, 298, top, 249, "header", accent, "right", titleSize, undefined, true);
   text(safe(source.number, 100), 298, doc.y + 4, 249, "header", muted, "right");
   y = Math.max(doc.y, logo ? top + 44 : top) + 8;
   rule(accent);
@@ -256,15 +261,15 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
   const parties = invoiceParties(view);
   const columns = [
     { section: "seller" as const, name: label("seller", view.copy.seller!), value: parties.seller, x: left },
-    { section: "customer" as const, name: label("billTo", view.copy.billTo!), value: parties.customer, x: 310 },
+    { section: "customer" as const, name: label("billTo", words.billTo ?? view.copy.billTo!), value: parties.customer, x: 310 },
   ].filter(column => column.value);
   const columnWidth = 237;
   const partiesHeight = Math.max(0, ...columns.map(({ name, value, section }) =>
-    height(name, columnWidth, section) + 4 + height(value, columnWidth, section)));
+    height(name, columnWidth, section, undefined, true) + 4 + height(value, columnWidth, section)));
   if (partiesHeight <= bottom - top) {
     ensure(partiesHeight);
     for (const { name, value, section, x } of columns) {
-      text(name, x, y, columnWidth, section, muted);
+      text(name, x, y, columnWidth, section, muted, "left", undefined, undefined, true);
       text(value, x, doc.y + 4, columnWidth, section);
     }
     y += partiesHeight + 10;
@@ -289,21 +294,21 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
   if (visible.has("table.items") && view.items.length) {
     const positions = [{ x: 55, w: 245 }, { x: 306, w: 41 }, { x: 353, w: 86 }, { x: 445, w: 95 }];
     const headings = ["product", "qty", "unit", "amount"].map(key => label(key, view.copy[key]!));
-    const rowHeight = (cells: string[]) => Math.max(...cells.map((cell, i) => height(cell, positions[i]!.w, "items"))) + 10;
+    const rowHeight = (cells: string[], heading = false) => Math.max(...cells.map((cell, i) => height(cell, positions[i]!.w, "items", undefined, heading))) + 10;
     // Keep custom column labels within three lines so each page has room for rows.
-    const headerTextHeight = 3 * (setFont("items").currentLineHeight(true) + lineGap);
-    const headerHeight = Math.min(rowHeight(headings), headerTextHeight + 10);
-    const drawCells = (cells: string[], color: string, maxHeight?: number) => {
+    const headerTextHeight = 3 * (setFont("items", undefined, true).currentLineHeight(true) + lineGap);
+    const headerHeight = Math.min(rowHeight(headings, true), headerTextHeight + 10);
+    const drawCells = (cells: string[], color: string, maxHeight?: number, heading = false) => {
       // Description is the only cell that can span pages. Draw it last so the
       // numeric cells stay on the first page of the row.
       for (const i of [1, 2, 3, 0]) {
         const { x, w } = positions[i]!;
-        text(cells[i]!, x, y + 5, w, "items", color, i ? "right" : "left", undefined, maxHeight);
+        text(cells[i]!, x, y + 5, w, "items", color, i ? "right" : "left", undefined, maxHeight, heading);
       }
     };
     const drawHeader = () => {
       doc.rect(left, y, width, headerHeight).fill(accent);
-      drawCells(headings, "#ffffff", headerTextHeight);
+      drawCells(headings, "#ffffff", headerTextHeight, true);
       y += headerHeight;
     };
     y += 8;
@@ -325,7 +330,7 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
   }
 
   for (const field of view.fields.filter(field => field.key.startsWith("finance.") && field.key !== "finance.currency")) {
-    detail(label(field.key, field.key === "finance.tax" ? words.tax! : field.label), field.value, "totals", field.key === "finance.total");
+    detail(label(field.key, field.key === "finance.tax" ? words.tax! : field.key === "finance.delivery" ? view.copy.shipping! : field.label), field.value, "totals", field.key === "finance.total");
   }
   if (visible.has("table.payments") && view.payments.length) {
     y += 8;
@@ -351,7 +356,7 @@ export async function renderSimplifiedInvoicePdf(source: DocumentSource) {
 }
 
 const invoiceWords: Record<DocumentLanguage, Record<string, string>> = {
-  en: { order: "Order", notes: "Notes", tax: "Tax included in price" },
+  en: { billTo: "Bill To / Customer", order: "Order", notes: "Notes", tax: "Tax included in price" },
   ru: { order: "Заказ", notes: "Примечание", tax: "Налог в цене" },
   uk: { order: "Замовлення", notes: "Примітка", tax: "Податок у ціні" },
   fr: { order: "Commande", notes: "Remarques", tax: "Taxe incluse dans le prix" },
@@ -369,7 +374,7 @@ export function renderSimplifiedInvoiceHtml(source:DocumentSource) {
  const fields=view.fields.filter(field=>!field.key.startsWith("finance.")&&!field.key.startsWith("client.")&&!["delivery.address","order.number"].includes(field.key)).map(field=>line(label(field.key,field.label),text(field.value))).join("");
  const rows=visible.has("table.items")?view.items.map(item=>`<tr><td><div>${text(item.description)}</div>${item.properties.map(property=>`<div class="muted property">${text(property)}</div>`).join("")}</td><td>${item.quantity}</td><td>${text(view.money(item.amountMinor))}</td><td>${text(view.money(item.amountMinor*item.quantity))}</td></tr>`).join(""):"";
  const table=rows?`<table class="items"><thead><tr>${["product","qty","unit","amount"].map(key=>`<th scope="col"><span title="${label(key,view.copy[key]!)}">${label(key,view.copy[key]!)}</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`:"";
- const totals=view.fields.filter(field=>field.key.startsWith("finance.")&&field.key!=="finance.currency").map(field=>`<div class="detail ${field.key==="finance.total"?"total":""}"><span>${label(field.key,field.key==="finance.tax"?word.tax!:field.label)}</span><span>${text(field.value)}</span></div>`).join("");
+ const totals=view.fields.filter(field=>field.key.startsWith("finance.")&&field.key!=="finance.currency").map(field=>`<div class="detail ${field.key==="finance.total"?"total":""}"><span>${label(field.key,field.key==="finance.tax"?word.tax!:field.key==="finance.delivery"?view.copy.shipping!:field.label)}</span><span>${text(field.value)}</span></div>`).join("");
  const payment=template.payment,instructions=interpolateDocumentText(payment.instructions,source,view);
  const paymentRows=[[label("receiver",view.copy.receiver!),payment.receiver],[label("iban",view.copy.iban!),payment.iban],[label("bic",view.copy.bic!),payment.bic]].filter(([,value])=>value).map(([name,value])=>`<div class="payment-row">${name}: ${text(value)}</div>`).join("");
  const paymentBlock=paymentRows||instructions?`<section class="payment"><div class="payment-details">${paymentRows ? `<h2>${label("payment",view.copy.payment!)}</h2>${paymentRows}` : ""}</div>${instructions?`<div class="instructions"><h3>${label("instructions",view.copy.instructions!)}</h3><p>${text(instructions)}</p></div>`:""}</section>`:"";
@@ -382,7 +387,15 @@ export function renderSimplifiedInvoiceHtml(source:DocumentSource) {
   return `font-family:${family};font-size:${fontSize}pt;font-weight:${fontWeight}`;
  };
  const titleSize=template.appearance.sections?.header?.fontSize ?? template.appearance.fontSize+11;
- const styles = [invoiceTypography(view), ...invoiceTypographySections.map(section => invoiceTypography(view, section))];
+ const headingSelectors = {
+  header: ".heading h1", seller: ".seller h2", customer: ".customer h2", items: ".items th",
+  payments: ".receipts h2", paymentDetails: ".payment-details h2", instructions: ".instructions h3", notes: ".notes h2",
+ } as const;
+ const headingRules = (Object.keys(headingSelectors) as (keyof typeof headingSelectors)[]).flatMap(section => {
+  const weight = template.appearance.sections?.[section]?.headingWeight;
+  return weight ? [{ style: invoiceTypography(view, section, true), css: `${headingSelectors[section]}{font-weight:${weight}}` }] : [];
+ });
+ const styles = [invoiceTypography(view), ...invoiceTypographySections.map(section => invoiceTypography(view, section)), ...headingRules.map(rule => rule.style)];
  const faces = [...new Map(styles.map(style => [invoiceFontAsset(style), style])).values()].map(invoiceFontFace).join("\n");
  return `<!doctype html><html lang="${view.language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"><title>${text(source.title)} ${text(source.number)}</title><style>
  ${faces}
@@ -415,11 +428,12 @@ export function renderSimplifiedInvoiceHtml(source:DocumentSource) {
  .instructions{${cssFont("instructions")};break-inside:avoid}
  .receipts{margin-top:8pt;${cssFont("payments")}}.notes{margin-top:6pt;${cssFont("notes")}}
  footer{border-top:1px solid #e7e7e7;padding-top:6pt;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8pt;${cssFont("footer")}}
+ ${headingRules.map(rule => rule.css).join("\n")}
  thead{display:table-header-group}tr{break-inside:avoid}
  @page{size:A4;margin:12mm 17mm 13mm}
  @media print{html{background:#fff}.sheet{width:auto;min-height:0;margin:0;padding:0}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
  @media screen and (max-width:800px){html{background:#fff}.sheet{width:100%;min-height:0;padding:16px}.parties{gap:12px}.items th,.items td{padding:5px 3px}}
- </style></head><body><article class="sheet"><header>${template.showLogo&&invoiceLogoBytes(source.logoDataUri)?`<div class="brand"><img src="${source.logoDataUri}" alt="Yoleotard"></div>`:"<div></div>"}<div class="heading"><h1>${text(source.title||template.title)}</h1><div class="number">${text(source.number)}</div></div></header><div class="parties"><section class="seller"><h2>${label("seller",view.copy.seller!)}</h2><p>${text(seller)}</p></section>${customer?`<section class="customer"><h2>${label("billTo",view.copy.billTo!)}</h2><p>${text(customer)}</p></section>`:""}</div><div class="order"><div class="metadata">${metadata}</div>${fields}</div>${table}<div class="totals">${totals}</div>${receipts}${paymentBlock}${notes?`<section class="notes"><h2>${label("notes",word.notes!)}</h2><p>${text(notes)}</p></section>`:""}${template.footer?`<footer>${text(template.footer)}</footer>`:""}</article></body></html>`;
+ </style></head><body><article class="sheet"><header>${template.showLogo&&invoiceLogoBytes(source.logoDataUri)?`<div class="brand"><img src="${source.logoDataUri}" alt="Yoleotard"></div>`:"<div></div>"}<div class="heading"><h1>${text(source.title||template.title)}</h1><div class="number">${text(source.number)}</div></div></header><div class="parties"><section class="seller"><h2>${label("seller",view.copy.seller!)}</h2><p>${text(seller)}</p></section>${customer?`<section class="customer"><h2>${label("billTo",word.billTo??view.copy.billTo!)}</h2><p>${text(customer)}</p></section>`:""}</div><div class="order"><div class="metadata">${metadata}</div>${fields}</div>${table}<div class="totals">${totals}</div>${receipts}${paymentBlock}${notes?`<section class="notes"><h2>${label("notes",word.notes!)}</h2><p>${text(notes)}</p></section>`:""}${template.footer?`<footer>${text(template.footer)}</footer>`:""}</article></body></html>`;
 }
 
 function renderLegacyDocumentHtml(source:DocumentSource) {

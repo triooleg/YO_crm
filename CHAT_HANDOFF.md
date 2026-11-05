@@ -1,3 +1,18 @@
+## Local follow-up to 0.17.1 - Invoice headings and shipping
+
+New invoice templates can set a section heading's weight independently of
+the section body. Inheritance remains the default. Both HTML and PDF honor
+the override. New English invoices default to Bill To / Customer. A selected
+customer country appears without the default label; explicit labels still
+work. Shipping appears once, in totals, with its amount still included in
+the agreed-price reconciliation. Stored invoice artifacts and payment
+calculations are unchanged. No migration.
+
+Verification: 36 invoice tests passed, including rendered PDF text and font
+checks; the local invoice-template browser test passed at desktop and 390 px.
+The full quality gate (tests, typecheck, build) passed. Production was not
+changed for this follow-up.
+
 ## 2026-11-05 - Delivery and invoice contact formatting 0.17.1
 
 Delivery keeps one Add parcel action in the header. New invoice HTML and PDF

@@ -190,7 +190,10 @@ test('template revision checks prevent lost writes and default selection is excl
 test('signed corrections and included tax do not change final total or payment policy',async()=>{
  const f=fixture();f.db.state.order[0].discountMinor=2000;f.db.state.order[0].payments.push({amountMinor:-5000,currency:'EUR',receivedAt:new Date(),method:'BANK_TRANSFER'});
  const t=await custom(f,{fieldKeys:['table.items','finance.total','finance.tax','finance.paid','finance.balance','table.payments']}),p=await f.documents.invoicePreview({orderId:'order-1',templateKey:t.id},user),i=await f.documents.invoiceFromTemplate({previewToken:p.previewToken,idempotencyKey:'signed'},user);
- assert.equal(i.totalMinor,33000);assert.equal(i.items.reduce((s,i)=>s+i.quantity*i.amountMinor,0),33000);
+ assert.equal(i.totalMinor,33000);assert.equal(i.items.reduce((s,i)=>s+i.quantity*i.amountMinor,0),30000);
+ assert.equal(i.dataSnapshot.values['finance.delivery'].minor,3000);
+ const pdfText=pdfPages((await f.documents.invoicePreviewDocument(p.previewToken,user)).pdf).join('');
+ assert.equal(pdfText.split('Shipping').length-1,1);
  assert.equal(i.dataSnapshot.values['finance.paid'].minor,30000);assert.equal(i.dataSnapshot.values['finance.balance'].minor,3000);
  assert.equal(i.dataSnapshot.payments.at(-1).amountMinor,-5000);assert.equal(i.dataSnapshot.values['finance.tax'].minor,500);
 });
@@ -272,8 +275,13 @@ test('real HTTP routes enforce RBAC and reject unknown config before legacy whit
 test('website NET items keep informational discount out of billed lines and name proven card fee explicitly',async()=>{
  for(const fee of [0,300]) {
   const f=fixture();Object.assign(f.db.state.order[0],{sourceSystem:'YOLEOTARD_WEBSITE',priceMinor:9300+fee,deliveryMinor:300,discountMinor:2000,taxMinor:0,items:[{name:'Net leotard',quantity:1,priceMinor:9000}],externalData:{totals:{cardFeeMinor:fee,chargedMinor:9300+fee}}});
-  const t=await custom(f,{fieldKeys:['table.items','finance.discount','finance.total']}),p=await f.documents.invoicePreview({orderId:'order-1',templateKey:t.id},user),i=await f.documents.invoiceFromTemplate({previewToken:p.previewToken,idempotencyKey:'net-'+fee},user);
-  assert.deepEqual(i.items.map(row=>[row.description,row.amountMinor]),[['Net leotard',9000],['Shipping',300],...(fee?[['Card payment fee',fee]]:[])]);
+  const caption=fee?'Parcel service':'Shipping';
+  const t=await custom(f,{fieldKeys:['table.items','finance.discount','finance.total'],labels:fee?{shipping:caption}:{}}),p=await f.documents.invoicePreview({orderId:'order-1',templateKey:t.id},user),i=await f.documents.invoiceFromTemplate({previewToken:p.previewToken,idempotencyKey:'net-'+fee},user);
+  assert.deepEqual(i.items.map(row=>[row.description,row.amountMinor]),[['Net leotard',9000],...(fee?[['Card payment fee',fee]]:[])]);
+  assert.equal(i.dataSnapshot.values['finance.delivery'].minor,300);
+  assert.equal(p.html.split('<tbody>')[1].split('</tbody>')[0].includes(caption),false);
+  assert.equal(p.html.includes(`<span>${caption}</span><span>€3.00</span>`),true);
+  assert.equal(pdfPages((await f.documents.invoicePreviewDocument(p.previewToken,user)).pdf).join('').split(caption).length-1,1);
   assert.equal(i.totalMinor,9300+fee);assert.match(p.html,/Discount included in item prices/);
   assert.equal(i.dataSnapshot.values['finance.discount'].minor,2000);
  }
@@ -309,7 +317,7 @@ function pdfPages(buffer) {
 }
 test('a standard invoice fits its payment instructions on the first page', async () => {
  const {renderOrderDocumentPdf, renderSimplifiedInvoiceHtml}=load('finance/order-document-pdf.ts');
- const values={'client.name':'Test buyer','client.email':'buyer@example.test','client.phone':'+1234567890','delivery.address':'Test street 1\nTest city','finance.itemsTotal':{minor:35000,currency:'EUR'},'finance.total':{minor:35000,currency:'EUR'}};
+ const values={'client.name':'Test buyer','client.country':'France','client.email':'buyer@example.test','client.phone':'+1234567890','delivery.address':'Test street 1\nTest city','finance.itemsTotal':{minor:35000,currency:'EUR'},'finance.total':{minor:35000,currency:'EUR'}};
  for(const field of ['finance.discount','finance.delivery','finance.tax']) values[field]={minor:0,currency:'EUR'};
  const source={title:'INVOICE',number:'TEST-713',language:'en',issueDate:new Date('2026-11-05'),
   templateSnapshot:config({seller:{name:'Test Seller',address:'Test street 2\nTest city\nTest region\nTest country'},appearance:{fontSize:10},payment:{receiver:'Test receiver',iban:'TEST-IBAN',bic:'TEST-BIC',instructions:'Please include the invoice number in the payment description.\n\nPayment for custom leotard by invoice {{invoice.number}} from {{invoice.date}}.\n\nIf payment is made in parts, please specify Part 1, Part 2 or Final.'}}),
@@ -322,7 +330,11 @@ test('a standard invoice fits its payment instructions on the first page', async
  assert.match(html,/<div class="parties">[\s\S]*?buyer@example\.test[\s\S]*?\+1234567890[\s\S]*?<div class="metadata">/);
  assert.match(pages[0], /buyer@example\.test/);
  assert.match(pages[0], /\+1234567890/);
- for (const rendered of [pages[0], html]) assert.doesNotMatch(rendered, /Customer (email|phone)/);
+ for (const rendered of [pages[0], html]) {
+  assert.equal(/Customer (email|phone|country)/.test(rendered),false);
+  assert.equal(/Bill To \/ Customer/.test(rendered),true);
+  assert.match(rendered,/France/);
+ }
  const customized = {
   ...source,
   templateSnapshot: {...source.templateSnapshot, labels:{'client.email':'Billing contact','client.city':''}},
@@ -338,19 +350,21 @@ test('a standard invoice fits its payment instructions on the first page', async
 test('invoice typography survives validation and selects embedded Unicode fonts per section', async () => {
  const {documents}=fixture();
  const {renderOrderDocumentPdf, renderSimplifiedInvoiceHtml}=load('finance/order-document-pdf.ts');
- const appearance={fontFamily:'noto-serif',fontSize:11,fontWeight:'bold',sections:{customer:{fontFamily:'ubuntu',fontWeight:'normal',fontSize:12},instructions:{fontSize:14}}};
+ const appearance={fontFamily:'noto-serif',fontSize:11,fontWeight:'bold',sections:{customer:{fontFamily:'ubuntu',fontWeight:'normal',fontSize:12,headingWeight:'bold'},instructions:{fontSize:14}}};
  const template=documents.validateTemplate({language:'en',config:config({appearance,payment:{instructions:'Payment details for the order.'}})});
  for(const key of ['fontFamily','fontWeight','fontSize','sections']) assert.deepEqual(template.appearance[key],appearance[key]);
- for(const invalid of [{fontFamily:'url(https://example.test/font)'},{fontWeight:'light'},{sections:{instructions:{fontSize:25}}},{sections:{unknown:{fontSize:12}}}]) {
+ for(const invalid of [{fontFamily:'url(https://example.test/font)'},{fontWeight:'light'},{sections:{instructions:{fontSize:25}}},{sections:{customer:{headingWeight:'light'}}},{sections:{unknown:{fontSize:12}}}]) {
   assert.throws(() => documents.validateTemplate({language:'en',config:config({appearance:invalid})}), /Некорректная настройка шаблона/);
  }
  const source={title:'INVOICE',number:'TEST-1',language:'en',templateSnapshot:template,
   dataSnapshot:{immutableInvoice:true,currency:'EUR',fieldKeys:['client.name'],values:{'client.name':'Олена Іваненко'}}};
  const pdf=(await renderOrderDocumentPdf(source)).toString('latin1');
  assert.match(pdf,/\/BaseFont \/[A-Z]+\+NotoSerif-Bold/);
- assert.match(pdf,/\/BaseFont \/[A-Z]+\+Ubuntu/);
+ assert.match(pdf,/\/BaseFont \/[A-Z]+\+Ubuntu-Bold/);
+ assert.match(pdf,/\/BaseFont \/[A-Z]+\+Ubuntu(?:-Regular)?(?=\s)/);
  const html=renderSimplifiedInvoiceHtml(source);
  assert.match(html,/\.customer\{font-family:Ubuntu, Arial, sans-serif;font-size:12pt;font-weight:normal/);
+ assert.equal(html.includes('.customer h2{font-weight:bold}'),true);
  assert.match(html,/\.instructions\{font-family:"Noto Serif", Georgia, serif;font-size:14pt;font-weight:bold/);
  assert.match(html,/font-src data:/);
  assert.match(html,/@font-face\{font-family:"Noto Serif";font-weight:bold;src:url\(data:font\/woff2;base64,/);

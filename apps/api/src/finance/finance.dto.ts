@@ -26,6 +26,7 @@ class DocumentFontDto {
  @IsOptional() @IsIn(documentFontWeights) fontWeight?: typeof documentFontWeights[number];
 }
 class DocumentSectionFontDto extends DocumentFontDto {
+ @IsOptional() @IsIn(documentFontWeights) headingWeight?: typeof documentFontWeights[number];
  @IsOptional() @IsInt() @Min(8) @Max(24) fontSize?: number;
 }
 class DocumentSectionFontsDto {
