@@ -413,7 +413,7 @@ test("AI draft provenance is reserved and completed for e-mail and Chatwoot send
   assert.ok(idempotentMismatch>=0&&terminalRetryReturn>idempotentMismatch,"AI provenance mismatch must be rejected before a terminal idempotent retry returns");
   assert.match(service,/constsendAiRunId=d\.aiRunId\|\|storedAiRunId/);
   for(const channelSend of [emailSend,chatwootSend]){
-    assert.match(channelSend,/aiRunId:sendAiRunId,sentMessageId:null,accepted:null/);
+    assert.ok(channelSend.includes("awaitthis.requireScopedAiFeedback(tx,replayScope(conversation.id))"));
     assert.match(channelSend,/reserveAiFeedback\(tx,\{aiRunId:sendAiRunId,clientId,conversationId:conversation\.id\}\)/);
     assert.match(channelSend,/aiRunId:sendAiRunId,sentMessageId:null,accepted:false/);
     assert.match(channelSend,/accepted:true,rejected:false,sentMessageId:message\.id/);

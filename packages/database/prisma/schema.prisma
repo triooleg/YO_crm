@@ -716,6 +716,7 @@ model OrderFile {
   role         OrderFileRole @default(GENERAL)
   sortOrder    Int           @default(0)
   createdAt    DateTime @default(now())
+  archivedAt   DateTime?
   order        Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
   uploadedBy   User     @relation("OrderFileUploader", fields: [uploadedById], references: [id])
   orderItem    OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)

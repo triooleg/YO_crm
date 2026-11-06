@@ -38,6 +38,29 @@ import { OrderDocumentsService } from "./order-documents.service";
  @Post("document-templates/:id/archive") @Roles("OWNER","ADMIN") archiveTemplate(@Param("id") id:string,@Body() dto:TemplateRevisionDto,@Req() req:Request&{user:User}){return this.documents.templateAction(id,dto,req.user,true)}
  @Post("invoices") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") invoice(@Body() dto:CreateInvoiceDto,@Req() req:Request&{user:User}){return this.finance.createInvoice(dto,req.user)}
  @Patch("invoices/:id") @Roles("OWNER","ADMIN","ACCOUNTANT") updateInvoice(@Param("id") id:string,@Body() dto:UpdateInvoiceDto,@Req() req:Request&{user:User}){return this.finance.updateInvoice(id,dto,req.user)}
+ @Get("clients/:clientId/invoices")
+ @Header("Cache-Control", "private, no-store")
+ @Roles("OWNER", "ADMIN", "MANAGER")
+ clientInvoices(@Param("clientId") clientId: string) {
+  return this.finance.clientInvoices(clientId);
+ }
+
+ @Get("clients/:clientId/invoices/:invoiceId/document")
+ @Roles("OWNER", "ADMIN", "MANAGER")
+ async clientInvoiceDocument(
+  @Param("clientId") clientId: string,
+  @Param("invoiceId") invoiceId: string,
+  @Res() res: Response,
+ ) {
+  const document = await this.finance.document(invoiceId, clientId);
+  const filename = "invoice-" + document.number.replace(/[^A-Za-z0-9_-]/g, "-") + ".pdf";
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", String(document.pdf.length));
+  return res.send(document.pdf);
+ }
+
  @Get("invoices/:id/preview") @Header("Cache-Control","no-store") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") invoiceHtml(@Param("id") id:string){return this.documents.invoiceHtml(id)}
  @Get("invoices/:id/document") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") async document(@Param("id") id:string,@Query("download") download:string|undefined,@Query("print") _print:string|undefined,@Res() res:Response){const document=await this.finance.document(id),filename="invoice-"+document.number.replace(/[^A-Za-z0-9_-]/g,"-")+".pdf",disposition=download==="1"?"attachment":"inline";res.setHeader("Cache-Control","no-store");res.setHeader("Content-Type","application/pdf");res.setHeader("Content-Disposition",`${disposition}; filename="${filename}"`);res.setHeader("Content-Length",String(document.pdf.length));return res.send(document.pdf)}
  @Get("document-templates") @Roles("OWNER","ADMIN","MANAGER","ACCOUNTANT") documentTemplates(){return this.documents.templates()}

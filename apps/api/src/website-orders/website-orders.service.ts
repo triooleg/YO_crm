@@ -136,7 +136,39 @@ export class WebsiteOrdersService {
  private async client(tx:Tx,p:WebsiteOrder,clientId?:string){
   const fields={firstName:p.customer.fullName,displayName:p.customer.fullName,email:p.customer.email,phone:p.customer.phone,country:p.customer.country,city:p.customer.city,address:[p.customer.addressLine1,p.customer.addressLine2].filter(Boolean).join('\n')||undefined,postalCode:p.customer.postalCode};
   let client:Client;
-  if(clientId){const found=await tx.client.findUnique({where:{id:clientId}});if(!found||found.archivedAt)conflict('WEBSITE_CLIENT_CONFLICT');client=found;const fill=Object.fromEntries(Object.entries(fields).filter(([key,value])=>value&&!(client as Record<string,unknown>)[key]));if(Object.keys(fill).length){const before=client;client=await tx.client.update({where:{id:client.id},data:fill});await tx.auditLog.create({data:{action:'UPDATE',entityType:'Client',entityId:client.id,before:json(before),after:json(client)}});}}
+  if(clientId){
+   const found=await tx.client.findUnique({where:{id:clientId}});
+   if(!found)conflict('WEBSITE_CLIENT_CONFLICT');
+   client=found;
+   const previousArchivedAt=client.archivedAt;
+   if(previousArchivedAt){
+    // The first delivery of a checkout may be delayed by the website outbox.
+    const manualArchive=await tx.auditLog.findFirst({where:{
+     entityType:'Client',entityId:clientId,action:'ARCHIVE',
+     after:{path:['archivedAt'],equals:previousArchivedAt.toISOString()},
+    },select:{id:true}});
+    if(!manualArchive)conflict('WEBSITE_CLIENT_CONFLICT');
+   }
+   const fill=Object.fromEntries(Object.entries(fields).filter(([key,value])=>value&&!(client as Record<string,unknown>)[key]));
+   if(previousArchivedAt||Object.keys(fill).length){
+    const before=client;
+    if(previousArchivedAt){
+     const claimed=await tx.client.updateMany({
+      where:{id:clientId,archivedAt:previousArchivedAt,updatedAt:before.updatedAt},
+      data:{...fill,archivedAt:null},
+     });
+     if(!claimed.count)conflict('WEBSITE_CLIENT_CONFLICT');
+     const restored=await tx.client.findUnique({where:{id:clientId}});
+     if(!restored)conflict('WEBSITE_CLIENT_CONFLICT');
+     client=restored;
+    }else client=await tx.client.update({where:{id:clientId},data:fill});
+    await tx.auditLog.create({data:{action:previousArchivedAt?'REACTIVATE':'UPDATE',entityType:'Client',entityId:client.id,before:json(before),after:json(client)}});
+    if(previousArchivedAt)await tx.activity.create({data:{
+     clientId,type:'CLIENT_REACTIVATED_BY_WEBSITE_ORDER',summary:'Клиент возвращён из архива новым заказом с сайта',
+     metadata:{previousArchivedAt:previousArchivedAt.toISOString()},
+    }});
+   }
+  }
   else{client=await tx.client.create({data:{...fields,source:'WEBSITE'}});await tx.auditLog.create({data:{action:'CREATE',entityType:'Client',entityId:client.id,after:json(client)}});}
   return client;
  }

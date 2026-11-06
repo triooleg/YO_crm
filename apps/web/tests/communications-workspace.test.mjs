@@ -892,9 +892,9 @@ test("к сообщению можно прикрепить изображени
   assert.match(component, /setAttachment\(undefined\)[\s\S]*setAttachmentPreview\(""\)[\s\S]*pendingSend\.current\s*=\s*\{\}/);
   assert.match(component, /readFile\(attachment\)/);
   assert.match(component, /attachment: file/);
-  assert.match(component, /const attachmentContent=activeChannel==="WHATSAPP"\?messageText\|\|undefined:undefined/);
+  assert.match(component, /attachmentCarriesText = !sendingInvoice && \(activeChannel === "EMAIL" \|\| activeChannel === "WHATSAPP"\)/);
   assert.match(component, /sendOne\(attachmentContent, uploaded, requestId\)/);
-  assert.match(component, /activeChannel!=="WHATSAPP"\|\|!uploaded/);
+  assert.match(component, /!uploaded \|\| !attachmentCarriesText/);
   assert.match(component, /communications-selected-attachment/);
   assert.match(component, /attachment\?\.type\.startsWith\("video\/"\)\?<video src=\{attachmentPreview\}/);
   assert.match(css, /\.communications-selected-attachment img,.communications-selected-attachment video\{[^}]*object-fit:cover/);

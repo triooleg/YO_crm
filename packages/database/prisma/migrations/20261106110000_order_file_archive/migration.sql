@@ -1,0 +1,1 @@
+ALTER TABLE "OrderFile" ADD COLUMN "archivedAt" TIMESTAMP(3);

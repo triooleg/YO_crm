@@ -1,3 +1,43 @@
+## 2026-11-06 - Client statistics and archive (0.18.2)
+
+Clients shows four filtered KPIs across all pages from the same workspace
+request. Active includes VIP, and repeat means at least two non-archived orders.
+Owner and admin can archive a row with confirmation. The transaction checks
+card freshness, refuses clients with non-archived orders and canonical merge
+targets, and records activity and audit. Related records are retained.
+An unambiguously matched first website order can reactivate a manually archived
+buyer using the archive audit record. Exact replay stays idempotent.
+
+Verified locally with 14 Playwright scenarios including desktop and mobile
+archive and filter refresh, focused API tests, and isolated PostgreSQL KPI
+counts with 10,000 synthetic clients and 50,000 orders.
+
+Inbox projects Instagram ig_post CDN photos onto the guarded attachment route.
+The API checks browser-compatible image signatures and serves the detected
+content type when the provider mislabels a photo. Existing messages are read
+as stored. An unavailable preview offers retry and a link to the original.
+
+Order Details archives only the selected general, unlinked OrderFile and
+retains its bytes and audit history. An additive nullable OrderFile.archivedAt
+migration was verified with synthetic PostgreSQL rows and requires a guarded
+migration deployment. Inbox can fetch and attach a saved invoice belonging to
+the selected client via its existing composer. Invoice reads do not issue a
+new document, change payment status or send a message. When Send is used,
+the composer sends the PDF before any accompanying text. Instagram offers
+a channel switch for PDF delivery.
+
+Verified invoice selection and send with mocked providers, including autosaved
+drafts, channel switches after a partial send, lost Gmail and Chatwoot responses,
+and reconciled WhatsApp echoes. Exact attachment retries reuse the original
+delivery even when provider display text differs or AI feedback was consumed.
+
+Production remains on 0.18.1. Candidate c44a252 passed quality, consistent DATA
+capture, isolated restore, and the schema 54/55 rehearsal. Cutover admission
+refused its Windows archive because Git converted the migration to CRLF. The
+migration now has an explicit LF attribute. Freeze and stage a new candidate
+before admission. The serving 0.18.1 images and historical recovery bundles
+remain protected while the retention owner reconciles the two-set limit.
+
 ## 2026-11-06 - Inbox client search from CRM links (0.18.1)
 
 Task, Order, Client and Overview links prefill Inbox with the client name.

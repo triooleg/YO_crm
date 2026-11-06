@@ -77,6 +77,38 @@ export class ClientsService {
     return presentClientContact(client);
   }
 
+  async archive(id: string, expectedUpdatedAt: string, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"client-merge-global"},0))`;
+      const client = await tx.client.findUnique({ where: { id }, select: { archivedAt: true, updatedAt: true } });
+      if (!client) throw new NotFoundException("Клиент не найден");
+      if (client.archivedAt) return { id, archivedAt: client.archivedAt };
+
+      const stale = () => new ConflictException("Карточка клиента изменилась. Обновите список и попробуйте снова.");
+      if (client.updatedAt.getTime() !== Date.parse(expectedUpdatedAt)) throw stale();
+
+      const order = await tx.order.findFirst({ where: { clientId: id, archivedAt: null }, select: { id: true } });
+      if (order) throw new ConflictException("У клиента есть неархивные заказы.");
+      const redirect = await tx.clientMergeRedirect.findFirst({ where: { targetClientId: id }, select: { sourceClientId: true } });
+      if (redirect) throw new ConflictException("Это основная карточка после объединения клиентов.");
+
+      const archivedAt = new Date();
+      const changed = await tx.client.updateMany({
+        where: { id, archivedAt: null, updatedAt: client.updatedAt }, data: { archivedAt },
+      });
+      if (!changed.count) throw stale();
+
+      await tx.activity.create({
+        data: { clientId: id, actorId: actor.id, type: "CLIENT_ARCHIVED", summary: "Клиент перемещён в архив" }
+      });
+      await tx.auditLog.create({
+        data: { actorId: actor.id, entityType: "Client", entityId: id, action: "ARCHIVE",
+          before: { archivedAt: null }, after: { archivedAt: archivedAt.toISOString() } }
+      });
+      return { id, archivedAt };
+    });
+  }
+
   async mergeSuggestions(id:string){
     const target=await this.prisma.client.findFirst({where:{id,archivedAt:null}});
     if(!target)throw new NotFoundException("CLIENT_MERGE_NOT_FOUND");

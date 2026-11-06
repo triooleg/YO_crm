@@ -4,7 +4,7 @@ import type { Request } from "express";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
-import { CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateAthleteDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
+import { ArchiveClientDto, CreateAthleteDto, CreateClientDto, CreateMeasurementDto, MergeClientDto, PromoteInboxClientDto, SplitClientDto, UpdateAthleteDto, UpdateClientNotesDto, UpdateClientProfileDto } from "./clients.dto";
 import { ClientsService } from "./clients.service";
 import { ClientsWorkspaceReadService, type ClientsWorkspaceQuery } from "./clients-workspace-read";
 import { ClientMergeBatchDto, ClientMergePreviewDto } from "./client-merge-workspace.dto";
@@ -60,6 +60,12 @@ export class ClientsController {
   @Post(":id/promote-from-inbox")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   promoteFromInbox(@Param("id") id:string,@Body()dto:PromoteInboxClientDto,@Req()request:AuthRequest){return this.clients.promoteFromInbox(id,dto,request.user)}
+
+  @Patch(":id/archive")
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  archive(@Param("id") id: string, @Body() dto: ArchiveClientDto, @Req() request: AuthRequest) {
+    return this.clients.archive(id, dto.expectedUpdatedAt, request.user);
+  }
 
   @Patch(":id/notes")
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

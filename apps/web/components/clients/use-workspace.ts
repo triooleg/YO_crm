@@ -12,7 +12,7 @@ export function useWorkspace(){
  const [listState,setList]=useState<{key:string;data?:ClientList;error?:string}>({key:""});
  const listKey=listQuery(query);
  useEffect(()=>{if(!ready)return;const abort=new AbortController();let active=true;
-  const timer=setTimeout(()=>{setList({key:listKey});clientRequest<ClientList>(`/clients?${listKey}`,{signal:abort.signal}).then(data=>{if(!active)return;if(!Array.isArray(data.items)||!data.filters||!Number.isSafeInteger(data.total))throw Error(ui.invalidData);setList({key:listKey,data});if(data.page!==current.current.page)update({page:data.page});}).catch(error=>{if(active)setList({key:listKey,error:failure(error)});});},250);
+  const timer=setTimeout(()=>{setList({key:listKey});clientRequest<ClientList>(`/clients?${listKey}`,{signal:abort.signal}).then(data=>{if(!active)return;if(!Array.isArray(data.items)||!data.filters||!Number.isSafeInteger(data.total))throw Error(ui.invalidData);const page=data.items.length?data.page:Math.min(data.page,Math.max(1,Math.ceil(data.total/data.pageSize)));if(page!==current.current.page){update({page});return;}setList({key:listKey,data});}).catch(error=>{if(active)setList({key:listKey,error:failure(error)});});},250);
   return()=>{active=false;clearTimeout(timer);abort.abort();};
  },[ready,listKey,revision,update]);
  const clientId=query.clientId,detailKey=`${clientId}:${query.currency}`;
@@ -22,7 +22,12 @@ export function useWorkspace(){
   clientRequest<ClientDetail>(`/clients/${encodeURIComponent(clientId)}?${params}`,{signal:abort.signal}).then(data=>{if(!active)return;if(!data.id||!data.summary||!Array.isArray(data.athletes))throw Error(ui.invalidData);if(data.id!==clientId){update({clientId:data.id});return;}setDetail({id:detailKey,data});}).catch(error=>{if(active)setDetail({id:detailKey,error:failure(error)});});
   return()=>{active=false;abort.abort();};
  },[ready,clientId,query.currency,revision,update]);
- return {query,ready,update,revision,refresh:()=>setRevision(n=>n+1),list:listState.key===listKey?listState.data:undefined,listError:listState.key===listKey?listState.error:undefined,detail:detailState.id===detailKey?detailState.data:undefined,detailError:detailState.id===detailKey?detailState.error:undefined};
+ function onClientArchived(id:string){
+  setList({key:""});
+  if(current.current.clientId===id)update({clientId:"",tab:"overview"});
+  setRevision(value=>value+1);
+ }
+ return {query,ready,update,revision,onClientArchived,refresh:()=>setRevision(n=>n+1),list:listState.key===listKey?listState.data:undefined,listError:listState.key===listKey?listState.error:undefined,detail:detailState.id===detailKey?detailState.data:undefined,detailError:detailState.id===detailKey?detailState.error:undefined};
 }
 /** A panel owns its request: changing client/tab/filter disposes the old response. */
 export function useClientPage<T>(path:string,revision=0){

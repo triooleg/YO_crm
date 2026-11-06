@@ -62,13 +62,18 @@ export class ClientsWorkspaceReadService {
       // Both identifiers and ordering fragments are a closed server-owned whitelist.
       const order={name:Prisma.sql`lower(c."displayName")`,orderCount:Prisma.sql`coalesce(o.n,0)`,latestOrder:Prisma.sql`o.latest`,createdAt:Prisma.sql`c."createdAt"`}[q.sort]!;
       const direction=q.direction==='asc'?Prisma.sql`ASC`:Prisma.sql`DESC`;
-      const rows=await db.$queryRaw<{items:{id:string;orderCount:number;latestOrderAt:string|null;latestOrder:{id:string;number:string;createdAt:string}|null;channels:ContactChannel[]}[];total:number}[]>(Prisma.sql`
+      const rows=await db.$queryRaw<{items:{id:string;orderCount:number;latestOrderAt:string|null;latestOrder:{id:string;number:string;createdAt:string}|null;channels:ContactChannel[]}[];total:number;active:number;leads:number;repeat:number}[]>(Prisma.sql`
         WITH orders AS (SELECT "clientId",count(*)::int n,max("createdAt") latest FROM "Order" WHERE "archivedAt" IS NULL GROUP BY "clientId"),
-        filtered AS (SELECT c.id,coalesce(o.n,0)::int AS "orderCount",o.latest AS "latestOrderAt",row_number() OVER(ORDER BY ${order} ${direction} NULLS LAST,c.id ASC) position FROM "Client" c LEFT JOIN orders o ON o."clientId"=c.id WHERE ${Prisma.join(conditions,' AND ')}),
+        filtered AS (SELECT c.id,c.status,coalesce(o.n,0)::int AS "orderCount",o.latest AS "latestOrderAt",row_number() OVER(ORDER BY ${order} ${direction} NULLS LAST,c.id ASC) position FROM "Client" c LEFT JOIN orders o ON o."clientId"=c.id WHERE ${Prisma.join(conditions,' AND ')}),
         page AS (SELECT * FROM filtered ORDER BY position OFFSET ${(q.page-1)*q.pageSize} LIMIT ${q.pageSize}),
         presented AS (SELECT page.*,(SELECT json_build_object('id',v.id,'number',v.number,'createdAt',v."createdAt" AT TIME ZONE 'UTC','sourceSystem',v."sourceSystem",'externalNumber',v."externalNumber",'externalId',v."externalId") FROM "Order" v WHERE v."clientId"=page.id AND v."archivedAt" IS NULL ORDER BY v."createdAt" DESC,v.id DESC LIMIT 1) AS "latestOrder",coalesce((SELECT json_agg(v.channel) FROM "Conversation" v WHERE v."clientId"=page.id AND v."archivedAt" IS NULL),'[]'::json) channels FROM page)
-        SELECT coalesce((SELECT json_agg(presented ORDER BY position) FROM presented),'[]'::json) items,(SELECT count(*)::int FROM filtered) total`);
-      const projection=rows[0]??{items:[],total:0},ids=projection.items.map(row=>row.id);
+        SELECT coalesce((SELECT json_agg(presented ORDER BY position) FROM presented),'[]'::json) items,
+          count(*)::int total,
+          (count(*) FILTER (WHERE status IN ('ACTIVE','VIP')))::int active,
+          (count(*) FILTER (WHERE status = 'LEAD'))::int leads,
+          (count(*) FILTER (WHERE "orderCount" >= 2))::int repeat
+        FROM filtered`);
+      const projection=rows[0]??{items:[],total:0,active:0,leads:0,repeat:0},ids=projection.items.map(row=>row.id);
       const [clients,countries,sources,statuses]=await Promise.all([
         ids.length?db.client.findMany({where:{id:{in:ids},archivedAt:null},take:q.pageSize,select:contactSelect}):[],
         db.client.groupBy({by:['country'],where:{archivedAt:null,country:{not:null}}}),
@@ -76,7 +81,7 @@ export class ClientsWorkspaceReadService {
         db.client.groupBy({by:['status'],where:{archivedAt:null}}),
       ]);
       const byId=new Map(clients.map(client=>[client.id,client]));
-      return {items:projection.items.flatMap(row=>{const client=byId.get(row.id);return client?[{...presentClientContact(client),orderCount:row.orderCount,latestOrder:row.latestOrder??null,channels:row.channels??[]}]:[]}),total:projection.total,page:q.page,pageSize:q.pageSize,filters:{countries:countries.map(v=>v.country!).filter(value=>value.trim()).sort(),sources:sources.map(v=>v.source).sort(),statuses:statuses.map(v=>v.status).sort()}};
+      return {items:projection.items.flatMap(row=>{const client=byId.get(row.id);return client?[{...presentClientContact(client),orderCount:row.orderCount,latestOrder:row.latestOrder??null,channels:row.channels??[]}]:[]}),total:projection.total,statistics:{active:projection.active,leads:projection.leads,repeat:projection.repeat},page:q.page,pageSize:q.pageSize,filters:{countries:countries.map(v=>v.country!).filter(value=>value.trim()).sort(),sources:sources.map(v=>v.source).sort(),statuses:statuses.map(v=>v.status).sort()}};
     },{isolationLevel:'RepeatableRead',timeout:30000,maxWait:5000});
   }
 

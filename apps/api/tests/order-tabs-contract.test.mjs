@@ -47,6 +47,6 @@ test("client preferences use an atomic optimistic concurrency claim",()=>{
   assert.doesNotMatch(service,/client\.update\(\{where:\{id:clientId\}/);
 });
 test("file role changes use optimistic concurrency instead of silent overwrite",()=>{
-  assert.match(service,/orderFile\.updateMany\(\{where:\{id:fileId,orderId,role:dto\.expectedRole,orderItemId:dto\.expectedOrderItemId\?\?null,noteId:dto\.expectedNoteId\?\?null\}/);
+  assert.match(service,/orderFile\.updateMany\(\{where:\{id:fileId,orderId,archivedAt:null,role:dto\.expectedRole,orderItemId:dto\.expectedOrderItemId\?\?null,noteId:dto\.expectedNoteId\?\?null\}/);
   assert.match(service,/Файл уже изменён другим пользователем/);
 });

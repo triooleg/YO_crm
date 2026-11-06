@@ -40,6 +40,11 @@ export class OrdersController {
   @Patch(":id/manager-comment") @Roles("OWNER", "ADMIN", "MANAGER") updateManagerComment(@Param("id") id: string, @Body() dto: UpdateOrderManagerCommentDto, @Req() req: Request & { user: User }) { return this.orders.updateManagerComment(id, dto, req.user); }
   @Patch(":id/delivery-contact") @Roles("OWNER", "ADMIN", "MANAGER") updateDeliveryContact(@Param("id") id: string, @Body() dto: UpdateOrderDeliveryContactDto, @Req() req: Request & { user: User }) { return this.orders.updateDeliveryContact(id, dto, req.user); }
   @Post(":id/files") @Roles("OWNER", "ADMIN", "MANAGER") uploadOrderFile(@Param("id") id: string, @Body() dto: UploadOrderFileDto, @Req() req: Request & { user: User }) { return this.orders.uploadOrderFile(id, dto, req.user); }
+  @Patch(":orderId/files/:fileId/archive")
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  archiveOrderFile(@Param("orderId") orderId: string, @Param("fileId") fileId: string, @Req() req: Request & { user: User }) {
+    return this.orders.archiveOrderFile(orderId, fileId, req.user);
+  }
   @Patch(":id/model-image") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateModelImage(@Param("id") id: string, @Body() dto: UpdateOrderModelImageDto, @Req() req: Request & { user: User }) { return this.orders.updateModelImage(id, dto, req.user); }
   @Patch(":id/details") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateDetails(@Param("id") id: string, @Body() dto: UpdateOrderDetailsDto, @Req() req: Request & { user: User }) { return this.orders.updateDetails(id, dto, req.user); }
   @Patch(":id/items/:itemId") @Roles(...ORDER_MODEL_IMAGE_ROLES) updateItemDetails(@Param("id") id: string, @Param("itemId") itemId: string, @Body() dto: UpdateOrderItemDetailsDto, @Req() req: Request & { user: User }) { return this.orders.updateItemDetails(id, itemId, dto, req.user); }
@@ -57,8 +62,8 @@ export class OrdersController {
     if (!isOrderImageName(name)) return res.status(404).end();
     return res.sendFile(join(uploadsRoot(), "order-models", name));
   }
-  @Get("files/:name") @Roles("OWNER", "ADMIN", "MANAGER") file(@Param("name") name: string, @Res() res: Response) {
-    if (!isOrderFileName(name)) return res.status(404).end();
-    return res.sendFile(join(uploadsRoot(), "order-files", name));
+  @Get("files/:name") @Roles("OWNER", "ADMIN", "MANAGER") async file(@Param("name") name: string, @Res() res: Response) {
+    if (!isOrderFileName(name) || !await this.orders.isOrderFileAvailable(name)) return res.status(404).end();
+    return res.sendFile(join(uploadsRoot(), "order-files", name), { headers: { "Cache-Control": "private, no-store" } });
   }
 }

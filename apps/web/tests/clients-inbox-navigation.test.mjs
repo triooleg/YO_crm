@@ -99,7 +99,7 @@ test('roundtrip keys are destination-scoped and cannot leak into other screens',
 });
 
 test('shell forwards Clients destination and context; Inbox client actions share the guarded return path', () => {
-  assert.match(shell, /<ClientWorkspace onNavigate=\{\(next:\s*"orders"\s*\|\s*"inbox",\s*context\?:Record<string,string>\)=>void navigate\(next,context\)\}/);
+  assert.match(shell, /<ClientWorkspace role=\{auth\.role\} onNavigate=\{\(next:\s*"orders"\s*\|\s*"inbox",\s*context\?:Record<string,string>\)=>void navigate\(next,context\)\}/);
   assert.match(inbox, /className="communications-open-client" onClick=\{openClientFromInbox\}/);
   assert.match(inbox, /onClick=\{openClientFromInbox\}>⌁ \{ui\.measurementsShortcut\}/);
   assert.match(inbox, /detail\.id!==context\.id\|\|detail\.clientId!==c\.id\|\|detail\.channel!==context\.channel\|\|detail\.archivedAt/);

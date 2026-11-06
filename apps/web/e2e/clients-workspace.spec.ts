@@ -52,3 +52,47 @@ test('global duplicates paginate independently of an empty page and keep pairwis
  await page.setViewportSize({width:1366,height:1000});await page.goto('/?section=clients');await page.getByRole('button',{name:'Найти дубликаты',exact:true}).click();const dialog=page.getByRole('dialog');await expect(dialog.getByText(/Совпадение имени — только слабый сигнал/)).toBeVisible();await expect(dialog.getByText('Другая карточка (b): Совпадает имя (слабый сигнал)',{exact:true})).toBeVisible();await expect(dialog.getByText(/Список связанных карточек сокращён/)).toBeVisible();
  await dialog.getByRole('checkbox',{name:'scarletsteward'}).check();await expect(dialog.getByRole('button',{name:'Объединить клиентов (1)',exact:true})).toBeDisabled();await dialog.getByRole('combobox',{name:'На странице',exact:true}).selectOption('15');await expect.poll(()=>queries.at(-1)).toContain('pageSize=15');await dialog.getByText('2',{exact:true}).click();await expect(dialog.getByText('На этой странице нет кандидатов',{exact:true})).toBeVisible();await expect(dialog.getByText('из 60',{exact:true})).toBeVisible();await expect(dialog.getByRole('button',{name:'Объединить клиентов (1)',exact:true})).toBeDisabled();await dialog.getByRole('combobox',{name:'На странице',exact:true}).selectOption('50');await expect.poll(()=>queries.at(-1)).toContain('pageSize=50');
 });
+
+for(const width of [1366,390]) test(`client archive needs confirmation and refreshes filtered statistics at ${width}`, async ({page},info) => {
+ await fixture(page);
+ await page.setViewportSize({width,height:900});
+ let archived=false;
+ const writes: unknown[]=[];
+ await page.route('**/api/clients?**', route => {
+  const params=new URL(route.request().url()).searchParams;
+  if(params.get('view')!=='workspace')return route.fallback();
+  const items=rows.filter(row=>!archived||row.id!=='c').map(row=>({...row,updatedAt:now}));
+  return route.fulfill({json:{
+   items,total:archived?40:41,page:1,pageSize:20,
+   statistics:{active:28,leads:archived?12:13,repeat:7},
+   filters:{countries:['Spain'],sources:['INSTAGRAM'],statuses:['ACTIVE','LEAD']},
+  }});
+ });
+ await page.route('**/api/clients/c/archive', route => {
+  expect(route.request().method()).toBe('PATCH');
+  writes.push(route.request().postDataJSON());
+  archived=true;
+  return route.fulfill({json:{id:'c',archivedAt:now}});
+ });
+ await page.goto('/?section=clients&country=Spain');
+ const stats=page.getByRole('region',{name:'По выбранным фильтрам'});
+ await expect(stats.getByText('41',{exact:true})).toBeVisible();
+ await expect(stats.getByText('7',{exact:true})).toBeVisible();
+ const button=page.getByRole('button',{name:/Удалить из списка: Клиент без заказов/});
+ const dialog=page.getByRole('dialog',{name:'Удалить из списка'});
+ await page.screenshot({path:info.outputPath('client-statistics.png')});
+ await button.click();
+ await page.screenshot({path:info.outputPath('client-archive-dialog.png')});
+ await dialog.getByRole('button',{name:'Отмена',exact:true}).click();
+ await expect(button).toBeFocused();
+ expect(writes).toHaveLength(0);
+ await button.click();
+ await dialog.getByRole('button',{name:'Переместить в архив'}).click();
+ await expect(dialog).toHaveCount(0);
+ await expect(button).toHaveCount(0);
+ await expect(page.getByRole('textbox',{name:/Поиск по имени/})).toBeFocused();
+ await expect(stats.getByText('40',{exact:true})).toBeVisible();
+ await expect(stats.getByText('12',{exact:true})).toBeVisible();
+ await expect(page).toHaveURL(/country=Spain/);
+ expect(writes).toEqual([{expectedUpdatedAt:now}]);
+});

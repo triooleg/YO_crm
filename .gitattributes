@@ -1,2 +1,3 @@
 *.sh text eol=lf
 apps/api/tests/fixtures/checkout-v518-source.php text eol=lf
+packages/database/prisma/migrations/20261106110000_order_file_archive/migration.sql text eol=lf

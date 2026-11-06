@@ -70,6 +70,37 @@ test('late KeyCRM number is display metadata on the same technical order and can
  p.order.externalNumber='706';await service.ingest(p);assert.equal(db.state.order.length,1);assert.equal(db.state.order[0].number,original);assert.equal(db.state.order[0].externalId,'123');assert.equal(db.state.order[0].externalNumber,'706');
  p.order.externalNumber='707';p.order.notes='changed source note';const before=structuredClone(db.state);await assert.rejects(service.ingest(p),e=>e.code==='WEBSITE_ORDER_CONFLICT');assert.deepEqual(db.state,before);
 });
+test('first delivery of a matching checkout reactivates a manually archived customer, even after an outbox delay',async()=>{
+ const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
+ const p=websitePayload(), archivedAt=new Date('2026-10-21T12:00:00Z');
+ const customer=await db.client.create({data:{displayName:'Existing buyer',email:p.customer.email,phone:p.customer.phone,archivedAt}});
+ await assert.rejects(service.ingest(p),e=>e.code==='WEBSITE_CLIENT_CONFLICT');
+ await db.auditLog.create({data:{entityType:'Client',entityId:customer.id,action:'ARCHIVE',after:{archivedAt:archivedAt.toISOString()}}});
+ const order=await service.ingest(p);
+ assert.equal(order.clientId,customer.id);
+ assert.equal(db.state.client.length,1);
+ assert.equal(db.state.client[0].archivedAt,null);
+ assert.equal(db.state.activity.filter(row=>row.type==='CLIENT_REACTIVATED_BY_WEBSITE_ORDER').length,1);
+ const before=structuredClone(db.state);
+ await service.ingest(p);
+ assert.deepEqual(db.state,before);
+});
+test('checkout cannot reactivate a client changed after checking the archive audit',async()=>{
+ const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
+ const p=websitePayload(), archivedAt=new Date('2026-10-21T12:00:00Z');
+ const customer=await db.client.create({data:{displayName:'Existing buyer',email:p.customer.email,phone:p.customer.phone,archivedAt}});
+ await db.auditLog.create({data:{entityType:'Client',entityId:customer.id,action:'ARCHIVE',after:{archivedAt:archivedAt.toISOString()}}});
+ const readAudit=db.auditLog.findFirst;
+ db.auditLog.findFirst=async query=>{
+  const result=await readAudit(query);
+  // Interleave a redaction with the already-read manual archive evidence.
+  await db.client.update({where:{id:customer.id},data:{email:null,phone:null,archivedAt:new Date('2026-10-22T12:00:00Z')}});
+  return result;
+ };
+ await assert.rejects(service.ingest(p),e=>e.code==='WEBSITE_CLIENT_CONFLICT');
+ assert.equal(db.state.order.length,0);
+ assert.equal(db.state.activity.length,0);
+});
 test('two complete client matches require review and never select a linked favorite',async()=>{
  const db=websiteDatabase(),service=new WebsiteOrdersService(db,{capturePayment:async()=>{}},()=>['calendar.yoleotard.com']);
  for(const id of ['one','two'])await db.client.create({data:{id,email:'BUYER@example.invalid',phone:'+380671234567',displayName:id}});

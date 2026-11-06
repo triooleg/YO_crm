@@ -29,3 +29,54 @@ test('Instagram username fallback is an honestly labelled profile in every Inbox
  }
  expect(writes).toEqual([]);
 });
+
+test("Instagram shared photos open in the Inbox and unavailable media has a readable fallback", async ({page}) => {
+ const client={id:"instagram-qa",displayName:"Synthetic Instagram client",source:"INSTAGRAM",status:"LEAD",orders:[],conversations:[{
+  id:"ig-conversation",channel:"INSTAGRAM",unreadCount:0,lastMessageAt:"2026-11-06T08:30:00Z",
+ }]};
+ const photoUrl=(id:string)=>`/api/communications/messages/${id}/attachments/0/download?inline=1`;
+ let expired=true;
+ const originalUrl="https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=synthetic";
+ const messages=["available","expired"].map(id=>({
+  id,content:"[Вложение]",direction:"INBOUND",channel:"INSTAGRAM",status:"RECEIVED",
+  createdAt:"2026-11-06T08:30:00Z",metadata:{attachments:[{type:"image",sharedInstagramPhoto:true,originalUrl,url:photoUrl(id)}]},
+ }));
+ const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/5KcAAAAASUVORK5CYII=","base64");
+ await page.route("**/api/**", route=>{
+  const path=new URL(route.request().url()).pathname;
+  if(path==="/api/auth/me")return route.fulfill({json:{user:{id:"owner",role:"OWNER",displayName:"QA",email:"qa@example.test"}}});
+  if(path==="/api/communications")return route.fulfill({json:{items:[client],total:1,hasMore:false,scopeCounts:{all:1,unread:0,waiting:0,spam:0},channelCounts:{INSTAGRAM:1}}});
+  if(path==="/api/communications/instagram-qa")return route.fulfill({json:{messages}});
+  if(path.includes("/messages/available/attachments/"))return route.fulfill({body:png,contentType:"image/png"});
+  if(path.includes("/messages/expired/attachments/"))return expired
+   ? route.fulfill({status:502,json:{message:"expired"}})
+   : route.fulfill({body:png,contentType:"image/png"});
+  if(path==="/api/branding")return route.fulfill({json:{}});
+  if(path==="/api/communications/unread-count")return route.fulfill({json:{unreadCount:0}});
+  return route.fulfill({json:[]});
+ });
+ await page.setViewportSize({width:1366,height:900});
+ await page.goto("/?section=inbox");
+ await page.locator(".communications-client-list>button").filter({hasText:client.displayName}).click();
+ const chat=page.locator(".communications-messages");
+ const photo=chat.getByRole("button",{name:"Открыть вложение: Фото из публикации Instagram",exact:true});
+ await expect(photo).toBeVisible();
+ await expect.poll(()=>photo.locator("img").evaluate(img=>img.naturalWidth)).toBe(1);
+ await expect(chat.getByText("Фото из публикации Instagram недоступно",{exact:true})).toBeVisible();
+ await expect(chat.getByRole("link",{name:"Открыть оригинал",exact:true})).toHaveAttribute("href",originalUrl);
+ const retry=chat.getByRole("button",{name:"Повторить загрузку",exact:true});
+ await retry.focus();
+ const rejected=page.waitForResponse(response=>response.url().endsWith(photoUrl("expired"))&&response.status()===502);
+ await page.keyboard.press("Enter");
+ await rejected;
+ await expect(retry).toBeFocused();
+
+ expired=false;
+ await page.keyboard.press("Enter");
+ await expect(photo).toHaveCount(2);
+ const recoveredPhoto=photo.filter({has:page.locator(`img[src="${photoUrl("expired")}"]`)});
+ await expect.poll(()=>recoveredPhoto.locator("img").evaluate(img=>img.naturalWidth)).toBe(1);
+ await expect(recoveredPhoto).toBeFocused();
+ await photo.first().click();
+ await expect(page.getByRole("dialog").locator("img")).toHaveAttribute("src",photoUrl("available"));
+});

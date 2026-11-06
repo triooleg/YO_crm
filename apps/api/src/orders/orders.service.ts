@@ -199,7 +199,7 @@ export class OrdersService {
         measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } },
         items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { instances: { where: { archivedAt: null }, select: { id: true, ordinal: true, updatedAt: true, productionStatus: true, standardHeight: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true } } } }, id: true, archivedAt: true, discipline: true, notes: true, name: true, quantity: true, priceMinor: true, modelImagePath: true, externalImageUrl: true, sku: true, designNumber: true, properties: true, productionStatus: true, athlete: { select: { id: true, firstName: true, lastName: true } }, measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, values: true } } } },
         activities: { select: { id: true, type: true, summary: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 },
-        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+        files: { where: { archivedAt: null }, select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } }, shipment: true, invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, templateKey: true, documentOptions: true, totalMinor: true, issueDate: true }, orderBy: { createdAt: "desc" } },
       } satisfies Prisma.OrderSelect;
       if(paged){
@@ -268,15 +268,15 @@ export class OrdersService {
             },
             measurement: { select: { id: true, athleteId: true, archivedAt: true, measuredAt: true, definitionVersion: true, unit: true, height: true, chest: true, waist: true, hips: true, torso: true, values: true, notes: true, source: true } },
             instances:{where:{archivedAt:null},orderBy:{ordinal:"asc"},select:{id:true,ordinal:true,standardHeight:true,productionStatus:true,plannedStartAt:true,plannedEndAt:true,startedAt:true,completedAt:true,updatedAt:true,athlete:{select:{id:true,firstName:true,lastName:true,archivedAt:true,updatedAt:true}},measurement:{select:{id:true,athleteId:true,archivedAt:true,measuredAt:true,definitionVersion:true,values:true}},orderShipment:{select:{id:true,status:true,trackingNumber:true}}}},
-            files:{orderBy:[{sortOrder:"asc"},{createdAt:"asc"}],select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,role:true,sortOrder:true,createdAt:true}},
+            files:{where:{archivedAt:null},orderBy:[{sortOrder:"asc"},{createdAt:"asc"}],select:{id:true,name:true,path:true,mimeType:true,sizeBytes:true,role:true,sortOrder:true,createdAt:true}},
           },
         },
         activities: { select: { id: true, type: true, summary: true, metadata: true, createdAt: true,actor:{select:{id:true,displayName:true}} }, orderBy: { createdAt: "desc" }, take: 250 },
-        files: { select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true,role:true,orderItemId:true,noteId:true,sortOrder:true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+        files: { where: { archivedAt: null }, select: { id: true, name: true, path: true, mimeType: true, sizeBytes: true,role:true,orderItemId:true,noteId:true,sortOrder:true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         payments: { where: { voidedAt: null }, select: { id: true, amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true, exchangeRateSnapshot: true, method: true, receivedAt: true, reference: true, notes: true }, orderBy: { receivedAt: "desc" } },
         shipment: true,
         orderShipments:{where:{archivedAt:null},orderBy:[{isPrimary:"desc"},{createdAt:"asc"}],include:{instances:{where:{archivedAt:null},select:{id:true,ordinal:true,orderItemId:true}},atelierExpense:true}},
-        notesStructured:{where:{archivedAt:null},orderBy:{createdAt:"desc"},include:{author:{select:{id:true,displayName:true}},files:true}},
+        notesStructured:{where:{archivedAt:null},orderBy:{createdAt:"desc"},include:{author:{select:{id:true,displayName:true}},files:{where:{archivedAt:null}}}},
         tags:{where:{archivedAt:null},orderBy:{createdAt:"asc"}},
         expenses:{where:{archivedAt:null},include:{category:true},orderBy:{incurredAt:"desc"}},
         invoices: { where: { archivedAt: null }, select: { id: true, number: true, status: true, language: true, currency: true, templateKey: true, documentOptions: true, totalMinor: true, issueDate: true, dueDate: true }, orderBy: { createdAt: "desc" } },
@@ -534,6 +534,37 @@ export class OrdersService {
       await unlink(join(directory, path)).catch(() => undefined);
       throw error;
     }
+  }
+  async archiveOrderFile(orderId: string, fileId: string, actor: User) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", "client-merge-global");
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
+      const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, select: { clientId: true } });
+      if (!order) throw new NotFoundException("Заказ не найден");
+
+      const where = { id: fileId, orderId, role: "GENERAL", orderItemId: null, noteId: null } satisfies Prisma.OrderFileWhereInput;
+      const file = await tx.orderFile.findFirst({ where, select: { name: true, archivedAt: true } });
+      if (!file) throw new NotFoundException("Файл не найден");
+      if (file.archivedAt) return { id: fileId, archivedAt: file.archivedAt.toISOString() };
+
+      const archivedAt = new Date();
+      const result = await tx.orderFile.updateMany({ where: { ...where, archivedAt: null }, data: { archivedAt } });
+      if (result.count !== 1) throw new ConflictException("Файл уже изменён другим пользователем");
+
+      const timestamp = archivedAt.toISOString();
+      await tx.activity.create({ data: {
+        orderId, clientId: order.clientId, actorId: actor.id, type: "ORDER_FILE_ARCHIVED",
+        summary: `Файл «${file.name}» перемещён в архив`, metadata: { fileId, archivedAt: timestamp },
+      } });
+      await tx.auditLog.create({ data: {
+        actorId: actor.id, action: "ARCHIVE", entityType: "OrderFile", entityId: fileId,
+        before: { orderId, archivedAt: null }, after: { orderId, archivedAt: timestamp },
+      } });
+      return { id: fileId, archivedAt: timestamp };
+    });
+  }
+  async isOrderFileAvailable(path: string) {
+    return !!await this.prisma.orderFile.findFirst({ where: { path, archivedAt: null }, select: { id: true } });
   }
   async updateModelImage(orderId: string, dto: UpdateOrderModelImageDto, actor: User) {
     if (!isOrderImageName(dto.modelImagePath)) throw new BadRequestException("Некорректное имя изображения заказа");

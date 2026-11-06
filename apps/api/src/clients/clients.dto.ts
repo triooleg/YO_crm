@@ -23,6 +23,11 @@ export class CreateClientDto {
   @ApiPropertyOptional() @IsOptional() @IsString() notes?:string;
 }
 export class PromoteInboxClientDto extends CreateClientDto {}
+export class ArchiveClientDto {
+  @ApiProperty()
+  @IsDateString()
+  expectedUpdatedAt!: string;
+}
 export class UpdateClientNotesDto {
   @ApiProperty() @IsString() @MaxLength(2000) notes!: string;
   @ApiPropertyOptional() @IsOptional() @IsIn(['INTERNAL','CLIENT']) visibility?: 'INTERNAL'|'CLIENT';

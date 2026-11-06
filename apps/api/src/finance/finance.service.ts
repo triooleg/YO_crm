@@ -8,6 +8,27 @@ import { renderInvoicePdf } from "./invoice-pdf";
 import { OrderDocumentsService } from "./order-documents.service";
 import { invoiceDisplayNumber, presentInvoice } from "./invoice-number";
 import { saveProductionSettingsTransaction } from "./production-settings";
+function clientInvoiceScope(clientId: string): Prisma.InvoiceWhereInput {
+  return {
+    archivedAt: null,
+    status: { not: InvoiceStatus.CANCELLED },
+    order: { clientId, archivedAt: null, client: { archivedAt: null } },
+  };
+}
+
+function invoiceOrderDisplayNumber(order: {
+  number: string;
+  sourceSystem: string | null;
+  externalNumber: string | null;
+  externalId: string | null;
+}) {
+  if (order.sourceSystem !== "YOLEOTARD_WEBSITE") return order.number;
+  const canonical = order.number.trim();
+  if (/^\d{2}-(?:\d{2}-)?\d+$/.test(canonical) || /^(?:YO|WEB)-[1-9]\d*$/i.test(canonical)) return canonical;
+  return order.externalNumber?.trim() ||
+    (order.externalId && /^[1-9]\d*$/.test(order.externalId) ? `WEB-${order.externalId}` : order.number);
+}
+
 @Injectable() export class FinanceService{
  constructor(private readonly prisma:PrismaService,private readonly taxes?:TaxesService,private readonly documents?:OrderDocumentsService){}
  private period(month?:string){const d=month&&/^\d{4}-\d{2}$/.test(month)?new Date(month+"-01T00:00:00Z"):new Date(),start=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1)),end=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)),previousStart=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()-1,1));return{start,end,previousStart,month:start.toISOString().slice(0,7)}}
@@ -93,7 +114,24 @@ import { saveProductionSettingsTransaction } from "./production-settings";
   return this.prisma.$transaction(async tx=>{await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))",d.orderId);const activeOrder=await tx.order.findFirst({where:{id:d.orderId,archivedAt:null},select:{id:true,clientId:true,currency:true}});if(!activeOrder)throw new NotFoundException("Заказ не найден");const number=await this.nextNumber(tx,issueDate),x=await tx.invoice.create({data:{number,orderId:activeOrder.id,language:d.language,currency:activeOrder.currency,issueDate,dueDate,seller:d.seller as unknown as Prisma.InputJsonValue,customer:d.customer as unknown as Prisma.InputJsonValue,items:d.items as unknown as Prisma.InputJsonValue,notes:d.notes,totalMinor,templateKey:document?.templateKey,templateSnapshot:document?.templateSnapshot as unknown as Prisma.InputJsonValue|undefined,dataSnapshot:document?.dataSnapshot as unknown as Prisma.InputJsonValue|undefined,documentOptions:document?.documentOptions as unknown as Prisma.InputJsonValue|undefined}});await tx.activity.create({data:{clientId:activeOrder.clientId,orderId:activeOrder.id,type:"INVOICE_CREATED",summary:"Создан инвойс "+number,metadata:{invoiceId:x.id,templateKey:x.templateKey}}});await tx.auditLog.create({data:{actorId:u.id,action:"CREATE",entityType:"Invoice",entityId:x.id,after:x}});return x})
  }
 async updateInvoice(id:string,d:UpdateInvoiceDto,u:User){return this.prisma.$transaction(async tx=>{const target=await tx.invoice.findFirst({where:{id,archivedAt:null},select:{orderId:true}});if(!target)throw new NotFoundException("Инвойс не найден");await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))",target.orderId);const before=await tx.invoice.findFirst({where:{id,archivedAt:null},include:{order:{select:{clientId:true,payments:{where:{voidedAt:null},select:{amountMinor:true,currency:true,appliedAmountMinor:true,appliedCurrency:true}},invoices:{where:{status:InvoiceStatus.PAID},select:{id:true,totalMinor:true,currency:true}}}}}});if(!before)throw new NotFoundException("Инвойс не найден");if(before.status===InvoiceStatus.PAID||before.status===InvoiceStatus.CANCELLED)throw new BadRequestException("Закрытый инвойс нельзя изменять");const contentChange=d.language!==undefined||d.dueDate!==undefined||d.seller!==undefined||d.customer!==undefined||d.items!==undefined||d.notes!==undefined;if(contentChange&&before.documentOptions&&typeof before.documentOptions==="object"&&"immutable" in before.documentOptions&&before.documentOptions.immutable===true)throw new BadRequestException("Сохранённый инвойс неизменяем; создайте копию");if(before.status===InvoiceStatus.ISSUED&&before.templateSnapshot&&before.dataSnapshot&&contentChange)throw new BadRequestException("Выпущенный инвойс неизменяем; разрешено только изменить его статус");const transitions:Record<string,InvoiceStatus[]>={[InvoiceStatus.DRAFT]:[InvoiceStatus.ISSUED,InvoiceStatus.CANCELLED],[InvoiceStatus.ISSUED]:[InvoiceStatus.PAID,InvoiceStatus.CANCELLED]};if(d.status&&d.status!==before.status&&!transitions[before.status]?.includes(d.status))throw new BadRequestException("Недопустимый переход статуса инвойса");const totalMinor=d.items?.reduce((sum,item)=>{const next=sum+item.amountMinor*item.quantity;if(!Number.isSafeInteger(next))throw new BadRequestException("Сумма позиций инвойса превышает допустимое значение");return next},0),effectiveTotal=totalMinor??before.totalMinor;if(d.status===InvoiceStatus.PAID){const paid=before.order.payments.reduce((sum,payment)=>sum+appliedPaymentMinor(payment,before.currency),0),allocated=before.order.invoices.filter(invoice=>invoice.id!==before.id&&invoice.currency===before.currency).reduce((sum,invoice)=>sum+invoice.totalMinor,0);if(paid-allocated<effectiveTotal)throw new BadRequestException("Инвойс нельзя отметить оплаченным до полной оплаты заказа")}const dueDate=d.dueDate===null?null:d.dueDate?new Date(d.dueDate):undefined;if(dueDate&&dueDate<before.issueDate)throw new BadRequestException("Срок оплаты не может быть раньше даты выпуска");const snapshots:{dataSnapshot?:unknown;templateSnapshot?:unknown}=before.status===InvoiceStatus.DRAFT&&before.templateSnapshot&&before.dataSnapshot&&this.documents?this.documents.updateInvoiceSnapshots(before,d):{};const x=await tx.invoice.update({where:{id},data:{status:d.status,language:d.language,dueDate,seller:d.seller as unknown as Prisma.InputJsonValue|undefined,customer:d.customer as unknown as Prisma.InputJsonValue|undefined,items:d.items as unknown as Prisma.InputJsonValue|undefined,notes:d.notes,totalMinor,dataSnapshot:snapshots.dataSnapshot as unknown as Prisma.InputJsonValue|undefined,templateSnapshot:snapshots.templateSnapshot as unknown as Prisma.InputJsonValue|undefined}});await tx.activity.create({data:{clientId:before.order.clientId,orderId:before.orderId,type:"INVOICE_UPDATED",summary:"Обновлён инвойс "+invoiceDisplayNumber(before),metadata:{invoiceId:x.id,status:x.status}}});await tx.auditLog.create({data:{actorId:u.id,action:"UPDATE",entityType:"Invoice",entityId:id,before:before as unknown as Prisma.InputJsonValue|undefined,after:x}});return presentInvoice(x)})}
- async document(id:string){const x=await this.prisma.invoice.findFirst({where:{id}});if(!x)throw new NotFoundException("Инвойс не найден");const options=x.documentOptions&&typeof x.documentOptions==="object"?x.documentOptions as Record<string,unknown>:{};if(options.immutable===true){const artifact=await this.prisma.appSetting.findUnique({where:{section_key:{section:"invoice-documents",key:x.id}}});const saved=artifact?.value as {pdfBase64?:string}|undefined;if(typeof saved?.pdfBase64!=="string"||!saved.pdfBase64)throw new BadRequestException("Сохранённый PDF недоступен");return{number:invoiceDisplayNumber(x),pdf:Buffer.from(saved.pdfBase64,"base64")}}if(x.archivedAt)throw new NotFoundException("Инвойс не найден");const pdf=x.templateSnapshot&&x.dataSnapshot&&this.documents?await this.documents.renderInvoiceSnapshot(x):await renderInvoicePdf(x);return{number:x.number,pdf}}
+ async clientInvoices(clientId: string) {
+  const invoices = await this.prisma.invoice.findMany({
+    where: clientInvoiceScope(clientId),
+    take: 100,
+    orderBy: [{ issueDate: "desc" }, { id: "desc" }],
+    select: {
+      id: true, number: true, issueDate: true, documentOptions: true,
+      order: { select: { number: true, sourceSystem: true, externalNumber: true, externalId: true } },
+    },
+  });
+  return invoices.map(invoice => ({
+    id: invoice.id,
+    number: invoiceDisplayNumber(invoice),
+    orderNumber: invoiceOrderDisplayNumber(invoice.order),
+    issueDate: invoice.issueDate,
+  }));
+ }
+ async document(id:string, clientId?:string){const x=await this.prisma.invoice.findFirst({where:clientId===undefined?{id}:{id,...clientInvoiceScope(clientId)}});if(!x)throw new NotFoundException("Инвойс не найден");const options=x.documentOptions&&typeof x.documentOptions==="object"?x.documentOptions as Record<string,unknown>:{};if(options.immutable===true){const artifact=await this.prisma.appSetting.findUnique({where:{section_key:{section:"invoice-documents",key:x.id}}});const saved=artifact?.value as {pdfBase64?:string}|undefined;if(typeof saved?.pdfBase64!=="string"||!saved.pdfBase64)throw new BadRequestException("Сохранённый PDF недоступен");return{number:invoiceDisplayNumber(x),pdf:Buffer.from(saved.pdfBase64,"base64")}}if(x.archivedAt)throw new NotFoundException("Инвойс не найден");const pdf=x.templateSnapshot&&x.dataSnapshot&&this.documents?await this.documents.renderInvoiceSnapshot(x):await renderInvoicePdf(x);return{number:x.number,pdf}}
  private async validateExpenseRelations(tx:Prisma.TransactionClient,categoryId:string,orderId?:string|null){await this.validateExpenseCategory(tx,categoryId);if(orderId)await this.validateExpenseOrder(tx,orderId)}
  private async validateExpenseCategory(tx:Prisma.TransactionClient,categoryId:string){const category=await tx.expenseCategory.findFirst({where:{id:categoryId,active:true},select:{id:true}});if(!category)throw new BadRequestException("Выберите активную статью расходов")}
  private async validateExpenseOrder(tx:Prisma.TransactionClient,orderId:string){const order=await tx.order.findFirst({where:{id:orderId,archivedAt:null},select:{id:true}});if(!order)throw new BadRequestException("Выберите активный заказ")}

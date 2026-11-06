@@ -3,6 +3,7 @@ import { OrderImagePreview } from "./orders/order-image-preview";
 import { takeParentMeasurementDraft } from "../lib/parent-measurements-message-draft";
 import { ShipmentNotificationAction } from "./shipment-notification-action";
 import { InboxHistoryEvidence } from "./inbox-history-evidence";
+import { InboxInvoiceAction } from "./inbox-invoice-action";
 
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
@@ -46,7 +47,7 @@ type Order = {
   currency: string;
   payments?: { amountMinor: number; currency: string; appliedAmountMinor?: number; appliedCurrency?: string }[];
 };
-type Attachment = { type: string; url?: string; stickerId?: string; name?: string; mimeType?: string };
+type Attachment = { type: string; url?: string; sharedInstagramPhoto?: boolean; originalUrl?: string; stickerId?: string; name?: string; mimeType?: string };
 type UploadedAttachment = { path: string; name: string; mimeType: string; sizeBytes: number };
 type ConversationPreview = {
   id: string;
@@ -153,6 +154,7 @@ const limits = { left: [200, 430], right: [260, 560] } as const,
   };
 const socialChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
 const sendableChannels: SocialChannel[] = ["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"];
+const invoicePdfChannels: SocialChannel[] = ["EMAIL", "WHATSAPP", "CHATWOOT", "FACEBOOK"];
 const COMMUNICATION_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const COMMUNICATION_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
 const commonAttachmentMimeTypes = ["image/jpeg","image/png","image/webp","image/gif","video/mp4","application/pdf","text/plain"];
@@ -376,7 +378,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     readOperationSequence = useRef(0),
     readOperations = useRef(new Map<string, number>()),
     pendingReads = useRef(new Map<string, Map<string, number>>()),
-    pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string }>({}),
+    pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string; invoiceRequestFingerprint?: string }>({}),
     composerDraftId=useRef<string|undefined>(undefined),
     composerDraftKey=useRef<string|undefined>(undefined),
     draftSavePromise=useRef<Promise<boolean>|null>(null),
@@ -399,6 +401,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     aiDraftEditor = useRef<HTMLTextAreaElement | null>(null),
     composerTextarea=useRef<HTMLTextAreaElement|null>(null),
     attachmentInput=useRef<HTMLInputElement|null>(null),
+    currentAttachment=useRef<File | undefined>(undefined),
+    invoiceAttachment=useRef<File | undefined>(undefined),
+    currentInvoiceScope=useRef(""),
+    currentInvoiceBusy=useRef(false),
     emojiTrigger=useRef<HTMLButtonElement|null>(null),
     emojiPicker=useRef<HTMLDivElement|null>(null),
     deleteTrigger=useRef<HTMLElement|null>(null),
@@ -423,12 +429,19 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
   currentMessages.current=messages;
+  const invoiceConversationId = client?.conversations.find(conversation => conversation.channel === activeChannel)?.id;
+  const invoiceEpoch = composeEpoch.current;
+  const invoiceScope = JSON.stringify([client?.id, activeChannel, invoiceConversationId, invoiceEpoch]);
+  const canAttachInvoice = !!invoiceConversationId && invoicePdfChannels.includes(activeChannel as SocialChannel);
+  const invoiceAttachmentBlocked = !!attachment && invoiceAttachment.current === attachment && !canAttachInvoice;
+  currentInvoiceScope.current = invoiceScope;
+  currentInvoiceBusy.current = busy;
   const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48;if(stickToBottom.current)setNewMessageCount(0)}
   function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
   function handleComposerKeyDown(event:KeyboardEvent<HTMLTextAreaElement>){
     if(event.key!=="Enter"||!(event.ctrlKey||event.metaKey)||event.nativeEvent.isComposing)return;
-    if(busy||!client||(!text.trim()&&!attachment)||!sendableChannels.includes(activeChannel as SocialChannel))return;
+    if(busy||!client||invoiceAttachmentBlocked||(!text.trim()&&!attachment)||!sendableChannels.includes(activeChannel as SocialChannel))return;
     event.preventDefault();void save("SEND");
   }
   function handleComposerPaste(event:ClipboardEvent<HTMLTextAreaElement>){
@@ -482,6 +495,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       composeEpoch.current++;draftSequence.current++;aiOperationSequence.current++;summaryRequestSequence.current++;
       composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";lastAutosavedAiRunId.current=undefined;
       pendingSend.current={};
+      currentAttachment.current = undefined;
+      invoiceAttachment.current = undefined;
       if(attachmentPreview)URL.revokeObjectURL(attachmentPreview);
       if(attachmentInput.current)attachmentInput.current.value="";
       const removedChannels=splitResult.movedChannels?.length?splitResult.movedChannels:fallbackRemovedChannels,movedConversationIds=new Set(splitResult.movedConversationIds||[]),detachedSourceClientIds=new Set(splitResult.detachedSourceClientIds||[splitSourceId]);
@@ -595,8 +610,16 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     void navigateFromInbox("clients",createInboxClientContext(window.location.search,client.id,conversation?.id,conversation?.channel,client.displayName));
   }
   async function changeReplyChannel(nextChannel:string){
-    if(nextChannel===activeChannel)return;
+    if(nextChannel===activeChannel||(busy&&attachment&&invoiceAttachment.current===attachment))return;
     if(!await flushComposerDraftBeforeNavigation()){setError(ui.draftAutosaveFailed);return}
+    if (currentAttachment.current && invoiceAttachment.current === currentAttachment.current) {
+      if (currentInvoiceBusy.current) return;
+      if (pendingSend.current.requestId) {
+        chooseAttachment();
+        showInboxNotification(ui.invoiceAttachmentClearedOnChannelChange);
+      }
+    }
+    currentInvoiceScope.current = "";
     volatileDrafts.current.set(activeChannel,text);
     const prepared=restoreInboxDraft(messages,nextChannel,volatileDrafts.current.get(nextChannel));
     draftSequence.current++;summaryRequestSequence.current++;
@@ -850,6 +873,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     setMobileClientListOpen(false);
     if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
       if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+      currentAttachment.current = undefined;
+      invoiceAttachment.current = undefined;
       setAttachment(undefined);
       setAttachmentPreview("");
       pendingSend.current = {};
@@ -1171,32 +1196,54 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   }
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
-    if (!client || (!messageText && !attachment)) return false;
-    if(action==="SEND"&&draftSavePromise.current)await draftSavePromise.current;
+    if (!client || invoiceAttachmentBlocked || (!messageText && !attachment)) return false;
+    const sendingInvoice = !!attachment && invoiceAttachment.current === attachment;
+    if (sendingInvoice && (action !== "SEND" || currentInvoiceBusy.current)) return false;
+    if(!sendingInvoice&&action==="SEND"&&draftSavePromise.current)await draftSavePromise.current;
     if(action==="DRAFT")invalidateAiOperation();
     const operationClientId=client.id,operationEpoch=composeEpoch.current;
-    const isActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
+    const isComposerActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
+    const isActive=()=>isComposerActive()&&(!sendingInvoice||
+      (currentInvoiceScope.current===invoiceScope&&currentAttachment.current===attachment));
+    if (sendingInvoice && !isActive()) return false;
+    if (sendingInvoice) currentInvoiceBusy.current = true;
     setBusy(true);
     setError("");
     try {
+      if (sendingInvoice) {
+        if (draftSavePromise.current) await draftSavePromise.current;
+        if (!isActive()) return false;
+        if (messageText && composerDraftId.current && !await flushComposerDraftBeforeNavigation()) {
+          if (isActive()) setError(ui.draftAutosaveFailed);
+          return false;
+        }
+        if (!isActive()) return false;
+      }
       let uploaded: UploadedAttachment | undefined;
       if (attachment) {
         if (pendingSend.current.file === attachment && pendingSend.current.uploaded) uploaded = pendingSend.current.uploaded;
         else {
+          const data = await readFile(attachment);
+          if (sendingInvoice && !isActive()) return false;
           uploaded = await api("/communications/attachments", {
             method: "POST",
-            body: JSON.stringify({ name: attachment.name, mimeType: attachment.type, data: await readFile(attachment) }),
+            body: JSON.stringify({ name: attachment.name, mimeType: attachment.type, data }),
           });
           if(!isActive())return false;
           pendingSend.current = { file: attachment, uploaded };
         }
       }
       const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
-        const draftId=action==="SEND"&&content?composerDraftId.current:undefined;
-        const result = await api("/communications/" + client.id + "/messages", {
-          method: "POST",
-          body: JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(content&&composerAiRunId?{aiRunId:composerAiRunId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) }),
-        });
+        const draftId=action==="SEND"&&content&&!(sendingInvoice&&file)?composerDraftId.current:undefined;
+        const body = JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(content&&composerAiRunId?{aiRunId:composerAiRunId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) });
+        if (sendingInvoice && file) {
+          const fingerprint = JSON.stringify([invoiceScope, body]);
+          if (pendingSend.current.invoiceRequestFingerprint && pendingSend.current.invoiceRequestFingerprint !== fingerprint) {
+            throw new Error(ui.invoiceRetryHold);
+          }
+          pendingSend.current.invoiceRequestFingerprint = fingerprint;
+        }
+        const result = await api("/communications/" + client.id + "/messages", { method: "POST", body });
         if(isActive())setMessages((current) => {const next=socialReplyTarget&&["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result;return draftId&&current.some(message=>message.id===draftId)?current.map(message=>message.id===draftId?next:message):[...current,next]});
         return result as Message;
       };
@@ -1204,24 +1251,19 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       if (action === "DRAFT") {
         sent.push(await sendOne(messageText || undefined, uploaded));
       } else {
-        if (activeChannel === "EMAIL" && uploaded && !pendingSend.current.attachmentDelivered) {
-          const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
-          pendingSend.current = attempt.state;
-          const result = await sendOne(messageText || undefined, uploaded, attempt.requestId);
-          if(!isActive())return false;
-          sent.push(result);
-          pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
-        } else if (uploaded && !pendingSend.current.attachmentDelivered) {
+        // Keep invoice retries attachment-only even if the text becomes a server draft later.
+        const attachmentCarriesText = !sendingInvoice && (activeChannel === "EMAIL" || activeChannel === "WHATSAPP");
+        if (uploaded && !pendingSend.current.attachmentDelivered) {
           const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
           pendingSend.current = attempt.state;
           const { requestId } = attempt;
-          const attachmentContent=activeChannel==="WHATSAPP"?messageText||undefined:undefined;
+          const attachmentContent = attachmentCarriesText ? messageText || undefined : undefined;
           const result = await sendOne(attachmentContent, uploaded, requestId);
           if(!isActive())return false;
           sent.push(result);
           pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
         }
-        if (((activeChannel!=="WHATSAPP"||!uploaded)&&activeChannel !== "EMAIL" && !sent.some((message) => message.status === "FAILED") && messageText) || (activeChannel === "EMAIL" && !uploaded && messageText)) {
+        if ((!uploaded || !attachmentCarriesText) && messageText && !sent.some(message => message.status === "FAILED")) {
           const content = messageText;
           const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
             ? pendingSend.current.textRequestId
@@ -1254,6 +1296,8 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         setSocialReplyTarget(undefined);
         setEmojiOpen(false);
         if(action==="DRAFT"){setAiReply(null);setAiDraftText("")}
+        currentAttachment.current = undefined;
+        invoiceAttachment.current = undefined;
         setAttachment(undefined);
         pendingSend.current = {};
         if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
@@ -1264,18 +1308,31 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       if(isActive())setError((e as Error).message);
       return false;
     } finally {
-      if(isActive())setBusy(false);
+      if (isComposerActive()) {
+        if (sendingInvoice) currentInvoiceBusy.current = false;
+        setBusy(false);
+      }
     }
   }
   function chooseAttachment(file?: File) {
-    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
     if(file&&!attachmentMimeTypes.includes(file.type)){setError(ui.unsupportedAttachmentType);return}
     const maxBytes=file?.type==="video/mp4"?COMMUNICATION_VIDEO_MAX_BYTES:COMMUNICATION_FILE_MAX_BYTES;
     if(file&&file.size>maxBytes){setError(ui.attachmentTooLarge.replace("{size}",file.type==="video/mp4"?"16 МБ":"5 МБ"));return}
     setError("");
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    currentAttachment.current = file;
+    invoiceAttachment.current = undefined;
     setAttachment(file);
     pendingSend.current = {};
     setAttachmentPreview(file&&(file.type.startsWith("image/")||file.type.startsWith("video/")) ? URL.createObjectURL(file) : "");
+  }
+  function attachSavedInvoice(file: File) {
+    if (!client || !canAttachInvoice || selectedClientId.current !== client.id ||
+        composeEpoch.current !== invoiceEpoch || currentInvoiceScope.current !== invoiceScope ||
+        currentInvoiceBusy.current || currentAttachment.current) return false;
+    chooseAttachment(file);
+    invoiceAttachment.current = file;
+    return true;
   }
   async function ai(action: string) {
     if (!aiPanelOpen || !client) return;
@@ -1434,6 +1491,9 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     grid = `min(${left}px,23vw) 4px minmax(320px,1fr) ${contextCollapsed?"0px 46px":`4px min(${right}px,25vw)`}`;
   const attachmentMimeTypes=activeChannel==="WHATSAPP"?whatsappAttachmentMimeTypes:commonAttachmentMimeTypes;
   const attachmentAccept=attachmentMimeTypes.join(",");
+  function generateInvoiceForActiveOrder() {
+    if(activeOrders[0]) void navigateFromInbox("finance",{action:"new-invoice",orderId:activeOrders[0].id});
+  }
   return (
     <div className="communications-page">
       {connectionLost&&<div className="communications-connection-state" role="status">{ui.connectionLost}</div>}
@@ -1565,7 +1625,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             {client&&<CrmButton type="button" tone="secondary" onClick={()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}>{client.inboxSpamAt?ui.restoreSpam:ui.markSpam}</CrmButton>}
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={openSplitDialog}>⇄</CrmActionIcon>:null}
             {client && availableChannels.length > 1 && (
-              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
+              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} disabled={busy && !!attachment && invoiceAttachment.current === attachment} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
             )}
             {client&&client.status!=="LEAD"&&<button type="button" className="communications-open-client" onClick={openClientFromInbox}>{ui.openClient}</button>}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
@@ -1617,6 +1677,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                               ui.attachmentTypes[
                                 attachment.type as keyof typeof ui.attachmentTypes
                               ] || ui.attachmentTypes.fallback;
+                          if (url && attachment.sharedInstagramPhoto) return (
+                            <InstagramSharedPhoto key={url} url={url} originalUrl={attachment.originalUrl} onLoad={scrollMessagesToLatest}
+                              onOpen={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:"image"});}}/>
+                          );
                           return url &&
                             ["image", "sticker", "video"].includes(attachment.type) ? (
                             <span className="communications-media-attachment" key={index}>
@@ -1743,6 +1807,9 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 {attachmentPreview && (attachment?.type.startsWith("video/")?<video src={attachmentPreview} aria-label={ui.selectedAttachment} preload="metadata" muted playsInline/>:<img src={attachmentPreview} alt={ui.selectedAttachment} />)}
                 <span><b>{attachment.name}</b><small>{formatBytes(attachment.size)}</small></span>
                 <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
+                {invoiceAttachmentBlocked && <small role="status">{ui.invoicePickerSwitchChannel}</small>}
+                {invoiceAttachment.current === attachment && (activeChannel === "EMAIL" || activeChannel === "WHATSAPP") &&
+                  text.trim() && <small role="status">{ui.invoiceSeparateSend}</small>}
               </div>
             )}
             <div className="communications-compose">
@@ -1768,7 +1835,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <span className={`communications-draft-status is-${draftStatus.toLowerCase()}`} role="status">{draftStatus==="SAVING"?ui.draftAutosaving:draftStatus==="SAVED"?ui.draftAutosaved:draftStatus==="ERROR"?ui.draftAutosaveFailed:""}</span>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
                 <button
-                  disabled={busy || !client || (!text.trim() && !attachment)}
+                  disabled={busy || !client || invoiceAttachmentBlocked || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}
                 >
                   {busy ? ui.sending : ui.sendMessage}
@@ -1780,7 +1847,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               {client && <ShipmentNotificationAction key={`${client.id}:${activeChannel}`} clientId={client.id} conversationId={client.conversations.find(conversation=>conversation.channel===activeChannel)?.id} channel={activeChannel} canSend onSent={()=>void refreshInbox()} />}
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
-              <button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&void navigateFromInbox("finance",{action:"new-invoice",orderId:activeOrders[0].id})}>▤ {ui.invoiceShortcut}</button>
+              {client ? <InboxInvoiceAction key={invoiceScope} clientId={client.id} disabled={busy}
+                canAttach={canAttachInvoice} attachmentOccupied={!!attachment} maxAttachmentBytes={COMMUNICATION_FILE_MAX_BYTES}
+                onAttach={attachSavedInvoice} onGenerate={activeOrders[0] && navigate ? generateInvoiceForActiveOrder : undefined}/>
+                : <button type="button" disabled>▤ {ui.invoiceShortcut}</button>}
               <button type="button" disabled={!client||client.status==="LEAD"} onClick={openClientFromInbox}>⌁ {ui.measurementsShortcut}</button>
               {templates.slice(0,5).map(template=><button type="button" key={template.id} title={template.content} onClick={()=>chooseTemplate(template)}>{template.name}</button>)}
               {templates.length>5&&<button type="button" onClick={()=>{setAiPanelOpen(true);setTemplatesOpen(true)}}>⋯ {ui.moreActions}</button>}
@@ -1840,7 +1910,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b>{nextTask&&<button type="button" onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:nextTask.id})}>{ui.edit}</button>}</header>{nextTask?<p style={{borderLeftColor:nextTask.markerColor}}><b>{nextTask.title}</b>{nextTask.description&&<span>{nextTask.description}</span>}{nextTask.dueAt&&<small>{new Date(nextTask.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small>}{nextTask.assignee&&<small>{ui.responsible}: {nextTask.assignee.displayName}</small>}</p>:client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-tasks"><header><b>{ui.contextTasks}</b><small>{clientDetail?.workTasks?.length||0}</small><button type="button" onClick={()=>void openTaskFromChat()}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loading}</small>:clientDetail?.workTasks?.length?<div>{clientDetail.workTasks.map(task=><button type="button" className="communications-context-task" key={task.id} style={{borderLeftColor:task.markerColor}} onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:task.id})}><b>{task.title}</b><span>{task.column.name}</span>{task.description&&<small>{task.description}</small>}{task.dueAt&&<time dateTime={task.dueAt}>{new Date(task.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</time>}{task.assignee&&<small>{ui.responsible}: {task.assignee.displayName}</small>}</button>)}</div>:<State text={ui.noClientTasks}/>}</section>}
-          <section className="communications-context-section communications-context-files"><header><b>{ui.contextFiles}</b><small>{conversationFiles.length}</small></header>{conversationFiles.length?<div className="communications-context-file-grid">{conversationFiles.map(({messageId,index,attachment})=>{const url=safeAttachmentUrl(attachment.url),label=attachment.name||ui.attachmentTypes[attachment.type as keyof typeof ui.attachmentTypes]||ui.attachmentTypes.fallback,isMedia=["image","sticker","video"].includes(attachment.type);return url&&isMedia?<button type="button" className={`communications-context-file-preview${attachment.type==="video"?" is-video":""}`} key={`${messageId}-${index}`} aria-label={`${ui.openAttachment}: ${label}`} title={label} onClick={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:attachment.type==="video"?"video":"image"})}}>{attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label}/>}<span>{label}</span></button>:url?<a className="communications-context-file-card" key={`${messageId}-${index}`} href={url} target="_blank" rel="noopener noreferrer" title={label}><b aria-hidden="true">▧</b><span>{label}</span></a>:null})}</div>:<small>{ui.noContextFiles}</small>}</section>
+          <section className="communications-context-section communications-context-files"><header><b>{ui.contextFiles}</b><small>{conversationFiles.length}</small></header>{conversationFiles.length?<div className="communications-context-file-grid">{conversationFiles.map(({messageId,index,attachment})=>{const url=safeAttachmentUrl(attachment.url),label=attachment.name||ui.attachmentTypes[attachment.type as keyof typeof ui.attachmentTypes]||ui.attachmentTypes.fallback,isMedia=["image","sticker","video"].includes(attachment.type);return url&&attachment.sharedInstagramPhoto?<InstagramSharedPhoto key={url} url={url} originalUrl={attachment.originalUrl} sidebar onOpen={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:"image"});}}/>:url&&isMedia?<button type="button" className={`communications-context-file-preview${attachment.type==="video"?" is-video":""}`} key={`${messageId}-${index}`} aria-label={`${ui.openAttachment}: ${label}`} title={label} onClick={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:attachment.type==="video"?"video":"image"})}}>{attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label}/>}<span>{label}</span></button>:url?<a className="communications-context-file-card" key={`${messageId}-${index}`} href={url} target="_blank" rel="noopener noreferrer" title={label}><b aria-hidden="true">▧</b><span>{label}</span></a>:null})}</div>:<small>{ui.noContextFiles}</small>}</section>
           <section className="communications-context-section communications-context-summary" data-active-tab="SUMMARY"><header><div><b>{ui.contextSummary}</b><small>{active.label}</small></div><button type="button" onClick={()=>setContextTab("CLIENT")}>{ui.backToClient}</button></header>
             <div className="communications-summary-controls">
               <span className="communications-summary-date-picker"><button ref={summaryDateButtonRef} type="button" aria-haspopup="grid" aria-expanded={summaryCalendarOpen} onClick={()=>setSummaryCalendarOpen(value=>!value)}>{ui.summaryFromDate}: <b>{new Date(`${summaryDate||firstSummaryDate}T12:00:00`).toLocaleDateString("ru-RU")}</b> ▾</button>{summaryCalendarOpen&&<SummaryCalendar month={summaryMonth} onMonth={setSummaryMonth} selected={summaryDate||firstSummaryDate} minimum={firstSummaryDate} maximum={localDateKey(new Date())} generated={new Set(conversationSummaries.map(item=>item.fromDate))} onSelect={date=>{setSummaryDate(date);setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}} onClose={()=>{setSummaryCalendarOpen(false);queueMicrotask(()=>summaryDateButtonRef.current?.focus())}}/>}</span>
@@ -1979,6 +2049,47 @@ function SummaryCalendar({month,onMonth,selected,minimum,maximum,generated,onSel
   const year=month.getFullYear(),monthIndex=month.getMonth(),first=new Date(year,monthIndex,1),offset=(first.getDay()+6)%7,days=new Date(year,monthIndex+1,0).getDate(),cellCount=Math.ceil((offset+days)/7)*7,cells=Array.from({length:cellCount},(_,index)=>index<offset||index>=offset+days?null:index-offset+1),weeks=Array.from({length:cellCount/7},(_,index)=>cells.slice(index*7,index*7+7));
   const moveFocus=(event:KeyboardEvent<HTMLButtonElement>)=>{const grid=event.currentTarget.closest('[role="grid"]'),buttons=[...(grid?.querySelectorAll<HTMLButtonElement>('[role="gridcell"]:not(:disabled)')||[])],index=buttons.indexOf(event.currentTarget);let next=index;if(event.key==="ArrowRight")next=index+1;else if(event.key==="ArrowLeft")next=index-1;else if(event.key==="ArrowDown")next=index+7;else if(event.key==="ArrowUp")next=index-7;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;event.preventDefault();buttons[Math.max(0,Math.min(buttons.length-1,next))]?.focus()};
   return <div className="communications-summary-calendar" onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();onClose()}}}><header><button type="button" aria-label={ui.previousMonth} onClick={()=>onMonth(new Date(year,monthIndex-1,1))}>‹</button><b>{month.toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</b><button type="button" aria-label={ui.nextMonth} onClick={()=>onMonth(new Date(year,monthIndex+1,1))}>›</button></header><div className="communications-summary-weekdays" aria-hidden="true">{["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(day=><span key={day}>{day}</span>)}</div><div className="communications-summary-days" role="grid" aria-label={ui.summaryCalendarLabel}>{weeks.map((week,weekIndex)=><div role="row" key={`week-${weekIndex}`}>{week.map((day,index)=>{if(day===null)return <span key={`blank-${weekIndex}-${index}`} role="gridcell"/>;const value=`${year}-${String(monthIndex+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`,disabled=value<minimum||value>maximum;return <button type="button" role="gridcell" key={value} disabled={disabled} tabIndex={value===selected?0:-1} className={`communications-summary-day ${value===selected?"is-selected ":""}${generated.has(value)?"is-generated":""}`.trim()} aria-selected={value===selected} aria-label={new Date(`${value}T12:00:00`).toLocaleDateString("ru-RU",{dateStyle:"long"})} onKeyDown={moveFocus} onClick={()=>onSelect(value)}>{day}</button>})}</div>)}</div><small>{ui.summaryCalendarHint}</small></div>
+}
+function InstagramSharedPhoto({url,originalUrl,sidebar,onLoad,onOpen}:{
+  url:string;
+  originalUrl?:string;
+  sidebar?:boolean;
+  onLoad?:()=>void;
+  onOpen:(event:MouseEvent<HTMLButtonElement>)=>void;
+}){
+  const [failed,setFailed]=useState(false);
+  const actionRef=useRef<HTMLButtonElement>(null);
+  const transferFocus=useRef(false);
+  useEffect(()=>{
+    if(!transferFocus.current)return;
+    transferFocus.current=false;
+    actionRef.current?.focus();
+  },[failed]);
+  if(failed){
+    const original=safeAttachmentUrl(originalUrl);
+    return <span>
+      <span>{ui.instagramPhotoUnavailable}</span>{" "}
+      <button ref={actionRef} type="button" onClick={event=>{
+        transferFocus.current=document.activeElement===event.currentTarget;
+        setFailed(false);
+      }}>{ui.retryInstagramPhoto}</button>
+      {original&&<>{" "}<a href={original} target="_blank" rel="noreferrer">{ui.openInstagramPhotoOriginal}</a></>}
+    </span>;
+  }
+  const photo=<button ref={actionRef} type="button" className={sidebar?"communications-context-file-preview":undefined}
+    aria-label={ui.openAttachment+": "+ui.instagramSharedPhoto} onClick={onOpen}>
+    <img src={url} alt={ui.instagramSharedPhoto} onLoad={onLoad} onError={()=>{
+      if(document.activeElement===actionRef.current)transferFocus.current=true;
+      setFailed(true);
+    }}/>
+    {sidebar&&<span>{ui.instagramSharedPhoto}</span>}
+  </button>;
+  if(sidebar)return photo;
+  return <span className="communications-media-attachment">{photo}
+    <a className="communications-media-save" aria-label={ui.saveAttachment} title={ui.saveAttachment} href={url.split("?")[0]} download>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>
+    </a>
+  </span>;
 }
 function ReplyMedia({url,type,label,onOpen,onLoad}:{url:string;type?:"image"|"video";label:string;onOpen:(event:MouseEvent<HTMLButtonElement>,type:"image"|"video")=>void;onLoad:()=>void}){
   const[video,setVideo]=useState(type==="video");

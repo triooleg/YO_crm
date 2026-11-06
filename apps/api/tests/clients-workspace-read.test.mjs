@@ -27,10 +27,10 @@ test('list query count stays constant at 20 and 50 and never loads unbounded cli
  const {ClientsWorkspaceReadService}=load(resolve(root,'clients-workspace-read.ts'));
  for(const pageSize of [20,50]){
   const calls=[];const records=Array.from({length:pageSize},(_,n)=>({id:`c${n}`,orderCount:n,latestOrderAt:null}));
-  const db={$queryRaw:async sql=>{calls.push(['sql',sql]);return [{items:records,total:200}]},client:{findMany:async args=>{calls.push(['clients',args]);return records.map(row=>({...row,displayName:row.id,orders:[],conversations:[]}))},findFirst:async()=>null,groupBy:async args=>{calls.push(['filters',args]);return []}}};
+  const db={$queryRaw:async sql=>{calls.push(['sql',sql]);return [{items:records,total:200,active:130,leads:60,repeat:75}]},client:{findMany:async args=>{calls.push(['clients',args]);return records.map(row=>({...row,displayName:row.id,orders:[],conversations:[]}))},findFirst:async()=>null,groupBy:async args=>{calls.push(['filters',args]);return []}}};
   db.$transaction=async fn=>fn(db);
   const result=await new ClientsWorkspaceReadService(db).list({pageSize:String(pageSize)});
-  assert.equal(result.items.length,pageSize);assert.equal(result.total,200);
+  assert.equal(result.items.length,pageSize);assert.equal(result.total,200);assert.deepEqual(result.statistics,{active:130,leads:60,repeat:75});
   const read=calls.find(([kind])=>kind==='clients')[1];assert.equal(read.where.id.in.length,pageSize);assert.equal(read.take,pageSize);
   assert.ok(calls.length<=5,`${calls.length} queries at ${pageSize} rows`);
  }

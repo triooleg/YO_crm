@@ -17,6 +17,10 @@ test('workspace aggregates, search and duplicate evidence run on isolated Postgr
    INSERT INTO "Order"(id,"clientId","createdAt","archivedAt",number) SELECT 'o'||n,'c'||(1+n%10000),'2026-01-01'::timestamp+n*interval '1 minute',CASE WHEN n%7=0 THEN '2026-10-01'::timestamp ELSE NULL END,'26-'||n FROM generate_series(1,50000)n;
    UPDATE "Client" SET email='shared@example.test',phone='+380 99 1234567' WHERE id IN ('c1','c2');
    UPDATE "Client" SET "archivedAt"=CURRENT_TIMESTAMP WHERE id='c3';
+   UPDATE "Client" SET status='LEAD' WHERE id='c4';
+   UPDATE "Client" SET status='VIP' WHERE id='c5';
+   UPDATE "Client" SET status='BLOCKED' WHERE id='c6';
+   UPDATE "Order" SET "archivedAt"=CURRENT_TIMESTAMP WHERE "clientId"='c7' OR ("clientId"='c8' AND id<>'o7');
    INSERT INTO "Conversation"(id,"clientId",channel,"externalId") VALUES('chat1','c1','INSTAGRAM','account:provider-555'),('chat2','c1','EMAIL','account:email');
    UPDATE "Order" SET number='legacy',"sourceSystem"='YOLEOTARD_WEBSITE',"externalNumber"='22732',"externalId"='22732' WHERE id='o50000'; ANALYZE;`);
   const calls=[];let lastSql;
@@ -25,11 +29,16 @@ test('workspace aggregates, search and duplicate evidence run on isolated Postgr
   for(const pageSize of ['20','50']){
    calls.length=0;const started=performance.now(),result=await service.list({pageSize,sort:'orderCount'});
    metrics.push({pageSize:Number(pageSize),queries:calls.length,milliseconds:Math.round(performance.now()-started)});
-   assert.equal(result.total,9999);assert.equal(result.items.length,Number(pageSize));assert.equal(calls.length,5);
+   assert.equal(result.total,9999);assert.deepEqual(result.statistics,{active:9997,leads:1,repeat:9997});assert.equal(result.items.length,Number(pageSize));assert.equal(calls.length,5);
    const expected=(await pg.query('SELECT count(*)::int n FROM "Order" WHERE "clientId"=$1 AND "archivedAt" IS NULL',[result.items[0].id])).rows[0].n;
    assert.equal(result.items[0].orderCount,expected);
   }
-  const plan=(await pg.query('EXPLAIN (ANALYZE,FORMAT JSON) '+lastSql.text,lastSql.values)).rows;
+  const listSql=lastSql;
+  const filtered=await service.list({status:'LEAD'});
+  assert.equal(filtered.total,1);assert.deepEqual(filtered.statistics,{active:0,leads:1,repeat:1});
+  const empty=await service.list({status:'LEAD',country:'Spain'});
+  assert.deepEqual(empty.statistics,{active:0,leads:0,repeat:0});
+  const plan=(await pg.query('EXPLAIN (ANALYZE,FORMAT JSON) '+listSql.text,listSql.values)).rows;
   const legacyRow=(await service.list({search:'provider-555'})).items[0];assert.equal(legacyRow.id,'c1');assert.equal(legacyRow.latestOrder.externalNumber,'22732');assert.equal(legacyRow.latestOrder.sourceSystem,'YOLEOTARD_WEBSITE');
   assert.equal((await service.list({search:'shared@example.test'})).total,2);
   assert.equal((await service.list({search:'%'})).total,0);

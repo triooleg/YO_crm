@@ -1,6 +1,7 @@
 import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
 import { checkChatwootShipmentCapability } from "./chatwoot-shipment-capability";
 import { sendShipmentEmail, resolveShipmentEmailContext, validateNotificationConversation, type ShipmentEmailInput, type NotificationConversationContext } from "./shipment-email";
+import { INSTAGRAM_SHARED_PHOTO_MAX_BYTES, instagramPhotoCdnUrl, instagramSharedPhotoPreview, renderInstagramSharedPhoto, withInstagramSharedPhotoSlot } from "./instagram-shared-photo";
 import { measurementDefinitionAnnotation } from "../clients/measurement-data";
 import {
   BadGatewayException,
@@ -87,21 +88,41 @@ const communicationMime = {
   "application/pdf": "pdf", "text/plain": "txt",
 } as const;
 const REMOTE_MEDIA_MAX_BYTES = WHATSAPP_MEDIA_MAX_BYTES;
+type AttachmentReplayInput = { path: string; name: string; mimeType: string };
+type AttachmentReplayScope = {
+  clientId: string; conversationId: string; actorId: string; requestId: string;
+  channel: ContactChannel; content: string; replyToMessageId?: string | null; aiRunId?: string;
+};
+function attachmentReplayFingerprint(input: AttachmentReplayInput, scope: AttachmentReplayScope) {
+  return createHash("sha256").update(JSON.stringify([
+    "attachment-replay:v1", scope.clientId, scope.conversationId, scope.actorId, scope.requestId, scope.channel,
+    input.path, input.name, input.mimeType, scope.content, scope.replyToMessageId ?? null, scope.aiRunId ?? null,
+  ])).digest("hex");
+}
 function messageAttachments(metadata: Prisma.JsonValue | null) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
   const attachments = (metadata as { attachments?: unknown }).attachments;
   return Array.isArray(attachments) ? attachments : [];
 }
-function messageMetadataForClient(messageId: string, metadata: Prisma.JsonValue | null) {
+function messageMetadataForClient(messageId: string, metadata: Prisma.JsonValue | null, channel: ContactChannel) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return metadata;
-  const current = metadata as Prisma.JsonObject, attachments = messageAttachments(metadata);
-  if (!attachments.some(item => item && typeof item === "object" && !Array.isArray(item) && typeof (item as { mediaId?: unknown }).mediaId === "string" && typeof (item as { url?: unknown }).url !== "string")) return metadata;
-  return {
-    ...current,
-    attachments: attachments.map((item, index) => item && typeof item === "object" && !Array.isArray(item) && typeof (item as { mediaId?: unknown }).mediaId === "string" && typeof (item as { url?: unknown }).url !== "string"
-      ? { ...item, url: `/api/communications/messages/${encodeURIComponent(messageId)}/attachments/${index}/download?inline=1` }
-      : item),
-  } as Prisma.JsonObject;
+  const attachments = messageAttachments(metadata) as Prisma.JsonValue[];
+  let changed = false;
+  const visible = attachments.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const preview = channel === ContactChannel.INSTAGRAM && item.type === "ig_post"
+      ? instagramSharedPhotoPreview(messageId, index, item.url) : undefined;
+    if (preview) {
+      changed = true;
+      return { ...item, ...preview };
+    }
+    if (typeof item.mediaId === "string" && typeof item.url !== "string") {
+      changed = true;
+      return { ...item, url: `/api/communications/messages/${encodeURIComponent(messageId)}/attachments/${index}/download?inline=1` };
+    }
+    return item;
+  });
+  return changed ? { ...metadata, attachments: visible } as Prisma.JsonObject : metadata;
 }
 function replayFragment(event: MetaInboundMessage | ChatwootMessage, provider: "META" | "CHATWOOT") {
   return JSON.parse(JSON.stringify({ provider, ...event, receivedAt: event.receivedAt.toISOString() })) as Prisma.InputJsonValue;
@@ -114,16 +135,29 @@ function configuredHttpsOrigin(value: unknown) {
     return url.origin;
   } catch {}
 }
-async function boundedRemoteMedia(body: ReadableStream<Uint8Array>) {
+async function cancelRemoteMedia(body: { cancel(): Promise<void> }, deadline: AbortSignal) {
+  const cancellation = body.cancel().catch(() => undefined);
+  if (deadline.aborted) return;
+  let onAbort!: () => void;
+  const expired = new Promise<void>(resolve => { onAbort = resolve; });
+  deadline.addEventListener("abort", onAbort, { once: true });
+  try {
+    await Promise.race([cancellation, expired]);
+  } finally {
+    deadline.removeEventListener("abort", onAbort);
+  }
+}
+async function boundedRemoteMedia(body: ReadableStream<Uint8Array>, maxBytes = REMOTE_MEDIA_MAX_BYTES, deadline?: AbortSignal) {
   const reader = body.getReader(), chunks: Buffer[] = [];
   let size = 0;
   while (true) {
     const part = await reader.read();
     if (part.done) break;
     size += part.value.byteLength;
-    if (size > REMOTE_MEDIA_MAX_BYTES) {
-      await reader.cancel();
-      throw new BadRequestException("Вложение превышает 50 МБ");
+    if (size > maxBytes) {
+      if (deadline) await cancelRemoteMedia(reader, deadline);
+      else await reader.cancel();
+      throw new BadRequestException(`Вложение превышает ${maxBytes / 1024 / 1024} МБ`);
     }
     chunks.push(Buffer.from(part.value));
   }
@@ -1437,7 +1471,13 @@ export class CommunicationsService {
         await tx.auditLog.create({data:{action:"MIGRATE",entityType:"Conversation",entityId:conversation.id,after:{channel:event.channel,identityScope:"receiverId+recipientId",source:"META_ECHO"}}});
       }
       const mergedMetadata = mergeMetaEchoMetadata(oldMetadata, event.metadata, event.receiverId, sentAt);
-      const metadata = { ...mergedMetadata, ...(uncertainAttempt ? { provider: "META", source: "CRM", receiverId: event.receiverId, recipientId: event.externalRecipientId } : {}) } as Prisma.InputJsonValue;
+      const replayFingerprint = uncertainAttempt && typeof uncertaintyValue.attachmentReplayFingerprint === "string"
+        ? uncertaintyValue.attachmentReplayFingerprint : undefined;
+      const metadata = {
+        ...mergedMetadata,
+        ...(uncertainAttempt ? { provider: "META", source: "CRM", receiverId: event.receiverId, recipientId: event.externalRecipientId } : {}),
+        ...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),
+      } as Prisma.InputJsonValue;
       const source = (metadata as Prisma.JsonObject).source === "CRM" ? "CRM" : "META";
       const replyExternalId = event.metadata.replyTo?.externalMessageId;
       const replyToMessage = replyExternalId ? await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId: replyExternalId } }, select: { id: true } }) : null;
@@ -2058,9 +2098,9 @@ export class CommunicationsService {
     const visible=batch.filter(message=>!isDeduplicatedDraft(message.metadata)&&!isSoftDeletedMessage(message.metadata));
     return visible.sort((left,right)=>position.get(right.id)!-position.get(left.id)!).map(({conversation,...message})=>{
       const replyToMessage=message.replyToMessage&&!isSoftDeletedMessage(message.replyToMessage.metadata)
-        ?{...message.replyToMessage,metadata:messageMetadataForClient(message.replyToMessage.id,message.replyToMessage.metadata)}
+        ?{...message.replyToMessage,metadata:messageMetadataForClient(message.replyToMessage.id,message.replyToMessage.metadata,conversation.channel)}
         :null;
-      return{...message,replyToMessage,metadata:messageMetadataForClient(message.id,message.metadata),channel:conversation.channel};
+      return{...message,replyToMessage,metadata:messageMetadataForClient(message.id,message.metadata,conversation.channel),channel:conversation.channel};
     });
   }
   async detail(clientId: string, channel?: ContactChannel) {
@@ -2157,10 +2197,11 @@ export class CommunicationsService {
       const body = await boundedRemoteMedia(response.body);
       return { body, contentType, contentLength: body.length, filename: `whatsapp-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
     }
-    if (!["image", "sticker", "video", "file"].includes(type) || typeof rawUrl !== "string") throw new NotFoundException("Вложение не найдено");
+    const sharedPhoto = message.conversation.channel === ContactChannel.INSTAGRAM && type === "ig_post";
+    if ((!sharedPhoto && !["image", "sticker", "video", "file"].includes(type)) || typeof rawUrl !== "string") throw new NotFoundException("Вложение не найдено");
     const webOrigin = new URL((process.env.WEB_ORIGIN || "https://crm.yoleotard.com").split(",")[0]!.trim());
-    const candidateLocal = new URL(rawUrl, webOrigin);
-    const localMatch = candidateLocal.origin === webOrigin.origin ? /^\/api\/communications\/files\/([a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|mp4|ogg|mp3|m4a))$/.exec(candidateLocal.pathname) : null;
+    const candidateLocal = sharedPhoto ? undefined : new URL(rawUrl, webOrigin);
+    const localMatch = candidateLocal && candidateLocal.origin === webOrigin.origin ? /^\/api\/communications\/files\/([a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|mp4|ogg|mp3|m4a))$/.exec(candidateLocal.pathname) : null;
     if (localMatch?.[1] && COMMUNICATION_FILE.test(localMatch[1])) {
       const path = join(uploadsRoot(), "communication-files", localMatch[1]);
       const file = await stat(path).catch(() => null);
@@ -2169,29 +2210,55 @@ export class CommunicationsService {
       const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : extension === "gif" ? "image/gif" : extension === "pdf" ? "application/pdf" : extension === "txt" ? "text/plain" : extension === "mp4" ? "video/mp4" : extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "image/jpeg";
       return { body: await readFile(path), contentType, contentLength: file.size, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
     }
-    const chatwootOrigin = configuredHttpsOrigin(chatwootValues.baseUrl);
-    let url = remoteMediaUrl(rawUrl, chatwootOrigin);
-    if (!url) throw new NotFoundException("Вложение не найдено");
-    let response: Response | undefined;
-    for (let redirect = 0; redirect < 4; redirect++) {
-      response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) }).catch(() => undefined);
-      if (!response) throw new BadGatewayException("Не удалось загрузить вложение");
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        url = remoteMediaUrl(location ? new URL(location, url).toString() : undefined, chatwootOrigin);
-        if (!url) throw new BadGatewayException("Источник вложения отклонил загрузку");
-        continue;
+    const downloadRemote = async () => {
+      const chatwootOrigin = configuredHttpsOrigin(chatwootValues.baseUrl);
+      let url: URL | undefined = sharedPhoto ? instagramPhotoCdnUrl(rawUrl) : remoteMediaUrl(rawUrl, chatwootOrigin);
+      if (!url) throw new NotFoundException("Вложение не найдено");
+      let response: Response | undefined;
+      const sharedPhotoDeadline = sharedPhoto ? AbortSignal.timeout(12_000) : undefined;
+      for (let redirect = 0; redirect < 4; redirect++) {
+        response = await fetch(url, { redirect: "manual", signal: sharedPhotoDeadline ?? AbortSignal.timeout(30_000) }).catch(() => undefined);
+        if (!response) throw new BadGatewayException("Не удалось загрузить вложение");
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get("location");
+          if (response.body && sharedPhotoDeadline) await cancelRemoteMedia(response.body, sharedPhotoDeadline);
+          else await response.body?.cancel().catch(() => undefined);
+          sharedPhotoDeadline?.throwIfAborted();
+          const target: string | undefined = location ? new URL(location, url).toString() : undefined;
+          url = sharedPhoto ? instagramPhotoCdnUrl(target) : remoteMediaUrl(target, chatwootOrigin);
+          if (!url) throw new BadGatewayException("Источник вложения отклонил загрузку");
+          continue;
+        }
+        break;
       }
-      break;
-    }
-    if (!response?.ok || !response.body) throw new BadGatewayException("Не удалось загрузить вложение");
-    const contentLength = Number(response.headers.get("content-length") || 0);
-    if (contentLength > REMOTE_MEDIA_MAX_BYTES) throw new BadRequestException("Вложение превышает 50 МБ");
-    const contentType = ((response.headers.get("content-type") || "application/octet-stream").split(";")[0] || "application/octet-stream").trim().toLowerCase();
-    if (!(contentType.startsWith("image/") || contentType.startsWith("video/") || contentType === "application/octet-stream")) throw new BadGatewayException("Источник вернул неподдерживаемый формат");
-    const extension = type === "video" || contentType.startsWith("video/") ? "mp4" : contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : contentType === "image/gif" ? "gif" : "jpg";
-    const body = await boundedRemoteMedia(response.body);
-    return { body, contentType, contentLength: body.length, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
+      try {
+        if (!response?.ok || !response.body) throw new BadGatewayException("Не удалось загрузить вложение");
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        const maxBytes = sharedPhoto ? INSTAGRAM_SHARED_PHOTO_MAX_BYTES : REMOTE_MEDIA_MAX_BYTES;
+        if (contentLength > maxBytes) throw new BadRequestException(`Вложение превышает ${maxBytes / 1024 / 1024} МБ`);
+        const contentType = ((response.headers.get("content-type") || "application/octet-stream").split(";")[0] || "application/octet-stream").trim().toLowerCase();
+        if (!(contentType.startsWith("image/") || contentType.startsWith("video/") || contentType === "application/octet-stream")) throw new BadGatewayException("Источник вернул неподдерживаемый формат");
+        if (sharedPhoto) {
+          const source = await boundedRemoteMedia(response.body, maxBytes, sharedPhotoDeadline);
+          const rendered = renderInstagramSharedPhoto(source);
+          if (!rendered) throw new BadGatewayException("Не удалось показать фото из Instagram");
+          return { body: rendered.body, contentType: rendered.contentType, contentLength: rendered.body.length,
+            filename: `instagram-${messageId.slice(0, 8)}-${index + 1}.${rendered.extension}` };
+        }
+        const extension = type === "video" || contentType.startsWith("video/") ? "mp4" : contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : contentType === "image/gif" ? "gif" : "jpg";
+        const body = await boundedRemoteMedia(response.body);
+        return { body, contentType, contentLength: body.length, filename: `attachment-${messageId.slice(0, 8)}-${index + 1}.${extension}` };
+      } finally {
+        if (sharedPhotoDeadline && response?.body && !response.bodyUsed) {
+          await cancelRemoteMedia(response.body, sharedPhotoDeadline);
+        }
+      }
+    };
+    if (!sharedPhoto) return downloadRemote();
+    return withInstagramSharedPhotoSlot(downloadRemote).catch(error => {
+      if (error instanceof HttpException) throw error;
+      throw new BadGatewayException("Не удалось показать фото из Instagram");
+    });
   }
   async reactToMessage(messageId: string, d: MessageReactionDto, u: User) {
     const [message, values] = await Promise.all([
@@ -2272,9 +2339,57 @@ export class CommunicationsService {
       return { ...updated, channel };
     });
   }
-  private async outboundAttachment(input: { path: string; name: string; mimeType: string }, u: User, clientRequestId?: string) {
+  private async requireScopedAiFeedback(
+    db: Pick<Prisma.TransactionClient, "aiResponseFeedback">,
+    scope: Pick<AttachmentReplayScope, "aiRunId" | "clientId" | "conversationId">,
+    sentMessageId?: string,
+  ) {
+    if (!scope.aiRunId) return;
+    const feedback = await db.aiResponseFeedback.findFirst({
+      where: {
+        aiRunId: scope.aiRunId, sentMessageId: sentMessageId ?? null, accepted: sentMessageId ? true : null,
+        aiRun: { clientId: scope.clientId, conversationId: scope.conversationId, operation: "REPLY", status: AiRunStatus.COMPLETED },
+      },
+      select: { id: true },
+    });
+    if (!feedback) throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется");
+  }
+  private async completedAttachmentReplay(
+    tx: Prisma.TransactionClient,
+    messageId: string | null,
+    input: AttachmentReplayInput,
+    scope: AttachmentReplayScope,
+  ) {
+    const [result, stored] = await Promise.all([
+      messageId ? tx.message.findUnique({ where: { id: messageId } }) : null,
+      tx.communicationAttachment.findUnique({ where: { path: input.path } }),
+    ]);
+    const expectedContent = scope.channel === ContactChannel.WHATSAPP
+      ? whatsappAttachmentHistoryContent(input.mimeType.startsWith("image/") ? "image" : input.mimeType.startsWith("video/") ? "video" : "file", input.name, scope.content)
+      : scope.content || input.name;
+    const metadata = result?.metadata;
+    const fingerprint = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? metadata.attachmentReplayFingerprint : undefined;
+    // Older messages lack request evidence. Keep their previous, stricter comparison to the persisted message.
+    const matchesRequest = fingerprint === undefined
+      ? result?.content === expectedContent &&
+        (scope.replyToMessageId === undefined || (result.replyToMessageId ?? null) === scope.replyToMessageId)
+      : fingerprint === attachmentReplayFingerprint(input, scope);
+    if (!result || !stored?.claimedAt || stored.messageId !== result.id ||
+        (stored.clientRequestId && stored.clientRequestId !== scope.requestId) ||
+        stored.createdById !== scope.actorId || stored.mimeType !== input.mimeType ||
+        stored.originalName !== input.name || result.conversationId !== scope.conversationId ||
+        result.authorId !== scope.actorId || result.direction !== MessageDirection.OUTBOUND ||
+        result.status !== MessageStatus.SENT || !matchesRequest || isSoftDeletedMessage(result.metadata)) {
+      throw new ConflictException("Идентификатор отправки уже использован");
+    }
+    if (fingerprint === undefined) await this.requireScopedAiFeedback(tx, scope, result.id);
+    return { ...result, channel: scope.channel };
+  }
+  private async outboundAttachment(input: { path: string; name: string; mimeType: string }, u: User, clientRequestId?: string,
+    db: Pick<Prisma.TransactionClient, "communicationAttachment"> = this.p) {
     if (!COMMUNICATION_FILE.test(input.path)) throw new BadRequestException("Некорректное имя вложения");
-    const stored = await this.p.communicationAttachment.findUnique({ where: { path: input.path } });
+    const stored = await db.communicationAttachment.findUnique({ where: { path: input.path } });
     if (!stored || stored.createdById !== u.id || stored.mimeType !== input.mimeType) throw new BadRequestException("Вложение не найдено");
     if ((stored.claimedAt || stored.clientRequestId) && stored.clientRequestId !== clientRequestId) throw new ConflictException("Вложение уже использовано в другом сообщении");
     const file = await stat(join(uploadsRoot(), "communication-files", input.path)).catch(() => null);
@@ -2390,8 +2505,18 @@ export class CommunicationsService {
     const storedAiRunId=typeof draftMetadata.aiRunId==="string"?draftMetadata.aiRunId:undefined;
     if(d.aiRunId&&storedAiRunId&&d.aiRunId!==storedAiRunId)throw new BadRequestException("AI-черновик не соответствует сохранённому предложению");
     const sendAiRunId=d.aiRunId||storedAiRunId;
-    const attachment = d.attachment ? await this.outboundAttachment(d.attachment, u, d.clientRequestId) : undefined;
-    if (!content && !attachment)
+    const requestedAttachment = d.attachment;
+    const lockedAttachment = d.action === "SEND" && (channel === ContactChannel.EMAIL || channel === ContactChannel.CHATWOOT)
+      ? requestedAttachment : undefined;
+    let blockedWhatsappAttachment: ConflictException | undefined;
+    let attachment = requestedAttachment && !lockedAttachment
+      ? await this.outboundAttachment(requestedAttachment, u, d.clientRequestId).catch(error => {
+        if (d.action !== "SEND" || channel !== ContactChannel.WHATSAPP || !(error instanceof ConflictException)) throw error;
+        blockedWhatsappAttachment = error;
+        return undefined;
+      })
+      : undefined;
+    if (!content && !d.attachment)
       throw new BadRequestException("Сообщение не может быть пустым");
     if (d.action === "SEND") {
       if(channel===ContactChannel.WHATSAPP&&attachment){
@@ -2401,12 +2526,15 @@ export class CommunicationsService {
       }
       if (!d.clientRequestId)
         throw new BadRequestException("Не задан идентификатор отправки");
+      const requestId = d.clientRequestId;
+      const replayScope = (conversationId: string, replyToMessageId?: string | null): AttachmentReplayScope => ({
+        clientId, conversationId, actorId: u.id, requestId, channel, content, replyToMessageId, aiRunId: sendAiRunId,
+      });
       if(channel===ContactChannel.EMAIL){
         if(!selected.email)throw new BadRequestException("У клиента не указан e-mail");
         const recipient=selected.email.trim().toLowerCase();
         const conversation=await this.p.conversation.findFirst({where:{clientId,channel,externalId:{equals:recipient,mode:"insensitive"},archivedAt:null},select:{id:true}});
         if(!conversation)throw new BadRequestException("Для этого клиента нет активной переписки по e-mail");
-        if(sendAiRunId){const scopedFeedback=await this.p.aiResponseFeedback.findFirst({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется")}
         const explicitReply=d.replyToMessageId?await this.p.message.findFirst({where:{id:d.replyToMessageId,conversationId:conversation.id,direction:MessageDirection.INBOUND},select:{id:true,metadata:true}}):undefined;
         if(d.replyToMessageId&&!explicitReply)throw new BadRequestException("Выбранное письмо не относится к этой переписке");
         const replyMessage=explicitReply||await this.p.message.findFirst(latestInboundEmailReplyLookup(conversation.id));
@@ -2414,7 +2542,60 @@ export class CommunicationsService {
         if(d.replyToMessageId&&typeof latest.messageId!=="string")throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
         const {subject,parent,references}=emailReplyHeaders(latest,selected.displayName),replyToMessageId=replyMessage?.id;
         return runMetaSendOnce({
-          reserve:async()=>this.p.$transaction(async tx=>{await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;const existing=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});if(existing){if(existing.clientId!==clientId||existing.conversationId!==conversation.id)throw new ConflictException("Идентификатор отправки уже использован");if(existing.messageId&&(existing.status==="SENT"||existing.status==="FAILED")){const result=await tx.message.findUnique({where:{id:existing.messageId}});if(result)return{kind:"DONE" as const,result:{...result,channel}}}if(blocksEmailDelivery(existing.status))return{kind:"PENDING" as const}}const pending=await tx.messageDeliveryAttempt.findFirst({where:{conversationId:conversation.id,status:{in:["PENDING","UNCERTAIN"]},...(existing?{id:{not:existing.id}}:{})}});if(pending)return{kind:"PENDING" as const};if(draft){const claimedDraft=await tx.message.findFirst({where:{id:draft.id,status:MessageStatus.DRAFT,direction:MessageDirection.OUTBOUND,conversationId:conversation.id},select:{id:true,metadata:true}});if(!claimedDraft||isSoftDeletedMessage(claimedDraft.metadata))throw new ConflictException("Черновик уже отправляется, удалён или был отправлен")}if(existing)await tx.messageDeliveryAttempt.update({where:{id:existing.id},data:{status:"PENDING",messageId:draft?.id}});else await tx.messageDeliveryAttempt.create({data:{clientRequestId:d.clientRequestId!,clientId,conversationId:conversation.id,status:"PENDING",messageId:draft?.id}});if(attachment){const claimed=await tx.communicationAttachment.updateMany({where:{path:attachment.path,claimedAt:null,clientRequestId:null,messageId:null},data:{clientRequestId:d.clientRequestId!}});if(claimed.count!==1)throw new ConflictException("Вложение уже используется в другой отправке")}if(sendAiRunId){const claimed=await reserveAiFeedback(tx,{aiRunId:sendAiRunId,clientId,conversationId:conversation.id});if(!claimed)throw new ConflictException("AI-черновик уже отправляется или был отправлен")}return{kind:"NEW" as const}}),
+          reserve: async () => this.p.$transaction(async tx => {
+            const requestId = d.clientRequestId!;
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: requestId } });
+            if (existing && (existing.clientId !== clientId || existing.conversationId !== conversation.id))
+              throw new ConflictException("Идентификатор отправки уже использован");
+            if (lockedAttachment && existing?.status === "SENT") {
+              const result = await this.completedAttachmentReplay(
+                tx, existing.messageId, lockedAttachment, replayScope(conversation.id, d.replyToMessageId),
+              );
+              return { kind: "DONE" as const, result };
+            }
+            if (lockedAttachment) attachment = await this.outboundAttachment(lockedAttachment, u, requestId, tx);
+            if (existing) {
+              if (existing.messageId && (existing.status === "SENT" || existing.status === "FAILED")) {
+                const result = await tx.message.findUnique({ where: { id: existing.messageId } });
+                if (result) {
+                  await this.requireScopedAiFeedback(tx, replayScope(conversation.id), existing.status === "SENT" ? result.id : undefined);
+                  return { kind: "DONE" as const, result: { ...result, channel } };
+                }
+              }
+              if (blocksEmailDelivery(existing.status)) return { kind: "PENDING" as const };
+            }
+            const pending = await tx.messageDeliveryAttempt.findFirst({
+              where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] }, ...(existing ? { id: { not: existing.id } } : {}) },
+            });
+            if (pending) return { kind: "PENDING" as const };
+            if (draft) {
+              const claimedDraft = await tx.message.findFirst({
+                where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id },
+                select: { id: true, metadata: true },
+              });
+              if (!claimedDraft || isSoftDeletedMessage(claimedDraft.metadata))
+                throw new ConflictException("Черновик уже отправляется, удалён или был отправлен");
+            }
+            await this.requireScopedAiFeedback(tx, replayScope(conversation.id));
+            if (existing) {
+              await tx.messageDeliveryAttempt.update({ where: { id: existing.id }, data: { status: "PENDING", messageId: draft?.id } });
+            } else {
+              await tx.messageDeliveryAttempt.create({ data: { clientRequestId: requestId, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
+            }
+            if (attachment) {
+              const claimed = await tx.communicationAttachment.updateMany({
+                where: { path: attachment.path, claimedAt: null, clientRequestId: null, messageId: null },
+                data: { clientRequestId: requestId },
+              });
+              if (claimed.count !== 1) throw new ConflictException("Вложение уже используется в другой отправке");
+            }
+            if (sendAiRunId) {
+              const claimed = await reserveAiFeedback(tx, { aiRunId: sendAiRunId, clientId, conversationId: conversation.id });
+              if (!claimed) throw new ConflictException("AI-черновик уже отправляется или был отправлен");
+            }
+            return { kind: "NEW" as const };
+          }),
           deliver:()=>this.emailTransport.send({to:recipient,subject,text:content,inReplyTo:parent,references,attachment}),
           pendingError:()=>new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
           persistFailure:async error=>{if(error instanceof EmailDeliveryUncertainError){await this.recordEmailUncertain(d.clientRequestId!,clientId,u.id,undefined,draft?.id,sendAiRunId);throw new ConflictException("Gmail не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат")}return this.p.$transaction(async tx=>{const metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,to:recipient,failureType:error instanceof Error?error.constructor.name:"UnknownError"} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}});if(attachment)await tx.communicationAttachment.update({where:{path:attachment.path},data:{messageId:message.id,claimedAt:new Date(),clientRequestId:null}});await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"FAILED",messageId:message.id}});if(sendAiRunId)await tx.aiResponseFeedback.updateMany({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},data:{accepted:null}});await tx.activity.create({data:{clientId,type:"MESSAGE_SEND_FAILED",summary:"Gmail не принял исходящее письмо",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND_FAILED",entityType:"Message",entityId:message.id,after:{channel,status:MessageStatus.FAILED}}});return{...message,channel}})},
@@ -2431,18 +2612,28 @@ export class CommunicationsService {
         const accountId = typeof values.accountId === "string" ? values.accountId.trim() : "";
         if (values.enabled !== true || !configuredHttpsOrigin(values.baseUrl) || !this.secretValue(values, "accessTokenEncrypted")) throw new BadRequestException("Канал Chatwoot не подключён для отправки");
         if (!conversation || !providerConversationId) throw new BadRequestException("Для этого клиента нет активного диалога Chatwoot");
-        if(sendAiRunId){const scopedFeedback=await this.p.aiResponseFeedback.findFirst({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется")}
         return runMetaSendOnce({
           reserve: async () => this.p.$transaction(async tx => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
             await validateNotificationConversation(tx, clientId, channel, conversation.id, conversation.externalId, notificationContext);
             if (notificationContext && !await this.shipmentChatwootAvailable(clientId,conversation.id,conversation.externalId,false,providerConversationId)) throw new ConflictException("Канал Chatwoot изменился. Обновите предпросмотр");
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: d.clientRequestId! } });
+            if (existing && (existing.clientId !== clientId || existing.conversationId !== conversation.id))
+              throw new ConflictException("Идентификатор отправки уже использован");
+            if (lockedAttachment && existing?.status === "SENT") {
+              const result = await this.completedAttachmentReplay(
+                tx, existing.messageId, lockedAttachment, replayScope(conversation.id, d.replyToMessageId ?? null),
+              );
+              return { kind: "DONE" as const, result };
+            }
+            if (lockedAttachment) attachment = await this.outboundAttachment(lockedAttachment, u, d.clientRequestId, tx);
             if (existing) {
-              if (existing.clientId !== clientId || existing.conversationId !== conversation.id) throw new ConflictException("Идентификатор отправки уже использован");
               if (existing.messageId && (existing.status === "SENT" || existing.status === "FAILED")) {
                 const result = await tx.message.findUnique({ where: { id: existing.messageId } });
-                if (result) return { kind: "DONE" as const, result: { ...result, channel } };
+                if (result) {
+                  await this.requireScopedAiFeedback(tx, replayScope(conversation.id), existing.status === "SENT" ? result.id : undefined);
+                  return { kind: "DONE" as const, result: { ...result, channel } };
+                }
               }
               return { kind: "PENDING" as const };
             }
@@ -2452,6 +2643,7 @@ export class CommunicationsService {
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return { kind: "PENDING" as const };
+            await this.requireScopedAiFeedback(tx, replayScope(conversation.id));
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
             if (attachment) {
               const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, claimedAt: null, clientRequestId: null, messageId: null }, data: { clientRequestId: d.clientRequestId! } });
@@ -2486,7 +2678,12 @@ export class CommunicationsService {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"chatwoot-echo:" + conversation.id + ":" + externalId}, 0))`;
             const sentAt = result.createdAt && Number.isFinite(result.createdAt) ? new Date(result.createdAt * 1000) : new Date();
             const persistedAttachment = attachment && (({ providerUrl: _providerUrl, ...safe }) => safe)(attachment);
-            const successMetadata = { ...draftMetadata, provider: "CHATWOOT", source: "CRM", chatwootConversationId: providerConversationId, accountId, inboxId: values.inboxId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}) } as Prisma.InputJsonValue;
+            const replayFingerprint = lockedAttachment && attachmentReplayFingerprint(lockedAttachment, replayScope(conversation.id, d.replyToMessageId ?? null));
+            const successMetadata = {
+              ...draftMetadata, provider: "CHATWOOT", source: "CRM", chatwootConversationId: providerConversationId,
+              accountId, inboxId: values.inboxId, ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}),
+              ...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),
+            } as Prisma.InputJsonValue;
             const existingEcho = await tx.message.findUnique({ where: { conversationId_externalId: { conversationId: conversation.id, externalId } } });
             const existingMetadata = existingEcho?.metadata && typeof existingEcho.metadata === "object" && !Array.isArray(existingEcho.metadata) ? existingEcho.metadata as Prisma.JsonObject : {};
             const message = draft && existingEcho
@@ -2560,9 +2757,23 @@ export class CommunicationsService {
       const isPublicCommentReply=engagement?.kind==="comment"&&engagement.replyMode==="PUBLIC_COMMENT";
       if(!recipientId&&!isPublicCommentReply)throw new BadRequestException(`Для этого клиента нет активного диалога ${channelName}`);
       if(isPublicCommentReply&&attachment)throw new BadRequestException("Ответ на комментарий поддерживает только текст");
+      if (blockedWhatsappAttachment && requestedAttachment) {
+        // WhatsApp reconciliation can release the upload reservation after persisting a successful echo.
+        const uploadConflict = blockedWhatsappAttachment;
+        return this.p.$transaction(async tx => {
+          const requestId = d.clientRequestId!;
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+          await validateNotificationConversation(tx, clientId, channel, conversation.id, conversation.externalId, notificationContext);
+          const attempt = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: requestId } });
+          if (attempt?.status !== "SENT" || attempt.clientId !== clientId || attempt.conversationId !== conversation.id)
+            throw uploadConflict;
+          return this.completedAttachmentReplay(
+            tx, attempt.messageId, requestedAttachment, replayScope(conversation.id, d.replyToMessageId ?? null),
+          );
+        });
+      }
       const metaReplyToMessageId = metaReplyToMessage?.externalId || undefined;
       const directReplyToMessageId = engagement?.kind==="reaction"||replyMetadata?.messageType==="social_mention" ? undefined : metaReplyToMessageId;
-      if(sendAiRunId){const scopedFeedback=await this.p.aiResponseFeedback.findFirst({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу, уже отправлен или отправляется")}
       const messageContent=channel===ContactChannel.WHATSAPP&&attachment?whatsappAttachmentHistoryContent(attachment.type,attachment.name,content):content||attachment?.name||"[Вложение]";
       return runMetaSendOnce({
         reserve: async () => {
@@ -2577,6 +2788,7 @@ export class CommunicationsService {
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({ where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] } } });
             if (pending) return { attempt: pending, sameRequest: false };
+            await this.requireScopedAiFeedback(tx, replayScope(conversation.id));
             await tx.messageDeliveryAttempt.create({ data: { clientRequestId: d.clientRequestId!, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
             if (attachment) {
               const claimed = await tx.communicationAttachment.updateMany({ where: { path: attachment.path, clientRequestId: null, claimedAt: null }, data: { clientRequestId: d.clientRequestId! } });
@@ -2592,7 +2804,10 @@ export class CommunicationsService {
             throw new ConflictException("Идентификатор отправки уже использован");
           if (attempt.status === "PENDING" || attempt.status === "UNCERTAIN" || !attempt.messageId) return { kind: "PENDING" as const };
           const existing = await this.p.message.findUnique({ where: { id: attempt.messageId } });
-          if (existing) return { kind: "DONE" as const, result: { ...existing, status:attempt.status==="FAILED"?MessageStatus.FAILED:existing.status, channel } };
+          if (existing) {
+            await this.requireScopedAiFeedback(this.p, replayScope(conversation.id), attempt.status === "SENT" ? existing.id : undefined);
+            return { kind: "DONE" as const, result: { ...existing, status:attempt.status==="FAILED"?MessageStatus.FAILED:existing.status, channel } };
+          }
           throw new ConflictException("Результат отправки временно недоступен");
         },
         pendingError: () => new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
@@ -2711,13 +2926,21 @@ export class CommunicationsService {
         return { ...m, channel };
         }),
         persistSuccessFailure:channel===ContactChannel.WHATSAPP?async(result,error)=>{
+          const replayFingerprint = requestedAttachment && attachmentReplayFingerprint(
+            requestedAttachment, replayScope(conversation.id, d.replyToMessageId ?? null),
+          );
           const outcome=await this.p.$transaction(async tx=>{
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+conversation.id},0))`;
             const attempt=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId:d.clientRequestId!}});
             let existing=await tx.message.findUnique({where:{conversationId_externalId:{conversationId:conversation.id,externalId:result.message_id!}}});
             if(existing){
               if(attempt?.status==="PENDING"){
-                const existingMetadata=existing.metadata&&typeof existing.metadata==="object"&&!Array.isArray(existing.metadata)?existing.metadata as Prisma.JsonObject:{},persistedAttachment=attachment&&(({providerUrl:_providerUrl,...safe})=>safe)(attachment),reconciledMetadata={...existingMetadata,...draftMetadata,provider:"META",source:"CRM",recipientId,receiverId,...(persistedAttachment?{attachments:[persistedAttachment]}:{})};
+                const existingMetadata=existing.metadata&&typeof existing.metadata==="object"&&!Array.isArray(existing.metadata)?existing.metadata as Prisma.JsonObject:{},persistedAttachment=attachment&&(({providerUrl:_providerUrl,...safe})=>safe)(attachment);
+                const reconciledMetadata = {
+                  ...existingMetadata, ...draftMetadata, provider: "META", source: "CRM", recipientId, receiverId,
+                  ...(persistedAttachment ? { attachments: [persistedAttachment] } : {}),
+                  ...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),
+                };
                 existing=await tx.message.update({where:{id:existing.id},data:{direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:messageContent,authorId:u.id,replyToMessageId:metaReplyToMessage?.id,metadata:reconciledMetadata}});
                 if(draft&&draft.id!==existing.id){
                   const currentDraft=await tx.message.findFirst({where:{id:draft.id,conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT},select:{id:true,metadata:true}});
@@ -2734,7 +2957,11 @@ export class CommunicationsService {
             }
             if(!attempt||attempt.status!=="PENDING")throw new ConflictException("Состояние отправки WhatsApp уже изменилось");
             await tx.messageDeliveryAttempt.update({where:{id:attempt.id},data:{status:"UNCERTAIN"}});
-            const uncertaintyValue={providerMessageId:result.message_id,...(draft?{draftMessageId:draft.id}:{}),...(sendAiRunId?{aiRunId:sendAiRunId}:{}),actorId:u.id};
+            const uncertaintyValue = {
+              providerMessageId: result.message_id, ...(draft ? { draftMessageId: draft.id } : {}),
+              ...(sendAiRunId ? { aiRunId: sendAiRunId } : {}), actorId: u.id,
+              ...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),
+            };
             await tx.appSetting.upsert({where:{section_key:{section:"integration.whatsapp.delivery-uncertain",key:attempt.id}},create:{section:"integration.whatsapp.delivery-uncertain",key:attempt.id,value:uncertaintyValue},update:{value:uncertaintyValue}});
             await tx.activity.create({data:{clientId,type:"MESSAGE_DELIVERY_UNCERTAIN",summary:"WhatsApp принял сообщение, но CRM не сохранила результат; повтор заблокирован",metadata:{attemptId:attempt.id,channel:"WHATSAPP"}}});
             await tx.auditLog.create({data:{actorId:u.id,action:"DELIVERY_UNCERTAIN",entityType:"MessageDeliveryAttempt",entityId:attempt.id,after:{channel:"WHATSAPP",status:"UNCERTAIN",providerMessageIdStored:true,requiresManualResolution:true,failureType:error instanceof Error?error.constructor.name:"UnknownError"}}});

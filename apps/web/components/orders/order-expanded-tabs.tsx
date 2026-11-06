@@ -37,7 +37,7 @@ import { orderSettlement } from "../../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../../lib/i18n";
 
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { ActionIcon, Badge, Modal, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Badge, Modal, Tooltip, UnstyledButton } from "@mantine/core";
 import { orderFormUi, ordersDashboardUi as ui, overviewContextUi, parentProductionConfirmationUi as parentProductionUi } from "../../lib/i18n";
 import { orderLabel } from "../../lib/orders-i18n";
 import { orderInitialTab, shipmentContextId } from "../../lib/order-context";
@@ -117,7 +117,7 @@ export type OrderShipmentView = {
   atelierExpense?: OrderExpenseView | null;
 };
 
-export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities"> & {
+export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities" | "files"> & {
   client: Order["client"] & {
     updatedAt?: string;
     athletes?: Athlete[];
@@ -126,6 +126,7 @@ export type ExpandedOrderView = Omit<Order, "items" | "client" | "activities"> &
     orders?: Array<{ id: string; number: string; createdAt: string; priceMinor: number; currency: string; salesStatus: string; productionStatus: string; shippingStatus: string; modelImagePath?: string | null; externalImageUrl?: string | null }>;
   };
   compositionManaged?: boolean;
+  files?: (OrderFileView & { role?: string; orderItemId?: string | null; noteId?: string | null })[];
   responsibleManager?: { id: string; displayName: string } | null;
   paymentHistory?: Array<Order["payments"][number] & { voidedAt?: string; voidReason?: string; canVoid?: boolean; isImported?: boolean }>;
   updatedAt?: string;
@@ -202,6 +203,7 @@ type TabCallbacks = {
   onAddDesign: () => void;
   onEditItem: (itemId: string) => void;
   onUploadFile: (file: File) => Promise<void>;
+  onArchiveFile?: (fileId: string) => Promise<void>;
   onImage: (itemId: string | undefined, expectedModelImagePath: string | null, file: File) => Promise<void>;
   onProductionStatus: (value: string) => void;
   onCreateNote: (input: OrderNoteInput) => Promise<void>;
@@ -310,7 +312,7 @@ export function OrderExpandedTabs(props: Props) {
   </>;
 }
 
-function OrderDetailsTab({ order, items, taxRole, clientContactActions, compositionActions, financeActions, onEditDesign, onClient, onDelivery, onDeliveryContact, onCustomerWishes, onUploadFile }: Props & { items: ExpandedOrderItem[]; onEditDesign:()=>void }) {
+function OrderDetailsTab({ order, items, taxRole, clientContactActions, compositionActions, financeActions, onEditDesign, onClient, onDelivery, onDeliveryContact, onCustomerWishes, onUploadFile, onArchiveFile }: Props & { items: ExpandedOrderItem[]; onEditDesign:()=>void }) {
   const timeline = orderTimelinePresentation(order);
   const paidMinor = paid(order);
   return <div className="orders-tab-details-approved">
@@ -364,7 +366,7 @@ function OrderDetailsTab({ order, items, taxRole, clientContactActions, composit
     <TabCard className="orders-tab-span-4" title={ui.stageStatuses}>
       <div className="orders-stage-list"><Stage icon="finance" label={ui.payment} value={orderLabel("payment", order.paymentStatus)} /><Stage icon="production" label={ui.tabs.production} value={timeline.productionCompleted ? ui.productionFulfilled : orderLabel("production", timeline.productionStatus)} /><Stage icon="delivery" label={ui.tabs.delivery} value={timeline.partial ? `${ui.shippingPartial}${["LOST","RETURNED"].includes(timeline.shippingStatus) ? ` · ${orderLabel("shipping",timeline.shippingStatus)}` : ""}` : timeline.shippingStatus === "SHIPPED" ? ui.shippingSent : orderLabel("shipping", timeline.shippingStatus)} /></div>
     </TabCard>
-    <OrderFilesCard className="orders-tab-span-4" order={order} onUpload={onUploadFile} />
+    <OrderFilesCard className="orders-tab-span-4" order={order} onUpload={onUploadFile} onArchive={onArchiveFile} />
   </div>;
 }
 
@@ -878,17 +880,64 @@ function OrderImageEditor({ item, order, onImage }: { item: ExpandedOrderItem; o
   return <div className="orders-design-image-editor orders-item-image-editor"><ItemThumb item={item} order={order} /><input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void select(event.currentTarget.files?.[0])} /><CrmActionIcon disabled={busy} onClick={() => input.current?.click()} aria-label={`${ui.changeOrderItemImage}: ${item.name}`}><TabIcon name="edit" /></CrmActionIcon></div>;
 }
 
-function OrderFilesCard({ order, onUpload, className }: { order: ExpandedOrderView; onUpload: (file: File) => Promise<void>; className?: string }) {
+function OrderFilesCard({ order, onUpload, onArchive, className }: { order: ExpandedOrderView; onUpload: TabCallbacks["onUploadFile"]; onArchive?: TabCallbacks["onArchiveFile"]; className?: string }) {
   const input = useRef<HTMLInputElement>(null);
+  const uploadButton = useRef<HTMLButtonElement>(null);
+  const archiveTrigger = useRef<HTMLButtonElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ src: string; name: string }>();
+  const [archiveTarget, setArchiveTarget] = useState<OrderFileView>();
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
   const files = order.files ?? [];
+  useEffect(() => {
+    if (archiveTarget || !archiveTrigger.current) return;
+    const trigger = archiveTrigger.current;
+    archiveTrigger.current = null;
+    if (trigger.isConnected) trigger.focus();
+    else uploadButton.current?.focus();
+  }, [archiveTarget]);
+
   async function select(file?: File) { if (!file || busy) return; setBusy(true); setError(""); try { await onUpload(file); } catch (reason) { setError((reason as Error).message); } finally { setBusy(false); if (input.current) input.current.value = ""; } }
-  return <TabCard className={className} title={`${ui.files} (${files.length})`} action={<><input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.docx,.xlsx,text/plain,.ai,application/postscript" onChange={(event) => void select(event.currentTarget.files?.[0])} /><CrmButton tone="secondary" size="compact-xs" loading={busy} onClick={() => input.current?.click()}>＋ {ui.addFile}</CrmButton></>}>
-    {files.length ? <div className="orders-approved-files">{files.map((file) => file.mimeType.startsWith("image/") ? <UnstyledButton key={file.id} onClick={() => setPreview({ src: `/api/orders/files/${file.path}`, name: file.name })}><img src={`/api/orders/files/${file.path}`} alt={file.name} /><span>{file.name}</span></UnstyledButton> : <a key={file.id} href={`/api/orders/files/${file.path}`} target="_blank" rel="noreferrer"><TabIcon name="file" /><span>{file.name}</span></a>)}</div> : <EmptyState text={ui.noFiles} compact />}
+
+  async function archiveFile() {
+    if (!archiveTarget || !onArchive || archiving) return;
+    setArchiving(true);
+    setArchiveError("");
+    try {
+      await onArchive(archiveTarget.id);
+      setArchiveTarget(undefined);
+    } catch (reason) {
+      setArchiveError(reason instanceof Error && /[а-яё]/i.test(reason.message) ? reason.message : ui.orderFileArchiveError);
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  return <TabCard className={className} title={`${ui.files} (${files.length})`} action={<><input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.docx,.xlsx,text/plain,.ai,application/postscript" onChange={(event) => void select(event.currentTarget.files?.[0])} /><CrmButton ref={uploadButton} tone="secondary" size="compact-xs" loading={busy} onClick={() => input.current?.click()}>＋ {ui.addFile}</CrmButton></>}>
+    {files.length ? <div className="orders-approved-files">{files.map((file) => {
+      const url = `/api/orders/files/${file.path}`;
+      return <div className="orders-approved-file" key={file.id}>
+        {file.mimeType.startsWith("image/") ? <UnstyledButton onClick={() => setPreview({ src: url, name: file.name })}><img src={url} alt={file.name} /><span>{file.name}</span></UnstyledButton> : <a href={url} target="_blank" rel="noreferrer"><TabIcon name="file" /><span>{file.name}</span></a>}
+        {onArchive && file.role === "GENERAL" && !file.orderItemId && !file.noteId && <Tooltip label={ui.orderFileArchiveAction}><ActionIcon color="red.8" variant="subtle" disabled={busy} aria-label={`${ui.orderFileArchiveAction}: ${file.name}`} onClick={(event) => {
+          archiveTrigger.current = event.currentTarget;
+          setArchiveError("");
+          setArchiveTarget(file);
+        }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7" /></svg></ActionIcon></Tooltip>}
+      </div>;
+    })}</div> : <EmptyState text={ui.noFiles} compact />}
     {error && <CrmAlert onClose={() => setError("")}>{error}</CrmAlert>}
     <Modal opened={Boolean(preview)} onClose={() => setPreview(undefined)} title={preview?.name || ui.imagePreview} aria-label={ui.imagePreview} closeButtonProps={{ "aria-label": ui.closePreview }} centered size="auto"><div className="orders-file-preview">{preview && <img className="orders-approved-preview" src={preview.src} alt={preview.name} />}</div></Modal>
+    {archiveTarget && <Modal opened centered returnFocus={false} title={ui.orderFileArchiveTitle} onClose={() => { if (!archiving) setArchiveTarget(undefined); }} closeOnEscape={!archiving} closeOnClickOutside={!archiving} closeButtonProps={{ "aria-label": ui.close, disabled: archiving }}>
+      <Text fw={600} mb="xs" style={{ overflowWrap: "anywhere" }}>{archiveTarget.name}</Text>
+      <Text size="sm" mb="md">{ui.orderFileArchiveHint}</Text>
+      {archiveError && <CrmAlert>{archiveError}</CrmAlert>}
+      <Group justify="flex-end" mt="md">
+        <Button data-autofocus variant="default" disabled={archiving} onClick={() => setArchiveTarget(undefined)}>{ui.cancel}</Button>
+        <Button color="red.8" loading={archiving} onClick={() => void archiveFile()}>{ui.orderFileArchiveConfirm}</Button>
+      </Group>
+    </Modal>}
   </TabCard>;
 }
 
