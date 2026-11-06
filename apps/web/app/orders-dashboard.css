@@ -569,3 +569,13 @@
 .orders-copy-value>.orders-approved-field.is-editable{width:auto;max-width:100%}
 .orders-contact-copy{flex-shrink:0}
 .orders-contact-copy svg{fill:none;stroke:currentColor}
+.orders-append-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+}

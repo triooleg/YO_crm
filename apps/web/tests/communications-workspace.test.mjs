@@ -10,7 +10,8 @@ const menuCss = await readFile(new URL("../app/communications-template-menu.css"
 
 test("входящие используют централизованные русские подписи и статусы", () => {
   assert.match(component, /communicationsUi/);
-  assert.match(component, /labels\.productionStatus/);
+  assert.match(component, /labels\.salesStatus\[o\.salesStatus\]/);
+  assert.match(component, /labels\.shippingStatus\[o\.dispatchStatus\]/);
   assert.match(locale, /export const communicationsUi/);
   for (const key of ["title", "search", "createClient", "loading", "emptyMessages", "saveDraft", "sendMessage", "sending"])
     assert.match(locale, new RegExp(`${key}:`));
@@ -130,7 +131,7 @@ test("контекст чата открывает конкретный зака
   assert.match(component,/type ContextTarget = "clients" \| "orders" \| "production" \| "tasks" \| "finance"/);
   assert.match(component,/onNavigate\?\.\("orders",\{orderId:o\.id\}\)/);
   assert.match(component,/onNavigate\?\.\("production",\{orderId:o\.id\}\)/);
-  assert.match(component,/orderQuantity\(o\)/);
+  assert.match(component,/orderCostumeQuantity\(o\)/);
 });
 
 test("чекбоксы ответа появляются только в режиме ответа и не показываются для фото и видео", () => {

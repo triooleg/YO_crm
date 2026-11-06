@@ -1,7 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readWorkspaceQuery, workspaceUrl, listQuery, safeRelativeReturn, mergeInput,createClientBody} from '../helpers.mjs';
+import {canAppendClientPage,readWorkspaceQuery, workspaceUrl, listQuery, safeRelativeReturn, mergeInput,createClientBody} from '../helpers.mjs';
 import {mergeComparisonFields,measurementIsStale,clientForNewOrder} from '../helpers.mjs';
+
+test('client page append requires a contiguous range and consistent total without duplicate IDs',()=>{
+ const items=(start,count)=>Array.from({length:count},(_,index)=>({id:String(start+index)}));
+ const loaded={page:2,pageSize:15,total:37,items:items(16,15)};
+ const next={page:3,pageSize:15,total:37,items:items(31,7)};
+ const canAppend=(page,previous=loaded)=>canAppendClientPage(previous,page,3);
+ assert.equal(canAppend(next),true);
+ assert.equal(canAppend({...next,total:38,items:items(31,8)}),false);
+ assert.equal(canAppend({...next,total:36,items:items(31,6)}),false);
+ assert.equal(canAppend({...next,items:items(30,7)}),false);
+ assert.equal(canAppend({...next,items:[...items(31,6),{id:'31'}]}),false);
+ assert.equal(canAppend({...next,items:items(31,6)}),false);
+ assert.equal(canAppend({...next,items:items(31,8)}),false);
+ assert.equal(canAppend({...next,page:2}),false);
+ assert.equal(canAppend({...next,pageSize:20}),false);
+ assert.equal(canAppend(next,{...loaded,items:items(16,14)}),false);
+});
 
 test('merge fields are compared independently from blocking operation conflicts',()=>{
  const fields=mergeComparisonFields([{displayName:'One',country:'Ukraine',email:'a@example.test'},{displayName:'Two',country:'France',email:'b@example.test'}]);

@@ -11,9 +11,9 @@ const { RolesGuard } = loadTargetModule("auth/roles.guard.ts");
 
 const issueDate = new Date("2026-11-06T00:00:00Z");
 const order = { clientId: "client-a", archivedAt: null, client: { archivedAt: null }, number: "26-42" };
-const draft = { id: "draft", number: "INV-42", issueDate, status: "DRAFT", archivedAt: null, order };
+const draft = { id: "draft", orderId: "order-42", number: "INV-42", issueDate, status: "DRAFT", archivedAt: null, order };
 const saved = {
-  ...draft, id: "saved", number: "registry-43",
+  ...draft, id: "saved", orderId: "order-43", number: "registry-43",
   documentOptions: { immutable: true, numberSource: "ORDER", displayNumber: "26-43" },
   order: { ...order, number: "legacy", sourceSystem: "YOLEOTARD_WEBSITE", externalNumber: "WEB-43" },
 };
@@ -75,8 +75,8 @@ test("Inbox invoice routes are staff-only GETs and list saved drafts using displ
     assert.deepEqual(Reflect.getMetadata("roles", handler), ["OWNER", "ADMIN", "MANAGER"]);
   }
   assert.deepEqual(await controller.clientInvoices("client-a"), [
-    { id: "saved", number: "26-43", orderNumber: "WEB-43", issueDate },
-    { id: "draft", number: "INV-42", orderNumber: "26-42", issueDate },
+    { id: "saved", orderId: "order-43", number: "26-43", orderNumber: "WEB-43", issueDate },
+    { id: "draft", orderId: "order-42", number: "INV-42", orderNumber: "26-42", issueDate },
   ]);
 });
 

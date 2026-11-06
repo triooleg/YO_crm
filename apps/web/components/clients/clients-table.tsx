@@ -1,13 +1,25 @@
 "use client";
-import {ActionIcon,Badge,Button,Checkbox,Group,NativeSelect,Pagination,ScrollArea,Table,Text,Tooltip,UnstyledButton} from "@mantine/core";
+import {useEffect,useRef} from "react";
+import {ActionIcon,Alert,Badge,Button,Checkbox,Group,NativeSelect,Pagination,ScrollArea,Table,Text,Tooltip,UnstyledButton} from "@mantine/core";
 import {orderDisplayNumber} from "../../lib/order-source";
 import {ClientAvatar} from "../client-avatar";
-import {clientsWorkspaceUi as ui} from "../../lib/clients-workspace-i18n";
+import {clientsListRefreshUi,clientsWorkspaceUi as ui} from "../../lib/clients-workspace-i18n";
 import {Channel,Contact,Country,RequestState,stamp} from "./presentation";
 import type {ClientList,ClientRow,WorkspaceQuery} from "./types";
-type Props={data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;onArchive?:(row:ClientRow,trigger:HTMLButtonElement)=>void};
-export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,onArchive}:Props){
+type Props={data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;onArchive?:(row:ClientRow,trigger:HTMLButtonElement)=>void;hasMore:boolean;appending:boolean;appendError?:string;appendNeedsRefresh:boolean;appendPage:()=>Promise<void>};
+export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,onArchive,hasMore,appending,appendError,appendNeedsRefresh,appendPage}:Props){
  const rows=data?.items??[],all=rows.length>0&&rows.every(row=>checked.has(row.id)),some=rows.some(row=>checked.has(row.id));
+ const listEnd=useRef<HTMLDivElement>(null);
+ useEffect(()=>{
+  const target=listEnd.current;
+  if(!target||!hasMore||appending||appendError||typeof IntersectionObserver==="undefined")return;
+  const root=target.closest(".crm-content");
+  const observer=new IntersectionObserver(entries=>{
+   if(entries.some(entry=>entry.isIntersecting))void appendPage();
+  },{root,rootMargin:"0px 0px 80px 0px"});
+  observer.observe(target);
+  return()=>observer.disconnect();
+ },[appendPage,appendError,appending,hasMore]);
  function sort(key:WorkspaceQuery["sort"]){onQuery({sort:key,direction:query.sort===key&&query.direction==="desc"?"asc":"desc",page:1});}
  function heading(key:WorkspaceQuery["sort"],label:string){return <UnstyledButton className="clients-sort" onClick={()=>sort(key)}>{label}{query.sort===key?<span aria-hidden="true">{query.direction==="desc"?" ↓":" ↑"}</span>:null}</UnstyledButton>;}
  return <section className="clients-table-panel" aria-label={ui.title}>
@@ -30,6 +42,13 @@ export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,on
    <Table.Td><UnstyledButton aria-label={`${ui.orders}: ${row.displayName}, ${row.orderCount}`} onClick={e=>{e.stopPropagation();onSelect(row.id,"orders");}}><Badge color="yoleotard" variant="light" size="lg">{row.orderCount}</Badge></UnstyledButton></Table.Td>
    <Table.Td>{row.latestOrder?<><Button variant="subtle" size="compact-xs" title={row.latestOrder.number} onClick={e=>{e.stopPropagation();onOrder(row.latestOrder!.id);}}>{orderDisplayNumber(row.latestOrder)}</Button><Text size="xs" c="dimmed">{stamp(row.latestOrder.createdAt)}</Text></>:ui.missing}</Table.Td><Table.Td><Text size="xs">{stamp(row.createdAt)}</Text></Table.Td>
   </Table.Tr>)}</Table.Tbody></Table></ScrollArea>{!rows.length&&<Text c="dimmed" p="xl" ta="center">{ui.empty}</Text>}
-  <div className="clients-pagination"><Text size="xs" c="dimmed">{ui.shown} {data.total?((data.page-1)*data.pageSize+1):0}–{Math.min(data.page*data.pageSize,data.total)} {ui.of} {data.total}</Text><NativeSelect aria-label={ui.pageSize} value={query.pageSize} onChange={e=>onQuery({page:1,pageSize:Number(e.currentTarget.value) as 15|20|50})} data={[15,20,50].map(value=>({value:String(value),label:`${value} ${ui.pageSize.toLowerCase()}`}))}/><Pagination size="xs" total={Math.max(1,Math.ceil(data.total/data.pageSize))} value={data.page} onChange={page=>onQuery({page})} boundaries={1} siblings={0} aria-label={ui.pagination}/></div></>}
+  {hasMore&&<div ref={listEnd} className="clients-list-end">
+   <RequestState error={appendError} retry={appendPage} loading={appending}/>
+  </div>}
+  {appendNeedsRefresh&&<Alert color="yellow" role="alert">
+   <Text size="sm">{clientsListRefreshUi.notice}</Text>
+   <Button variant="subtle" onClick={retry}>{clientsListRefreshUi.action}</Button>
+  </Alert>}
+  <div className="clients-pagination"><Text size="xs" c="dimmed">{ui.shown} {rows.length?((data.page-1)*data.pageSize+1):0}–{rows.length?Math.min((data.page-1)*data.pageSize+rows.length,data.total):0} {ui.of} {data.total}</Text><NativeSelect aria-label={ui.pageSize} value={query.pageSize} onChange={e=>onQuery({page:1,pageSize:Number(e.currentTarget.value) as 15|20|50})} data={[15,20,50].map(value=>({value:String(value),label:`${value} ${ui.pageSize.toLowerCase()}`}))}/><Pagination size="xs" total={Math.max(1,Math.ceil(data.total/data.pageSize))} value={data.page} onChange={page=>onQuery({page})} boundaries={1} siblings={0} aria-label={ui.pagination}/></div></>}
  </section>;
 }

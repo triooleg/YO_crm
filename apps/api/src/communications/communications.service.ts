@@ -80,6 +80,13 @@ import { latestInboxMessageIds } from "./inbox-message-window";
 import { guardHistoryNativeEvent } from "../history-migration/history-native-reconciliation";
 import { PrismaHistoryNativeStorage } from "../history-migration/history-native-storage";
 import { originalMetaHistoryTimestamp } from "../history-migration/history-native-event";
+import { shippingEvidence } from "../orders/order-shipping-evidence";
+import { trackingLink } from "../shipping/tracking-link";
+
+const inboxMeasurementRefs = {
+  athlete: { select: { id: true, clientId: true, archivedAt: true } },
+  measurement: { select: { athleteId: true } },
+} satisfies Prisma.OrderSelect;
 class ShipmentChatwootRejectedError extends Error {}
 const COMMUNICATION_FILE = COMMUNICATION_FILE_NAME;
 const communicationMime = {
@@ -219,6 +226,69 @@ export class CommunicationsService {
       ORDER BY m."conversationId", CASE WHEN m."direction"='OUTBOUND' THEN COALESCE(m."sentAt",m."createdAt") ELSE COALESCE(m."receivedAt",m."createdAt") END DESC, m."id" DESC
     `);
   }
+  async clientOrderCards(clientId: string) {
+    const orders = await this.p.order.findMany({
+      where: { clientId, archivedAt: null, client: { archivedAt: null } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: {
+        id: true, number: true, type: true, priceMinor: true, currency: true,
+        modelImagePath: true, requiredDeliveryAt: true, salesStatus: true, shippingStatus: true,
+        productionStatus: true, notes: true, deliveryTrackingCode: true, ...inboxMeasurementRefs,
+        _count: { select: { items: true, compositionOperations: true } },
+        productionSlot: { select: { startsAt: true, endsAt: true } },
+        payments: { where: { voidedAt: null }, select: {
+          amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true,
+        } },
+        items: { where: { archivedAt: null }, select: {
+          name: true, quantity: true, ...inboxMeasurementRefs,
+          _count: { select: { instances: true } },
+          instances: { where: { archivedAt: null }, select: {
+            id: true, productionStatus: true, ...inboxMeasurementRefs,
+          } },
+        } },
+        shipment: { select: { carrier: true, trackingNumber: true, shippedAt: true, deliveredAt: true } },
+        orderShipments: { where: { archivedAt: null }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], select: {
+          carrier: true, trackingNumber: true, trackingUrl: true, status: true, shippedAt: true, deliveredAt: true,
+          instances: { where: { archivedAt: null }, select: { id: true } },
+        } },
+      },
+    });
+    function measurementRefs(row: Pick<(typeof orders)[number], "athlete" | "measurement">, fallbackAthleteId?: string) {
+      const athlete = row.athlete?.clientId === clientId && !row.athlete.archivedAt ? { id: row.athlete.id } : null;
+      const athleteId = row.athlete ? athlete?.id : fallbackAthleteId;
+      const measurement = athleteId && row.measurement?.athleteId === athleteId ? row.measurement : null;
+      return { athlete, measurement };
+    }
+    return orders.map(order => {
+      const { shipment, orderShipments, deliveryTrackingCode, _count, items, ...card } = order;
+      // Parcel tracking alone only supplies a link. Shipment mirrors the primary parcel.
+      const evidence = shippingEvidence(orderShipments.length ? {
+        ...order, shipment: null, deliveryTrackingCode: null,
+        orderShipments: orderShipments.map(parcel => ({ ...parcel, trackingNumber: null })),
+      } : order);
+      const sentStatus = order.shippingStatus === "IN_TRANSIT" ? "IN_TRANSIT" : "SHIPPED";
+      const dispatchStatus = evidence.exception ?? (evidence.delivered ? "DELIVERED"
+        : evidence.complete ? sentStatus : evidence.partial ? "PARTIALLY_SHIPPED" : null);
+      const tracking = orderShipments.flatMap(parcel => parcel.trackingNumber?.trim()
+        ? [{ number: parcel.trackingNumber.trim(), url: trackingLink(parcel) }] : []);
+      const legacyNumber = !orderShipments.length && (shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim());
+      if (legacyNumber) tracking.push({ number: legacyNumber, url: shipment
+        ? trackingLink({ ...shipment, trackingNumber: legacyNumber }) : undefined });
+      const orderRefs = measurementRefs(order);
+      const hasPhysicalInstances = items.some(item => item._count.instances > 0);
+      return {
+        ...card, ...orderRefs, dispatchStatus, tracking,
+        isActive: order.salesStatus !== "COMPLETED" && order.salesStatus !== "CANCELLED",
+        compositionManaged: Boolean(_count.compositionOperations || _count.items),
+        items: items.map(item => ({
+          name: item.name, quantity: item.quantity,
+          ...measurementRefs(item, hasPhysicalInstances ? undefined : orderRefs.athlete?.id),
+          ...(hasPhysicalInstances ? { instances: item.instances.map(instance => measurementRefs(instance)) } : {}),
+        })),
+      };
+    });
+  }
+
   async list(query: CommunicationsListQueryDto = new CommunicationsListQueryDto()) {
     const search = query.search?.trim();
     const selectedChannels=query.channels?.length?query.channels:undefined;

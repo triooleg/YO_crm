@@ -120,13 +120,14 @@ async updateInvoice(id:string,d:UpdateInvoiceDto,u:User){return this.prisma.$tra
     take: 100,
     orderBy: [{ issueDate: "desc" }, { id: "desc" }],
     select: {
-      id: true, number: true, issueDate: true, documentOptions: true,
+      id: true, orderId: true, number: true, issueDate: true, documentOptions: true,
       order: { select: { number: true, sourceSystem: true, externalNumber: true, externalId: true } },
     },
   });
   return invoices.map(invoice => ({
     id: invoice.id,
     number: invoiceDisplayNumber(invoice),
+    orderId: invoice.orderId,
     orderNumber: invoiceOrderDisplayNumber(invoice.order),
     issueDate: invoice.issueDate,
   }));

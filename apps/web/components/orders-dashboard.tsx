@@ -24,7 +24,7 @@ import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useE
 import { Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { useClickOutside } from "@mantine/hooks";
 import { designsInstancesUi as designsUi, orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi, ordersClientHistoryUi } from "../lib/i18n";
-import { orderLabel } from "../lib/orders-i18n";
+import { orderLabel, orderPaginationUi } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
 import { CrmAlert } from "./crm/alert";
 import { CrmActionIcon, CrmButton, CrmCheckbox, CrmNativeSelect, CrmTextInput, CrmTextarea } from "./crm/settings-controls";
@@ -33,7 +33,7 @@ import { CrmStatusBadge, crmStatusPresentation } from "./crm/status-badge";
 import { canOpenOrderFinance } from "../lib/order-context";
 import { orderDeadlineDays, orderReadyToShip, orderProductionStatusPresentation, orderTimelinePresentation, hasDatedProductionSlot } from "../lib/production-view";
 import { orderMeasurementState } from "../lib/order-measurement-state";
-import { ORDER_PAGE_SIZES, type OrderPageSize, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination";
+import { isContiguousOrderPage, ORDER_PAGE_SIZES, type OrderPageSize, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination";
 import { defaultOrderSort, nextOrderSort, sortOrders } from "../lib/order-sort.mjs";
 import { orderDeliveryErrorMessage } from "../lib/order-delivery-errors";
 import { hasUsableDeliveryAddress } from "../lib/order-delivery-address";
@@ -50,6 +50,7 @@ type SortColumnId = Exclude<ColumnId, "menu"> | "source";
 type SortState = { column: SortColumnId; direction: "asc" | "desc" };
 type QuickFilter = "all" | "active" | "urgent" | "deposit" | "depositShortfall" | "work" | "ready" | "completed" | "overdue";
 type OrderListPage = {clientFilter?:{id:string;displayName:string};items:Order[];total:number;page:number;pageSize:number;focusFound:boolean;metrics:{total:number;active:number;unpaid:number;deposit:number;urgent:number;overdue:number;ready:number;completed:number;work:number};sources:{total:number;websiteCount:number};disciplines:string[]};
+type LoadedOrderPage = OrderListPage & { viewKey: string; through: number; generation: number };
 
 type OverviewContext = { filter: string; period: string };
 type Props = { role: string; onNavigate: (section: "clients" | "inbox" | "production" | "finance", context?: Record<string, string>) => void; onWebsiteOrderReviewed?:()=>void };
@@ -73,9 +74,16 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const theme = useMantineTheme();
   const editableTextColor = (theme.other.crmControls as { editableTextColor: string }).editableTextColor;
   const [source,setSource]=useState<OrderSourceFilter>('');
-  const [serverPage,setServerPage]=useState<OrderListPage>();
+  const [serverPage,setServerPage]=useState<LoadedOrderPage>();
+  const loadedPage = useRef(serverPage);
+  loadedPage.current = serverPage;
+  const paginationFooter = useRef<HTMLDivElement>(null);
+  const appendRequest = useRef<AbortController | undefined>(undefined);
+  const [appendStatus, setAppendStatus] = useState<"idle" | "loading" | "failed" | "changed">("idle");
   const restoringRoute=useRef(false);
   const [orders, setOrders] = useState<Order[]>([]);
+  const listedOrders = useRef(orders);
+  listedOrders.current = orders;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -216,6 +224,16 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
     return `/orders${params.size ? `?${params}` : ""}`;
   }
 
+  const listKey = orderListPath(search, overviewContext, source, { focusId: "" });
+  const activeListKey = useRef(listKey);
+  activeListKey.current = listKey;
+
+  function cancelAppend() {
+    appendRequest.current?.abort();
+    appendRequest.current = undefined;
+    setAppendStatus("idle");
+  }
+
   function clearOverviewContext() {
     listSequence.current++;
     cancelPreviousOrderNavigation();
@@ -235,21 +253,47 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
     clientHistoryCache.invalidate();setClientHistoryRevision(value=>value+1);
     const sequence=++listSequence.current;
     const path = orderListPath(requestedSearch, context);
+    const origin = listContext.current.source;
+    const key = orderListPath(requestedSearch, context, origin, { focusId: "" });
+    const previousPage = loadedPage.current;
+    cancelAppend();
     if (!options.background) setLoading(true);
     try {
       const response = await request(path) as OrderListPage | Order[];
-      const paged=Array.isArray(response)?undefined:response;const listed=(Array.isArray(response)?response:response.items).filter(order=>(!requestedClientId||order.client.id===requestedClientId)&&matchesClientOrderMinimum(order,requestedMinimum));
+      const paged=Array.isArray(response)?undefined:response;
+      const matchesClient = (order: Order) => (!requestedClientId || order.client.id === requestedClientId) && matchesClientOrderMinimum(order, requestedMinimum);
+      let listed = (Array.isArray(response) ? response : response.items).filter(matchesClient);
+      const isCurrent = () => sequence === listSequence.current && path === orderListPath(listContext.current.search, listContext.current.overviewContext);
+      if (!isCurrent()) return;
+      let through = paged?.page ?? 1;
+      let listChanged = false;
+      // Reconcile the visible window after a mutation, including rows loaded by scrolling.
+      if (paged && options.background && previousPage?.viewKey === key && previousPage.page === paged.page) {
+        const lastPage = Math.min(previousPage.through, Math.ceil(paged.total / paged.pageSize));
+        for (let next = through + 1; next <= lastPage; next++) {
+          const result = await request(orderListPath(requestedSearch, context, origin, { page: String(next), focusId: "" })) as OrderListPage;
+          if (!isCurrent()) return;
+          if (result.clientFilter && result.clientFilter.id !== requestedClientId) throw Error(ui.error);
+          if (!isContiguousOrderPage(listed, paged.page, next, paged, result) || !result.items.every(matchesClient)) {
+            listChanged = true;
+            break;
+          }
+          listed = [...listed, ...result.items];
+          through = next;
+        }
+      }
       let contextUnavailable = false;
       let contextOrder = initialOrderId.current
         ? await request(`/orders/${encodeURIComponent(initialOrderId.current)}`).catch(() => { contextUnavailable = true; return undefined; }) as OrderDetail | undefined
         : undefined;
-      if(sequence!==listSequence.current || path !== orderListPath(listContext.current.search, listContext.current.overviewContext))return;
+      if(!isCurrent())return;
       if(contextOrder&&((requestedClientId&&contextOrder.client.id!==requestedClientId)||!matchesClientOrderMinimum(contextOrder,requestedMinimum))){if(contextOrder)contextUnavailable=true;contextOrder=undefined;}
       if(requestedClientId&&paged?.clientFilter&&paged.clientFilter.id!==requestedClientId)throw Error();
       if ((context || listContext.current.source || requestedClientId || requestedMinimum || paged) && contextOrder && (paged? !paged.focusFound : !listed.some(order => order.id === contextOrder.id))) contextUnavailable = true;
       const retainedContext = contextUnavailable ? undefined : contextOrder ?? (!requestedSearch.trim() && !context ? (previousOrderContext.current&&(!requestedClientId||previousOrderContext.current.client.id===requestedClientId)&&matchesClientOrderMinimum(previousOrderContext.current,requestedMinimum)?previousOrderContext.current:undefined) : undefined);
-      setServerPage(paged);if(paged)setPage(paged.page);
+      setServerPage(paged && { ...paged, through, generation: sequence, viewKey: orderListPath(requestedSearch, context, origin, { page: String(paged.page), focusId: "" }) });if(paged)setPage(paged.page);
       setOrders(!paged && retainedContext && !listed.some((order) => order.id === retainedContext.id) ? [retainedContext, ...listed] : listed);
+      if (listChanged) setAppendStatus("changed");
       if (contextOrder && !contextUnavailable) {
         setOrderDetails((current) => ({ ...current, [contextOrder.id]: contextOrder }));
         setExpandedId(contextOrder.id);if(paged)setNavigationTarget(contextOrder.id);
@@ -299,8 +343,11 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       if((requestedClientId&&detail.client.id!==requestedClientId)||!matchesClientOrderMinimum(detail,requestedMinimum)){setError(ordersClientHistoryUi.clientUnavailable);return;}
       const paged=Array.isArray(response)?undefined:response,listed=(Array.isArray(response)?response:response.items).filter(order=>(!requestedClientId||order.client.id===requestedClientId)&&matchesClientOrderMinimum(order,requestedMinimum));
       if((listContext.current.overviewContext||listContext.current.source||requestedMinimum||paged)&&!(paged?paged.focusFound:listed.some(order=>order.id===orderId))){setError(overviewContextUi.orderUnavailable);return;}
-      listSequence.current++;setLoading(false);previousOrderContext.current=detail;initialOrderId.current=undefined;
-      setOrderDetails(current=>({...current,[orderId]:detail}));setServerPage(paged);setOrders(listed.some(order=>order.id===orderId)?listed:[...listed,detail]);
+      const generation = ++listSequence.current;
+      cancelAppend();setLoading(false);previousOrderContext.current=detail;initialOrderId.current=undefined;
+      setOrderDetails(current=>({...current,[orderId]:detail}));
+      setServerPage(paged && { ...paged, through: paged.page, generation, viewKey: orderListPath("", listContext.current.overviewContext, listContext.current.source, { page: String(paged.page), focusId: "", quick: "all", status: "all", discipline: "all" }) });
+      setOrders(listed.some(order=>order.id===orderId)?listed:[...listed,detail]);
       previousListCriteria.current=undefined;setQuickFilter('all');setStatusFilter('all');setDisciplineFilter('all');setSearch('');setError('');if(paged)setPage(paged.page);setExpandedId(orderId);
       void acknowledgeWebsiteNotification(orderId);
       setNavigationTarget(orderId);
@@ -426,6 +473,8 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
 
   useEffect(() => {
     if(skipNavigationSearchReload.current&&!search){skipNavigationSearchReload.current=false;return;}
+    // A focus lookup may already have returned the page it resolved to.
+    if (loadedPage.current?.viewKey === listKey && loadedPage.current.generation === listSequence.current) return;
     const timer = window.setTimeout(() => void load(), 220);
     return () => window.clearTimeout(timer);
   }, [search, overviewContext, source, clientIdFilter, minClientOrders, quickFilter,statusFilter,disciplineFilter,sort,page,pageSize,paginationReady,routeRevision]);
@@ -546,6 +595,56 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const totalPages = orderPage.totalPages;
   const currentPage = orderPage.page;
   const shown = orderPage.items;
+  const canAppend = Boolean(serverPage && serverPage.viewKey === listKey && serverPage.generation === listSequence.current && serverPage.through < totalPages && !loading && !error && !navigationTarget);
+
+  async function appendNextPage() {
+    if (!canAppend || !serverPage || appendRequest.current || loadedPage.current !== serverPage || activeListKey.current !== listKey || listSequence.current !== serverPage.generation) return;
+    const controller = new AbortController();
+    const sequence = listSequence.current;
+    const next = serverPage.through + 1;
+    const params = new URLSearchParams(listKey.split("?")[1]);
+    params.set("page", String(next));
+    params.delete("focusId");
+    const isCurrent = () => appendRequest.current === controller && listSequence.current === sequence && activeListKey.current === listKey;
+    appendRequest.current = controller;
+    setAppendStatus("loading");
+    try {
+      const result = await request(`/orders?${params}`, { signal: controller.signal }) as OrderListPage;
+      if (!isCurrent()) return;
+      if (result.clientFilter && result.clientFilter.id !== clientIdFilter) throw Error(ui.error);
+      if (!isContiguousOrderPage(listedOrders.current, serverPage.page, next, serverPage, result)
+        || !result.items.every(order => (!clientIdFilter || order.client.id === clientIdFilter) && matchesClientOrderMinimum(order, minClientOrders))) {
+        setAppendStatus("changed");
+        return;
+      }
+      setOrders(current => [...current, ...result.items]);
+      setServerPage({ ...result, page: serverPage.page, through: next, generation: sequence, viewKey: listKey });
+      setAppendStatus("idle");
+    } catch {
+      if (isCurrent()) setAppendStatus("failed");
+    } finally {
+      if (appendRequest.current === controller) appendRequest.current = undefined;
+    }
+  }
+
+  useEffect(() => {
+    cancelAppend();
+    return () => {
+      appendRequest.current?.abort();
+      appendRequest.current = undefined;
+    };
+  }, [listKey, routeRevision]);
+
+  useEffect(() => {
+    const footer = paginationFooter.current;
+    if (!footer || !canAppend || appendStatus !== "idle" || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) void appendNextPage();
+    }, { rootMargin: "0px 0px 80px 0px" });
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, [canAppend, appendStatus, serverPage, listKey, routeRevision]);
+
   useEffect(()=>{
     if(!navigationTarget)return;
     const index=sorted.findIndex(order=>order.id===navigationTarget);
@@ -783,7 +882,14 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       </table>
     </div>
 
-    {!loading && totalRows > 0 && <div className="orders-pagination"><span>{ui.shown} {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalRows)} {ui.of} {totalRows}</span><nav aria-label={ui.pagination}><button disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, currentPage - 3), Math.max(5, currentPage + 2)).map((value) => <button key={value} className={currentPage === value ? "active" : ""} aria-current={currentPage === value ? "page" : undefined} onClick={() => changePage(value)}>{value}</button>)}<button disabled={currentPage === totalPages} onClick={() => changePage(currentPage + 1)}><UiIcon name="chevronRight" /></button></nav><CrmNativeSelect className="orders-page-size" aria-label={ui.ordersPerPage} value={String(pageSize)} onChange={(event) => changePageSize(event.target.value)} data={ORDER_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value} / ${ui.rowsPerPage}` }))} /></div>}
+    {!loading && totalRows > 0 && <div className="orders-pagination" ref={paginationFooter}><span>{ui.shown} {(currentPage - 1) * pageSize + 1}–{Math.min((serverPage?.through ?? currentPage) * pageSize, totalRows)} {ui.of} {totalRows}</span><nav aria-label={ui.pagination}><button disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><UiIcon name="chevronLeft" /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(Math.max(0, currentPage - 3), Math.max(5, currentPage + 2)).map((value) => <button key={value} className={currentPage === value ? "active" : ""} aria-current={currentPage === value ? "page" : undefined} onClick={() => changePage(value)}>{value}</button>)}<button disabled={currentPage >= totalPages} onClick={() => changePage(currentPage + 1)}><UiIcon name="chevronRight" /></button></nav><CrmNativeSelect className="orders-page-size" aria-label={ui.ordersPerPage} value={String(pageSize)} onChange={(event) => changePageSize(event.target.value)} data={ORDER_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value} / ${ui.rowsPerPage}` }))} /></div>}
+    {canAppend && <>
+      {appendStatus !== "idle" && <div className="orders-append-status">
+        <span role="status">{appendStatus === "changed" ? orderPaginationUi.listChanged : appendStatus === "loading" ? ui.loading : ui.error}</span>
+        {appendStatus === "failed" && <CrmButton tone="secondary" size="compact-sm" onClick={() => void appendNextPage()}>{ui.retry}</CrmButton>}
+        {appendStatus === "changed" && <CrmButton tone="secondary" size="compact-sm" onClick={() => void load({ background: true })}>{orderPaginationUi.refresh}</CrmButton>}
+      </div>}
+    </>}
 
     <Modal opened={columnsOpen} onClose={() => setColumnsOpen(false)} title={ui.columns} aria-label={ui.columns} closeButtonProps={{ "aria-label": ui.close }} returnFocus centered size={440} classNames={{ content: "orders-column-settings", header: "orders-column-settings-header", title: "orders-column-settings-title", body: "orders-column-settings-body" }}>
       <p className="orders-columns-hint">{ui.columnsHint}</p>

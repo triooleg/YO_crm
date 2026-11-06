@@ -27,6 +27,7 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
  return binding;
 }
 @Get()@Roles("OWNER","ADMIN","MANAGER")list(@Query()query:CommunicationsListQueryDto){return this.c.list(query)}
+@Get("clients/:clientId/order-cards")@Roles("OWNER","ADMIN","MANAGER")clientOrderCards(@Param("clientId")clientId:string){return this.c.clientOrderCards(clientId)}
 @Get("unread-count")@Roles("OWNER","ADMIN","MANAGER")unreadCount(){return this.c.unreadCount()}
 @Get("templates")@Roles("OWNER","ADMIN","MANAGER")templates(){return this.c.templates()}
 @Post("templates")@Roles("OWNER","ADMIN")createTemplate(@Body()d:MessageTemplateDto,@Req()r:Request&{user:User}){return this.c.createTemplate(d,r.user)}

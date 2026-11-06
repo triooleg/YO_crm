@@ -1,7 +1,8 @@
-import type {WorkspaceQuery} from "./types";
+import type {ClientList,WorkspaceQuery} from "./types";
 export function readWorkspaceQuery(search?:string):WorkspaceQuery;
 export function workspaceUrl(current:string,state:WorkspaceQuery):string;
 export function listQuery(state:Partial<WorkspaceQuery>):string;
+export function canAppendClientPage(previous:ClientList,next:ClientList,requestedPage:number):boolean;
 export function safeRelativeReturn(value:unknown):string|undefined;
 export function mergeInput(target:string,ids:string[],fieldChoices:Record<string,string>):{sourceClientIds:string[];fieldChoices:Record<string,string>};
 

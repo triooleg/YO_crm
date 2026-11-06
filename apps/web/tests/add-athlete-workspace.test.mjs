@@ -28,7 +28,8 @@ test("после добавления спортсмена список и ка�
  assert.match(workspace,/<AddAthlete[\s\S]*?done=\{saved\}/);
  assert.match(workspace,/functionsaved\(\)[\s\S]*?state\.refresh\(\)/);
  assert.match(requests,/refresh:\(\)=>setRevision\(n=>n\+1\)/);
- assert.match(requests,/\[ready,listKey,revision,update\]/);
+ assert.match(requests,/listScope=`\$\{revision\}:\$\{listKey\}`/);
+ assert.match(requests,/\[ready,listKey,listScope,update\]/);
  assert.match(requests,/\[ready,clientId,query\.currency,revision,update\]/);
 });
 test("необязательный поиск дубликатов не входит в загрузку выбранной карточки",()=>{

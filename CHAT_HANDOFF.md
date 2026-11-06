@@ -1,3 +1,27 @@
+## 2026-11-06 - Clients and Orders scrolling, Inbox order cards and invoices (local)
+
+Clients places the four KPIs in the workspace header and pins the desktop
+detail panel below the CRM header. Clients and Orders append pages near the end
+of the list. Explicit pagination, filters, selection, and deep links remain
+available. An overlapping or changed page total pauses append and offers a
+refresh with the current criteria.
+
+Inbox shows saved client invoices by order on every conversation channel. The
+scoped PDF download is available in Instagram; composer attachment still
+requires a supported channel. Listing or downloading an invoice never sends it.
+
+Inbox reads non-void settlement receipts, shipment evidence, and client-owned
+measurement references in a separate client-scoped order-card response.
+Parcel tracking and the primary parcel's legacy mirror do not establish dispatch.
+Active cards show payment, balance and measurement readiness; shipped cards
+show delivery status and verified tracking links when available.
+
+Local verification: pnpm quality:check passed (3,357 tests passed, 110
+skipped). All 23 focused Playwright scenarios passed, with desktop and mobile
+captures of the client list, order list and invoice picker.
+
+No version bump or production mutation in this follow-up.
+
 ## 2026-11-06 - Client statistics and archive (0.18.2)
 
 Clients shows four filtered KPIs across all pages from the same workspace

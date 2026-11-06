@@ -30,3 +30,26 @@ export function paginateOrders<T>(items: T[], page: number, pageSize: number) {
     totalPages,
   };
 }
+
+type OrderIdentity = { id: string };
+type OrderPageSizeAndTotal = { pageSize: number; total: number };
+
+export function isContiguousOrderPage(
+  loaded: OrderIdentity[],
+  firstPage: number,
+  next: number,
+  baseline: OrderPageSizeAndTotal,
+  result: OrderPageSizeAndTotal & { page: number; items: OrderIdentity[] },
+) {
+  const { pageSize, total } = baseline;
+  const expected = Math.min(pageSize, total - (next - 1) * pageSize);
+  if (result.page !== next || result.pageSize !== pageSize || result.total !== total || expected <= 0) return false;
+  if (!Array.isArray(result.items) || result.items.length !== expected || loaded.length !== (next - firstPage) * pageSize) return false;
+  const ids = new Set(loaded.map(order => order.id));
+  if (ids.size !== loaded.length) return false;
+  for (const order of result.items) {
+    if (!order?.id || ids.has(order.id)) return false;
+    ids.add(order.id);
+  }
+  return true;
+}

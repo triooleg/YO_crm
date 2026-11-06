@@ -10,6 +10,22 @@ export function workspaceUrl(current,state){
  return url.pathname+url.search+url.hash;
 }
 export function listQuery(state){const p=new URLSearchParams({view:'workspace'});for(const key of ['page','pageSize','search','country','source','status','sort','direction','period'])if(state[key]!==''&&state[key]!==undefined)p.set(key,String(state[key]));return p.toString();}
+
+export function canAppendClientPage(previous,next,requestedPage){
+ if(next.page!==requestedPage||next.pageSize!==previous.pageSize||next.total!==previous.total)return false;
+ const offset=(next.page-1)*next.pageSize;
+ const loadedEnd=(previous.page-1)*previous.pageSize+previous.items.length;
+ const expectedCount=Math.min(next.pageSize,next.total-offset);
+ if(offset!==loadedEnd||expectedCount<=0||next.items.length!==expectedCount)return false;
+ const ids=new Set(previous.items.map(row=>row.id));
+ if(ids.size!==previous.items.length)return false;
+ for(const row of next.items){
+  if(ids.has(row.id))return false;
+  ids.add(row.id);
+ }
+ return true;
+}
+
 export function safeRelativeReturn(value){return typeof value==='string'&&value.startsWith('/')&&!value.startsWith('//')&&!/[\\\p{Cc}]/u.test(value)?value:undefined;}
 export function mergeInput(target,ids,fieldChoices){const sourceClientIds=[...new Set(ids)].filter(id=>id!==target);if(!target||!sourceClientIds.length)throw Error('INVALID_MERGE');return {sourceClientIds,fieldChoices};}
 

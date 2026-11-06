@@ -89,23 +89,30 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
   {label:ui.repeatClients,value:statistics?.repeat,icon:"orders",color:"yoleotard"},
  ] as const;
  return <main className="clients-workspace">
-  <header className="clients-page-header"><div><Text size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><Title order={1}>{ui.title}</Title><Text size="sm" c="dimmed">{ui.subtitle}</Text></div><Group gap="xs" className="clients-header-actions"><Button ref={duplicateTriggerRef} variant="default" onClick={()=>setDuplicates(true)}>{ui.findDuplicates}</Button><Button ref={mergeTriggerRef} variant="default" disabled={checked.size<2} onClick={()=>setMergeRows([...checked.values()])}>{ui.merge}{checked.size?` (${checked.size})`:""}</Button><Button ref={createClientTriggerRef} onClick={()=>setCreating(true)}>{ui.create}</Button></Group></header>
-  <section aria-label={ui.listStatistics}>
-   <Text size="xs" c="dimmed" mb="xs">{ui.listStatistics}</Text>
-   <SimpleGrid cols={{base:2,sm:4}} spacing="sm" mb="md">
-    {cards.map(({label,value,icon,color})=><Paper key={label} withBorder p="sm">
-     <Group gap="xs" wrap="nowrap">
-      <ThemeIcon variant="light" radius="xl" color={color} visibleFrom="sm"><CrmNavIcon section={icon}/></ThemeIcon>
-      <div><Text size="xs" c="dimmed">{label}</Text>
-      <Text size="xl" fw={700}>{value?.toLocaleString("ru-RU")??ui.missing}</Text></div>
-     </Group>
-    </Paper>)}
-   </SimpleGrid>
-  </section>
+  <header className="clients-page-header">
+   <div className="clients-page-title"><Text size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><Title order={1}>{ui.title}</Title></div>
+   <Text className="clients-page-subtitle" size="sm" c="dimmed">{ui.subtitle}</Text>
+   <section aria-label={ui.listStatistics} className="clients-header-stats">
+    <SimpleGrid cols={{base:2,sm:4}} spacing="xs">
+     {cards.map(({label,value,icon,color})=><Paper key={label} withBorder p="sm">
+      <Group gap="xs" wrap="nowrap">
+       <ThemeIcon variant="light" radius="xl" color={color} visibleFrom="sm"><CrmNavIcon section={icon}/></ThemeIcon>
+       <div><Text size="xs" c="dimmed">{label}</Text>
+       <Text size="xl" fw={700}>{value?.toLocaleString("ru-RU")??ui.missing}</Text></div>
+      </Group>
+     </Paper>)}
+    </SimpleGrid>
+   </section>
+   <Group gap="xs" className="clients-header-actions"><Button ref={duplicateTriggerRef} variant="default" onClick={()=>setDuplicates(true)}>{ui.findDuplicates}</Button><Button ref={mergeTriggerRef} variant="default" disabled={checked.size<2} onClick={()=>setMergeRows([...checked.values()])}>{ui.merge}{checked.size?` (${checked.size})`:""}</Button><Button ref={createClientTriggerRef} onClick={()=>setCreating(true)}>{ui.create}</Button></Group>
+  </header>
   {returnChat&&returnChat.clientId===query.clientId&&<Button mb="sm" variant="subtle" disabled={!detail?.displayName&&!returnChat.clientName} onClick={()=>onNavigate?.("inbox",{...returnChat,clientName:detail?.displayName||returnChat.clientName,clientsReturn:window.location.pathname+window.location.search})}>{ui.returnChat}</Button>}
   <div className="clients-toolbar"><TextInput ref={searchRef} aria-label={ui.search} placeholder={ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button></div>
   {(moreFilters||query.period)&&<Group mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
-  <div className="clients-columns"><ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder} onArchive={canArchive?openArchive:undefined}/>{desktop&&<aside className="clients-detail-panel">{detailContent}</aside>}</div>
+  <div className="clients-columns">
+   <ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder} onArchive={canArchive?openArchive:undefined}
+    hasMore={state.hasMore} appending={state.appending} appendError={state.appendError} appendNeedsRefresh={state.appendNeedsRefresh} appendPage={state.appendPage}/>
+   {desktop&&<aside className="clients-detail-panel" aria-label={ui.client} tabIndex={0}>{detailContent}</aside>}
+  </div>
   <Drawer opened={!desktop&&!!query.clientId} onClose={closeDetail} position="right" size={mobile?"100%":600} title={ui.client} closeButtonProps={{"aria-label":ui.back,disabled:!!flow||overlay}} classNames={{content:"clients-drawer",header:"clients-drawer-header",body:"clients-drawer-body"}} closeOnEscape={!flow&&!overlay} closeOnClickOutside={!flow&&!overlay} trapFocus={!flow&&!overlay} returnFocus>{!desktop&&detailContent}</Drawer>
   {archiveTarget&&<Modal opened centered returnFocus={false} onClose={closeArchive} title={ui.archiveClient}
    closeOnEscape={!archiving} closeOnClickOutside={!archiving} closeButtonProps={{disabled:archiving,"aria-label":ui.close}}>

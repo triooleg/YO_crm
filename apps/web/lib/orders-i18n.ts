@@ -6,3 +6,8 @@ export const orderLabels={
  source:{WEBSITE:"Сайт",CHATWOOT:"Chatwoot",INSTAGRAM:"Instagram",FACEBOOK:"Facebook",WHATSAPP:"WhatsApp",EMAIL:"Email",TELEGRAM:"Telegram",REFERRAL:"Рекомендация",RETURNING_CUSTOMER:"Повторный клиент",MANUAL:"Вручную",OTHER:"Другое"}
 }as const;
 export function orderLabel(group:keyof typeof orderLabels,value:string){return(orderLabels[group]as Record<string,string>)[value]??value}
+
+export const orderPaginationUi = {
+  listChanged: "Список заказов изменился. Обновите его, чтобы продолжить.",
+  refresh: "Обновить список заказов",
+} as const;

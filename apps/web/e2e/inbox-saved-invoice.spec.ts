@@ -5,8 +5,8 @@ const clientId = "invoice-client";
 const invoicesPath = "/api/finance/clients/" + clientId + "/invoices";
 const pdfPath = invoicesPath + "/saved-2/document";
 const invoices = [
-  { id: "saved-1", number: "INV-001", orderNumber: "YO-101", issueDate: "2026-11-01" },
-  { id: "saved-2", number: "INV-002", orderNumber: "YO-102", issueDate: "2026-11-02" },
+  { id: "saved-1", orderId: "order-101", number: "INV-001", orderNumber: "YO-101", issueDate: "2026-11-01" },
+  { id: "saved-2", orderId: "order-102", number: "INV-002", orderNumber: "YO-102", issueDate: "2026-11-02" },
 ];
 const pdf = Buffer.from("%PDF-1.4\n% Synthetic Inbox attachment fixture\n%%EOF");
 
@@ -15,9 +15,10 @@ type SendRequest = { channel: InvoiceChannel; content?: string; attachment?: { n
 const savedDraftId = "synthetic-server-draft-id";
 const replyMessageId = "synthetic-reply-message-id";
 
-async function setup(page: Page, channel: InvoiceChannel = "EMAIL", sendMode?: "success" | "fail-text" | "lose-first-attachment-response") {
+async function setup(page: Page, channel: InvoiceChannel = "EMAIL", sendMode?: "success" | "fail-text" | "lose-first-attachment-response", hasActiveOrder = false) {
   const client = {
-    id: clientId, displayName: "Invoice QA", status: "LEAD", source: channel, orders: [],
+    id: clientId, displayName: "Invoice QA", status: "LEAD", source: channel,
+    orders: hasActiveOrder ? [{ id: "order-102", number: "YO-102", priceMinor: 35000, currency: "EUR", productionStatus: "PLANNED" }] : [],
     conversations: [channel, channel === "EMAIL" ? "INSTAGRAM" : "EMAIL"].map((value, index) => ({
       id: "conversation-" + value, channel: value, unreadCount: 0,
       lastMessageAt: index === 0 ? "2026-11-06T12:00:00Z" : "2026-11-06T11:00:00Z",
@@ -137,11 +138,22 @@ test("selects a saved invoice without an active order and stages its scoped PDF 
   expect(requests.deliveryRequests).toEqual([]);
 });
 
-test("an existing attachment is preserved and Instagram offers a channel hint", async ({ page }) => {
-  const requests = await setup(page, "INSTAGRAM");
+test("an existing attachment is preserved and Instagram offers a channel hint", async ({ page }, testInfo) => {
+  const requests = await setup(page, "INSTAGRAM", undefined, true);
   let dialog = await openPicker(page);
   await expect(dialog.getByText(ui.invoicePickerSwitchChannel)).toBeVisible();
-  expect(requests.invoiceRequests).toEqual([]);
+  await dialog.getByLabel(ui.invoicePickerOrder, { exact: true }).selectOption({ label: "YO-102 · активный" });
+  await expect(dialog.getByLabel(ui.invoicePickerSelect)).not.toContainText("INV-001");
+  await dialog.getByLabel(ui.invoicePickerSelect).selectOption("saved-2");
+  await expect(dialog.getByRole("link", { name: "Скачать PDF" })).toHaveAttribute("href", pdfPath);
+  await expect(dialog.getByRole("button", { name: ui.invoicePickerAttach })).toHaveCount(0);
+  await dialog.screenshot({ path: testInfo.outputPath("invoice-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.getByRole("link", { name: ui.invoicePickerDownload })).toBeInViewport();
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.screenshot({ path: testInfo.outputPath("invoice-mobile.png") });
+  await page.setViewportSize({ width: 1366, height: 900 });
+  expect(requests.invoiceRequests).toEqual([invoicesPath]);
   await dialog.getByRole("button", { name: ui.close }).last().click();
   await page.getByLabel(ui.replyChannel).selectOption("EMAIL");
   await page.locator('input[type="file"]').setInputFiles({ name: "existing.pdf", mimeType: "application/pdf", buffer: pdf });
@@ -149,7 +161,7 @@ test("an existing attachment is preserved and Instagram offers a channel hint", 
   await dialog.getByLabel(ui.invoicePickerSelect).selectOption("saved-2");
   await expect(dialog.getByRole("button", { name: ui.invoicePickerAttach })).toBeDisabled();
   await expect(dialog.getByText(ui.invoicePickerAttachmentOccupied)).toBeVisible();
-  expect(requests.invoiceRequests).toEqual([invoicesPath]);
+  expect(requests.invoiceRequests).toEqual([invoicesPath, invoicesPath]);
   expect(requests.deliveryRequests).toEqual([]);
   await page.keyboard.press("Escape");
   await expect(page.getByText("existing.pdf", { exact: true })).toBeVisible();

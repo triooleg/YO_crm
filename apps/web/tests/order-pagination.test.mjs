@@ -1,10 +1,34 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ORDER_PAGE_SIZES, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination.ts";
+import { isContiguousOrderPage, ORDER_PAGE_SIZES, paginateOrders, parseOrderPaginationState } from "../lib/order-pagination.ts";
 
 const service = readFileSync(new URL("../../api/src/orders/orders.service.ts", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../components/orders-dashboard.tsx", import.meta.url), "utf8");
+
+test("append accepts a complete page or a correctly sized final page", () => {
+  const loaded = [{ id: "1" }, { id: "2" }];
+  const next = { page: 2, pageSize: 2, total: 4, items: [{ id: "3" }, { id: "4" }] };
+  assert.equal(isContiguousOrderPage(loaded, 1, 2, { pageSize: 2, total: 4 }, next), true);
+  assert.equal(isContiguousOrderPage(loaded, 1, 2, { pageSize: 2, total: 3 }, { ...next, total: 3, items: [next.items[0]] }), true);
+});
+
+test("append rejects total drift, overlapping IDs and an incorrect page range", () => {
+  const loaded = [{ id: "1" }, { id: "2" }];
+  const baseline = { pageSize: 2, total: 4 };
+  const next = { page: 2, ...baseline, items: [{ id: "3" }, { id: "4" }] };
+  for (const invalid of [
+    { ...next, total: 3 },
+    { ...next, page: 1 },
+    { ...next, pageSize: 3 },
+    { ...next, items: [next.items[1]] },
+    { ...next, items: [loaded[1], next.items[1]] },
+    { ...next, items: [next.items[1], next.items[1]] },
+  ]) {
+    assert.equal(isContiguousOrderPage(loaded, 1, 2, baseline, invalid), false);
+  }
+  assert.equal(isContiguousOrderPage(loaded.slice(1), 1, 2, baseline, next), false);
+});
 
 test("все 101 заказ доступны через локальную пагинацию", () => {
   const orders = Array.from({ length: 101 }, (_, index) => ({ id: index + 1 }));

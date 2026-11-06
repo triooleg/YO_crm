@@ -7,12 +7,14 @@ import { InboxInvoiceAction } from "./inbox-invoice-action";
 
 import { moneyLabel } from "../lib/finance-report";
 import { orderSettlement } from "../lib/order-settlement.mjs";
+import { orderCostumeQuantity } from "../lib/order-composition-view";
+import { orderMeasurementState } from "../lib/order-measurement-state";
 import { dataEvidenceUi } from "../lib/i18n";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Group, Modal, NativeSelect, Switch, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { communicationsUi as ui, labels, overviewTargetUi } from "../lib/i18n";
+import { communicationsUi as ui, labels, ordersUi, overviewTargetUi, productionUi } from "../lib/i18n";
 import {
   canRefreshInbox,
   isCurrentInboxDetailRequest,
@@ -45,7 +47,18 @@ type Order = {
   notes?: string;
   priceMinor: number;
   currency: string;
-  payments?: { amountMinor: number; currency: string; appliedAmountMinor?: number; appliedCurrency?: string }[];
+  payments?: { amountMinor: number; currency: string; appliedAmountMinor?: number | null; appliedCurrency?: string | null }[];
+};
+type MeasurementAssignment = { athlete?: { id: string } | null; measurement?: { athleteId: string } | null };
+type InboxOrderCard = Order & MeasurementAssignment & {
+  type: string;
+  isActive: boolean;
+  salesStatus: keyof typeof labels.salesStatus;
+  productionStatus: keyof typeof labels.productionStatus;
+  dispatchStatus: keyof typeof labels.shippingStatus | "PARTIALLY_SHIPPED" | null;
+  tracking: { number: string; url?: string }[];
+  compositionManaged: boolean;
+  items: ({ name: string; quantity: number; instances?: MeasurementAssignment[] } & MeasurementAssignment)[];
 };
 type Attachment = { type: string; url?: string; sharedInstagramPhoto?: boolean; originalUrl?: string; stickerId?: string; name?: string; mimeType?: string };
 type UploadedAttachment = { path: string; name: string; mimeType: string; sizeBytes: number };
@@ -247,8 +260,6 @@ function showInboxErrorNotification(message:string){
 function formatMessageDateTime(value:string){
   return new Date(value).toLocaleString("ru",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 }
-function orderPaidMinor(order:Order){return orderSettlement(order).paidMinor;}
-function orderQuantity(order:Order){return order.items?.reduce((total,item)=>total+item.quantity,0)||1}
 function messageDayKey(value:string){const date=new Date(value);return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
 function localDateKey(value:string|Date){const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Kyiv",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(value)),part=(type:Intl.DateTimeFormatPartTypes)=>parts.find(item=>item.type===type)?.value||"";return `${part("year")}-${part("month")}-${part("day")}`}
 function formatMessageDay(value:string){return new Date(value).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
@@ -323,6 +334,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [splitBusy,setSplitBusy]=useState(false),
     [splitError,setSplitError]=useState(""),
     [clientDetail,setClientDetail]=useState<ClientDetail>(),
+    [clientOrderCards,setClientOrderCards]=useState<{ clientId: string; cards: InboxOrderCard[] | null }>(),
     [selectedAthleteId,setSelectedAthleteId]=useState<string>(),
     [contextLoading,setContextLoading]=useState(false),
     [addingAthlete,setAddingAthlete]=useState(false),
@@ -801,6 +813,14 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   async function loadClientDetail(clientId: string) {
     const request = ++clientDetailRequest.current;
     setContextLoading(true);
+    const setOrderCards = (cards: InboxOrderCard[] | null) => {
+      if (request === clientDetailRequest.current && selectedClientId.current === clientId) {
+        setClientOrderCards({ clientId, cards });
+      }
+    };
+    void api(`/communications/clients/${encodeURIComponent(clientId)}/order-cards`)
+      .then(result => setOrderCards(Array.isArray(result) ? result : null))
+      .catch(() => setOrderCards(null));
     try {
       const contextOrderId=clientId===initialClientId.current?initialOrderId.current:undefined;
       const detail = await api("/clients/" + clientId+(contextOrderId?`?orderId=${encodeURIComponent(contextOrderId)}`:"")) as ClientDetail;
@@ -886,6 +906,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     taskRequestVersion.current++;
     summaryRequestSequence.current++;
     setClientDetail(undefined);
+    setClientOrderCards(undefined);
     setSelectedAthleteId(undefined);
     setContextLoading(c.status !== "LEAD");
     setAddingAthlete(false);
@@ -1476,9 +1497,11 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   const availableChannels = client ? clientBadges(client) : [],
     active = availableChannels.find(item=>item.key===activeChannel)||{...sourceBadge({source:activeChannel} as Client),accountName:undefined as string|undefined},
     activeOrders=client?.orders||[],
-    contextOrders=clientDetail?.orders?.length?clientDetail.orders:activeOrders,
+    orderCards=clientOrderCards?.clientId===client?.id?clientOrderCards?.cards:undefined,
+    contextOrders=orderCards??[],
     focusedContextOrder=contextOrders.find(order=>order.id===initialOrderId.current),
-    orderedContextOrders=focusedContextOrder?[focusedContextOrder,...contextOrders.filter(order=>order.id!==focusedContextOrder.id)]:contextOrders,
+    prioritizedContextOrders=[...contextOrders.filter(order=>order.isActive),...contextOrders.filter(order=>!order.isActive)],
+    orderedContextOrders=focusedContextOrder?[focusedContextOrder,...prioritizedContextOrders.filter(order=>order.id!==focusedContextOrder.id)]:prioritizedContextOrders,
     displayedContextOrders=contextTab==="CLIENT"?orderedContextOrders.slice(0,1):orderedContextOrders,
     nextTask=clientDetail?.workTasks?.[0],
     purchaseTotals=(client?.buyerSummary?.paymentTotals||[]).map(total=>[total.currency,total.amountMinor] as const),
@@ -1849,7 +1872,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
               {client ? <InboxInvoiceAction key={invoiceScope} clientId={client.id} disabled={busy}
                 canAttach={canAttachInvoice} attachmentOccupied={!!attachment} maxAttachmentBytes={COMMUNICATION_FILE_MAX_BYTES}
-                onAttach={attachSavedInvoice} onGenerate={activeOrders[0] && navigate ? generateInvoiceForActiveOrder : undefined}/>
+                onAttach={attachSavedInvoice} activeOrders={activeOrders} onGenerate={activeOrders[0] && navigate ? generateInvoiceForActiveOrder : undefined}/>
                 : <button type="button" disabled>▤ {ui.invoiceShortcut}</button>}
               <button type="button" disabled={!client||client.status==="LEAD"} onClick={openClientFromInbox}>⌁ {ui.measurementsShortcut}</button>
               {templates.slice(0,5).map(template=><button type="button" key={template.id} title={template.content} onClick={()=>chooseTemplate(template)}>{template.name}</button>)}
@@ -1874,8 +1897,16 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-athletes"><header><b>{ui.athletes}</b><small>{clientDetail?.athletes.length||0}</small><button ref={addAthleteTriggerRef} type="button" onClick={()=>setAddingAthlete(true)}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loadingAthletes}</small>:clientDetail?.athletes.length?<div>{clientDetail.athletes.map(athlete=><div className="communications-athlete-card" key={athlete.id}><label><input type="radio" name="chat-athlete" checked={selectedAthleteId===athlete.id} onChange={()=>setSelectedAthleteId(athlete.id)}/><span><b>{athlete.firstName} {athlete.lastName||""}</b>{athlete.discipline&&<small>{athlete.discipline}</small>}{athlete.measurements[0]&&<small>{ui.latestMeasurements}: {new Date(athlete.measurements[0].measuredAt).toLocaleDateString("ru-RU")}</small>}{athlete.measurements[0]&&<span className="communications-athlete-measurements">{inboxMeasurements(athlete.measurements[0]).map(({field,value,unit})=><span key={field}><small>{ui.measurementFields[field]}</small><b>{value} <small>{unit}</small></b></span>)}</span>}</span></label>{athlete.measurements[0]&&<CrmButton type="button" tone="secondary" className="communications-athlete-edit" onClick={()=>{setSelectedAthleteId(athlete.id);setEditingMeasurements(athlete)}}>{ui.editMeasurements}</CrmButton>}</div>)}</div>:<small>{ui.noAthletes}</small>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-actions"><header><b>{ui.quickActions}</b></header><div><button type="button" onClick={()=>void openTaskFromChat()}>✓ <span>{ui.createTask}</span></button><button ref={orderTriggerRef} type="button" onClick={()=>void openOrderFromChat()}>▣ <span>{ui.createOrder}</span></button><button type="button" disabled={!templates.some(template=>/мерк|measure/i.test(template.name))} onClick={()=>{const template=templates.find(item=>/мерк|measure/i.test(item.name));if(template)chooseTemplate(template)}}>⌁ <span>{ui.requestMeasurements}</span></button><button type="button" disabled={!activeOrders[0]} onClick={()=>activeOrders[0]&&onNavigate?.("finance",{orderId:activeOrders[0].id})}>₴ <span>{ui.openFinance}</span></button><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>✎ <span>{ui.addNote}</span></button><button type="button" onClick={()=>setContextTab("SUMMARY")}>≡ <span>{ui.contextSummary}</span></button></div></section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-note"><header><b>{ui.chatNote}</b><button type="button" onClick={()=>{setNoteText(client.notes||"");setNoteOpen(true)}}>{client.notes?ui.edit:ui.add}</button></header>{client.notes?<p>{client.notes}</p>:<small>{ui.noChatNote}</small>}</section>}
-          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.activeOrders}</b><small>{activeOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
-          {displayedContextOrders.map((o) => (
+          {client.status!=="LEAD"&&<section className="communications-context-section communications-context-orders"><header><b>{ui.clientOrders}</b><small>{contextOrders.length}</small><button type="button" aria-label={ui.createOrder} onClick={()=>void openOrderFromChat()}>＋</button></header>
+          {displayedContextOrders.map((o) => {
+            const { paidMinor, balanceMinor } = orderSettlement(o);
+            const inProgress = o.isActive && (!o.dispatchStatus || o.dispatchStatus === "PARTIALLY_SHIPPED");
+            const salesLabel = labels.salesStatus[o.salesStatus] || ui.unknownStatus;
+            const productionLabel = labels.productionStatus[o.productionStatus];
+            const quantity = orderCostumeQuantity(o);
+            const dispatchLabel = o.dispatchStatus === "PARTIALLY_SHIPPED" ? ui.orderPartiallyShipped
+              : o.dispatchStatus && labels.shippingStatus[o.dispatchStatus];
+            return (
             <article className={o.id===initialOrderId.current?"is-context":undefined} key={o.id}>
               {o.modelImagePath ? (
                 <OrderImagePreview order={o} onOpenOrder={onNavigate?()=>onNavigate("orders",{orderId:o.id}):undefined}
@@ -1889,25 +1920,28 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               )}
               <div>
                 <b>{o.number}</b>
-                <small>
-                  {labels.productionStatus[
-                    o.productionStatus as keyof typeof labels.productionStatus
-                  ] || ui.unknownStatus}
-                </small>
-                <p>{o.notes || ui.noDescription}</p>
-                <small>{ui.quantity}: {orderQuantity(o)}</small>
-                {o.requiredDeliveryAt&&<small>{ui.deadline}: {new Date(o.requiredDeliveryAt).toLocaleDateString("ru-RU")}</small>}
+                <small>{salesLabel}</small>
+                {inProgress && productionLabel && productionLabel !== salesLabel && <small>{productionLabel}</small>}
+                {o.notes && <p>{o.notes}</p>}
+                <small>{ui.quantity}: {quantity}</small>
+                {inProgress&&o.requiredDeliveryAt&&<small>{ui.deadline}: {new Date(o.requiredDeliveryAt).toLocaleDateString("ru-RU")}</small>}
                 <strong>
                   {moneyLabel(o.priceMinor,o.currency)}
                 </strong>
-                <small className="communications-order-payment is-paid">{ui.paid}: {orderPaidMinor(o) === null ? dataEvidenceUi.unavailable : moneyLabel(orderPaidMinor(o),o.currency)}</small>
-                <small className="communications-order-payment is-balance">{ui.balance}: {orderSettlement(o).balanceMinor === null ? dataEvidenceUi.unavailable : moneyLabel(orderSettlement(o).balanceMinor,o.currency)}</small>
+                <small className="communications-order-payment is-paid">{ui.paid}: {paidMinor === null ? dataEvidenceUi.unavailable : moneyLabel(paidMinor,o.currency)}</small>
+                {inProgress&&<>
+                  <small className="communications-order-payment is-balance">{ui.balance}: {balanceMinor === null ? dataEvidenceUi.unavailable : moneyLabel(balanceMinor,o.currency)}</small>
+                  {quantity > 0 && <small>{orderMeasurementState(o).complete ? productionUi.measurementsReady : ordersUi.measurementsMissing}</small>}
+                </>}
+                {dispatchLabel&&dispatchLabel!==salesLabel&&<small>{dispatchLabel}</small>}
+                {o.tracking.map(({number,url},index)=><small key={`${number}-${index}`}>{ui.orderTrackingNumber}: {url
+                  ? <a href={url} target="_blank" rel="noopener noreferrer">{number}</a> : number}</small>)}
                 <span className="communications-context-order-actions"><button type="button" onClick={()=>onNavigate?.("orders",{orderId:o.id})}>{ui.openOrder}</button><button type="button" disabled={!o.productionSlot} onClick={()=>onNavigate?.("production",{orderId:o.id})}>{ui.openProduction}</button></span>
               </div>
             </article>
-          ))}
-          {contextTab==="CLIENT"&&activeOrders.length>1&&<button type="button" className="communications-more-orders" onClick={()=>setContextTab("ORDERS")}>{ui.moreOrders.replace("{count}",String(activeOrders.length-1))}</button>}
-          {!activeOrders.length && <State text={ui.noActiveOrders} />}</section>}
+          )})}
+          {contextTab==="CLIENT"&&contextOrders.length>1&&<button type="button" className="communications-more-orders" onClick={()=>setContextTab("ORDERS")}>{ui.moreOrders.replace("{count}",String(contextOrders.length-1))}</button>}
+          {!contextOrders.length && <State text={orderCards===undefined?ui.loading:orderCards===null?ui.orderCardsUnavailable:ui.noSidebarOrders} />}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-next"><header><b>{ui.nextAction}</b>{nextTask&&<button type="button" onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:nextTask.id})}>{ui.edit}</button>}</header>{nextTask?<p style={{borderLeftColor:nextTask.markerColor}}><b>{nextTask.title}</b>{nextTask.description&&<span>{nextTask.description}</span>}{nextTask.dueAt&&<small>{new Date(nextTask.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small>}{nextTask.assignee&&<small>{ui.responsible}: {nextTask.assignee.displayName}</small>}</p>:client.nextActionAt?<p><b>{ui.contactClient}</b><small>{new Date(client.nextActionAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</small></p>:<p><span>{ui.noNextAction}</span><button type="button" onClick={()=>void openTaskFromChat()}>{ui.createTask}</button></p>}</section>}
           {client.status!=="LEAD"&&<section className="communications-context-section communications-context-tasks"><header><b>{ui.contextTasks}</b><small>{clientDetail?.workTasks?.length||0}</small><button type="button" onClick={()=>void openTaskFromChat()}>＋ {ui.add}</button></header>{contextLoading?<small>{ui.loading}</small>:clientDetail?.workTasks?.length?<div>{clientDetail.workTasks.map(task=><button type="button" className="communications-context-task" key={task.id} style={{borderLeftColor:task.markerColor}} onClick={()=>onNavigate?.("tasks",{clientId:client.id,taskId:task.id})}><b>{task.title}</b><span>{task.column.name}</span>{task.description&&<small>{task.description}</small>}{task.dueAt&&<time dateTime={task.dueAt}>{new Date(task.dueAt).toLocaleString("ru-RU",{dateStyle:"medium",timeStyle:"short"})}</time>}{task.assignee&&<small>{ui.responsible}: {task.assignee.displayName}</small>}</button>)}</div>:<State text={ui.noClientTasks}/>}</section>}
           <section className="communications-context-section communications-context-files"><header><b>{ui.contextFiles}</b><small>{conversationFiles.length}</small></header>{conversationFiles.length?<div className="communications-context-file-grid">{conversationFiles.map(({messageId,index,attachment})=>{const url=safeAttachmentUrl(attachment.url),label=attachment.name||ui.attachmentTypes[attachment.type as keyof typeof ui.attachmentTypes]||ui.attachmentTypes.fallback,isMedia=["image","sticker","video"].includes(attachment.type);return url&&attachment.sharedInstagramPhoto?<InstagramSharedPhoto key={url} url={url} originalUrl={attachment.originalUrl} sidebar onOpen={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:"image"});}}/>:url&&isMedia?<button type="button" className={`communications-context-file-preview${attachment.type==="video"?" is-video":""}`} key={`${messageId}-${index}`} aria-label={`${ui.openAttachment}: ${label}`} title={label} onClick={event=>{previewTrigger.current=event.currentTarget;setPreview({url,type:attachment.type==="video"?"video":"image"})}}>{attachment.type==="video"?<video src={url} preload="metadata" muted playsInline aria-label={label}/>:<img src={url} alt={label}/>}<span>{label}</span></button>:url?<a className="communications-context-file-card" key={`${messageId}-${index}`} href={url} target="_blank" rel="noopener noreferrer" title={label}><b aria-hidden="true">▧</b><span>{label}</span></a>:null})}</div>:<small>{ui.noContextFiles}</small>}</section>
