@@ -31,12 +31,14 @@ drafts, channel switches after a partial send, lost Gmail and Chatwoot responses
 and reconciled WhatsApp echoes. Exact attachment retries reuse the original
 delivery even when provider display text differs or AI feedback was consumed.
 
-Production remains on 0.18.1. Candidate c44a252 passed quality, consistent DATA
-capture, isolated restore, and the schema 54/55 rehearsal. Cutover admission
-refused its Windows archive because Git converted the migration to CRLF. The
-migration now has an explicit LF attribute. Freeze and stage a new candidate
-before admission. The serving 0.18.1 images and historical recovery bundles
-remain protected while the retention owner reconciles the two-set limit.
+Production switched to 0.18.2 from commit d5f2098c1955eca1e06dc2a635ad182fe206d37b,
+snapshot 9782d6510940634ad8555da1c65e52af9bea4a70e5ec67c1670b6428e92b05d7.
+Plan a5d1c154 completed and verified schema 55. Both production HTTP checks
+returned 200. Browser smoke covered the logo, release journal, client KPIs,
+orders list, Instagram photo preview and saved invoice picker. Archive writes
+and invoice delivery were tested in isolation. The consistent DATA copy
+pre-order0182-9782d6510940-r01 passed isolated recovery and migration rehearsal.
+Two source sets remain active. 0.18.0 is historical and 0.18.1 is retained.
 
 ## 2026-11-06 - Inbox client search from CRM links (0.18.1)
 
