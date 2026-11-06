@@ -9,6 +9,20 @@ Five browser cases passed with simulated data, covering a namesake, reload,
 Clients round trip, global search and browser history, and unread filters.
 The release contains no provider or database changes.
 
+Installed application commit `5ce445d25f3e30ae4fd81be1d3dd54784dbb0926`
+from snapshot `1bdc2e99b0300c33404d0468b465a8de9968255e55766834057279a60545d8fa`.
+Quality passed with 3,322 tests and 111 conditional skips. DATA backup
+`pre-order0181-1bdc2e99b030` and its isolated restore passed.
+Public web and API health returned HTTP 200. The installed browser showed
+0.18.1 and its journal entry, and passed the same five navigation cases using
+synthetic API responses. PostgreSQL and Redis kept their original containers.
+Installed retention verified two source sets, two rollback sets, two protected
+service archives and five images per service.
+The current pointer and installed provenance were verified. The private
+`.local/deploy-v0181` evidence records plan
+`6d5c0547e02fbc3a241455c31c40f8e4991257e7e00378056a97fb63fcd54703`
+and provenance `64094dad22593397f5738b00b3785bba331dfd8b1ea8332739e198fe6655ea1d`.
+
 ## 2026-11-05 - Invoice heading typography and totals 0.18.0
 
 Installed from application commit `9ca7598074050aaa3af2398f5ba58ba33cf84f8a`
