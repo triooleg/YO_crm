@@ -1,4 +1,4 @@
-## 2026-11-06 - Clients and Orders scrolling, Inbox order cards and invoices (local)
+## 2026-11-06 - Clients and Orders scrolling, Inbox order cards and invoices (0.18.3)
 
 Clients places the four KPIs in the workspace header and pins the desktop
 detail panel below the CRM header. Clients and Orders append pages near the end
@@ -20,7 +20,22 @@ Local verification: pnpm quality:check passed (3,357 tests passed, 110
 skipped). All 23 focused Playwright scenarios passed, with desktop and mobile
 captures of the client list, order list and invoice picker.
 
-No version bump or production mutation in this follow-up.
+Production switched to 0.18.3 from application commit
+0330cfc800ccfdb7c859c4d534b949e8dc5a7610 and snapshot
+5213de2ad561c3c5db9c416ce80d33ab67501bab1b0253acd3a279cc4405c2f0.
+Guarded plan 8a7f59dd21cd reached the terminal runtime gate. Both public HTTP
+checks returned 200. PostgreSQL and Redis retained their identities and schema
+55 stayed in place. The consistent DATA copy pre-order0183-5213de2ad561 passed
+isolated recovery before cutover.
+
+Browser smoke confirmed the brand version and full revision in the first
+release-journal entry, actual client order cards, the active-order invoice
+picker and PDF link, and append from 20 to 40 rows on Clients and Orders.
+There were zero new console errors. The smoke used no outbound messages.
+Installed retention verified two ordinary source sets, four API images and
+four web images. The exact 0.18.2 rollback images remain available.
+Version Guardian and Release Gatekeeper accepted the installed release.
+The current release pointer and provenance were verified after acceptance.
 
 ## 2026-11-06 - Client statistics and archive (0.18.2)
 
