@@ -1,13 +1,13 @@
 "use client";
-import {useEffect,useRef} from "react";
+import {useEffect,useRef,type Ref} from "react";
 import {Alert,Badge,Button,Checkbox,Group,NativeSelect,Pagination,ScrollArea,Table,Text,UnstyledButton} from "@mantine/core";
 import {orderDisplayNumber} from "../../lib/order-source";
 import {ClientAvatar} from "../client-avatar";
 import {clientsListRefreshUi,clientsWorkspaceUi as ui} from "../../lib/clients-workspace-i18n";
 import {Channel,Contact,Country,RequestState,stamp} from "./presentation";
 import type {ClientList,ClientRow,WorkspaceQuery} from "./types";
-type Props={data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;hasMore:boolean;appending:boolean;appendError?:string;appendNeedsRefresh:boolean;appendPage:()=>Promise<void>};
-export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,hasMore,appending,appendError,appendNeedsRefresh,appendPage}:Props){
+type Props={tableRef?:Ref<HTMLTableElement>;data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;hasMore:boolean;appending:boolean;appendError?:string;appendNeedsRefresh:boolean;appendPage:()=>Promise<void>};
+export function ClientsTable({tableRef,data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,hasMore,appending,appendError,appendNeedsRefresh,appendPage}:Props){
  const rows=data?.items??[],all=rows.length>0&&rows.every(row=>checked.has(row.id)),some=rows.some(row=>checked.has(row.id));
  const listEnd=useRef<HTMLDivElement>(null);
  useEffect(()=>{
@@ -24,7 +24,7 @@ export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,on
  function heading(key:WorkspaceQuery["sort"],label:string){return <UnstyledButton className="clients-sort" onClick={()=>sort(key)}>{label}{query.sort===key?<span aria-hidden="true">{query.direction==="desc"?" ↓":" ↑"}</span>:null}</UnstyledButton>;}
  return <section className="clients-table-panel" aria-label={ui.title}>
   <RequestState error={error} retry={retry} loading={!data&&!error}/>
-  {data&&<><ScrollArea type="auto" offsetScrollbars><Table className="clients-table" highlightOnHover verticalSpacing="sm" horizontalSpacing="sm"><Table.Thead><Table.Tr>
+  {data&&<><ScrollArea type="auto" scrollbars="x" offsetScrollbars="x"><Table ref={tableRef} className="clients-table" highlightOnHover verticalSpacing="sm" horizontalSpacing="sm"><Table.Thead><Table.Tr>
    <Table.Th><Checkbox aria-label={ui.selectAll} checked={all} indeterminate={some&&!all} onChange={e=>onCheck(rows,e.currentTarget.checked)}/></Table.Th>
    <Table.Th aria-sort={query.sort==="name"?(query.direction==="asc"?"ascending":"descending"):"none"}>{heading("name",ui.client)}</Table.Th><Table.Th>{ui.contacts}</Table.Th>
    <Table.Th aria-sort={query.sort==="orderCount"?(query.direction==="asc"?"ascending":"descending"):"none"}>{heading("orderCount",ui.orders)}</Table.Th>

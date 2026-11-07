@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef } from "react";
 
 /** Keep the native table header in its horizontal scroller; only move it vertically. */
-export function useStickyListControls() {
+export function useStickyListControls(tableRevision?: unknown) {
   const workspaceRef = useRef<HTMLElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -41,7 +41,7 @@ export function useStickyListControls() {
       scroller.removeEventListener("scroll", schedule);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [tableRevision]);
 
   return { workspaceRef, controlsRef, tableRef };
 }

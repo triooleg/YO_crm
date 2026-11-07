@@ -594,11 +594,10 @@
 /* Summary and commands occupy separate rows, with fluid summary columns. */
 .orders-dashboard .orders-dashboard-header {
  display:grid;grid-template-columns:minmax(9rem,auto) minmax(0,1fr);
- grid-template-areas:"title stats" "subtitle subtitle";
+ grid-template-areas:"title stats";
  align-items:center;gap:8px 14px;
 }
 .orders-dashboard-title{grid-area:title;min-width:0}
-.orders-dashboard-subtitle{grid-area:subtitle}
 .orders-dashboard header.orders-dashboard-header .orders-kpi-grid {
  grid-area:stats;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));
  min-width:0;margin:0;overflow:visible;
@@ -613,7 +612,7 @@
  .orders-dashboard header.orders-dashboard-header .orders-kpi-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:1199px){
- .orders-dashboard .orders-dashboard-header{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "subtitle" "stats"}
+ .orders-dashboard .orders-dashboard-header{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "stats"}
 }
 @media(max-width:700px){
  .orders-dashboard header.orders-dashboard-header .orders-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}

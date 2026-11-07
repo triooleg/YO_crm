@@ -19,8 +19,8 @@ import type {ClientRow,Navigate,WorkspaceTab} from "./clients/types";
 import "./clients/styles.css";
 import {useStickyListControls} from "./crm/use-sticky-list-controls";
 export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:string}={}){
- const {workspaceRef,controlsRef}=useStickyListControls();
  const state=useWorkspace(),{query,update,detail}=state;
+ const {workspaceRef,controlsRef,tableRef}=useStickyListControls(state.list);
  const desktop=useMediaQuery("(min-width: 75em)",false),mobile=useMediaQuery("(max-width: 45em)",false);
  const [checked,setChecked]=useState(new Map<string,ClientRow>()),[creating,setCreating]=useState(false),[duplicates,setDuplicates]=useState(false),[mergeRows,setMergeRows]=useState<ClientRow[]>(),[flow,setFlow]=useState<"order"|"measure"|"athlete"|"review-measurements">(),[allowStale,setAllowStale]=useState(false),[initialAthleteId,setInitialAthleteId]=useState<string>(),[overlay,setOverlay]=useState(false),[moreFilters,setMoreFilters]=useState(false);
  const addAthleteTriggerRef=useRef<HTMLButtonElement>(null),createClientTriggerRef=useRef<HTMLButtonElement>(null),mergeTriggerRef=useRef<HTMLButtonElement>(null),duplicateTriggerRef=useRef<HTMLButtonElement>(null);
@@ -105,7 +105,6 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
  return <main ref={workspaceRef} className="clients-workspace">
   <header className="clients-page-header">
    <div className="clients-page-title"><Text size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><Title order={1}>{ui.title}</Title></div>
-   <Text className="clients-page-subtitle" size="sm" c="dimmed">{ui.subtitle}</Text>
    <section aria-label={ui.listStatistics} className="clients-header-stats">
     <SimpleGrid cols={{base:2,sm:4}} spacing="xs">
      {cards.map(({label,value,icon,color})=><Paper key={label} withBorder p="sm">
@@ -130,7 +129,7 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
   {(moreFilters||query.period)&&<Group mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
   </div>
   <div className="clients-columns">
-   <ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder}
+   <ClientsTable tableRef={tableRef} data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder}
     hasMore={state.hasMore} appending={state.appending} appendError={state.appendError} appendNeedsRefresh={state.appendNeedsRefresh} appendPage={state.appendPage}/>
    {desktop&&<aside className="clients-detail-panel" aria-label={ui.client} tabIndex={0}>{detailContent}</aside>}
   </div>

@@ -1,3 +1,37 @@
+## 2026-11-07 - Authorized 0.19.3 deployment preparation
+
+- Owner explicitly authorized deployment of the completed UI batch and requires
+  current source on GitHub with every deployment.
+- Candidate 0.19.3 updates package, changelog and visible release journal together.
+  API/Web will be rebuilt from the same frozen source; no database migration.
+- Implementation quality and all five local review roles passed before release
+  metadata changes. Fresh deployment preflight and version/artifact review pending.
+- Existing release tooling, backup/restore checks and two source-set retention
+  policy will be reused. No production switch has happened for 0.19.3 yet.
+
+## 2026-11-07 - Header copy cleanup and sticky Clients headings (LOCAL)
+
+- Continued from the accepted 0.19.2 release, commit
+  `124ab3fe5926fb9d6584299ae9144c133f1dea9a`. The older local entry below is
+  historical: combined 0.19.2 was subsequently installed and accepted; see the
+  deployment receipt in the operations worktree handoff.
+- Current batch removes Clients/Orders descriptive subtitles and matches Orders
+  and Tasks eyebrows to Clients Mantine Text styling. Task wording is sentence case.
+- Clients reuses the existing sticky-controls hook and original table header;
+  table data revisions trigger measurement after sorting/filter remounts.
+- ScrollArea is horizontal-only with horizontal-only scrollbar offsets, removing
+  the empty reserved right-hand vertical-scrollbar strip without changing the
+  gap between the client list and details panel.
+- Browser regression covers 1920/1366/390px, expanded filters, horizontal column
+  alignment, sorting and absence of mutation requests: 3/3 PASS. Nine additional
+  screenshot checks confirm matching Clients/Orders/Tasks eyebrow computed styles,
+  subtitle removal, no overflow/page errors/API writes at 1920/1366/390px.
+  Compatibility, regression, business and visual reviewers passed. Full
+  `pnpm quality:check` passed (tests, typecheck, production build); generated
+  next-env.d.ts matches HEAD. Final local release gatekeeper PASS. Evidence is under `.local/header-copy-cleanup` and
+  `output/playwright/header-copy-cleanup`.
+- No version bump, commit, push, deployment or production data changes in this batch.
+
 ## 2026-11-07 - Sticky Clients and Orders list controls (LOCAL)
 
 - Owner authorized deployment after these changes. Integrator is preparing one

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Text } from "@mantine/core";
 import { tasksUi } from "../lib/i18n";
 import { CrmAlert } from "./crm/alert";
 import { CrmModal } from "./crm/modal";
@@ -197,7 +198,7 @@ export function TasksWorkspace({ role }: { role?: string } = {}) {
     <section className="phase2-main tasks-page">
       <header className="phase2-header tasks-page-header">
         <div className="tasks-page-title">
-          <p>{tasksUi.eyebrow}</p>
+          <Text component="div" size="xs" fw={700} c="yoleotard">{tasksUi.eyebrow}</Text>
           <h1>{tasksUi.title}</h1>
         </div>
         <div className="tasks-stats" aria-busy={boardLoading}>

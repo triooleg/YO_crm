@@ -21,7 +21,7 @@ import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Text, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { useClickOutside } from "@mantine/hooks";
 import { useStickyListControls } from "./crm/use-sticky-list-controls";
 import { designsInstancesUi as designsUi, orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi, ordersClientHistoryUi } from "../lib/i18n";
@@ -862,7 +862,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
 
   return <section ref={workspaceRef} className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
-      <div className="orders-dashboard-title"><p>{ui.eyebrow}</p><h1>{ui.title}</h1></div>
+      <div className="orders-dashboard-title"><Text component="div" size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><h1>{ui.title}</h1></div>
     <div className="orders-kpi-grid">
       <Kpi label={ui.kpis.all} value={loading || error ? null : metrics.total} icon="bag" active={quickFilter === "all" && !source} onClick={() => { setSource(''); selectQuickFilter("all"); }} />
       {serverPage&&<button className={`orders-kpi tone-green${source==='WEBSITE'?' active':''}`} aria-pressed={source==='WEBSITE'} title={sourceUi.ordersScope} onClick={()=>{cancelPreviousOrderNavigation();setSource(source==='WEBSITE'?'':'WEBSITE');}}><i><CartIcon/></i><span><small>{sourceUi.onlineOrders}</small><strong>{loading||error?'—':serverPage.sources.websiteCount}</strong></span></button>}
@@ -872,7 +872,6 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       <Kpi label={ui.kpis.ready} value={loading || error ? null : metrics.ready} icon="truck" tone="green" active={quickFilter === "ready"} onClick={() => selectQuickFilter("ready")} />
       <Kpi label={ui.kpis.completed} value={loading || error ? null : metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
     </div>
-      <span className="orders-dashboard-subtitle">{ui.subtitle}</span>
     </header>
     {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
     {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}
