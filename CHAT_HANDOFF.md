@@ -1,3 +1,14 @@
+## 2026-11-06 - Browser-local sales status colors in Orders
+
+The color swatch beside a sales status opens a palette and a reset action.
+The browser stores overrides by sales status and uses them to tint all matching
+summary rows. The original status selector and its server mutation are separate
+from this display preference. There are no database or API changes.
+
+Local verification: pnpm quality:check and all nine Orders Playwright scenarios
+passed. The color scenario covers reload, reset, cross-tab updates, status PATCH
+rollback, and the picker and long status labels at 390 px.
+
 ## 2026-11-06 - Clients and Orders scrolling, Inbox order cards and invoices (0.18.3)
 
 Clients places the four KPIs in the workspace header and pins the desktop

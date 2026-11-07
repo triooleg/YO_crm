@@ -4,7 +4,7 @@ const orders = Array.from({ length: 78 }, (_, index) => ({
   id: `order-${index + 1}`,
   number: `26-${1001 + index}`,
   type: "CUSTOM_ORDER",
-  salesStatus: "NEW_LEAD",
+  salesStatus: index === 1 ? "WAITING_DEPOSIT" : "NEW_LEAD",
   productionStatus: "NOT_STARTED",
   shippingStatus: "NOT_READY",
   paymentStatus: "UNPAID",
@@ -183,4 +183,69 @@ test("archiving an appended order reconciles the loaded range", async ({ page })
   await expect(rows(page).filter({ hasText: "26-1025" })).toHaveCount(0);
   await expect(rows(page)).toHaveCount(40);
   await expect(rows(page).last()).toContainText("26-1041");
+});
+
+test("customizes the row tint for one status and restores its default", async ({ page }, testInfo) => {
+  await mockOrders(page);
+  await page.goto("/?section=orders");
+  const statusChanges: unknown[] = [];
+  await page.route("**/api/orders/order-1/statuses", async route => {
+    statusChanges.push(route.request().postDataJSON());
+    await route.fulfill({ status: 409, json: { message: "Тестовый отказ смены статуса" } });
+  });
+  const matching = rows(page).filter({ hasText: "26-1001" });
+  const other = rows(page).filter({ hasText: "26-1002" });
+  await expect(matching).toBeVisible();
+  const readTint = () => matching.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor);
+  const original = await readTint();
+  const otherOriginal = await other.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor);
+  const button = matching.getByRole("button", { name: "Изменить цвет статуса: Новый заказ" });
+  await button.click();
+  const picker = page.getByRole("dialog", { name: "Цвет статуса: Новый заказ" });
+  await picker.getByLabel("Выбрать цвет").fill("#ff0000");
+  await picker.screenshot({ path: testInfo.outputPath("status-color-desktop.png") });
+  await expect.poll(readTint).not.toBe(original);
+  await expect(rows(page).filter({ hasText: "26-1003" })).toHaveCSS("--order-status-color", "#ff0000");
+  expect(await other.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor)).toBe(otherOriginal);
+  await page.reload();
+  await expect(matching).toHaveCSS("--order-status-color", "#ff0000");
+  expect(statusChanges).toEqual([]);
+  const status = matching.getByRole("combobox");
+  await status.click();
+  await page.getByRole("option", { name: "Ожидается предоплата" }).click();
+  await expect.poll(() => statusChanges).toEqual([{ salesStatus: "WAITING_DEPOSIT" }]);
+  await expect(status).toBeEnabled();
+  await expect(status).toHaveValue("Новый заказ");
+  await expect(matching).toHaveCSS("--order-status-color", "#ff0000");
+  await button.click();
+  await picker.getByRole("button", { name: "Вернуть стандартный цвет" }).click();
+  await expect.poll(readTint).toBe(original);
+  const secondTab = await page.context().newPage();
+  await secondTab.route("**/status-color-test-tab", route => route.fulfill({ body: "<html></html>", contentType: "text/html" }));
+  await secondTab.goto("/status-color-test-tab");
+  await secondTab.evaluate(() => {
+    localStorage.setItem("orders-dashboard-status-color-v1:WAITING_DEPOSIT", "#0000ff");
+  });
+  await expect(other).toHaveCSS("--order-status-color", "#0000ff");
+  await expect.poll(readTint).toBe(original);
+  await secondTab.close();
+  await page.reload();
+  await expect.poll(readTint).toBe(original);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const longStatus = other.getByRole("combobox");
+  await expect(longStatus).toHaveValue("Ожидается предоплата");
+  const widths = await longStatus.evaluate(input => {
+    const field = input as HTMLInputElement;
+    const style = getComputedStyle(field);
+    const context = document.createElement("canvas").getContext("2d")!;
+    context.font = style.font;
+    const contentWidth = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return { text: context.measureText(field.value).width, available: contentWidth };
+  });
+  expect(widths.available).toBeGreaterThanOrEqual(widths.text);
+  await button.click();
+  await expect(picker).toBeInViewport({ ratio: 0.95 });
+  await picker.screenshot({ path: testInfo.outputPath("status-color-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(button).toBeFocused();
 });
