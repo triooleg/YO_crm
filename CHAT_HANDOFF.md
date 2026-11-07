@@ -1,3 +1,31 @@
+## 2026-11-07 - CRM 0.19.0 and new-host recovery guide
+
+- Candidate source commit `862c29503e00e9da21176b8ef85eae908d694012`.
+  Installed snapshot `462b4465fd0ce6ef283bddad778be2d511192b453e6cff15f31783f5fad3a304`.
+  Web and API serve 0.19.0. The technical smoke returned HTTP 200 for the
+  domain and health endpoint. PostgreSQL and Redis retained their container
+  IDs. Schema 55 remained in place.
+- Live browser smoke confirmed the release journal and snapshot, the Orders
+  status color control, and one Clients archive action next to Filters.
+  Selection enabled the action and opened the confirmation. The verification
+  cancelled before any client archive or color preference write.
+- The pre-cutover DATA snapshot `pre-order0190-462b4465fd0c` passed a separate
+  isolated restore. Predeploy retention verified two ordinary source sets and
+  five API and five Web image IDs. The retired ordinary uploads were moved
+  to a private archive on the same filesystem.
+- Installed Version Guardian and Release Gatekeeper passed. The accepted
+  deployment pointer and private provenance were verified by read-back.
+  Installed retention confirmed two ordinary source sets, two rollback
+  roots, and five images per service. The 0.18.3 rollback pair is present.
+- The candidate quality gate passed 3,357 tests with zero failures and
+  110 skips. The affected workflows passed 24 browser scenarios.
+- New-host recovery tooling and the [Russian operator guide](docs/NEW_HOST_RESTORE_RU.md)
+  are source changes separate from the serving image. The installer verified
+  synthetic DATA and FULL restores in local Docker, isolated browser login,
+  blocked order writes and webhook ingress, and persistent DB and files after
+  container recreation. The guide covers the separately operated public
+  HTTPS cutover and preflight for a fresh Docker host.
+
 ## 2026-11-07 - Client archive moved to the filter toolbar
 
 The list has one archive control next to Filters for owners and admins.
