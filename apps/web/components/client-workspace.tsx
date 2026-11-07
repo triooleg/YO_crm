@@ -40,6 +40,10 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
  const [archiving,setArchiving]=useState(false);
  const [archiveError,setArchiveError]=useState<string[]>([]);
  const archivePending=useRef(false);
+ const archiveClose=useRef<HTMLButtonElement>(null);
+ useEffect(()=>{
+  if(archiveError.length)archiveClose.current?.focus();
+ },[archiveError]);
  const searchRef=useRef<HTMLInputElement>(null);
  const archiveTrigger=useRef<HTMLButtonElement|null>(null);
  useEffect(()=>{
@@ -133,7 +137,7 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
    <Text size="sm" mb="md">{ui.archiveWarning}</Text>
    {!!archiveError.length&&<Alert color="red" role="alert" title={ui.archivePartial} mb="md"><ScrollArea.Autosize mah={140}>{archiveError.map((error,index)=><Text key={index} size="sm">{error}</Text>)}</ScrollArea.Autosize></Alert>}
    <Group justify="flex-end">
-    <Button data-autofocus variant="default" disabled={archiving} onClick={closeArchive}>{archiveError.length?ui.close:ui.cancel}</Button>
+    <Button ref={archiveClose} data-autofocus variant="default" disabled={archiving} onClick={closeArchive}>{archiveError.length?ui.close:ui.cancel}</Button>
     {!archiveError.length&&<Button color="red.8" loading={archiving} onClick={archiveClients}>{ui.archiveConfirm}</Button>}
    </Group>
   </Modal>}

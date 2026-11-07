@@ -129,7 +129,9 @@ test('client archive reports protected clients in a multi-selection', async ({pa
  await dialog.getByRole('button',{name:'Переместить в архив'}).click();
  await expect(dialog.getByRole('alert')).toContainText('Gina Embley');
  await expect(dialog.getByRole('button',{name:'Переместить в архив'})).toHaveCount(0);
- await dialog.getByRole('button',{name:'Закрыть',exact:true}).last().click();
+ const close=dialog.getByRole('button',{name:'Закрыть',exact:true}).last();
+ await expect(close).toBeFocused();
+ await close.click();
  await expect(table.getByRole('checkbox',{name:/Клиент без заказов/})).toHaveCount(0);
  await expect(table.getByRole('checkbox',{name:'Выбрать клиента: Gina Embley',exact:true})).toBeChecked();
 });
