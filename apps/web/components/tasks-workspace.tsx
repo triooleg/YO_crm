@@ -195,11 +195,36 @@ export function TasksWorkspace({ role }: { role?: string } = {}) {
   }
   return (
     <section className="phase2-main tasks-page">
-      <header className="phase2-header">
-        <div>
+      <header className="phase2-header tasks-page-header">
+        <div className="tasks-page-title">
           <p>{tasksUi.eyebrow}</p>
           <h1>{tasksUi.title}</h1>
-          <span>{tasksUi.subtitle}</span>
+        </div>
+        <div className="tasks-stats" aria-busy={boardLoading}>
+          <span>
+            {tasksUi.total}
+            <b>{boardReady&&!boardLoadError?all.length:"—"}</b>
+          </span>
+          <span>
+            {tasksUi.inWork}
+            <b>
+              {
+                boardReady&&!boardLoadError?data.columns.filter((c) => !c.isDone).flatMap((c) => c.tasks).length:"—"
+              }
+            </b>
+          </span>
+          <span>
+            {tasksUi.overdue}
+            <b>{boardReady&&!boardLoadError?overdue:"—"}</b>
+          </span>
+          <span>
+            {tasksUi.done}
+            <b>
+              {
+                boardReady&&!boardLoadError?data.columns.filter((c) => c.isDone).flatMap((c) => c.tasks).length:"—"
+              }
+            </b>
+          </span>
         </div>
         <div className="tasks-header-actions">
           {!showArchived && (
@@ -222,37 +247,12 @@ export function TasksWorkspace({ role }: { role?: string } = {}) {
             </>
           )}
         </div>
+        <span className="tasks-page-subtitle">{tasksUi.subtitle}</span>
       </header>
       {error && (
         <CrmAlert>{error}</CrmAlert>
       )}
       {boardLoadError&&boardReady&&<p role="status">{tasksUi.staleData}</p>}
-      <div className="tasks-stats" aria-busy={boardLoading}>
-        <span>
-          {tasksUi.total}
-          <b>{boardReady&&!boardLoadError?all.length:"—"}</b>
-        </span>
-        <span>
-          {tasksUi.inWork}
-          <b>
-            {
-              boardReady&&!boardLoadError?data.columns.filter((c) => !c.isDone).flatMap((c) => c.tasks).length:"—"
-            }
-          </b>
-        </span>
-        <span>
-          {tasksUi.overdue}
-          <b>{boardReady&&!boardLoadError?overdue:"—"}</b>
-        </span>
-        <span>
-          {tasksUi.done}
-          <b>
-            {
-              boardReady&&!boardLoadError?data.columns.filter((c) => c.isDone).flatMap((c) => c.tasks).length:"—"
-            }
-          </b>
-        </span>
-      </div>
       <div className="tasks-toolbar">
         <input
           aria-label={tasksUi.search}

@@ -1,3 +1,19 @@
+## 2026-11-07 - Compact Tasks header and consistent list controls
+
+- Moved the existing Tasks counters into the page header, beside the title
+  and actions on desktop. Small screens retain a two-column counter grid.
+- Restored theme-owned sizing and appearance of the Orders new-order button
+  and removed the decorative dropdown glyph. Scoped legacy header-span
+  overrides so Mantine can center its label.
+- Removed the Inbox order-scope selector and visible per-channel numeric
+  badges as requested. Kept the All counter and existing channel selection.
+- Verification passed `pnpm quality:check`, 18 Tasks/Inbox browser cases,
+  and nine screenshot scenarios covering all three pages at 1920/1366/390px.
+  Historical Orders controls E2E has stale search/design-editor selectors;
+  the changed new-order open/close path passed independently at each width.
+- Local-only UI patch. Browser evidence uses synthetic API fixtures in
+  `.local/tasks-header-visual/`; production has not been changed.
+
 ## 2026-11-07 - CRM 0.19.0 and new-host recovery guide
 
 - Candidate source commit `862c29503e00e9da21176b8ef85eae908d694012`.

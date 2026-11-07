@@ -861,7 +861,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
       <div><p>{ui.eyebrow}</p><h1>{ui.title}</h1><span>{ui.subtitle}</span></div>
-      <CrmButton ref={newOrderTrigger} className="orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder} <span aria-hidden="true">⌄</span></CrmButton>
+      <CrmButton ref={newOrderTrigger} className="orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder}</CrmButton>
     </header>
     {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
     {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}

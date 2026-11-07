@@ -480,15 +480,11 @@ test("под поиском можно отфильтровать входящи
   assert.match(css, /\.communications-social-filter\.source-email/);
 });
 
-test("под каналами можно отфильтровать клиентов по заказам", () => {
+test("вторичные фильтры не содержат удалённый выбор по заказам", () => {
   assert.match(component, /type OrderScope = "WITH_ORDERS" \| "ACTIVE_ORDERS"/);
   assert.match(component, /orderScope,setOrderScope/);
   assert.match(component, /orderScope=\$\{encodeURIComponent\(selectedOrderScope\)\}/);
   assert.match(component, /className="communications-order-filters communications-secondary-filters"/);
-  assert.match(component, /ui\.clientsWithOrders/);
-  assert.match(component, /ui\.clientsWithActiveOrders/);
-  assert.match(component, /value:"WITH_ORDERS",label:ui\.clientsWithOrders/);
-  assert.match(component, /value:"ACTIVE_ORDERS",label:ui\.clientsWithActiveOrders/);
   assert.match(locale, /clientsWithOrders:\s*"Покупали"/);
   assert.match(locale, /clientsWithActiveOrders:\s*"Активные заказы"/);
   assert.match(css, /\.communications-order-filters\{/);
@@ -701,13 +697,15 @@ test("сброс ширин убран из основной панели дей
   assert.match(css,/\.communications-header-actions \.communications-header-menu>button\{[^}]*position:absolute/);
 });
 
-test("фильтры каналов показывают Все и реальные счетчики", () => {
+test("фильтры каналов сохраняют общий счётчик и показывают источники значками", () => {
   assert.match(component, /channelCounts=Object\.fromEntries/);
   assert.match(component, /communications-channel-filter-all/);
   assert.match(component, /ui\.allChannels/);
   assert.match(component, /channelCounts\[item\]/);
   assert.match(component, /aria-label=\{`\$\{label\}: \$\{channelCounts\[item\]\}`\}/);
-  assert.match(component, /<span aria-hidden="true">\{icons\[item\]\}<\/span><strong aria-hidden="true">\{channelCounts\[item\]\}<\/strong>/);
+  assert.match(component, /<span aria-hidden="true">\{icons\[item\]\}<\/span><\/button>/);
+  assert.doesNotMatch(component, /<strong aria-hidden="true">\{channelCounts\[item\]\}<\/strong>/);
+  assert.doesNotMatch(component, /<CrmNativeSelect className="communications-order-scope"/);
   assert.doesNotMatch(component, /<b>\{item==="EMAIL"\?ui\.gmail:ui\.sources\[item\]\}<\/b>/);
   assert.doesNotMatch(css, /communications-social-filter>b/);
   assert.doesNotMatch(css, /communications-social-filter>strong[^}]*display:none/);

@@ -1556,14 +1556,13 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           />
           <div className="communications-social-filters" role="group" aria-label={ui.socialNetworkFilter}>
             <button type="button" className="communications-social-filter communications-channel-filter-all" aria-pressed={!socialFilters.length} onClick={()=>setSocialFilters([])}><span>{ui.allChannels}</span><strong>{scopeCounts.allChannels ?? "—"}</strong></button>
-            {socialChannels.map(item=>{const label=item==="EMAIL"?ui.gmail:ui.sources[item];return <button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={`${label}: ${channelCounts[item]}`} title={label} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}><span aria-hidden="true">{icons[item]}</span><strong aria-hidden="true">{channelCounts[item]}</strong></button>})}
+            {socialChannels.map(item=>{const label=item==="EMAIL"?ui.gmail:ui.sources[item];return <button type="button" key={item} className={`communications-social-filter source-${item.toLowerCase()}`} aria-label={`${label}: ${channelCounts[item]}`} title={label} aria-pressed={socialFilters.includes(item)} onClick={()=>toggleSocialFilter(item)}><span aria-hidden="true">{icons[item]}</span></button>})}
           </div>
           <div className="communications-order-filters communications-secondary-filters" role="group" aria-label={ui.orderFilter}>
             <button type="button" aria-pressed={conversationScope==="ALL"&&!orderScope&&!spamScope} onClick={()=>{void changeSpamScope(false);setConversationScope("ALL");setOrderScope(undefined)}}>{ui.allChannels} <b>{scopeCounts.normalAll ?? "—"}</b></button>
             <button type="button" aria-pressed={conversationScope==="UNREAD"} onClick={()=>setConversationScope(current=>current==="UNREAD"?"ALL":"UNREAD")}>{ui.unreadChats} <b>{scopeCounts.unread}</b></button>
             <button type="button" aria-pressed={conversationScope==="WAITING"} onClick={()=>setConversationScope(current=>current==="WAITING"?"ALL":"WAITING")}>{ui.waitingReply} <b>{scopeCounts.waiting}</b></button>
             <button type="button" aria-pressed={spamScope} onClick={()=>void changeSpamScope(!spamScope)}>{ui.spam} <b>{scopeCounts.spam||0}</b></button>
-            <CrmNativeSelect className="communications-order-scope" aria-label={ui.orderFilter} value={orderScope||""} onChange={event=>setOrderScope((event.target.value||undefined) as typeof orderScope)} data={[{value:"",label:ui.orderScopeMenu},{value:"WITH_ORDERS",label:ui.clientsWithOrders},{value:"ACTIVE_ORDERS",label:ui.clientsWithActiveOrders}]}/>
           </div>
           <div className="communications-client-list" ref={clientListViewport}>
           {loading ? (
