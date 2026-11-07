@@ -84,12 +84,12 @@ export function useWorkspace(){
   clientRequest<ClientDetail>(`/clients/${encodeURIComponent(clientId)}?${params}`,{signal:abort.signal}).then(data=>{if(!active)return;if(!data.id||!data.summary||!Array.isArray(data.athletes))throw Error(ui.invalidData);if(data.id!==clientId){update({clientId:data.id});return;}setDetail({id:detailKey,data});}).catch(error=>{if(active)setDetail({id:detailKey,error:failure(error)});});
   return()=>{active=false;abort.abort();};
  },[ready,clientId,query.currency,revision,update]);
- function onClientArchived(id:string){
+ function onClientsArchived(ids:string[]){
   setList({key:""});
-  if(current.current.clientId===id)update({clientId:"",tab:"overview"});
+  if(ids.includes(current.current.clientId))update({clientId:"",tab:"overview"});
   setRevision(value=>value+1);
  }
- return {query,ready,update,revision,onClientArchived,refresh:()=>setRevision(n=>n+1),list:visibleList?.data,listError:visibleList?.error,appendPage,hasMore:!!nextPage,appending:!!visibleList?.appending,appendError:visibleList?.appendError,appendNeedsRefresh:!!visibleList?.appendNeedsRefresh,detail:detailState.id===detailKey?detailState.data:undefined,detailError:detailState.id===detailKey?detailState.error:undefined};
+ return {query,ready,update,revision,onClientsArchived,refresh:()=>setRevision(n=>n+1),list:visibleList?.data,listError:visibleList?.error,appendPage,hasMore:!!nextPage,appending:!!visibleList?.appending,appendError:visibleList?.appendError,appendNeedsRefresh:!!visibleList?.appendNeedsRefresh,detail:detailState.id===detailKey?detailState.data:undefined,detailError:detailState.id===detailKey?detailState.error:undefined};
 }
 /** A panel owns its request: changing client/tab/filter disposes the old response. */
 export function useClientPage<T>(path:string,revision=0){

@@ -1,3 +1,10 @@
+## 2026-11-07 - Client archive moved to the filter toolbar
+
+The list has one archive control next to Filters for owners and admins.
+Only explicitly checked clients from the loaded list enter the confirmation
+dialog. Archive requests retain the per-client freshness and order checks.
+A partially successful request refreshes the list and reports failed clients.
+
 ## 2026-11-06 - Browser-local sales status colors in Orders
 
 The color swatch beside a sales status opens a palette and a reset action.

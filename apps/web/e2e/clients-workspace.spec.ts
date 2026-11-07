@@ -78,7 +78,11 @@ for(const width of [1366,390]) test(`client archive needs confirmation and refre
  const stats=page.getByRole('region',{name:'По выбранным фильтрам'});
  await expect(stats.getByText('41',{exact:true})).toBeVisible();
  await expect(stats.getByText('7',{exact:true})).toBeVisible();
- const button=page.getByRole('button',{name:/Удалить из списка: Клиент без заказов/});
+ const button=page.getByRole('button',{name:'Удалить из списка',exact:true});
+ const checkbox=page.getByRole('checkbox',{name:/Клиент без заказов/});
+ await expect(button).toBeDisabled();
+ await checkbox.check();
+ await expect(button).toBeEnabled();
  const dialog=page.getByRole('dialog',{name:'Удалить из списка'});
  await page.screenshot({path:info.outputPath('client-statistics.png')});
  await button.click();
@@ -89,10 +93,43 @@ for(const width of [1366,390]) test(`client archive needs confirmation and refre
  await button.click();
  await dialog.getByRole('button',{name:'Переместить в архив'}).click();
  await expect(dialog).toHaveCount(0);
- await expect(button).toHaveCount(0);
+ await expect(button).toBeDisabled();
  await expect(page.getByRole('textbox',{name:/Поиск по имени/})).toBeFocused();
  await expect(stats.getByText('40',{exact:true})).toBeVisible();
  await expect(stats.getByText('12',{exact:true})).toBeVisible();
  await expect(page).toHaveURL(/country=Spain/);
  expect(writes).toEqual([{expectedUpdatedAt:now}]);
+});
+
+test('client archive reports protected clients in a multi-selection', async ({page}) => {
+ await fixture(page);
+ await page.setViewportSize({width:1366,height:900});
+ let archived=false;
+ await page.route('**/api/clients?**', route => {
+  if(new URL(route.request().url()).searchParams.get('view')!=='workspace')return route.fallback();
+  const items=rows.filter(row=>!archived||row.id!=='c').map(row=>({...row,updatedAt:now}));
+  return route.fulfill({json:{items,total:items.length,page:1,pageSize:20,
+   filters:{countries:[],sources:[],statuses:[]}}});
+ });
+ await page.route('**/api/clients/c/archive', route => {
+  archived=true;
+  return route.fulfill({json:{id:'c',archivedAt:now}});
+ });
+ await page.route('**/api/clients/b/archive', route =>
+  route.fulfill({status:409,json:{message:'У клиента есть заказы'}}));
+ await page.goto('/?section=clients');
+ const table=page.getByRole('table');
+ await expect(table.getByRole('button',{name:/Удалить из списка/})).toHaveCount(0);
+ await table.getByRole('checkbox',{name:'Выбрать клиента: Gina Embley',exact:true}).check();
+ await table.getByRole('checkbox',{name:/Клиент без заказов/}).check();
+ await page.getByRole('button',{name:'Удалить из списка',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Удалить из списка'});
+ await expect(dialog.getByText('Gina Embley',{exact:true})).toBeVisible();
+ await expect(dialog.getByText(/^Клиент без заказов/)).toBeVisible();
+ await dialog.getByRole('button',{name:'Переместить в архив'}).click();
+ await expect(dialog.getByRole('alert')).toContainText('Gina Embley');
+ await expect(dialog.getByRole('button',{name:'Переместить в архив'})).toHaveCount(0);
+ await dialog.getByRole('button',{name:'Закрыть',exact:true}).last().click();
+ await expect(table.getByRole('checkbox',{name:/Клиент без заказов/})).toHaveCount(0);
+ await expect(table.getByRole('checkbox',{name:'Выбрать клиента: Gina Embley',exact:true})).toBeChecked();
 });

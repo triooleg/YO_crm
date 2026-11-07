@@ -1,13 +1,13 @@
 "use client";
 import {useEffect,useRef} from "react";
-import {ActionIcon,Alert,Badge,Button,Checkbox,Group,NativeSelect,Pagination,ScrollArea,Table,Text,Tooltip,UnstyledButton} from "@mantine/core";
+import {Alert,Badge,Button,Checkbox,Group,NativeSelect,Pagination,ScrollArea,Table,Text,UnstyledButton} from "@mantine/core";
 import {orderDisplayNumber} from "../../lib/order-source";
 import {ClientAvatar} from "../client-avatar";
 import {clientsListRefreshUi,clientsWorkspaceUi as ui} from "../../lib/clients-workspace-i18n";
 import {Channel,Contact,Country,RequestState,stamp} from "./presentation";
 import type {ClientList,ClientRow,WorkspaceQuery} from "./types";
-type Props={data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;onArchive?:(row:ClientRow,trigger:HTMLButtonElement)=>void;hasMore:boolean;appending:boolean;appendError?:string;appendNeedsRefresh:boolean;appendPage:()=>Promise<void>};
-export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,onArchive,hasMore,appending,appendError,appendNeedsRefresh,appendPage}:Props){
+type Props={data?:ClientList;error?:string;retry:()=>void;query:WorkspaceQuery;onQuery:(patch:Partial<WorkspaceQuery>)=>void;onSelect:(id:string,tab?:WorkspaceQuery["tab"])=>void;checked:Map<string,ClientRow>;onCheck:(rows:ClientRow[],checked:boolean)=>void;onOrder:(id:string)=>void;hasMore:boolean;appending:boolean;appendError?:string;appendNeedsRefresh:boolean;appendPage:()=>Promise<void>};
+export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,onCheck,onOrder,hasMore,appending,appendError,appendNeedsRefresh,appendPage}:Props){
  const rows=data?.items??[],all=rows.length>0&&rows.every(row=>checked.has(row.id)),some=rows.some(row=>checked.has(row.id));
  const listEnd=useRef<HTMLDivElement>(null);
  useEffect(()=>{
@@ -33,9 +33,6 @@ export function ClientsTable({data,error,retry,query,onQuery,onSelect,checked,on
   </Table.Tr></Table.Thead><Table.Tbody>{rows.map(row=><Table.Tr key={row.id} className={query.clientId===row.id?"is-selected":undefined} data-selected={query.clientId===row.id||undefined} onClick={()=>onSelect(row.id)}>
    <Table.Td onClick={e=>e.stopPropagation()}><Group gap={4} justify="center">
     <Checkbox aria-label={`${ui.select}: ${row.displayName}`} checked={checked.has(row.id)} onChange={e=>onCheck([row],e.currentTarget.checked)}/>
-    {onArchive&&row.updatedAt&&<Tooltip label={ui.archiveClient}><ActionIcon color="red" variant="subtle" aria-label={`${ui.archiveClient}: ${row.displayName}`} onClick={event=>{event.stopPropagation();onArchive(row,event.currentTarget);}}>
-     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>
-    </ActionIcon></Tooltip>}
    </Group></Table.Td>
    <Table.Td><div className="clients-person"><ClientAvatar displayName={row.displayName} avatarUrl={row.avatarUrl} className="clients-avatar"/><div className="clients-person-text"><Group gap={5} wrap="nowrap"><UnstyledButton className="clients-name" onClick={e=>{e.stopPropagation();onSelect(row.id);}} title={row.displayName}>{row.displayName}</UnstyledButton><span className="clients-channels">{row.channels?.map(channel=><Channel key={channel} value={channel}/>)}</span></Group><Country value={row.country}/></div></div></Table.Td>
    <Table.Td><Contact value={row.email}/><Contact value={row.phone}/></Table.Td>

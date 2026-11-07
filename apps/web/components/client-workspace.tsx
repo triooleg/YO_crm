@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useRef,useState,type FormEvent} from "react";
-import {Alert,Button,Drawer,Group,Modal,Paper,Select,SimpleGrid,Text,TextInput,ThemeIcon,Title} from "@mantine/core";
+import {ActionIcon,Alert,Button,Drawer,Group,Modal,Paper,ScrollArea,Select,SimpleGrid,Text,TextInput,ThemeIcon,Title} from "@mantine/core";
 import {useMediaQuery} from "@mantine/hooks";
 import {CrmNavIcon} from "./crm-nav-icon";
 import {MeasurementPanel} from "./measurement-panel";
@@ -36,45 +36,53 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
  function saved(){setFlow(undefined);setInitialAthleteId(undefined);state.refresh();}
  function closeDetail(){update({clientId:"",tab:"overview"});}
  const detailContent=detail?<ClientDetails key={detail.id} currency={query.currency} onCurrency={currency=>update({currency})} client={detail} tab={query.tab} onTab={tab=>update({tab})} onOrder={onOrder} onNewOrder={newOrder} onMeasure={()=>setFlow("measure")} onAddAthlete={()=>setFlow("athlete")} onRefresh={state.refresh} revision={state.revision} onNavigate={onNavigate} addAthleteRef={addAthleteTriggerRef} focusedOrderId={originOrder.current} onOverlayChange={setOverlay}/>:query.clientId?<RequestState error={state.detailError} retry={state.refresh} loading={!state.detailError}/>:<Text c="dimmed" p="xl" ta="center">{ui.choose}</Text>;
- const [archiveTarget,setArchiveTarget]=useState<ClientRow>();
+ const [archiveTargets,setArchiveTargets]=useState<ClientRow[]>();
  const [archiving,setArchiving]=useState(false);
- const [archiveError,setArchiveError]=useState("");
+ const [archiveError,setArchiveError]=useState<string[]>([]);
  const archivePending=useRef(false);
  const searchRef=useRef<HTMLInputElement>(null);
  const archiveTrigger=useRef<HTMLButtonElement|null>(null);
  useEffect(()=>{
-  if(!archiveTarget&&archiveTrigger.current){
+  if(!archiveTargets&&archiveTrigger.current){
    const trigger=archiveTrigger.current;
    archiveTrigger.current=null;
-   if(trigger.isConnected)trigger.focus();
+   if(trigger.isConnected&&!trigger.disabled)trigger.focus();
    else searchRef.current?.focus();
   }
- },[archiveTarget]);
+ },[archiveTargets]);
  const canArchive=role==="OWNER"||role==="ADMIN";
- function openArchive(row:ClientRow,trigger:HTMLButtonElement){
+ const selectedForArchive=(state.list?.items??[]).filter(row=>checked.has(row.id)&&row.updatedAt);
+ function openArchive(trigger:HTMLButtonElement){
+  if(!canArchive||!selectedForArchive.length)return;
   archiveTrigger.current=trigger;
-  setArchiveError("");
-  setArchiveTarget(row);
+  setArchiveError([]);
+  setArchiveTargets(selectedForArchive);
  }
  function closeArchive(){
-  if(!archivePending.current)setArchiveTarget(undefined);
+  if(!archivePending.current)setArchiveTargets(undefined);
  }
- async function archiveClient(){
-  if(archivePending.current||!archiveTarget?.updatedAt)return;
-  const row=archiveTarget;
+ async function archiveClients(){
+  if(!canArchive||archivePending.current||!archiveTargets?.length||archiveError.length)return;
   archivePending.current=true;
   setArchiving(true);
-  setArchiveError("");
+  const archived:ClientRow[]=[];
+  const errors:string[]=[];
   try{
-   await clientRequest(`/clients/${encodeURIComponent(row.id)}/archive`,{
-    method:"PATCH",body:JSON.stringify({expectedUpdatedAt:row.updatedAt}),
-   });
-   onCheck([row],false);
-   state.onClientArchived(row.id);
-   setArchiveTarget(undefined);
-  }catch(error){
-   setArchiveError(failure(error));
-   state.refresh();
+   for(const row of archiveTargets){
+    try{
+     await clientRequest(`/clients/${encodeURIComponent(row.id)}/archive`,{
+      method:"PATCH",body:JSON.stringify({expectedUpdatedAt:row.updatedAt}),
+     });
+     archived.push(row);
+    }catch(error){
+     errors.push(`${row.displayName} — ${failure(error)}`);
+    }
+   }
+   onCheck(archived,false);
+   if(archived.length)state.onClientsArchived(archived.map(row=>row.id));
+   else state.refresh();
+   if(errors.length)setArchiveError(errors);
+   else setArchiveTargets(undefined);
   }finally{
    archivePending.current=false;
    setArchiving(false);
@@ -106,22 +114,27 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
    <Group gap="xs" className="clients-header-actions"><Button ref={duplicateTriggerRef} variant="default" onClick={()=>setDuplicates(true)}>{ui.findDuplicates}</Button><Button ref={mergeTriggerRef} variant="default" disabled={checked.size<2} onClick={()=>setMergeRows([...checked.values()])}>{ui.merge}{checked.size?` (${checked.size})`:""}</Button><Button ref={createClientTriggerRef} onClick={()=>setCreating(true)}>{ui.create}</Button></Group>
   </header>
   {returnChat&&returnChat.clientId===query.clientId&&<Button mb="sm" variant="subtle" disabled={!detail?.displayName&&!returnChat.clientName} onClick={()=>onNavigate?.("inbox",{...returnChat,clientName:detail?.displayName||returnChat.clientName,clientsReturn:window.location.pathname+window.location.search})}>{ui.returnChat}</Button>}
-  <div className="clients-toolbar"><TextInput ref={searchRef} aria-label={ui.search} placeholder={ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button></div>
+  <div className="clients-toolbar"><TextInput ref={searchRef} aria-label={ui.search} placeholder={ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Group gap="xs" wrap="nowrap"><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button>
+   {canArchive&&<ActionIcon color="red" variant="light" size="input-sm" aria-label={ui.archiveClient} title={ui.archiveClient}
+    disabled={!selectedForArchive.length||archiving} onClick={event=>openArchive(event.currentTarget)}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>
+   </ActionIcon>}
+  </Group></div>
   {(moreFilters||query.period)&&<Group mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
   <div className="clients-columns">
-   <ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder} onArchive={canArchive?openArchive:undefined}
+   <ClientsTable data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder}
     hasMore={state.hasMore} appending={state.appending} appendError={state.appendError} appendNeedsRefresh={state.appendNeedsRefresh} appendPage={state.appendPage}/>
    {desktop&&<aside className="clients-detail-panel" aria-label={ui.client} tabIndex={0}>{detailContent}</aside>}
   </div>
   <Drawer opened={!desktop&&!!query.clientId} onClose={closeDetail} position="right" size={mobile?"100%":600} title={ui.client} closeButtonProps={{"aria-label":ui.back,disabled:!!flow||overlay}} classNames={{content:"clients-drawer",header:"clients-drawer-header",body:"clients-drawer-body"}} closeOnEscape={!flow&&!overlay} closeOnClickOutside={!flow&&!overlay} trapFocus={!flow&&!overlay} returnFocus>{!desktop&&detailContent}</Drawer>
-  {archiveTarget&&<Modal opened centered returnFocus={false} onClose={closeArchive} title={ui.archiveClient}
+  {archiveTargets&&<Modal opened centered returnFocus={false} onClose={closeArchive} title={ui.archiveClient}
    closeOnEscape={!archiving} closeOnClickOutside={!archiving} closeButtonProps={{disabled:archiving,"aria-label":ui.close}}>
-   <Text fw={600} mb="xs">{archiveTarget.displayName}</Text>
+   <ScrollArea.Autosize mah={160} mb="xs">{archiveTargets.map(row=><Text key={row.id} fw={600}>{row.displayName}</Text>)}</ScrollArea.Autosize>
    <Text size="sm" mb="md">{ui.archiveWarning}</Text>
-   {archiveError&&<Alert color="red" role="alert" mb="md">{archiveError}</Alert>}
+   {!!archiveError.length&&<Alert color="red" role="alert" title={ui.archivePartial} mb="md"><ScrollArea.Autosize mah={140}>{archiveError.map((error,index)=><Text key={index} size="sm">{error}</Text>)}</ScrollArea.Autosize></Alert>}
    <Group justify="flex-end">
-    <Button data-autofocus variant="default" disabled={archiving} onClick={closeArchive}>{ui.cancel}</Button>
-    <Button color="red.8" loading={archiving} onClick={archiveClient}>{ui.archiveConfirm}</Button>
+    <Button data-autofocus variant="default" disabled={archiving} onClick={closeArchive}>{archiveError.length?ui.close:ui.cancel}</Button>
+    {!archiveError.length&&<Button color="red.8" loading={archiving} onClick={archiveClients}>{ui.archiveConfirm}</Button>}
    </Group>
   </Modal>}
   {creating&&<CreateClient onClose={()=>{setCreating(false);createClientTriggerRef.current?.focus();}} onCreated={client=>{setCreating(false);update({clientId:client.id,tab:"overview"},true);state.refresh();createClientTriggerRef.current?.focus();}}/>}
