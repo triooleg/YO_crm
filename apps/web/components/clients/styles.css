@@ -2,8 +2,8 @@
 .clients-workspace *{box-sizing:border-box}
 .clients-page-header{
  display:grid;grid-template-columns:minmax(9rem,auto) minmax(0,1fr) auto;
- grid-template-areas:"title stats actions" "subtitle subtitle subtitle";
- align-items:center;gap:4px var(--mantine-spacing-md);margin:0 0 var(--mantine-spacing-lg)
+ grid-template-areas:"title stats stats" "subtitle subtitle actions";
+ align-items:center;gap:var(--mantine-spacing-sm) var(--mantine-spacing-md);margin:0 0 var(--mantine-spacing-md)
 }
 .clients-page-title{grid-area:title}
 .clients-page-subtitle{grid-area:subtitle}
@@ -11,6 +11,7 @@
 .clients-header-stats{grid-area:stats;min-width:0}
 .clients-header-stats .mantine-Paper-root{display:flex;align-items:center;min-width:0}
 .clients-header-stats .mantine-ThemeIcon-root{flex:none}
+.clients-header-stats .mantine-Group-root>div:last-child{min-width:0;overflow-wrap:anywhere}
 .clients-header-actions{grid-area:actions;justify-content:flex-end}
 .clients-toolbar{display:grid;grid-template-columns:minmax(220px,2.4fr) repeat(3,minmax(130px,1fr)) auto;gap:var(--mantine-spacing-md);margin-bottom:var(--mantine-spacing-lg);align-items:center}
 .clients-columns{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:var(--mantine-spacing-lg);align-items:start}

@@ -1,3 +1,19 @@
+## 2026-11-07 - Clients and Orders responsive header placement (LOCAL)
+
+- Base is deployed 0.19.1 commit 3149841fb8f17253f89c177d084608b7763dec16;
+  the preceding local-only Tasks entry below is superseded by that release.
+- Clients header statistics span the space beside the title. Existing duplicate,
+  merge and create actions occupy the lower header row beside the subtitle.
+- Orders KPI cards move into the header beside the title. Existing new-order
+  trigger moves immediately before sorting in the command bar, retaining its ref,
+  handlers and focus restoration. Summary columns adapt at narrower widths.
+- No API, database, query, metric, permission or money calculation changes.
+- Quality check and final Web build passed. Eight browser scenarios passed at
+  1920/1366/390/320px, including dialog open/close and preserved filters.
+  Evidence is under .local/header-layout-qa and .local/quality.log.
+- Owner authorized deployment. Candidate 0.19.2 is frozen for qualification;
+  installation and GitHub publication remain pending until installed acceptance.
+
 ## 2026-11-07 - Compact Tasks header and consistent list controls
 
 - Moved the existing Tasks counters into the page header, beside the title

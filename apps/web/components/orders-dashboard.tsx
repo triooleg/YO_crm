@@ -860,12 +860,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
 
   return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
-      <div><p>{ui.eyebrow}</p><h1>{ui.title}</h1><span>{ui.subtitle}</span></div>
-      <CrmButton ref={newOrderTrigger} className="orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder}</CrmButton>
-    </header>
-    {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
-    {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}
-
+      <div className="orders-dashboard-title"><p>{ui.eyebrow}</p><h1>{ui.title}</h1></div>
     <div className="orders-kpi-grid">
       <Kpi label={ui.kpis.all} value={loading || error ? null : metrics.total} icon="bag" active={quickFilter === "all" && !source} onClick={() => { setSource(''); selectQuickFilter("all"); }} />
       {serverPage&&<button className={`orders-kpi tone-green${source==='WEBSITE'?' active':''}`} aria-pressed={source==='WEBSITE'} title={sourceUi.ordersScope} onClick={()=>{cancelPreviousOrderNavigation();setSource(source==='WEBSITE'?'':'WEBSITE');}}><i><CartIcon/></i><span><small>{sourceUi.onlineOrders}</small><strong>{loading||error?'—':serverPage.sources.websiteCount}</strong></span></button>}
@@ -875,6 +870,12 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       <Kpi label={ui.kpis.ready} value={loading || error ? null : metrics.ready} icon="truck" tone="green" active={quickFilter === "ready"} onClick={() => selectQuickFilter("ready")} />
       <Kpi label={ui.kpis.completed} value={loading || error ? null : metrics.completed} icon="check" tone="gray" active={quickFilter === "completed"} onClick={() => selectQuickFilter("completed")} />
     </div>
+      <span className="orders-dashboard-subtitle">{ui.subtitle}</span>
+    </header>
+    {error && <CrmAlert className="orders-error" onClose={() => setError("")}>{error}<CrmButton tone="secondary" size="compact-sm" onClick={() => void load()}>{ui.retry}</CrmButton></CrmAlert>}
+    {overviewContext && <div className="orders-overview-context" role="status"><span><strong>{overviewContextUi.filter}</strong> {overviewContextUi.filters[overviewContext.filter as keyof typeof overviewContextUi.filters] || overviewContextUi.filters.period}{overviewContext.period && <> · {overviewContext.period}</>}</span><CrmButton tone="secondary" size="compact-sm" onClick={clearOverviewContext}>{overviewContextUi.clear}</CrmButton></div>}
+
+
 
     {clientIdFilter&&<div className="orders-client-history-filter"><span>{ordersClientHistoryUi.clientFilter.replace("{name}",serverPage?.clientFilter?.id===clientIdFilter?serverPage.clientFilter.displayName:orders.find(order=>order.client.id===clientIdFilter)?.client.displayName??ordersClientHistoryUi.loading)}</span></div>}
     <div className="orders-command-bar">
@@ -891,6 +892,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       </div>
       <div className="orders-quick-filters">{([ ["all", ui.all, metrics.total], ["urgent", ui.urgent, metrics.urgent], ["deposit", ui.withoutDeposit, metrics.unpaid], ["work", ui.inWork, (serverPage?.metrics.work??orders.filter((order) => isOperationalOrder(order) && ["SCHEDULED", "MATERIALS", "CUTTING", "SEWING", "DECORATION", "QUALITY_CONTROL"].includes(order.productionStatus)).length)], ["ready", ui.ready, metrics.ready] ] as const).map(([id, label, value]) => <button key={id} className={quickFilter === id ? "active" : ""} onClick={() => selectQuickFilter(id)}>{label}<small>{loading || error ? "—" : value}</small></button>)}</div>
       {(filterCount>0||quickFilter!=="all"||Boolean(search.trim())||Boolean(overviewContext))&&<Button className="orders-reset-filters" variant="default" size="sm" leftSection={<UiIcon name="reset"/>} onClick={resetAllFilters}>{ui.resetFilters}</Button>}
+      <CrmButton ref={newOrderTrigger} className="orders-new-order" onClick={() => openNewOrder()}>{ui.newOrder}</CrmButton>
       <CrmNativeSelect className="orders-sort" label={ui.sortLabel} value={sort.column} onChange={(event) => persistSort(defaultOrderSort(event.target.value) as SortState)} data={SORTABLE_ORDER_COLUMNS.map((id) => ({ value: id, label: id === "source" ? sourceUi.filter : ui.columnsMap[id] }))} />
       <CrmButton ref={columnsTrigger} tone="secondary" className="orders-columns-button" onClick={() => setColumnsOpen(true)}><UiIcon name="settings" />{ui.columns}</CrmButton>
       <CrmActionIcon className="orders-export" onClick={exportOrders} aria-label={ui.export}><UiIcon name="download" /></CrmActionIcon>
