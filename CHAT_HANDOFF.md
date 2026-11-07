@@ -1,3 +1,32 @@
+## 2026-11-07 - Sticky Clients and Orders list controls (LOCAL)
+
+- Owner authorized deployment after these changes. Integrator is preparing one
+  combined 0.19.2 candidate; the earlier header-only 0.19.2 was staged/admitted
+  but never installed. Its plan/artifacts require explicit audited retirement
+  before the replacement candidate is admitted. Production remains 0.19.1.
+- Isolated worktree `sticky-list-controls`, based on frozen 0.19.2. No version,
+  commit, production, push or deployment operation performed.
+- Clients search/filter controls and expanded filters stick below the shell.
+  The desktop detail panel uses the measured controls height and actual shell
+  scrollport height so it remains below them and inside the viewport.
+- Orders command controls, chips and selection banner stick together. The one
+  original table header is vertically translated inside its existing horizontal
+  scroller; sorting, column sizing, refs and callbacks are retained. A scoped
+  overflow override removes the legacy ancestor that prevented native sticky.
+- Controls use opaque theme surfaces. Mobile controls use a compact responsive grid to leave
+  room for rows. Focused order rows have measured toolbar/header scroll margins.
+- Native mobile sort select occupies a full grid span. Actual select/Columns
+  rectangles do not intersect at 390/320; selected values remain readable.
+- Focused QA: 8/8 browser cases on 1920/1366/390/320 using local source devserver
+  and synthetic API fixtures. Actual vertical/horizontal scroll, header/body
+  alignment, column toggles, dropdowns, focus return, mobile Drawer, appended
+  row retention and selected checkboxes passed; no page errors or API writes.
+- Web typecheck and 25 focused tests passed. Web build passed before the final
+  mobile sort/grid CSS refinement; parent runs final full quality on this patch.
+  Browser evidence: `.local/sticky-controls-qa/`.
+- Independent compatibility/business/regression/visual/release DAG reviews and
+  any subsequent release remain the parent integrator's responsibility.
+
 ## 2026-11-07 - Clients and Orders responsive header placement (LOCAL)
 
 - Base is deployed 0.19.1 commit 3149841fb8f17253f89c177d084608b7763dec16;

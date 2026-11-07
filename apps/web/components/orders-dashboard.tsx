@@ -23,6 +23,7 @@ import { findCountry } from "../lib/country-options.mjs";
 import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { useClickOutside } from "@mantine/hooks";
+import { useStickyListControls } from "./crm/use-sticky-list-controls";
 import { designsInstancesUi as designsUi, orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi, ordersClientHistoryUi } from "../lib/i18n";
 import { orderLabel, orderPaginationUi } from "../lib/orders-i18n";
 import { migrateLegacyOrderColumnSettings, parseOrderColumnSettings } from "../lib/order-column-settings.mjs";
@@ -87,6 +88,7 @@ function readStatusColors(): StatusColors {
 const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
 
 export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Props) {
+  const { workspaceRef, controlsRef, tableRef } = useStickyListControls();
   const theme = useMantineTheme();
   const [statusColors, setStatusColors] = useState<StatusColors>({});
   useEffect(() => {
@@ -858,7 +860,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
     }
   }
 
-  return <section className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
+  return <section ref={workspaceRef} className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
       <div className="orders-dashboard-title"><p>{ui.eyebrow}</p><h1>{ui.title}</h1></div>
     <div className="orders-kpi-grid">
@@ -878,6 +880,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
 
 
     {clientIdFilter&&<div className="orders-client-history-filter"><span>{ordersClientHistoryUi.clientFilter.replace("{name}",serverPage?.clientFilter?.id===clientIdFilter?serverPage.clientFilter.displayName:orders.find(order=>order.client.id===clientIdFilter)?.client.displayName??ordersClientHistoryUi.loading)}</span></div>}
+    <div ref={controlsRef} className="orders-sticky-controls">
     <div className="orders-command-bar">
       <CrmSearchField className="orders-search" value={search} onValueChange={value=>{cancelPreviousOrderNavigation();setSearch(value);}} placeholder={ui.search} ariaLabel={ui.search} clearLabel={ui.clearSearch} showSearchIcon />
       <div className="orders-filter-wrap" ref={filtersRef}>
@@ -909,8 +912,9 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
 
     {selectedIds.size > 0 && <div className="orders-selection"><strong>{ui.selected}: {selectedIds.size}</strong><span>{ui.bulkHint}</span>{canArchiveOrders && <CrmButton color="red" size="compact-sm" onClick={() => setArchiveOpen(true)}>{ui.archiveSelected}</CrmButton>}<button className="orders-clear-selection" onClick={() => setSelectedIds(new Set())}>{ui.clearSelection}</button></div>}
 
+    </div>
     <div className="orders-table-wrap orders-table-scroll">
-      <table className="orders-table orders-dashboard-table">
+      <table ref={tableRef} className="orders-table orders-dashboard-table">
         <colgroup><col className="orders-controls" />{visibleColumns.map((id) => <col key={id} className={`orders-col orders-col-${id}`} />)}</colgroup>
         <thead><tr><th className="orders-controls"><input type="checkbox" aria-label={ui.selectAll} checked={shown.length > 0 && shown.every((order) => selectedIds.has(order.id))} onChange={(event) => setSelectedIds(event.target.checked ? new Set(shown.map((order) => order.id)) : new Set())} /></th>{visibleColumns.map((id) => id === "menu" ? <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }}>{ui.columnsMap[id]}</th> : <th key={id} className={`orders-col orders-col-${id}`} style={{ order: columnOrder.indexOf(id) + 1 }} aria-sort={sort.column === id ? sort.direction === "asc" ? "ascending" : "descending" : "none"}><button className="orders-sort-heading" onClick={() => cycleSort(id)} aria-label={`${ui.sortByColumn}: ${ui.columnsMap[id]}`} title={`${ui.sortByColumn}: ${ui.columnsMap[id]}`}><span>{ui.columnsMap[id]}</span><b aria-hidden="true">{sort.column === id ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</b></button></th>)}</tr></thead>
         <tbody>

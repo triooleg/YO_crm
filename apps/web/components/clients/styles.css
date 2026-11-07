@@ -65,3 +65,9 @@
 .clients-drawer-header{margin:0;padding:12px;min-height:48px;display:flex;flex-direction:row;align-items:center;gap:12px}.clients-drawer-header h2{margin:0;font-size:14px}
 
 .clients-native-label,.clients-native-value{font-size:10px;line-height:1.3}.clients-native-value{display:inline-block;margin-right:6px}.clients-summary-money{gap:8px}.clients-detail-header .mantine-Badge-root{text-transform:none}.clients-table .mantine-Badge-root{background:var(--mantine-color-yoleotard-2);color:var(--mantine-color-yoleotard-8)}
+
+/* The shell owns scrolling; toolbar and detail share its available height. */
+.clients-sticky-controls{position:sticky;top:0;z-index:20;padding:8px 0;background:var(--canvas);margin-bottom:var(--mantine-spacing-md)}
+.clients-sticky-controls .clients-toolbar{margin-bottom:0}
+.clients-sticky-controls>.mantine-Group-root{margin-top:var(--mantine-spacing-md);margin-bottom:0}
+@media(min-width:75em){.clients-detail-panel{top:calc(var(--list-controls-height,0px) + var(--mantine-spacing-md));max-height:calc(var(--list-viewport-height,100dvh) - var(--list-controls-height,0px) - 2 * var(--mantine-spacing-md))}}
