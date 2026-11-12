@@ -1,3 +1,23 @@
+## 2026-11-12 - CRM 0.19.4 installed
+
+- Installed exact application commit `cfc436044690251b8f07215f7b86b233c53ac3e9`,
+  frozen archive SHA-256 `6123be53d1d27013f74e0dde271e0cc2c0fc28bd310cb0c7d8d1a6e0e1191102`.
+  API image `sha256:110f76650cb8964b5efe3ed097f4a5f0818f04dd836de0d8e9f04c78d8655108`,
+  Web image `sha256:9ce82399025f395a8a3a52a43138e9397259cbc3f6d132995c7bc97e0cc704c3`.
+- Exact quality gate and responsive Finance/Clients browser tests passed.
+  Isolated PostgreSQL verified immediate HTTP 202 with NBU held, one job on retry,
+  zero accruals and completion audits after disabling tax accounting, and one
+  successful completion audit after re-enabling it.
+- Public homepage and API health returned 200. Authenticated Finance/Clients
+  smoke passed with zero new console errors. Version badge and release journal
+  match the installed snapshot. Production tax calculation was not started as
+  part of the smoke check.
+- PostgreSQL and Redis container IDs were retained. No schema migration.
+  The verified DATA backup `pre-tax0194-f37dcb71ec33-r01` passed isolated restore.
+  The immediate 0.19.2 rollback source and Compose are preserved by the
+  `yo-crm-v0194-cfc4360-planner` transaction; five tagged images per service
+  and two ordinary active source sets were retained.
+
 ## 2026-11-12 - Manual tax calculation and Clients controls (LOCAL)
 
 - Manual calculation now acknowledges immediately with HTTP 202 and a status
