@@ -13,7 +13,7 @@
 .clients-header-stats .mantine-Group-root>div:last-child{min-width:0;overflow-wrap:anywhere}
 .clients-list-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--mantine-spacing-md)}
 .clients-header-actions{justify-content:flex-end}
-.clients-toolbar{display:grid;grid-template-columns:minmax(11rem,1fr) repeat(3,minmax(7rem,clamp(7rem,calc(33vw - 20rem),20rem))) auto;gap:var(--mantine-spacing-md);align-items:center}
+.clients-toolbar{display:grid;grid-template-columns:minmax(18.5rem,1fr) repeat(3,minmax(6rem,clamp(6rem,calc(33vw - 23rem),20rem))) auto;gap:var(--mantine-spacing-md);align-items:center}
 .clients-columns{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:var(--mantine-spacing-lg);align-items:start}
 .clients-table-panel,.clients-detail-panel{min-width:0;border:1px solid var(--mantine-color-yoleotard-2);border-radius:var(--mantine-radius-md);background:var(--mantine-color-white);overflow:hidden}
 .clients-table{font-size:12px;min-width:700px;table-layout:fixed}

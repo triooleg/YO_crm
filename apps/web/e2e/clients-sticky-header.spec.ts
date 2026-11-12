@@ -3,7 +3,7 @@ import { fixture, rows } from '../components/clients/tests/fixtures';
 
 for (const width of [1920, 1366, 390]) {
   test(`client headings follow filters without a reserved right gutter at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 });
+    await page.setViewportSize({ width, height: width === 1920 ? 1080 : width === 1366 ? 768 : 844 });
     const calls = await fixture(page);
     const clients = Array.from({ length: 60 }, (_, index) => ({
       ...rows[index % rows.length]!, id: `sticky-${index}`, displayName: `Client ${index + 1}`,
@@ -21,6 +21,16 @@ for (const width of [1920, 1366, 390]) {
     });
     await page.goto('/?section=clients');
     await expect(page.locator('.clients-table tbody tr')).toHaveCount(20);
+    const searchFits = await page.locator('.clients-toolbar input').first().evaluate((input: HTMLInputElement) => {
+      const style = getComputedStyle(input);
+      const placeholder = getComputedStyle(input, '::placeholder');
+      const canvas = document.createElement('canvas').getContext('2d')!;
+      canvas.font = [placeholder.fontWeight, placeholder.fontSize, placeholder.fontFamily].join(' ');
+      const textWidth = canvas.measureText(input.placeholder).width;
+      return input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) >= textWidth;
+    });
+    expect(searchFits).toBe(true);
+    await page.screenshot({ path: `../../output/playwright/header-copy-cleanup/clients-before-${width}.png` });
     const filters = await page.locator('.clients-toolbar').boundingBox();
     const actions = await page.locator('.clients-header-actions').boundingBox();
     const controls = await page.locator('.clients-sticky-controls').boundingBox();

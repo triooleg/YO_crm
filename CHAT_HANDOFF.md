@@ -23,6 +23,7 @@
   and duplicate search, merge and creation on the right at desktop widths.
 - Narrow screens stack the controls. Existing action handlers, focus targets,
   and the measured sticky offset for the table and client detail are preserved.
+- The search hint fits alongside filters and actions at 1366 px. Chromium verified the complete hint and sticky alignment at 1920, 1366 and 390 px.
 
 ## 2026-11-07 - Authorized 0.19.3 deployment preparation
 
