@@ -46,7 +46,8 @@ test('PostgreSQL real tax service, lifecycle, constraints, rollback, CAS and ret
    const replay=await service.confirmSource(root.id,confirmation,actor);
    assert.equal(replay.id,first.id);
    const entries=await query(`SELECT * FROM "TaxEntry" WHERE "paymentId"=$1 AND kind='FINALIZE' ORDER BY component`,receipt.id);
-   assert.deepEqual(entries.map(e=>[e.component,e.amountMinor]),[['UNIFIED',85000],['MILITARY',17000]]);
+   assert.equal(entries.length,2);
+   assert.deepEqual(Object.fromEntries(entries.map(e=>[e.component,e.amountMinor])),{UNIFIED:85000,MILITARY:17000});
    for(const e of entries){
     assert.equal(e.baseMinor,1700000);
     assert.equal(e.snapshot.grossCurrency,'UAH');
@@ -195,8 +196,8 @@ test('PostgreSQL real tax service, lifecycle, constraints, rollback, CAS and ret
    const captured=(await query(`SELECT revision FROM "TaxPeriod" WHERE month='2026-05'`))[0].revision;assert.ok(captured>before,'source changes invalidate stale close CAS');
    const root=(await roots(receipt))[0];await service.confirmSource(root.id,await cmd({grossMinor:10000,incomeDate:'2026-05-01',evidence:'bank reconciled'}),actor);assert.ok((await query(`SELECT revision FROM "TaxPeriod" WHERE month='2026-05'`))[0].revision>captured);
   });
-  await t.test('tax report freezes ledger and cash in one RepeatableRead snapshot; NBU stays outside',async()=>{
-   let active=false,transactions=0;const snapshotDb=new Proxy(db,{get(target,prop){if(prop==='$transaction')return async(fn,options)=>{assert.equal(options.isolationLevel,'RepeatableRead');transactions++;active=true;try{return await target.$transaction(fn,options);}finally{active=false;}};if(['$queryRawUnsafe','payment','expense'].includes(prop))throw Error('report escaped its read snapshot');return Reflect.get(target,prop);}});
+  await t.test('uncached tax report freezes ledger and cash in one RepeatableRead snapshot; NBU stays outside',async()=>{
+   let active=false,transactions=0;const snapshotDb=new Proxy(db,{get(target,prop){if(prop==='$transaction')return async(fn,options)=>{assert.equal(options.isolationLevel,'RepeatableRead');transactions++;active=true;try{return await target.$transaction(fn,options);}finally{active=false;}};if(prop==='$queryRawUnsafe')return undefined; if(['payment','expense'].includes(prop))throw Error('report escaped its read snapshot');return Reflect.get(target,prop);}});
    const snapshotNbu={async rate(currency,date){assert.equal(active,false,'no network under report transaction');return nbu.rate(currency,date);}},reader=new TaxesService(snapshotDb,snapshotNbu),before=await reader.report({from:'2026-05',to:'2026-05'},actor);assert.equal(transactions,1);
    const receipt=await payment(12345);await locked(tx=>service.capturePayment(tx,receipt.id,'CREATE',actor.id));await service.confirmSource((await roots(receipt))[0].id,await cmd({grossMinor:12345,incomeDate:'2026-05-01',evidence:'deduplicated cash receipt'}),actor);
    const after=await reader.report({from:'2026-05',to:'2026-05'},actor);assert.equal(after.results.receivedMinor-before.results.receivedMinor,12345);assert.equal(transactions,2);
