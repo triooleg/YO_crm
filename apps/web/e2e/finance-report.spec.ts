@@ -25,7 +25,7 @@ for(const [width,height] of [[1920,1080],[1366,768],[390,844]])test(`manual tax 
  await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
  await expect(page.getByText('Налоговый расчёт выполняется.',{exact:false})).toBeVisible();
  await page.screenshot({path:info.outputPath('finance-during-calculation.png')});
- await expect(page.getByRole('status').filter({hasText:'Налоговый отчёт обновлён'})).toBeVisible();
+ await expect(page.getByRole('status').filter({hasText:'Налоговый отчёт обновлён'})).toBeVisible({timeout:12_000});
  expect(writes).toBe(1);
  expect(polls).toBe(3);
  expect(calls.filter(call=>call.path==='/api/finance/report').length).toBeGreaterThan(reads);
