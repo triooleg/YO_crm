@@ -5,7 +5,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionGuard } from '../auth/session.guard';
 import { TaxesService } from './taxes.service';
-import { TaxAllocationDto, TaxBackfillApplyDto, TaxBackfillPreviewDto, TaxCloseDto, TaxCommandDto, TaxConfirmSourceDto, TaxCorrectionDto, TaxExemptionDto, TaxMonobankSettingsDto, TaxPolicyDto, TaxPolicyPreviewDto, TaxReasonDto, TaxReportDto, TaxSettingsDto, TaxSettlementCorrectionDto, TaxSettlementDto } from './taxes.dto';
+import { TaxAllocationDto, TaxBackfillApplyDto, TaxBackfillPreviewDto, TaxCloseDto, TaxCommandDto, TaxConfirmSourceDto, TaxCorrectionDto, TaxExemptionDto, TaxMonobankReceiptDto, TaxMonobankSettingsDto, TaxPolicyDto, TaxPolicyPreviewDto, TaxReasonDto, TaxReportDto, TaxSettingsDto, TaxSettlementCorrectionDto, TaxSettlementDto } from './taxes.dto';
 type AuthRequest=Request&{user:User};
 @Controller('finance/taxes') @UseGuards(SessionGuard,RolesGuard) @Roles('OWNER','ADMIN','ACCOUNTANT')
 export class TaxesController {
@@ -23,7 +23,7 @@ export class TaxesController {
  @Header('Cache-Control','no-store') @Get('orders/:id') order(@Param('id') id:string,@Req() req:AuthRequest){return this.taxes.order(id,req.user);}
  @Header('Cache-Control','no-store') @Post('backfill/preview') @Roles('OWNER','ADMIN') preview(@Body() d:TaxBackfillPreviewDto,@Req() req:AuthRequest){return this.taxes.backfillPreview(d,req.user);}
  @Header('Cache-Control','no-store') @Post('backfill/apply') @Roles('OWNER','ADMIN') apply(@Body() d:TaxBackfillApplyDto,@Req() req:AuthRequest){return this.taxes.backfillApply(d,req.user);}
- @Header('Cache-Control','no-store') @Get('sources/:id/monobank') monobank(@Param('id') id:string,@Req() req:AuthRequest){return this.taxes.previewMonobankReceipt(id,req.user);}
+ @Header('Cache-Control','no-store') @Get('sources/:id/monobank') monobank(@Param('id') id:string,@Query() d:TaxMonobankReceiptDto,@Req() req:AuthRequest){return this.taxes.previewMonobankReceipt(id,d.merchantReference.trim(),req.user);}
  @Header('Cache-Control','no-store') @Post('sources/:id/confirm') confirm(@Param('id') id:string,@Body() d:TaxConfirmSourceDto,@Req() req:AuthRequest){return this.taxes.confirmSource(id,d,req.user);}
  @Header('Cache-Control','no-store') @Post('settlements') settle(@Body() d:TaxSettlementDto,@Req() req:AuthRequest){return this.taxes.settle(d,req.user);}
  @Header('Cache-Control','no-store') @Post('allocations') allocate(@Body() d:TaxAllocationDto,@Req() req:AuthRequest){return this.taxes.allocate(d,req.user);}

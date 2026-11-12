@@ -125,11 +125,11 @@ function MonobankSettings() {
   return <TaxSection title={ui.monobankSettings}>
     <TaxLoading {...resource} />
     {resource.data && <form onSubmit={save}><Stack gap="sm">
-      <TextInput label={ui.monobankSource} value={sourceAccount} onChange={event => setAccount(event.currentTarget.value)} required maxLength={120} disabled={state === 'saving'} />
+      <TextInput label={ui.monobankSource} value={sourceAccount} onChange={event => setAccount(event.currentTarget.value)} required maxLength={253} disabled={state === 'saving'} />
       <PasswordInput label={ui.monobankToken} value={token} onChange={event => setToken(event.currentTarget.value)} required maxLength={512} autoComplete="new-password" disabled={state === 'saving'} />
       {resource.data.configured && <Text size="sm" c="dimmed">{ui.monobankConfigured}</Text>}
       {state === 'saved' && <Alert color="teal">{ui.monobankSaved}</Alert>}
-      {state === 'error' && <Alert color="red">{ui.monobankError}</Alert>}
+      {state === 'error' && <Alert color="red">{ui.monobankSaveError}</Alert>}
       <Button type="submit" disabled={!sourceAccount.trim() || !token.trim()} loading={state === 'saving'}>{ui.monobankSave}</Button>
     </Stack></form>}
   </TaxSection>;

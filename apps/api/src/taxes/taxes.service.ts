@@ -201,7 +201,7 @@ export class TaxesService {
  }
  async saveMonobankSettings(input:{token:string;sourceAccount:string},actor:Actor){
   allow(actor,true);
-  const sourceAccount=input.sourceAccount;
+  const sourceAccount=input.sourceAccount.toLowerCase();
   const value={sourceAccount,encryptedToken:encryptSecret(input.token)};
   await this.prisma.$transaction(async tx=>{
    await tx.appSetting.upsert({where:{section_key:monobankSetting},create:{...monobankSetting,value},update:{value}});
@@ -209,12 +209,12 @@ export class TaxesService {
   });
   return {configured:true,sourceAccount};
  }
- async previewMonobankReceipt(rootId:string,actor:Actor){
+ async previewMonobankReceipt(rootId:string,merchantReference:string,actor:Actor){
   allow(actor);
   const root=await this.root(this.prisma,rootId);
   const payment=root.paymentId ? await this.prisma.payment.findUnique({
    where:{id:root.paymentId},
-   select:{reference:true,receivedAt:true,sourceSystem:true,sourceAccount:true,voidedAt:true,externalStatus:true,order:{select:{externalId:true,externalNumber:true,externalData:true,archivedAt:true}}},
+   select:{reference:true,receivedAt:true,sourceSystem:true,sourceAccount:true,voidedAt:true,externalStatus:true,order:{select:{externalId:true,externalData:true,archivedAt:true}}},
   }) : null;
   const config=await this.monobankConfig();
   if(!config || !payment || payment.sourceAccount!==config.sourceAccount || payment.voidedAt || payment.sourceSystem!=='YOLEOTARD_WEBSITE' || payment.externalStatus!=='paid'
@@ -222,11 +222,9 @@ export class TaxesService {
    throw new BadRequestException('У оплаты нет идентификатора счёта Monobank для сверки.');
   }
   const raw=payment.order.externalData as {payment?:{provider?:string;reference?:string}}|null;
-  const suffix=payment.order.externalNumber;
-  if(raw?.payment?.provider!=='monobank' || raw.payment.reference!==payment.reference || !suffix || !/^\d{2}-\d+$/.test(suffix)){
+  if(raw?.payment?.provider!=='monobank' || raw.payment.reference!==payment.reference || !merchantReference){
    throw new BadRequestException('Полное назначение платежа Monobank не подтверждено. Сверьте оплату вручную.');
   }
-  const merchantReference=`${payment.order.externalId}/${suffix}`;
   const matches=await this.prisma.payment.count({
    where:{sourceSystem:'YOLEOTARD_WEBSITE',reference:payment.reference},
   });

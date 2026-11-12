@@ -3353,6 +3353,8 @@ export const taxAccountingUi = {
   monobankSaved: 'Настройки Monobank сохранены',
   monobankConfigured: 'Токен настроен. Чтобы заменить его, введите новый.',
   monobankSave: 'Сохранить настройки Monobank',
+  monobankReference: 'Полный идентификатор заказа из выписки Monobank',
+  monobankSaveError: 'Не удалось сохранить настройки Monobank. Проверьте токен и аккаунт сайта.',
   monobankLoad: 'Заполнить по выписке Monobank',
   monobankError: 'Не удалось подтвердить зачисление в гривнах по API Monobank. Проверьте подключение или заполните данные по выписке вручную.',
   monobankEvidence: 'Дата операции по выписке Monobank',
