@@ -18,6 +18,26 @@ export function loadTax(file){
  vm.runInThisContext('(function(require,module,exports){'+out+'\n})',{filename})(custom,module,module.exports);return module.exports;
 }
 const {TaxesService}=loadTax('taxes.service.ts');
+test('manual calculation checks access and walks pending sources once through the Kyiv business date',async()=>{
+ const runs=[];
+ const prisma={appSetting:{},$queryRawUnsafe:async()=>[{value:{enabled:true}}],auditLog:{
+  findFirst:async()=>({after:{through:'2026-11-09'}}),
+  create:async()=>{},
+ }};
+ const service=new TaxesService(prisma,{});
+ service.catchUpMonthly=async()=>{};
+ service.reconcilePending=async(_now,_limit,_paymentId,window)=>{
+  runs.push({...window});
+  return {examined:1,finalized:1,retried:0,deferred:0,nextSequence:runs.length===1?42n:null};
+ };
+ const now=new Date('2026-11-11T22:30:00Z');
+ await assert.rejects(()=>service.calculate({id:'manager',role:'MANAGER'},now),/прав/);
+ const result=await service.calculate({id:'owner',role:'OWNER'},now);
+ assert.deepEqual(runs,[{through:'2026-11-12',after:0n},{through:'2026-11-12',after:42n}]);
+ assert.equal(result.from,'2026-11-09');
+ assert.equal(result.through,'2026-11-12');
+ assert.equal(result.finalized,2);
+});
 test('service RBAC rejects manager before any database access',async()=>{
  const s=new TaxesService({},{});await assert.rejects(()=>s.settings({id:'m',role:'MANAGER'}),/прав/);
  await assert.rejects(()=>s.saveSettings({expectedRevision:0,operationKey:'x',enabled:true},{id:'a',role:'ACCOUNTANT'}),/прав/);

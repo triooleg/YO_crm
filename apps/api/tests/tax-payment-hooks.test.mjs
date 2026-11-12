@@ -17,11 +17,11 @@ test('manual receipt captures tax source in the same transaction without changin
  const f=fixture(); const result=await f.service.addPayment(f.order.id,{amountMinor:1000000,currency:'UAH',receivedAt:'2026-05-01T10:00:00Z',method:'BANK_TRANSFER'},owner);
  assert.equal(result.amountMinor,1000000);assert.equal(f.calls.length,1);assert.equal(f.calls[0][0],f.tx);assert.equal(f.calls[0][1],f.payment.id);assert.equal(f.calls[0][3],owner.id);
  assert.deepEqual(f.calls[0][4],{receiptConfirmed:true,confirmedByRole:'OWNER',evidence:'MANUAL_CRM_ENTRY'});
- assert.deepEqual(f.reconciliations,[[f.payment.id]]);
+ assert.deepEqual(f.reconciliations,[]);
 });
 test('manager can record a receipt but cannot confirm the tax basis',async()=>{
  const f=fixture();await f.service.addPayment(f.order.id,{amountMinor:1000000,currency:'UAH',receivedAt:'2026-05-01T10:00:00Z',method:'BANK_TRANSFER'},{id:'manager-1',role:'MANAGER'});
- assert.deepEqual(f.calls[0][4],{});assert.deepEqual(f.reconciliations,[[f.payment.id]]);
+ assert.deepEqual(f.calls[0][4],{});assert.deepEqual(f.reconciliations,[]);
 });
 test('manual void retains receipt and atomically records tax lifecycle for review',async()=>{
  const f=fixture();await f.service.voidPayment(f.order.id,f.payment.id,{reason:'Ошибка ввода',expectedOrderUpdatedAt:f.order.updatedAt.toISOString()},owner);

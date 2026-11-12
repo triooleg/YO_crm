@@ -12,7 +12,10 @@
 .finance-information-notices{width:min(360px,calc(100vw - 32px))}
 .finance-information-notices .mantine-Notification-description{font-size:12px;line-height:1.45}
 .finance-information-notices .mantine-Notification-title{font-size:13px}
-.finance-tax-kpi-link{height:100%;min-width:0;width:100%;text-align:inherit;color:inherit}
+.finance-report-kpis-tax.finance-report-kpis-calculable > *,
+.finance-report-kpis-tax.finance-report-kpis-calculable .finance-report-kpi{height:172px}
+.finance-tax-kpi-action{position:absolute;bottom:9px;left:12px}
+.finance-kpi-copy h2 button{font:inherit;color:inherit;text-align:left}
 .finance-cash-result{display:flex;justify-content:space-between;gap:12px;align-items:center;color:var(--ink);padding:7px 10px;margin-bottom:6px;border:1px solid var(--line);border-radius:var(--mantine-radius-sm);background:var(--paper)}
 .finance-cash-result span,.finance-fiscal-scope{color:var(--muted);font-size:12px}
 .finance-report-page .finance-fiscal-scope{margin:0 0 8px}

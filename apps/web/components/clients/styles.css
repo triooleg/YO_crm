@@ -1,8 +1,8 @@
 .clients-workspace{padding:var(--mantine-spacing-xl);min-width:0;color:var(--mantine-color-text)}
 .clients-workspace *{box-sizing:border-box}
 .clients-page-header{
- display:grid;grid-template-columns:minmax(9rem,auto) minmax(0,1fr) auto;
- grid-template-areas:"title stats stats" ". . actions";
+ display:grid;grid-template-columns:minmax(9rem,auto) minmax(0,1fr);
+ grid-template-areas:"title stats";
  align-items:center;gap:var(--mantine-spacing-sm) var(--mantine-spacing-md);margin:0 0 var(--mantine-spacing-md)
 }
 .clients-page-title{grid-area:title}
@@ -11,8 +11,9 @@
 .clients-header-stats .mantine-Paper-root{display:flex;align-items:center;min-width:0}
 .clients-header-stats .mantine-ThemeIcon-root{flex:none}
 .clients-header-stats .mantine-Group-root>div:last-child{min-width:0;overflow-wrap:anywhere}
-.clients-header-actions{grid-area:actions;justify-content:flex-end}
-.clients-toolbar{display:grid;grid-template-columns:minmax(220px,2.4fr) repeat(3,minmax(130px,1fr)) auto;gap:var(--mantine-spacing-md);margin-bottom:var(--mantine-spacing-lg);align-items:center}
+.clients-list-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--mantine-spacing-md)}
+.clients-header-actions{justify-content:flex-end}
+.clients-toolbar{display:grid;grid-template-columns:minmax(11rem,1fr) repeat(3,minmax(7rem,clamp(7rem,calc(33vw - 20rem),20rem))) auto;gap:var(--mantine-spacing-md);align-items:center}
 .clients-columns{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:var(--mantine-spacing-lg);align-items:start}
 .clients-table-panel,.clients-detail-panel{min-width:0;border:1px solid var(--mantine-color-yoleotard-2);border-radius:var(--mantine-radius-md);background:var(--mantine-color-white);overflow:hidden}
 .clients-table{font-size:12px;min-width:700px;table-layout:fixed}
@@ -57,7 +58,8 @@
 @media(max-width:90em){
  .clients-header-stats .mantine-ThemeIcon-root{display:none}
 }
-@media(max-width:74.99em){.clients-columns{grid-template-columns:minmax(0,1fr)}.clients-page-header{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "stats" "actions";align-items:start;gap:var(--mantine-spacing-sm)}.clients-header-actions{justify-content:flex-start}.clients-toolbar{grid-template-columns:minmax(180px,2fr) repeat(3,minmax(110px,1fr)) auto}}
+@media(max-width:80em){.clients-list-controls{grid-template-columns:minmax(0,1fr)}.clients-header-actions{justify-content:flex-start}.clients-toolbar{grid-template-columns:minmax(11rem,2fr) repeat(3,minmax(6rem,1fr)) auto}}
+@media(max-width:74.99em){.clients-columns{grid-template-columns:minmax(0,1fr)}.clients-page-header{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "stats";align-items:start;gap:var(--mantine-spacing-sm)}}
 @media(max-width:45em){.clients-workspace{padding:var(--mantine-spacing-md)}.clients-page-header{gap:var(--mantine-spacing-md);margin-bottom:var(--mantine-spacing-lg)}.clients-page-header h1{font-size:26px}.clients-header-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.clients-header-actions>.mantine-Button-root{width:100%;min-width:0}.clients-header-actions .mantine-Button-label{white-space:normal}.clients-header-actions>.mantine-Button-root:last-child{grid-column:1/-1}.clients-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.clients-toolbar>div:first-child{grid-column:1/-1}.clients-table{min-width:700px}.clients-pagination{justify-content:center}.clients-detail-body{padding:var(--mantine-spacing-md)}.clients-merge-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:359px){.clients-contact-grid{grid-template-columns:minmax(0,1fr)}.clients-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.clients-order{grid-template-columns:72px minmax(0,1fr)}.clients-order-value{grid-column:2;text-align:left}}
 
@@ -67,7 +69,6 @@
 
 /* The shell owns scrolling; toolbar and detail share its available height. */
 .clients-sticky-controls{position:sticky;top:0;z-index:20;padding:8px 0;background:var(--canvas);margin-bottom:var(--mantine-spacing-md)}
-.clients-sticky-controls .clients-toolbar{margin-bottom:0}
 .clients-sticky-controls>.mantine-Group-root{margin-top:var(--mantine-spacing-md);margin-bottom:0}
 @media(min-width:75em){.clients-detail-panel{top:calc(var(--list-controls-height,0px) + var(--mantine-spacing-md));max-height:calc(var(--list-viewport-height,100dvh) - var(--list-controls-height,0px) - 2 * var(--mantine-spacing-md))}}
 

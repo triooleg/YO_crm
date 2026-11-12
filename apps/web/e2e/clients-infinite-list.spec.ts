@@ -41,20 +41,18 @@ test("statistics share the heading row and the desktop detail panel scrolls unde
  await expect(page.locator(".clients-detail-panel")).toBeVisible();
  const stats=page.getByRole("region",{name:"По выбранным фильтрам"});
  await expect(stats.locator(".mantine-Paper-root")).toHaveCount(4);
- const [title,cards,actions]=await Promise.all([
+ const [title,cards]=await Promise.all([
   page.getByRole("heading",{name:"Клиенты",exact:true}).boundingBox(),
   stats.boundingBox(),
-  page.getByRole("button",{name:"Найти дубликаты"}).boundingBox(),
  ]);
  expect(cards!.x).toBeGreaterThan(title!.x+title!.width);
- expect(cards!.x+cards!.width).toBeLessThan(actions!.x);
  expect(title!.y).toBeGreaterThan(cards!.y);
  expect(title!.y).toBeLessThan(cards!.y+cards!.height);
  await buyer(page,15).scrollIntoViewIfNeeded();
  const panel=page.locator(".clients-detail-panel");
- const header=await page.locator(".crm-topbar").boundingBox();
- await expect.poll(async()=>(await panel.boundingBox())!.y).toBeLessThan(header!.y+header!.height+32);
- expect((await panel.boundingBox())!.y).toBeGreaterThanOrEqual(header!.y+header!.height);
+ const controls=await page.locator(".clients-sticky-controls").boundingBox();
+ await expect.poll(async()=>(await panel.boundingBox())!.y).toBeLessThan(controls!.y+controls!.height+32);
+ expect((await panel.boundingBox())!.y).toBeGreaterThanOrEqual(controls!.y+controls!.height);
  expect(await panel.evaluate(el=>el.scrollHeight>el.clientHeight)).toBe(true);
  await panel.hover();
  await page.mouse.wheel(0,100);

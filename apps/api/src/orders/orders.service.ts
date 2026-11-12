@@ -764,9 +764,6 @@ export class OrdersService {
       if (this.taxes) await this.taxes.capturePayment(tx, payment.id, "CREATE", actor.id, canConfirmTaxReceipt ? { receiptConfirmed: true, confirmedByRole: actor.role, evidence: "MANUAL_CRM_ENTRY" } : {});
       return payment;
     });
-    // The payment is already committed. A temporary rate problem must not create
-    // a duplicate receipt on retry; the scheduled reconciler will try again.
-    if (this.taxes) try { await this.taxes.reconcilePayment(payment.id); } catch {}
     return payment;
   }
 

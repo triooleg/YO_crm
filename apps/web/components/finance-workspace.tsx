@@ -38,6 +38,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const [sourceChart,setSourceChart]=useState('standard');
   const [debouncedSearch]=useDebouncedValue(filters.search,250);
   const [taxEpoch,setTaxEpoch]=useState(0);
+  const [calculatingTaxes,setCalculatingTaxes]=useState(false);
   const [initialChartMetric,setInitialChartMetric]=useState<'received'|'expenses'|'result'>('received');
   const [expense,setExpense]=useState<FinanceExpenseView|null>(),[categoriesOpen,setCategoriesOpen]=useState(false),[detail,setDetail]=useState<{order:FinanceOrder;row?:PaymentRow}>(),[payment,setPayment]=useState<FinanceOrder>(),[invoice,setInvoice]=useState<{order:FinanceOrder;invoice?:FinanceInvoice}>(),[pickOrder,setPickOrder]=useState<'payment'|'invoice'>(),[pickedOrder,setPickedOrder]=useState<string|null>(null),[actionBusy,setActionBusy]=useState(false);
   const [remoteSearch,setRemoteSearch]=useState(''),[remoteOptions,setRemoteOptions]=useState<{orders:FinanceReport['options']['orders'];clients:FinanceReport['options']['clients']}>({orders:[],clients:[]});
@@ -49,7 +50,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const data=summaryScope.current===aggregateScope?storedData:undefined;
   const pending=loading||filters.search!==debouncedSearch||(data!==undefined&&loadedReportKey.current!==financeReportQuery(filters).toString());
   const request=useCallback(async(path:string,init?:RequestInit)=>{const response=await financeRequest(`/api${path}`,role,{credentials:'include',cache:'no-store',...init,headers:{'Content-Type':'application/json',...init?.headers}});if(!response.ok){const body=await response.json().catch(()=>({}));throw new FinanceRequestError(Array.isArray(body.message)?body.message.join('; '):body.message||ui.error,response.status);}const result=await response.json();if(init?.method&&!['GET','HEAD'].includes(init.method.toUpperCase())&&!path.startsWith('/finance/exchange-rates/')){invalidateFinanceRequests();setTaxEpoch(value=>value+1);}return result;},[role]);
-  const load=useCallback(async(clearVersion=false)=>{
+  const load=useCallback(async(clearVersion=false,propagateError=false)=>{
     const sequence=++reportSequence.current,selected={...filtersRef.current};
     const scope=JSON.stringify([selected.month,selected.currency,selected.range,selected.source||'']);
     const needsSummary=clearVersion||scope!==summaryScope.current;
@@ -71,7 +72,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
       catch(reason){if(!(reason instanceof FinanceRequestError)||reason.status!==409)throw reason;if(sequence!==reportSequence.current)return;valuation.current=undefined;setData(undefined);setNotice(ui.valuationChanged);result=await request(`/finance/report?${financeReportQuery(selected)}`);}
       if(sequence!==reportSequence.current)return;
       valuation.current=result.valuationVersion;loadedReportKey.current=financeReportQuery(selected).toString();setData(result);summaryScope.current=scope;setRatesNotice(rateWarning);
-    }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';}}finally{if(sequence===reportSequence.current)setLoading(false)}
+    }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';}if(propagateError)throw reason;}finally{if(sequence===reportSequence.current)setLoading(false)}
   },[request]);
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);let currency:DisplayCurrency='EUR';
@@ -107,7 +108,18 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const selectedTable=data&&filters.tab==='expenses'?financeExpenseTable(data):data?.table;
   const recentExpenses=data?financeRecentExpenses(data):[];
   const fiscalMoney=(amount:number|null|undefined)=>fiscalAmountLabel(amount,filters.currency);
-  const change=(key:'receivedMinor'|'ordinaryExpensesMinor'|'accruedTaxesMinor'|'resultAfterAccrualMinor')=>fiscalComparison(current?.[key],previous?.[key],current?.incomplete,previous?.incomplete);
+  const taxChange=(key:'accruedTaxesMinor'|'resultAfterAccrualMinor')=>fiscalComparison(current?.[key],previous?.[key],current?.incomplete,previous?.incomplete);
+  async function calculateTaxes(){
+    setCalculatingTaxes(true);
+    setError('');
+    setNotice('');
+    try{
+      const result:{from:string;through:string}=await request('/finance/taxes/calculate',{method:'POST'});
+      await load(true,true);
+      setNotice(taxUi.calculationUpdated.replace('{from}',financeDate(result.from)).replace('{through}',financeDate(result.through)));
+    }catch(reason){setError((reason as Error).message)}
+    finally{setCalculatingTaxes(false)}
+  }
   const contextRow=data?.table.rows.find(row=>row.orderId===filters.orderId);
   const contextOrderNumber=orders.find(order=>order.id===filters.orderId)?.number||(contextRow&&('orderNumber' in contextRow?contextRow.orderNumber:contextRow.number))||ui.unavailableOrder;
   function clearOrderFilter(){patch({orderId:''});const url=new URL(window.location.href);url.searchParams.delete('orderId');window.history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);}
@@ -121,12 +133,15 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     </div></header>
     {(notice||ratesNotice)&&<Alert color="yellow" role="status" withCloseButton onClose={()=>{setNotice('');setRatesNotice('')}}>{[notice,ratesNotice].filter(Boolean).join(' ')}</Alert>}{error&&<CrmAlert>{error} <CrmButton size="compact-xs" tone="secondary" onClick={()=>void load(true)}>{ui.refresh}</CrmButton></CrmAlert>}{pending&&!data&&<div className="finance-report-loading" role="status"><Loader size="sm"/>{ui.loading}</div>}
     {data&&<>
-      <section className="finance-report-kpis finance-report-kpis-tax" aria-label={ui.title}>
-        <Metric title={ui.received} amount={fiscalMoney(current?.receivedMinor)} icon="wallet" color="green" comparison={change('receivedMinor')} hint={ui.previousPeriod} tooltip={ui.receivedHint}/>
-        <Metric title={taxUi.ordinaryExpenses} amount={fiscalMoney(current?.ordinaryExpensesMinor)} icon="arrow" color="red" comparison={change('ordinaryExpensesMinor')} hint={ui.previousPeriod} inverse/>
+      <section className={`finance-report-kpis finance-report-kpis-tax${canWrite?' finance-report-kpis-calculable':''}`} aria-label={ui.title}>
+        <Metric title={ui.received} amount={fiscalMoney(current?.receivedMinor)} icon="wallet" color="green" comparison={fiscalComparison(current?.receivedMinor,previous?.receivedMinor)} hint={ui.previousPeriod} tooltip={ui.receivedHint}/>
+        <Metric title={taxUi.ordinaryExpenses} amount={fiscalMoney(current?.ordinaryExpensesMinor)} icon="arrow" color="red" comparison={fiscalComparison(current?.ordinaryExpensesMinor,previous?.ordinaryExpensesMinor)} hint={ui.previousPeriod} inverse/>
         <Metric title={taxUi.cashResult} amount={fiscalMoney(current?.cashResultMinor)} icon="wallet" color="green" comparison={fiscalComparison(current?.cashResultMinor,previous?.cashResultMinor)} hint={ui.previousPeriod} tooltip={taxUi.cashFormula}/>
-        <UnstyledButton className="finance-tax-kpi-link" onClick={()=>patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'})}><Metric title={taxUi.accruedTaxes} amount={fiscalMoney(current?.accruedTaxesMinor)} icon="tax" color="red" comparison={change('accruedTaxesMinor')} hint={!current||current.incomplete||fiscal?.presentationFx?.some(row=>row.month===filters.month)?taxUi.provisional:taxUi.complete} inverse/></UnstyledButton>
-        <Metric title={taxUi.accrualResult} amount={fiscalMoney(current?.resultAfterAccrualMinor)} icon="trend" color="violet" comparison={change('resultAfterAccrualMinor')} hint={!current||current.incomplete||fiscal?.presentationFx?.some(row=>row.month===filters.month)?taxUi.provisional:ui.previousPeriod} tooltip={taxUi.resultFormula}/>
+        <Metric title={taxUi.accruedTaxes} amount={fiscalMoney(current?.accruedTaxesMinor)} icon="tax" color="red"
+          comparison={taxChange('accruedTaxesMinor')} hint={!current||current.incomplete||fiscal?.presentationFx?.some(row=>row.month===filters.month)?taxUi.provisional:taxUi.complete} inverse
+          openDetails={()=>patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'})}
+          action={canWrite&&<CrmButton size="compact-xs" tone="secondary" loading={calculatingTaxes} disabled={pending} onClick={()=>void calculateTaxes()}>{taxUi.calculate}</CrmButton>}/>
+        <Metric title={taxUi.accrualResult} amount={fiscalMoney(current?.resultAfterAccrualMinor)} icon="trend" color="violet" comparison={taxChange('resultAfterAccrualMinor')} hint={!current||current.incomplete||fiscal?.presentationFx?.some(row=>row.month===filters.month)?taxUi.provisional:ui.previousPeriod} tooltip={taxUi.resultFormula}/>
         <UnstyledButton className="finance-source-kpi" aria-label={sourceUi.onlineReceipts} onClick={()=>patch({source:'WEBSITE',tab:'payments',scope:'all'})}><Metric title={sourceUi.receiptsKpi} amount={fiscalMoney(current?.websiteReceivedMinor)} icon="cart" color="green" hint={sourceUi.actualReceipts} tooltip={sourceUi.onlineReceipts}/></UnstyledButton>
         <Metric title={ui.debt} amount={money(data.debtMinor)} icon="clock" color="orange" hint={ui.currentOrders} tooltip={ui.debtHint}/>
         <Metric title={ui.forecast} amount={money(data.forecastMinor)} icon="calendar" color="blue" extra={`${data.forecastCount} ${ui.orders}`} hint={ui.horizon} tooltip={`${ui.forecastHint} ${financeDate(data.today)} – ${financeDate(data.forecastUntil)}`}/>
@@ -163,7 +178,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     {pickOrder&&<CrmModal busy={actionBusy} title={pickOrder==='payment'?ui.addPayment:ui.addInvoice} close={()=>{if(!actionBusy){actionSequence.current++;setPickOrder(undefined)}}}><Stack><Select label={ui.chooseOrder} searchable onSearchChange={setRemoteSearch} value={pickedOrder} onChange={setPickedOrder} data={orders.map(item=>({value:item.id,label:`${item.number} · ${item.clientName}`}))}/><CrmButton loading={actionBusy} disabled={!pickedOrder} onClick={()=>pickedOrder&&void orderAction(pickedOrder,pickOrder==='payment'?'payment':'invoice')}>{ui.open}</CrmButton></Stack></CrmModal>}
   </div></MantineProvider>;
 }
-function Metric({title,amount,icon,color,hint,extra,comparison,inverse,tooltip}:{title:string;amount:string;icon:string;color:string;hint:string;extra?:string;comparison?:number|null;inverse?:boolean;tooltip?:string}){
+function Metric({title,amount,icon,color,hint,extra,comparison,inverse,tooltip,openDetails,action}:{title:string;amount:string;icon:string;color:string;hint:string;extra?:string;comparison?:number|null;inverse?:boolean;tooltip?:string;openDetails?:()=>void;action?:ReactNode}){
   const theme=useMantineTheme(),palette=theme.colors[color]||theme.colors.violet!;
   const amountRef=useRef<HTMLElement>(null);
   const [resizeAmountRef,amountBox]=useResizeObserver<HTMLElement>();
@@ -176,7 +191,7 @@ function Metric({title,amount,icon,color,hint,extra,comparison,inverse,tooltip}:
       element.style.setProperty('--finance-kpi-amount-size',`${Math.max(12,base*element.clientWidth/element.scrollWidth-.2)}px`);
     }
   },[amount,amountBox.width,amountRef]);
-  const body=<article className="finance-report-kpi"><span className="finance-report-kpi-icon" style={{background:palette[0],color:palette[6]}}><FinanceIcon name={icon}/></span><div className="finance-kpi-copy"><h2 title={title}>{title}</h2><strong ref={mergedAmountRef} data-wide={amount.length>16||undefined}>{amount}</strong>{comparison!==undefined?<span className={`finance-kpi-detail ${comparison===null?'finance-report-neutral':(inverse?comparison<=0:comparison>=0)?'finance-report-positive':'finance-report-negative'}`}>{comparison===null?ui.noComparison:comparison===0?ui.noChanges:`${comparison>0?'↑ +':'↓ '}${comparison}%`}</span>:extra&&<span className="finance-kpi-detail">{extra}</span>}<small>{hint}</small></div></article>;
+  const body=<article className="finance-report-kpi"><span className="finance-report-kpi-icon" style={{background:palette[0],color:palette[6]}}><FinanceIcon name={icon}/></span><div className="finance-kpi-copy"><h2 title={title}>{openDetails?<UnstyledButton onClick={openDetails}>{title}</UnstyledButton>:title}</h2><strong ref={mergedAmountRef} data-wide={amount.length>16||undefined}>{amount}</strong>{comparison!==undefined?<span className={`finance-kpi-detail ${comparison===null?'finance-report-neutral':(inverse?comparison<=0:comparison>=0)?'finance-report-positive':'finance-report-negative'}`}>{comparison===null?ui.noComparison:comparison===0?ui.noChanges:`${comparison>0?'↑ +':'↓ '}${comparison}%`}</span>:extra&&<span className="finance-kpi-detail">{extra}</span>}<small>{hint}</small></div>{action&&<div className="finance-tax-kpi-action">{action}</div>}</article>;
   return tooltip?<Tooltip label={tooltip} multiline w={300} withArrow><div className="finance-kpi-tooltip" tabIndex={0}>{body}</div></Tooltip>:body;
 }
 export function FinanceIcon({name}:{name:string}){const paths:Record<string,ReactNode>={tax:<><path d="m5 19 14-14"/><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/></>,cart:<CartIcon/>,left:<path d="m14 6-6 6 6 6"/>,right:<path d="m9 6 6 6-6 6"/>,wallet:<><path d="M3 6h17v15H3zM3 6V3h13v3"/><path d="M15 12h5v5h-5z"/></>,calendar:<><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6m10-6v6M3 10h18"/></>,download:<><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></>,invoice:<><path d="M5 2h10l4 4v16H5zM15 2v5h4M8 11h8m-8 4h8m-8 4h5"/></>,clock:<><circle cx="12" cy="12" r="9"/><path d="M12 6v7l4 2"/></>,trend:<path d="m3 17 6-6 4 3 8-10m-6 0h6v6"/>,arrow:<path d="M5 19 19 5M5 5h14v14"/>,plus:<path d="M12 3v18M3 12h18"/>,search:<><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></>};return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]||paths.wallet}</svg>}

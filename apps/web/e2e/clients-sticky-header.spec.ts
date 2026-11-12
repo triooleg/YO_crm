@@ -21,6 +21,16 @@ for (const width of [1920, 1366, 390]) {
     });
     await page.goto('/?section=clients');
     await expect(page.locator('.clients-table tbody tr')).toHaveCount(20);
+    const filters = await page.locator('.clients-toolbar').boundingBox();
+    const actions = await page.locator('.clients-header-actions').boundingBox();
+    const controls = await page.locator('.clients-sticky-controls').boundingBox();
+    expect(actions!.x + actions!.width).toBeLessThanOrEqual(controls!.x + controls!.width + 1);
+    if (width >= 1366) {
+      expect(actions!.x).toBeGreaterThan(filters!.x + filters!.width);
+      expect(Math.abs(actions!.y + actions!.height / 2 - filters!.y - filters!.height / 2)).toBeLessThan(2);
+    } else {
+      expect(actions!.y).toBeGreaterThan(filters!.y + filters!.height);
+    }
     await page.locator('.crm-content').evaluate(element => { element.scrollTop = 550; });
 
     const headerGap = () => page.locator('.clients-table thead').evaluate(element => {

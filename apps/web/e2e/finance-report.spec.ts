@@ -1,6 +1,38 @@
 import {test,expect,type Page} from '@playwright/test';
 import {join} from 'node:path';
 
+test('manual tax calculation posts once and refreshes the selected finance report',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const calls=await setup(page);
+ let writes=0;
+ await page.route('**/api/finance/taxes/calculate',route=>{
+  expect(route.request().method()).toBe('POST');
+  writes++;
+  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+ });
+ await page.goto('/?section=finance&period=2026-10');
+ await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+ const reads=calls.filter(call=>call.path==='/api/finance/report').length;
+ await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
+ await expect(page.getByRole('status').filter({hasText:'Налоговый отчёт обновлён'})).toBeVisible();
+ expect(writes).toBe(1);
+ expect(calls.filter(call=>call.path==='/api/finance/report').length).toBeGreaterThan(reads);
+ await expect(page).toHaveURL(/period=2026-10/);
+});
+
+test('a failed report refresh after calculation shows the error without a success notice',async({page})=>{
+ await setup(page);
+ await page.route('**/api/finance/taxes/calculate',async route=>{
+  await page.route('**/api/finance/report?*',report=>report.fulfill({status:503,json:{message:'Отчёт временно недоступен'}}));
+  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+ });
+ await page.goto('/?section=finance');
+ await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+ await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
+ await expect(page.getByText('Отчёт временно недоступен',{exact:false})).toBeVisible();
+ await expect(page.getByText('Налоговый отчёт обновлён',{exact:false})).toHaveCount(0);
+});
+
 test('order deep-link filter stays visible and can be removed without leaving Finance',async({page})=>{
  const calls=await setup(page);await page.goto('/?section=finance&orderId=order-1');
  await expect(page.getByRole('status').filter({hasText:'Заказ: TEST-001'})).toBeVisible();

@@ -1,3 +1,19 @@
+## 2026-11-12 - Manual tax calculation and Clients controls (LOCAL)
+
+- The Finance tax card starts an authenticated calculation through today's
+  Kyiv date, audits the checkpoint and refreshes the reports. Unresolved earlier
+  sources remain eligible and explicit receipt confirmation is preserved.
+- Receipt capture remains atomic with payment creation. Scheduled tax
+  calculation and immediate post-payment reconciliation no longer run.
+- Cash KPI comparisons use their own known amounts even if taxes are incomplete.
+
+## 2026-11-12 - Clients filters and actions on one row
+
+- The existing sticky Clients controls place search and filters on the left
+  and duplicate search, merge and creation on the right at desktop widths.
+- Narrow screens stack the controls. Existing action handlers, focus targets,
+  and the measured sticky offset for the table and client detail are preserved.
+
 ## 2026-11-07 - Authorized 0.19.3 deployment preparation
 
 - Owner explicitly authorized deployment of the completed UI batch and requires
