@@ -37,6 +37,24 @@ test('PostgreSQL real tax service, lifecycle, constraints, rollback, CAS and ret
    assert.equal((await query(`SELECT * FROM "TaxEntry" WHERE "paymentId"=$1 AND kind='SOURCE'`,edge.id)).length,4);
    await service.saveSettings(await cmd({enabled:true}),actor);
   });
+  await t.test('EUR website payment reconciles directly against gross UAH from the bank',async()=>{
+   const receipt=await payment(34644,'2026-05-01T10:00:00Z','EUR');
+   await locked(tx=>service.capturePayment(tx,receipt.id,'WEBSITE_CREATE'));
+   const root=(await roots(receipt))[0];
+   const confirmation=await cmd({grossMinor:1700000,grossCurrency:'UAH',incomeDate:'2026-05-02',evidence:'bank credit 16660 UAH plus 340 UAH fee'});
+   const first=await service.confirmSource(root.id,confirmation,actor);
+   const replay=await service.confirmSource(root.id,confirmation,actor);
+   assert.equal(replay.id,first.id);
+   const entries=await query(`SELECT * FROM "TaxEntry" WHERE "paymentId"=$1 AND kind='FINALIZE' ORDER BY component`,receipt.id);
+   assert.deepEqual(entries.map(e=>[e.component,e.amountMinor]),[['UNIFIED',85000],['MILITARY',17000]]);
+   for(const e of entries){
+    assert.equal(e.baseMinor,1700000);
+    assert.equal(e.snapshot.grossCurrency,'UAH');
+    assert.equal(e.snapshot.originalPayment.currency,'EUR');
+    assert.equal(e.snapshot.incomeDate,'2026-05-02');
+    assert.equal(e.snapshot.receiptConfirmed,true);
+   }
+  });
   let p,rs;
   await t.test('same Payment concurrent capture, source duplicate and audit rollback',async()=>{
    p=await payment();await Promise.all([locked(tx=>service.capturePayment(tx,p.id,'CREATE',actor.id)),locked(tx=>service.capturePayment(tx,p.id,'CREATE',actor.id))]);rs=await roots(p);assert.equal(rs.length,2);assert.equal((await query(`SELECT id FROM "TaxEntry" WHERE "paymentId"=$1 AND kind='SOURCE'`,p.id)).length,2);

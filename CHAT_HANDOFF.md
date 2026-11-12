@@ -1,3 +1,7 @@
+## 2026-11-12 - Website acquiring tax reconciliation
+
+- Tax reconciliation accepts confirmed UAH gross and deposit date for a foreign-currency order. The original payment is retained in the audit snapshot. The UAH amount comes from the bank statement, including the actual acquiring fee.
+
 ## 2026-11-12 - CRM 0.19.4 installed
 
 - Installed exact application commit `cfc436044690251b8f07215f7b86b233c53ac3e9`,

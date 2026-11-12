@@ -163,7 +163,7 @@ export class TaxesService {
   const period=await this.period(tx,postingMonth);
   const periodLocks=await this.lockPeriods(tx,[root.periodId,period.id]);if(period.state!=='OPEN')throw new ConflictException('Коррекция публикуется только в открытом периоде');
   const previousDone=await this.finalForSource(tx,source.id);
-  if(previousDone&&(!confirmation.receiptConfirmed||previousDone.snapshot.receiptConfirmed&&previousDone.snapshot.grossMinor===gross&&previousDone.snapshot.incomeDate===date))return previousDone;
+  if(previousDone&&(!confirmation.receiptConfirmed||previousDone.snapshot.receiptConfirmed&&previousDone.snapshot.grossMinor===gross&&(previousDone.snapshot.grossCurrency??source.snapshot.state.currency)===rate.currency&&previousDone.snapshot.incomeDate===date))return previousDone;
   const policy=excluded?root.snapshot.policy:await one<TaxPolicy>(tx,`SELECT * FROM "TaxPolicy" WHERE state='PUBLISHED' AND "effectiveFrom"<=$1 ORDER BY "effectiveFrom" DESC LIMIT 1`,date);
   if(!policy)throw new ConflictException('Нет исторической политики на подтверждённую дату');
   const base=convertMinor(gross,rate),voided=!!source.snapshot.state.voidedAt;
@@ -180,15 +180,15 @@ export class TaxesService {
    }
   }
   const current=await this.lifecycleBalance(tx,root.id),first=!(await one(tx,`SELECT id FROM "TaxEntry" WHERE "rootId"=$1 AND kind='FINALIZE'`,root.id));
-  const e=await entry(tx,{...this.rootFields(root),periodId:period.id,originalPeriodId:period.id===root.periodId?null:root.periodId,kind:first?'FINALIZE':voided?'REVERSE':previous===0?'RESTORE':'ADJUST',operationKey,amountMinor:target-current,baseMinor:base,snapshot:{lifecycle:true,sourceId:source.id,stateHash:source.snapshot.stateHash,rate,grossMinor:gross,incomeDate:date,postingPeriod:period.month,valuationPolicy:policy,receiptConfirmed:!!confirmation.receiptConfirmed,evidence:confirmation.evidence??null,originalPayment:source.snapshot.state,excludedBeforeStart:excluded,rounding:'half-up kopecks',targetMinor:target}}, {rootId:root.id,sourceId:source.id,rate,confirmation});
+  const e=await entry(tx,{...this.rootFields(root),periodId:period.id,originalPeriodId:period.id===root.periodId?null:root.periodId,kind:first?'FINALIZE':voided?'REVERSE':previous===0?'RESTORE':'ADJUST',operationKey,amountMinor:target-current,baseMinor:base,snapshot:{lifecycle:true,sourceId:source.id,stateHash:source.snapshot.stateHash,rate,grossMinor:gross,grossCurrency:rate.currency,incomeDate:date,postingPeriod:period.month,valuationPolicy:policy,receiptConfirmed:!!confirmation.receiptConfirmed,evidence:confirmation.evidence??null,originalPayment:source.snapshot.state,excludedBeforeStart:excluded,rounding:'half-up kopecks',targetMinor:target}}, {rootId:root.id,sourceId:source.id,rate,confirmation});
   await audit(tx,actorId,'TAX_FINALIZE',e.id,e);return e;
  }
- async confirmSource(rootId:string,d:Command&{grossMinor:number;incomeDate:string;evidence:string;postingPeriod?:string},actor:Actor){
+ async confirmSource(rootId:string,d:Command&{grossMinor:number;grossCurrency?:'UAH';incomeDate:string;evidence:string;postingPeriod?:string},actor:Actor){
   allow(actor);key(d.operationKey);const replay=await this.prisma.auditLog.findFirst({where:{requestId:'tax:'+d.operationKey,entityType:'TaxCommand'}});if(replay){const a=replay.after as Row;if(a.payloadHash!==hash({action:'TAX_CONFIRM_SOURCE',...d,rootId}))throw new ConflictException('Ключ операции использован с другими данными');return a.result as TaxEntry;}
   positive(d.grossMinor);dateOnly(d.incomeDate);reason(d.evidence);if(d.postingPeriod)monthKey(d.postingPeriod);
   const root=await this.root(this.prisma,rootId),source=await this.source(this.prisma,rootId);if(!source)throw new BadRequestException('Нет события источника');
   const original=await one<TaxPeriod>(this.prisma,`SELECT * FROM "TaxPeriod" WHERE id=$1`,root.periodId),closedLiability=await one(this.prisma,`SELECT p.id FROM "TaxEntry" e JOIN "TaxPeriod" p ON p.id=e."periodId" WHERE e."rootId"=$1 AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') AND p.state='CLOSED' LIMIT 1`,rootId);if(original?.state==='CLOSED'||closedLiability){allow(actor,true);if(!d.postingPeriod)throw new ConflictException('Укажите открытый период корректировки закрытого источника');}
-  const rate=await this.nbu.rate(source.snapshot.state.currency,d.incomeDate);
+  const rate=await this.nbu.rate(d.grossCurrency??source.snapshot.state.currency,d.incomeDate);
   return this.command('TAX_CONFIRM_SOURCE',{...d,rootId} as typeof d,actor,false,async tx=>{const current=await this.source(tx,rootId);if(current?.id!==source.id)throw new ConflictException('Оплата изменилась во время сверки');const closedNow=await one(tx,`SELECT p.id FROM "TaxPeriod" p WHERE p.state='CLOSED' AND (p.id=$1 OR EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."periodId"=p.id AND e."rootId"=$2 AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST'))) LIMIT 1`,root.periodId,root.id);if(closedNow){allow(actor,true);if(!d.postingPeriod)throw new ConflictException('Укажите открытый период корректировки закрытого источника');}
    const siblings=await rows<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "paymentId"=$1 AND kind='ROOT' ORDER BY component`,root.paymentId);
    const states=[];for(const sibling of siblings){const state=await this.source(tx,sibling.id);if(!state||state.snapshot.stateHash!==source.snapshot.stateHash)throw new ConflictException('Компоненты оплаты требуют общей сверки');states.push({root:sibling,source:state});}

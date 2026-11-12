@@ -36,6 +36,7 @@ export class TaxBackfillApplyDto extends TaxCommandDto {
 export class TaxConfirmSourceDto extends TaxCommandDto {
  @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/) postingPeriod?:string;
  @IsInt() @Min(1) grossMinor!:number;
+ @IsOptional() @IsIn(['UAH']) grossCurrency?:'UAH';
  @Matches(/^\d{4}-\d{2}-\d{2}$/) incomeDate!:string;
  @IsString() @MaxLength(4000) evidence!:string;
 }

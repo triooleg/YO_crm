@@ -76,7 +76,7 @@ export function TaxSnapshot({ value }: { value: unknown }) {
       if (!labels[key] || val == null || !['string', 'number', 'boolean'].includes(typeof val)) continue;
       const originalPayment = data.originalPayment && typeof data.originalPayment === 'object' ? data.originalPayment as Record<string, unknown> : {};
       const sourceCurrency = typeof data.currency === 'string' ? data.currency : typeof data.originalCurrency === 'string' ? data.originalCurrency : typeof originalPayment.currency === 'string' ? originalPayment.currency : '';
-      const text = key.endsWith('Minor') || key === 'minor' ? taxAmount(typeof val === 'number' ? val : null, ['grossMinor', 'amountMinor'].includes(key) ? sourceCurrency : 'UAH') : key.endsWith('RateBps') && typeof val === 'number' ? `${val / 100}%` : String(val);
+      const text = key.endsWith('Minor') || key === 'minor' ? taxAmount(typeof val === 'number' ? val : null, key === 'grossMinor' && typeof data.grossCurrency === 'string' ? data.grossCurrency : ['grossMinor', 'amountMinor'].includes(key) ? sourceCurrency : 'UAH') : key.endsWith('RateBps') && typeof val === 'number' ? `${val / 100}%` : String(val);
       rows.push({ label: labels[key]!, text });
     }
   }
