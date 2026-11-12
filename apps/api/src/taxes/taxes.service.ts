@@ -11,6 +11,11 @@ import { readRetryableFinanceSnapshot } from '../finance/finance-cache-retry';
 export type Command={operationKey:string;expectedRevision:number};
 export type CaptureOptions={createIfMissing?:boolean;receiptConfirmed?:boolean;evidence?:string;confirmedByRole?:string};
 type CashData={payments:{id:string;amountMinor:number;currency:string;receivedAt:Date|string}[];expenses:{id:string;amountMinor:number;currency:string;incurredAt:Date|string}[];links:{expenseId:string}[]};
+type CalculationResult={from:string;through:string;finalized:number;retried:number;deferred:number};
+type CalculationState={id:string;status:'RUNNING'}|{id:string;status:'COMPLETED';result:CalculationResult}|{id:string;status:'FAILED';reason:'SETTINGS_CHANGED'|'CALCULATION_FAILED'};
+class TaxCalculationInterrupted extends ConflictException {
+ constructor(){super('Настройки налогового учёта изменились. Расчёт остановлен');}
+}
 export type Totals={accruedMinor:number;paidMinor:number;allocatedMinor:number;debtMinor:number;creditMinor:number};
 const monetary=['FINALIZE','REVERSE','RESTORE','ADJUST'];
 const sum=(values:number[])=>safeMinor(values.reduce((n,v)=>n+BigInt(v),0n));
@@ -24,6 +29,8 @@ function positive(value:number){integer(value);if(value<=0)fail('Сумма до
 @Injectable()
 export class TaxesService {
  private readonly reportCache:FinancePeriodCache<Tx>;
+ private activeCalculation?:string;
+ private readonly calculations=new Map<string,CalculationState>();
  constructor(private readonly prisma:PrismaService,private readonly nbu:HistoricalNbuService){this.reportCache=new FinancePeriodCache(prisma);}
  private async command<T>(action:string,d:Command,actor:Actor,admin:boolean,run:(tx:Tx,c:Config)=>Promise<T>,periodRevision=false,beforeLock?:(tx:Tx)=>Promise<void>):Promise<T>{
   allow(actor,admin);key(d.operationKey);if(!Number.isInteger(d.expectedRevision)||d.expectedRevision<0)fail('Укажите ревизию');
@@ -110,8 +117,13 @@ export class TaxesService {
  }
  private rootFields(root:TaxEntry){return {periodId:root.periodId,originalPeriodId:root.originalPeriodId,policyId:root.policyId,paymentId:root.paymentId,orderId:root.orderId,component:root.component,rootId:root.id};}
  assertExpenseMutable(tx:Tx,id:string){return assertTaxExpenseMutable(tx,id);}
- async catchUpMonthly(now=new Date(),actorId?:string){
-  await this.prisma.$transaction(async tx=>{await lockConfig(tx);const c=await config(tx);if(!c.enabled)return;
+ private async assertCalculationConfig(tx:Tx,revision?:number){
+  const current=await config(tx);
+  if(revision!==undefined&&(!current.enabled||current.revision!==revision))throw new TaxCalculationInterrupted();
+  return current;
+ }
+ async catchUpMonthly(now=new Date(),actorId?:string,revision?:number){
+  await this.prisma.$transaction(async tx=>{await lockConfig(tx);const c=await this.assertCalculationConfig(tx,revision);if(!c.enabled)return;
    for(const month of monthsBetween(ACCOUNTING_START.slice(0,7),kyivDate(now).slice(0,7))){const period=await this.period(tx,month);const p=period.snapshot.policy as TaxPolicy;
     for(const comp of COMPONENTS){if((comp==='UNIFIED'&&p.unifiedMode!=='FIXED')||(comp==='MILITARY'&&p.group!==2))continue;
      const sourceKey=`month:${month}:${comp}`;let root=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "sourceKey"=$1`,sourceKey);
@@ -187,9 +199,10 @@ export class TaxesService {
    return selected!;
   });
  }
- private async deferSourceReview(source:TaxEntry,incomeDate:string,currency:string,actorId?:string){
+ private async deferSourceReview(source:TaxEntry,incomeDate:string,currency:string,actorId?:string,revision?:number){
   return this.prisma.$transaction(async tx=>{
    await lockConfig(tx);
+   if(revision!==undefined)await this.assertCalculationConfig(tx,revision);
    if((await this.source(tx,source.rootId!))?.id!==source.id||await this.finalForSource(tx,source.id))return false;
    const operationKey='manual-review:'+source.id;
    if(await one(tx,`SELECT id FROM "TaxEntry" WHERE "operationKey"=$1`,operationKey))return false;
@@ -200,9 +213,29 @@ export class TaxesService {
    return true;
   });
  }
+ startCalculation(actor:Actor):CalculationState{
+  allow(actor);
+  if(this.activeCalculation)return this.calculationStatus(this.activeCalculation,actor);
+  const id=randomUUID(), accepted={id,status:'RUNNING'} as const;
+  this.activeCalculation=id;
+  this.calculations.set(id,accepted);
+  while(this.calculations.size>20)this.calculations.delete(this.calculations.keys().next().value!);
+  void Promise.resolve().then(()=>this.calculate(actor)).then(
+   result=>this.calculations.set(id,{id,status:'COMPLETED',result}),
+   error=>this.calculations.set(id,{id,status:'FAILED',reason:error instanceof TaxCalculationInterrupted?'SETTINGS_CHANGED':'CALCULATION_FAILED'}),
+  ).finally(()=>{this.activeCalculation=undefined;});
+  return accepted;
+ }
+ calculationStatus(id:string,actor:Actor):CalculationState{
+  allow(actor);
+  const state=this.calculations.get(id);
+  if(!state)throw new NotFoundException('Расчёт больше недоступен. Запустите его снова');
+  return state;
+ }
  async calculate(actor:Actor,now=new Date()){
   allow(actor);
-  if(!(await config(this.prisma)).enabled)throw new ConflictException('Налоговый учёт отключён');
+  const settings=await config(this.prisma);
+  if(!settings.enabled)throw new TaxCalculationInterrupted();
   const through=kyivDate(now);
   const previous=await this.prisma.auditLog.findFirst({
    where:{entityType:'TaxLedger',action:'TAX_MANUAL_CALCULATE'},
@@ -212,24 +245,29 @@ export class TaxesService {
   const from=typeof last==='string'&&last<=through?last:ACCOUNTING_START;
   // Monthly entries and receipt versions are the durable checkpoints.
   // Earlier unresolved receipts remain eligible when their evidence becomes available.
-  await this.catchUpMonthly(now,actor.id);
+  await this.catchUpMonthly(now,actor.id,settings.revision);
   const result={from,through,finalized:0,retried:0,deferred:0};
   let after=0n;
   for(;;){
-   const batch=await this.reconcilePending(now,50,undefined,{through,after},actor.id);
+   const batch=await this.reconcilePending(now,50,undefined,{through,after,revision:settings.revision},actor.id);
    result.finalized+=batch.finalized;
    result.retried+=batch.retried;
    result.deferred+=batch.deferred;
    if(batch.nextSequence==null)break;
    after=batch.nextSequence;
   }
-  await audit(this.prisma,actor.id,'TAX_MANUAL_CALCULATE',randomUUID(),result);
+  await this.prisma.$transaction(async tx=>{
+   await lockConfig(tx);
+   await this.assertCalculationConfig(tx,settings.revision);
+   await audit(tx,actor.id,'TAX_MANUAL_CALCULATE',randomUUID(),result);
+  });
   return result;
  }
- async reconcilePending(now=new Date(),limit=20,paymentId?:string,window?:{through:string;after:bigint},actorId?:string){
+ async reconcilePending(now=new Date(),limit=20,paymentId?:string,window?:{through:string;after:bigint;revision:number},actorId?:string){
   const candidates=await rows<TaxEntry & { cursor: string }>(this.prisma,`SELECT s.*,s.sequence::text AS cursor FROM "TaxEntry" s JOIN "TaxEntry" r ON r.id=s."rootId" JOIN "TaxPeriod" p ON p.id=r."periodId" WHERE s.kind='SOURCE' AND p.state='OPEN' AND ($4::text IS NULL OR (s.snapshot->>'incomeDate'<=$4 AND s."createdAt"<=$2::timestamptz AND s.sequence>$5::bigint)) AND ($3::text IS NULL OR s."paymentId"=$3) AND s.snapshot->'state'->>'voidedAt' IS NULL AND NOT EXISTS(SELECT 1 FROM "TaxEntry" review WHERE review.kind='RESOLVE' AND review.snapshot->>'manualReviewFor'=s.id) AND COALESCE((SELECT (retry.snapshot->>'nextRetryAt')::timestamptz FROM "TaxEntry" retry WHERE retry.kind='RESOLVE' AND retry.snapshot ? 'retryFor' AND retry.snapshot->>'currency'=s.snapshot->'state'->>'currency' AND retry.snapshot->>'incomeDate'=s.snapshot->>'incomeDate' ORDER BY retry.sequence DESC LIMIT 1),'-infinity'::timestamptz)<=$2::timestamptz AND s.id=(SELECT z.id FROM "TaxEntry" z WHERE z."rootId"=s."rootId" AND z.kind='SOURCE' ORDER BY z.sequence DESC LIMIT 1) AND (NOT EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."snapshot"->>'sourceId'=s.id AND e.snapshot->>'lifecycle'='true' AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST')) OR (s.snapshot->>'reason'='CREATE' AND s.snapshot->>'receiptConfirmed'='true' AND s.snapshot->>'confirmedByRole' IN('OWNER','ADMIN','ACCOUNTANT') AND NOT EXISTS(SELECT 1 FROM "TaxEntry" e WHERE e."snapshot"->>'sourceId'=s.id AND e.snapshot->>'lifecycle'='true' AND e.kind IN('FINALIZE','REVERSE','RESTORE','ADJUST') AND e.snapshot->>'receiptConfirmed'='true'))) ORDER BY s.sequence LIMIT $1`,Math.max(1,Math.min(50,limit)),now,paymentId??null,window?.through??null,window?.after??0n);
   const rates=new Map<string,HistoricalRate|Error>();let finalized=0,retried=0,deferred=0;
   for(const source of candidates){
+   if(window)await this.assertCalculationConfig(this.prisma,window.revision);
    // A void is a reconciliation request, never automatic proof of legal refund.
    if(source.snapshot.state.voidedAt)continue;
    const retry=await one<TaxEntry>(this.prisma,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND "snapshot"->>'retryFor'=$2 ORDER BY sequence DESC LIMIT 1`,source.rootId,source.id);
@@ -241,10 +279,10 @@ export class TaxesService {
    const currency=state.currency,date=reuse?previous!.snapshot.incomeDate:source.snapshot.incomeDate,rateKey=currency+':'+date;
    if(window&&date>window.through)continue;
    let rate:HistoricalRate|Error|undefined=reuse?previous!.snapshot.rate:rates.get(rateKey);if(!rate){try{rate=await this.nbu.rate(currency,date);}catch(e){rate=e instanceof Error?e:new Error('НБУ недоступен');}rates.set(rateKey,rate);}
-   if(rate instanceof Error){await this.prisma.$transaction(async tx=>{await lockConfig(tx);if((await this.source(tx,source.rootId!))?.id!==source.id||await this.finalForSource(tx,source.id))return;const currentRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND snapshot->>'retryFor'=$2 ORDER BY sequence DESC LIMIT 1`,source.rootId,source.id);if(currentRetry?.snapshot.nextRetryAt&&new Date(currentRetry.snapshot.nextRetryAt)>now)return;const dateRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot ? 'retryFor' AND snapshot->>'currency'=$1 AND snapshot->>'incomeDate'=$2 ORDER BY sequence DESC LIMIT 1`,currency,date);const shared=dateRetry?.snapshot.nextRetryAt&&new Date(dateRetry.snapshot.nextRetryAt)>now;const attempt=shared?Number(dateRetry!.snapshot.attempt):Number(dateRetry?.snapshot.attempt??0)+1,nextRetryAt=shared?dateRetry!.snapshot.nextRetryAt:new Date(now.getTime()+Math.min(24*60*60*1000,60000*2**Math.min(attempt-1,10))).toISOString();await entry(tx,{...this.rootFields(await this.root(tx,source.rootId!)),kind:'RESOLVE',operationKey:`retry:${source.id}:${attempt}`,snapshot:{retryFor:source.id,attempt,nextRetryAt,incomeDate:date,currency,error:'NBU_UNAVAILABLE'}},{sourceId:source.id,attempt,nextRetryAt});await audit(tx,actorId,'TAX_RETRY',source.id,{attempt,nextRetryAt,incomeDate:date});});retried++;continue;}
+   if(rate instanceof Error){await this.prisma.$transaction(async tx=>{await lockConfig(tx);if(window)await this.assertCalculationConfig(tx,window.revision);if((await this.source(tx,source.rootId!))?.id!==source.id||await this.finalForSource(tx,source.id))return;const currentRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE "rootId"=$1 AND kind='RESOLVE' AND snapshot->>'retryFor'=$2 ORDER BY sequence DESC LIMIT 1`,source.rootId,source.id);if(currentRetry?.snapshot.nextRetryAt&&new Date(currentRetry.snapshot.nextRetryAt)>now)return;const dateRetry=await one<TaxEntry>(tx,`SELECT * FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot ? 'retryFor' AND snapshot->>'currency'=$1 AND snapshot->>'incomeDate'=$2 ORDER BY sequence DESC LIMIT 1`,currency,date);const shared=dateRetry?.snapshot.nextRetryAt&&new Date(dateRetry.snapshot.nextRetryAt)>now;const attempt=shared?Number(dateRetry!.snapshot.attempt):Number(dateRetry?.snapshot.attempt??0)+1,nextRetryAt=shared?dateRetry!.snapshot.nextRetryAt:new Date(now.getTime()+Math.min(24*60*60*1000,60000*2**Math.min(attempt-1,10))).toISOString();await entry(tx,{...this.rootFields(await this.root(tx,source.rootId!)),kind:'RESOLVE',operationKey:`retry:${source.id}:${attempt}`,snapshot:{retryFor:source.id,attempt,nextRetryAt,incomeDate:date,currency,error:'NBU_UNAVAILABLE'}},{sourceId:source.id,attempt,nextRetryAt});await audit(tx,actorId,'TAX_RETRY',source.id,{attempt,nextRetryAt,incomeDate:date});});retried++;continue;}
    const evidence=rate;
    try {
-    const applied=await this.prisma.$transaction(async tx=>{await lockConfig(tx);const currentFinal=await this.finalForSource(tx,source.id);if((await this.source(tx,source.rootId!))?.id!==source.id||(currentFinal&&!(trustedManual&&currentFinal.snapshot.receiptConfirmed!==true))||await one(tx,`SELECT id FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot->>'manualReviewFor'=$1`,source.id))return false;
+    const applied=await this.prisma.$transaction(async tx=>{await lockConfig(tx);if(window)await this.assertCalculationConfig(tx,window.revision);const currentFinal=await this.finalForSource(tx,source.id);if((await this.source(tx,source.rootId!))?.id!==source.id||(currentFinal&&!(trustedManual&&currentFinal.snapshot.receiptConfirmed!==true))||await one(tx,`SELECT id FROM "TaxEntry" WHERE kind='RESOLVE' AND snapshot->>'manualReviewFor'=$1`,source.id))return false;
      const root=await this.root(tx,source.rootId!);
      const operationKey=currentFinal&&trustedManual?'reconcile-confirmed:'+source.id:'reconcile:'+source.id;
      if(reuse)await this.finalize(tx,root,source,evidence,{grossMinor:previous!.snapshot.grossMinor,incomeDate:previous!.snapshot.incomeDate,receiptConfirmed:trustedManual||previous!.snapshot.receiptConfirmed===true,evidence:trustedManual?(source.snapshot.evidence??'MANUAL_CRM_ENTRY'):previous!.snapshot.evidence},operationKey,actorId);
@@ -253,10 +291,10 @@ export class TaxesService {
     });
     if(applied)finalized++;
    } catch(error) {
-    if(!(error instanceof ConflictException))throw error;
+    if(!(error instanceof ConflictException)||error instanceof TaxCalculationInterrupted)throw error;
     // Finalization rolled back. Preserve a non-monetary, audited manual task
     // for this exact SOURCE and let unrelated eligible receipts continue.
-    if(await this.deferSourceReview(source,date,currency,actorId))deferred++;
+    if(await this.deferSourceReview(source,date,currency,actorId,window?.revision))deferred++;
    }
   }
   const tail=candidates.at(-1);

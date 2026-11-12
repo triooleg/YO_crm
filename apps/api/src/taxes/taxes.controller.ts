@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { User } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
@@ -15,7 +15,8 @@ export class TaxesController {
  @Header('Cache-Control','no-store') @Post('policies') @Roles('OWNER','ADMIN') policy(@Body() d:TaxPolicyDto,@Req() req:AuthRequest){return this.taxes.publishPolicy(d,req.user);}
  @Header('Cache-Control','no-store') @Post('policies/preview') @Roles('OWNER','ADMIN') policyPreview(@Body() d:TaxPolicyPreviewDto,@Req() req:AuthRequest){return this.taxes.policyPreview(d,req.user);}
  @Header('Cache-Control','no-store') @Get('report') report(@Query() d:TaxReportDto,@Req() req:AuthRequest){return this.taxes.report(d,req.user);}
- @Header('Cache-Control','no-store') @Post('calculate') calculate(@Req() req:AuthRequest){return this.taxes.calculate(req.user);}
+ @Header('Cache-Control','no-store') @Post('calculate') @HttpCode(202) calculate(@Req() req:AuthRequest){return this.taxes.startCalculation(req.user);}
+ @Header('Cache-Control','no-store') @Get('calculate/:id') calculationStatus(@Param('id') id:string,@Req() req:AuthRequest){return this.taxes.calculationStatus(id,req.user);}
  @Header('Cache-Control','no-store') @Get('report/export') async exportReport(@Query() d:TaxReportDto,@Req() req:AuthRequest,@Res() res:Response){res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="fop-taxes.csv"');return res.send(await this.taxes.reportCsv(d,req.user));}
  @Header('Cache-Control','no-store') @Get('orders/:id') order(@Param('id') id:string,@Req() req:AuthRequest){return this.taxes.order(id,req.user);}
  @Header('Cache-Control','no-store') @Post('backfill/preview') @Roles('OWNER','ADMIN') preview(@Body() d:TaxBackfillPreviewDto,@Req() req:AuthRequest){return this.taxes.backfillPreview(d,req.user);}

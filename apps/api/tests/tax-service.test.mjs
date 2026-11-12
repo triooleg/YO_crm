@@ -18,9 +18,23 @@ export function loadTax(file){
  vm.runInThisContext('(function(require,module,exports){'+out+'\n})',{filename})(custom,module,module.exports);return module.exports;
 }
 const {TaxesService}=loadTax('taxes.service.ts');
+test('manual HTTP entry point acknowledges a calculation before a slow provider finishes',async()=>{
+ const service=new TaxesService({},{});
+ let finish;
+ const work=new Promise(resolve=>{finish=resolve;});
+ service.calculate=()=>work;
+ const actor={id:'owner',role:'OWNER'};
+ const accepted=service.startCalculation(actor);
+ assert.equal(accepted.status,'RUNNING');
+ assert.equal(service.startCalculation(actor).id,accepted.id);
+ assert.equal(service.calculationStatus(accepted.id,actor).status,'RUNNING');
+ finish({from:'2026-11-09',through:'2026-11-12'});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(service.calculationStatus(accepted.id,actor).status,'COMPLETED');
+});
 test('manual calculation checks access and walks pending sources once through the Kyiv business date',async()=>{
  const runs=[];
- const prisma={appSetting:{},$queryRawUnsafe:async()=>[{value:{enabled:true}}],auditLog:{
+ const prisma={appSetting:{},$queryRawUnsafe:async()=>[{value:{enabled:true,revision:4}}],$executeRawUnsafe:async()=>{},$transaction:async fn=>fn(prisma),auditLog:{
   findFirst:async()=>({after:{through:'2026-11-09'}}),
   create:async()=>{},
  }};
@@ -33,10 +47,33 @@ test('manual calculation checks access and walks pending sources once through th
  const now=new Date('2026-11-11T22:30:00Z');
  await assert.rejects(()=>service.calculate({id:'manager',role:'MANAGER'},now),/прав/);
  const result=await service.calculate({id:'owner',role:'OWNER'},now);
- assert.deepEqual(runs,[{through:'2026-11-12',after:0n},{through:'2026-11-12',after:42n}]);
+ assert.deepEqual(runs,[{through:'2026-11-12',after:0n,revision:4},{through:'2026-11-12',after:42n,revision:4}]);
  assert.equal(result.from,'2026-11-09');
  assert.equal(result.through,'2026-11-12');
  assert.equal(result.finalized,2);
+});
+test('an NBU response arriving after tax accounting is disabled cannot finalize a receipt',async()=>{
+ let settings={enabled:true,revision:4};
+ let release,entered;
+ const providerEntered=new Promise(resolve=>{entered=resolve;});
+ const providerResponse=new Promise(resolve=>{release=resolve;});
+ const source={id:'source',rootId:'root',cursor:'1',snapshot:{incomeDate:'2026-11-09',state:{currency:'EUR'}}};
+ const prisma={
+  $transaction:async fn=>fn(prisma),
+  $executeRawUnsafe:async sql=>assert.match(sql,/pg_advisory_xact_lock/),
+  $queryRawUnsafe:async sql=>{
+   if(sql.includes('FROM "AppSetting"'))return [{value:settings}];
+   if(sql.includes('SELECT s.*'))return [source];
+   if(sql.includes("kind='RESOLVE'")||sql.includes("snapshot ? 'originalPayment'"))return [];
+   assert.fail('A ledger operation was attempted after settings changed');
+  },
+ };
+ const service=new TaxesService(prisma,{rate:async()=>{entered();return providerResponse;}});
+ const pending=service.reconcilePending(new Date('2026-11-12T12:00:00Z'),50,undefined,{through:'2026-11-12',after:0n,revision:4},'owner');
+ await providerEntered;
+ settings={enabled:false,revision:5};
+ release({numerator:'50',denominator:'1'});
+ await assert.rejects(pending,/Расчёт остановлен/);
 });
 test('service RBAC rejects manager before any database access',async()=>{
  const s=new TaxesService({},{});await assert.rejects(()=>s.settings({id:'m',role:'MANAGER'}),/прав/);

@@ -1,6 +1,9 @@
 import {test,expect,type Page} from '@playwright/test';
 import {join} from 'node:path';
 
+const calculationAccepted={id:'tax-test',status:'RUNNING'};
+const calculationCompleted={id:'tax-test',status:'COMPLETED',result:{from:'2026-11-09',through:'2026-11-12'}};
+
 test('manual tax calculation posts once and refreshes the selected finance report',async({page})=>{
  await page.setViewportSize({width:390,height:844});
  const calls=await setup(page);
@@ -8,14 +11,18 @@ test('manual tax calculation posts once and refreshes the selected finance repor
  await page.route('**/api/finance/taxes/calculate',route=>{
   expect(route.request().method()).toBe('POST');
   writes++;
-  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+  return route.fulfill({status:202,json:calculationAccepted});
  });
+ let polls=0;
+ await page.route('**/api/finance/taxes/calculate/tax-test',route=>route.fulfill({json:++polls===1?calculationAccepted:calculationCompleted}));
  await page.goto('/?section=finance&period=2026-10');
  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
  const reads=calls.filter(call=>call.path==='/api/finance/report').length;
  await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
+ await expect(page.getByText('Налоговый расчёт выполняется.',{exact:false})).toBeVisible();
  await expect(page.getByRole('status').filter({hasText:'Налоговый отчёт обновлён'})).toBeVisible();
  expect(writes).toBe(1);
+ expect(polls).toBe(2);
  expect(calls.filter(call=>call.path==='/api/finance/report').length).toBeGreaterThan(reads);
  await expect(page).toHaveURL(/period=2026-10/);
 });
@@ -23,8 +30,11 @@ test('manual tax calculation posts once and refreshes the selected finance repor
 test('a failed report refresh after calculation shows the error without a success notice',async({page})=>{
  await setup(page);
  await page.route('**/api/finance/taxes/calculate',async route=>{
+  return route.fulfill({status:202,json:calculationAccepted});
+ });
+ await page.route('**/api/finance/taxes/calculate/tax-test',async route=>{
   await page.route('**/api/finance/report?*',report=>report.fulfill({status:503,json:{message:'Отчёт временно недоступен'}}));
-  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+  return route.fulfill({json:calculationCompleted});
  });
  await page.goto('/?section=finance');
  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
@@ -50,8 +60,11 @@ test('changing month during the calculation refresh does not announce a stale su
   return route.fulfill({status:503,json:{message:'Новый период временно недоступен'}});
  });
  await page.route('**/api/finance/taxes/calculate',route=>{
+  return route.fulfill({status:202,json:calculationAccepted});
+ });
+ await page.route('**/api/finance/taxes/calculate/tax-test',route=>{
   calculationStarted=true;
-  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+  return route.fulfill({json:calculationCompleted});
  });
  try{
   await page.goto('/?section=finance&period=2026-10');

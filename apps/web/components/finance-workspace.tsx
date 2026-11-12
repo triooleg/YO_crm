@@ -32,6 +32,7 @@ const symbols={EUR:'€',USD:'$',UAH:'₴'};
 function businessMonth(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Kyiv',year:'numeric',month:'2-digit'}).formatToParts(new Date());return `${parts.find(part=>part.type==='year')!.value}-${parts.find(part=>part.type==='month')!.value}`;}
 const baseFilters=():FinanceFilters=>({source:'',month:businessMonth(),currency:'EUR',range:6,tab:'payments',page:1,pageSize:10,search:'',status:'',clientId:'',categoryId:'',orderId:'',from:'',to:'',sort:'date',direction:'desc',scope:'all'});
 type Props={role?:string;onNavigate?:(section:'orders',context:Record<string,string>)=>void};
+type TaxCalculation={id:string;status:'RUNNING'}|{id:string;status:'COMPLETED';result:{from:string;through:string}}|{id:string;status:'FAILED';reason:'SETTINGS_CHANGED'|'CALCULATION_FAILED'};
 export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const mobileCurrencyMenu=useMediaQuery('(max-width: 800px)');
   const [filters,setFilters]=useState<FinanceFilters>(baseFilters),[ready,setReady]=useState(false),[storedData,setData]=useState<FinanceReport>(),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[ratesNotice,setRatesNotice]=useState(''),[exporting,setExporting]=useState(false);
@@ -39,6 +40,8 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const [debouncedSearch]=useDebouncedValue(filters.search,250);
   const [taxEpoch,setTaxEpoch]=useState(0);
   const [calculatingTaxes,setCalculatingTaxes]=useState(false);
+  const taxCalculationRequest=useRef<AbortController|null>(null);
+  useEffect(()=>()=>taxCalculationRequest.current?.abort(),[]);
   const [initialChartMetric,setInitialChartMetric]=useState<'received'|'expenses'|'result'>('received');
   const [expense,setExpense]=useState<FinanceExpenseView|null>(),[categoriesOpen,setCategoriesOpen]=useState(false),[detail,setDetail]=useState<{order:FinanceOrder;row?:PaymentRow}>(),[payment,setPayment]=useState<FinanceOrder>(),[invoice,setInvoice]=useState<{order:FinanceOrder;invoice?:FinanceInvoice}>(),[pickOrder,setPickOrder]=useState<'payment'|'invoice'>(),[pickedOrder,setPickedOrder]=useState<string|null>(null),[actionBusy,setActionBusy]=useState(false);
   const [remoteSearch,setRemoteSearch]=useState(''),[remoteOptions,setRemoteOptions]=useState<{orders:FinanceReport['options']['orders'];clients:FinanceReport['options']['clients']}>({orders:[],clients:[]});
@@ -111,16 +114,31 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const fiscalMoney=(amount:number|null|undefined)=>fiscalAmountLabel(amount,filters.currency);
   const taxChange=(key:'accruedTaxesMinor'|'resultAfterAccrualMinor')=>fiscalComparison(current?.[key],previous?.[key],current?.incomplete,previous?.incomplete);
   async function calculateTaxes(){
+    if(taxCalculationRequest.current)return;
+    const controller=new AbortController();
+    taxCalculationRequest.current=controller;
+    const {signal}=controller;
     setCalculatingTaxes(true);
     setError('');
     setNotice('');
     try{
-      const result:{from:string;through:string}=await request('/finance/taxes/calculate',{method:'POST'});
+      let state:TaxCalculation=await request('/finance/taxes/calculate',{method:'POST',signal});
+      while(state.status==='RUNNING'){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        if(signal.aborted)return;
+        state=await request(`/finance/taxes/calculate/${encodeURIComponent(state.id)}`,{signal});
+      }
+      if(signal.aborted)return;
+      if(state.status==='FAILED'){
+        await load(true);
+        throw new Error(state.reason==='SETTINGS_CHANGED'?taxUi.calculationSettingsChanged:taxUi.calculationFailed);
+      }
+      const {result}=state;
       if(await load(true,true)){
         setNotice(taxUi.calculationUpdated.replace('{from}',financeDate(result.from)).replace('{through}',financeDate(result.through)));
       }
-    }catch(reason){setError((reason as Error).message)}
-    finally{setCalculatingTaxes(false)}
+    }catch(reason){if(!signal.aborted)setError((reason as Error).message)}
+    finally{taxCalculationRequest.current=null;if(!signal.aborted)setCalculatingTaxes(false)}
   }
   const contextRow=data?.table.rows.find(row=>row.orderId===filters.orderId);
   const contextOrderNumber=orders.find(order=>order.id===filters.orderId)?.number||(contextRow&&('orderNumber' in contextRow?contextRow.orderNumber:contextRow.number))||ui.unavailableOrder;
@@ -135,6 +153,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     </div></header>
     {(notice||ratesNotice)&&<Alert color="yellow" role="status" withCloseButton onClose={()=>{setNotice('');setRatesNotice('')}}>{[notice,ratesNotice].filter(Boolean).join(' ')}</Alert>}{error&&<CrmAlert>{error} <CrmButton size="compact-xs" tone="secondary" onClick={()=>void load(true)}>{ui.refresh}</CrmButton></CrmAlert>}{pending&&!data&&<div className="finance-report-loading" role="status"><Loader size="sm"/>{ui.loading}</div>}
     {data&&<>
+      {calculatingTaxes&&<Alert color="blue" role="status">{taxUi.calculationRunning}</Alert>}
       <section className={`finance-report-kpis finance-report-kpis-tax${canWrite?' finance-report-kpis-calculable':''}`} aria-label={ui.title}>
         <Metric title={ui.received} amount={fiscalMoney(current?.receivedMinor)} icon="wallet" color="green" comparison={fiscalComparison(current?.receivedMinor,previous?.receivedMinor)} hint={ui.previousPeriod} tooltip={ui.receivedHint}/>
         <Metric title={taxUi.ordinaryExpenses} amount={fiscalMoney(current?.ordinaryExpensesMinor)} icon="arrow" color="red" comparison={fiscalComparison(current?.ordinaryExpensesMinor,previous?.ordinaryExpensesMinor)} hint={ui.previousPeriod} inverse/>

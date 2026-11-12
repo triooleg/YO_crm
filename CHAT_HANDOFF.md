@@ -1,5 +1,12 @@
 ## 2026-11-12 - Manual tax calculation and Clients controls (LOCAL)
 
+- Manual calculation now acknowledges immediately with HTTP 202 and a status
+  identifier. Finance polls short read requests until completion and refreshes
+  the selected report. One API process accepts one run at a time. Restarting the
+  API clears transient status and retry resumes from persisted ledger evidence.
+- Every manual ledger transaction rechecks enabled/revision under the settings
+  lock. Disabling accounting during an FX wait interrupts remaining writes.
+
 - The Finance tax card starts an authenticated calculation through today's
   Kyiv date, audits the checkpoint and refreshes the reports. Unresolved earlier
   sources remain eligible and explicit receipt confirmation is preserved.

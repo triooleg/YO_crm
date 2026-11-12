@@ -13,7 +13,8 @@ const {Module,ValidationPipe,UnauthorizedException}=require('@nestjs/common'),{N
 const {TaxesController}=load('taxes/taxes.controller.ts'),{TaxesService}=load('taxes/taxes.service.ts'),{AuthService}=load('auth/auth.service.ts'),{SessionGuard}=load('auth/session.guard.ts'),{RolesGuard}=load('auth/roles.guard.ts');
 test('tax HTTP boundary enforces sessions, roles, DTOs and no-store with actual Nest guards',async()=>{
  const calls=[];const taxes={settings:async actor=>{calls.push(['settings',actor.role]);return {accountingStartDate:'2026-05-01',enabled:false,revision:0}},saveSettings:async(d,actor)=>{calls.push(['save',actor.role,d]);return {enabled:d.enabled}},report:async()=>({currency:'UAH'}),settle:async(d,actor)=>{calls.push(['settle',actor.role,d]);return {kind:'PAYMENT_LINK'}}};
- taxes.calculate=async actor=>{calls.push(['calculate',actor.role]);return {from:'2026-11-09',through:'2026-11-12'};};
+ taxes.startCalculation=actor=>{calls.push(['calculate',actor.role]);return {id:'job-1',status:'RUNNING'};};
+ taxes.calculationStatus=id=>({id,status:'COMPLETED',result:{from:'2026-11-09',through:'2026-11-12'}});
  class TestModule{};Module({controllers:[TaxesController],providers:[SessionGuard,RolesGuard,{provide:TaxesService,useValue:taxes},{provide:AuthService,useValue:{userForToken:async token=>{if(!['OWNER','ADMIN','ACCOUNTANT','MANAGER','PRODUCTION'].includes(token))throw new UnauthorizedException();return {id:'test-'+token,role:token}}}}]})(TestModule);
  const app=await NestFactory.create(TestModule,{logger:false});app.use(require('cookie-parser')());app.useGlobalPipes(new ParentMeasurementsValidationPipe());await app.listen(0,'127.0.0.1');
  const base=await app.getUrl();const request=(path,role,body)=>fetch(base+'/finance/taxes'+path,{method:body?'POST':'GET',headers:{...(role?{Cookie:'yoleotard_crm_session='+role}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -22,10 +23,15 @@ test('tax HTTP boundary enforces sessions, roles, DTOs and no-store with actual 
   assert.equal((await request('/calculate',undefined,{})).status,401);
   assert.equal((await request('/calculate','MANAGER',{})).status,403);
   const calculation=await request('/calculate','ACCOUNTANT',{});
-  assert.equal(calculation.status,201);
+  assert.equal(calculation.status,202);
   assert.equal(calculation.headers.get('cache-control'),'no-store');
-  assert.deepEqual(await calculation.json(),{from:'2026-11-09',through:'2026-11-12'});
+  assert.deepEqual(await calculation.json(),{id:'job-1',status:'RUNNING'});
   assert.deepEqual(calls.at(-1),['calculate','ACCOUNTANT']);
+  assert.equal((await request('/calculate/job-1','MANAGER')).status,403);
+  const result=await request('/calculate/job-1','ACCOUNTANT');
+  assert.equal(result.status,200);
+  assert.equal(result.headers.get('cache-control'),'no-store');
+  assert.equal((await result.json()).status,'COMPLETED');
   for(const role of ['MANAGER','PRODUCTION'])assert.equal((await request('/settings',role)).status,403);
   for(const role of ['OWNER','ADMIN','ACCOUNTANT']){const r=await request('/settings',role);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');assert.equal((await r.json()).accountingStartDate,'2026-05-01');}
   const command={enabled:true,expectedRevision:0,operationKey:'http-command'};
