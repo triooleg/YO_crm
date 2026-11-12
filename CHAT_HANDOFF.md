@@ -877,3 +877,11 @@ Quality and live verification are summarized in docs/release-evidence/contact-co
 Installed image pins: API sha256:f856441dd06f59db98b209ba4b66e033e3b252fdc5ef69a6c7c971b86ab19c88; web sha256:3f6eba7f2104ecc7b42da8331eed7696a56e809a1fff70963bb063b4e13ee3d0. Post-deployment retention passed at 5 rollback sets, 5 releases, 5 API images and 5 web images. The backup executor is resumed and AVAILABLE with one owned cron entry; foreign cron and agent settings are preserved. Final installed release and visual reviews passed. This accepted record accompanies the main-branch fast-forward after installed acceptance.
 
 Owner policy: GitHub must reflect the reviewed source for every deployment, including service-only releases and rollback. Publish the reviewed release branch before staging; fast-forward main after installed acceptance. Preserve remote-only development material unless removal is separately justified. Publish sanitized technical evidence only; exclude credentials, customer data, signed URLs and private operational history. Record actual deployment pins separately. No force-push.
+
+## Monobank receipt preview
+
+Configure the acquiring token and CRM website source account under Settings >
+FOP taxes. The token is write-only and encrypted in AppSetting. Tax review only
+prefills UAH amounts for an exact invoice and full merchant reference. The
+operation date is evidence only. Enter the actual credit date separately.
+No production tax entries were changed by implementation.

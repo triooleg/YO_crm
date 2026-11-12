@@ -102,3 +102,44 @@ test('manual CRM receipts are confirmed automatically and legacy pending rows ar
  assert.match(taxesSource,/reconcile-confirmed:'\+source\.id/);
  assert.match(taxesSource,/async reconcilePayment\(paymentId:string/);
 });
+
+test('Monobank reconciliation accepts one successful UAH invoice with exact ID and no refunds', () => {
+ const { matchMonobankReceipt } = loadTax('monobank-receipt.ts');
+ const receipt = {invoiceId:'mono-test', reference:'123/26-456', status:'success', ccy:980, date:'2026-11-10T17:39:00Z', amount:10000, profitAmount:9800};
+ assert.deepEqual(matchMonobankReceipt({list:[receipt]}, 'mono-test', '123/26-456'), {grossMinor:10000, netMinor:9800, commissionMinor:200, operationDate:'2026-11-10'});
+ for(const list of [[receipt,receipt], [{...receipt,ccy:978}], [{...receipt,cancelList:[{}]}], [{...receipt,invoiceId:'other'}], [{...receipt,reference:'124/26-456'}], [{...receipt,reference:'123/26-457'}]]){
+  assert.throws(() => matchMonobankReceipt({list}, 'mono-test', '123/26-456'));
+ }
+});
+
+test('Monobank settings encrypt the token and only return account and configured state', async () => {
+ const { TaxesService } = loadTax('taxes.service.ts');
+ const { decryptSecret } = loadTax('../secret-box.ts');
+ const key = process.env.SETTINGS_ENCRYPTION_KEY;
+ process.env.SETTINGS_ENCRYPTION_KEY = 'synthetic-settings-encryption-key-for-test';
+ let stored;
+ let audit;
+ const db = {
+  appSetting: {
+   findUnique: async () => stored ? {value:stored} : null,
+   upsert: async ({create}) => { stored=create.value; },
+  },
+  auditLog: {create: async ({data}) => { audit=data; }},
+  $transaction: async callback => callback(db),
+ };
+ const taxes = new TaxesService(db, {});
+ const owner = {id:'owner',role:'OWNER'};
+ const accountant = {id:'accountant',role:'ACCOUNTANT'};
+ try {
+  await assert.rejects(taxes.monobankSettings(accountant), {status:403});
+  await assert.rejects(taxes.saveMonobankSettings({sourceAccount:'shop.example',token:'synthetic-token'},accountant), {status:403});
+  const saved = await taxes.saveMonobankSettings({sourceAccount:'shop.example',token:'synthetic-token'},owner);
+  assert.deepEqual(saved, {configured:true,sourceAccount:'shop.example'});
+  assert.deepEqual(await taxes.monobankSettings(owner), saved);
+  assert.equal(decryptSecret(stored.encryptedToken),'synthetic-token');
+  assert.ok(!JSON.stringify(audit).includes('synthetic-token'));
+ } finally {
+  if (key === undefined) delete process.env.SETTINGS_ENCRYPTION_KEY;
+  else process.env.SETTINGS_ENCRYPTION_KEY = key;
+ }
+});

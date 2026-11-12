@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Accordion, Alert, Anchor, Badge, Button, Checkbox, Fieldset, Group, Paper, Select, SimpleGrid, Stack, Table, Tabs, Text, TextInput, ThemeIcon, Title } from '@mantine/core';
+import { Accordion, Alert, Anchor, Badge, Button, Checkbox, Fieldset, Group, Paper, PasswordInput, Select, SimpleGrid, Stack, Table, Tabs, Text, TextInput, ThemeIcon, Title } from '@mantine/core';
 import { taxAccountingUi as ui, taxContractUi as contractUi, taxIntegrationOrderUi as integrationUi } from '../../lib/i18n';
 import { TAX_ACCOUNTING_START, canManageTaxes, canReadTaxes, parseTaxMinor, taxMajorInput, taxAmount, taxDate, taxEvidenceUrl, type TaxPolicy, type TaxPolicyInput, type TaxSettings } from '../../lib/tax-accounting';
 import type { TaxPolicyPreviewResponse } from '../../lib/tax-integration-contract';
@@ -103,6 +103,37 @@ export function TaxSettingsPanel({ role }: { role: string }) {
   if (!canReadTaxes(role)) return null;
   return <SettingsContent role={role} key={role} />;
 }
+function MonobankSettings() {
+  const resource = useTaxResource(signal => taxApi.monobankSettings(signal), 'monobank');
+  const [account, setAccount] = useState<string | null>(null);
+  const [token, setToken] = useState('');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const sourceAccount = account ?? resource.data?.sourceAccount ?? '';
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setState('saving');
+    try {
+      const result = await taxApi.saveMonobankSettings({ token: token.trim(), sourceAccount: sourceAccount.trim() });
+      setAccount(result.sourceAccount);
+      setToken('');
+      setState('saved');
+      resource.refresh();
+    } catch {
+      setState('error');
+    }
+  }
+  return <TaxSection title={ui.monobankSettings}>
+    <TaxLoading {...resource} />
+    {resource.data && <form onSubmit={save}><Stack gap="sm">
+      <TextInput label={ui.monobankSource} value={sourceAccount} onChange={event => setAccount(event.currentTarget.value)} required maxLength={120} disabled={state === 'saving'} />
+      <PasswordInput label={ui.monobankToken} value={token} onChange={event => setToken(event.currentTarget.value)} required maxLength={512} autoComplete="new-password" disabled={state === 'saving'} />
+      {resource.data.configured && <Text size="sm" c="dimmed">{ui.monobankConfigured}</Text>}
+      {state === 'saved' && <Alert color="teal">{ui.monobankSaved}</Alert>}
+      {state === 'error' && <Alert color="red">{ui.monobankError}</Alert>}
+      <Button type="submit" disabled={!sourceAccount.trim() || !token.trim()} loading={state === 'saving'}>{ui.monobankSave}</Button>
+    </Stack></form>}
+  </TaxSection>;
+}
 function SettingsContent({ role }: { role: string }) {
   const resource = useTaxResource(signal => taxApi.settings(signal), role), settings = resource.data;
   const [activeTab, setActiveTab] = useState<string | null>('history');
@@ -124,6 +155,7 @@ function SettingsContent({ role }: { role: string }) {
           <Button variant="light" onClick={resource.refresh}>{ui.retry}</Button>
         </Group><Text size="xs" c="dimmed">{ui.startHint}</Text>
       </TaxSection>
+      {canManageTaxes(role) && <MonobankSettings />}
       <TaxSection title={integrationUi.rules}><CurrentPolicyRules policy={settings.currentPolicy} /></TaxSection>
       <TaxSection title={integrationUi.policyLogic}><Text size="sm">{integrationUi.policyLogicHint}</Text><Text size="sm">{integrationUi.receiptRules}</Text></TaxSection>
       <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>

@@ -5,6 +5,10 @@ export class TaxCommandDto {
  @IsString() @MaxLength(160) operationKey!:string;
  @IsInt() @Min(0) expectedRevision!:number;
 }
+export class TaxMonobankSettingsDto {
+ @IsString() @Matches(/^[\x21-\x7e]{8,512}$/) token!:string;
+ @IsString() @Matches(/^[A-Za-z0-9._-]{1,120}$/) sourceAccount!:string;
+}
 export class TaxSettingsDto extends TaxCommandDto { @IsBoolean() enabled!:boolean; }
 export class TaxPolicyDto extends TaxCommandDto {
  @Matches(/^\d{4}-\d{2}-\d{2}$/) effectiveFrom!:string;

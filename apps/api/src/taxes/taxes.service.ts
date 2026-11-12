@@ -4,10 +4,14 @@ import { PrismaService } from '../prisma.service';
 import { HistoricalNbuService, type HistoricalRate } from './historical-nbu.service';
 import { ACCOUNTING_START, COMPONENTS, WAGE_CATALOG, convertMinor, dateOnly as parseDate, integer as parseMinor, kyivDate, monthKey as parseMonth, monthlyAmount, monthsBetween, percentMinor, safeMinor, wageFor, type Component } from './tax-math';
 import { allocation, allow, assertTaxExpenseMutable, audit, cas, config, entry, hash, json, key, lockConfig, lockExpense, one, rows, type Actor, type Config, type Row, type TaxAllocation, type TaxEntry, type TaxPeriod, type TaxPolicy, type Tx } from './tax-store';
+import { decryptSecret, encryptSecret } from '../secret-box';
+import { lookupMonobankReceipt } from './monobank-receipt';
 import { policyImpactPreview } from './tax-policy-preview';
 import type { TaxPolicyPreviewInput, TaxOrderEstimate, TaxOrderCompleteness } from '../finance/finance-fiscal.types';
 import { FinancePeriodCache, type FinancePeriodRequest, type FinancePeriodResult } from '../finance/finance-period-cache';
 import { readRetryableFinanceSnapshot } from '../finance/finance-cache-retry';
+const monobankSetting = { section:'tax-monobank', key:'merchant' };
+type MonobankConfig = { sourceAccount:string; encryptedToken:string };
 export type Command={operationKey:string;expectedRevision:number};
 export type CaptureOptions={createIfMissing?:boolean;receiptConfirmed?:boolean;evidence?:string;confirmedByRole?:string};
 type CashData={payments:{id:string;amountMinor:number;currency:string;receivedAt:Date|string}[];expenses:{id:string;amountMinor:number;currency:string;incurredAt:Date|string}[];links:{expenseId:string}[]};
@@ -182,6 +186,52 @@ export class TaxesService {
   const current=await this.lifecycleBalance(tx,root.id),first=!(await one(tx,`SELECT id FROM "TaxEntry" WHERE "rootId"=$1 AND kind='FINALIZE'`,root.id));
   const e=await entry(tx,{...this.rootFields(root),periodId:period.id,originalPeriodId:period.id===root.periodId?null:root.periodId,kind:first?'FINALIZE':voided?'REVERSE':previous===0?'RESTORE':'ADJUST',operationKey,amountMinor:target-current,baseMinor:base,snapshot:{lifecycle:true,sourceId:source.id,stateHash:source.snapshot.stateHash,rate,grossMinor:gross,grossCurrency:rate.currency,incomeDate:date,postingPeriod:period.month,valuationPolicy:policy,receiptConfirmed:!!confirmation.receiptConfirmed,evidence:confirmation.evidence??null,originalPayment:source.snapshot.state,excludedBeforeStart:excluded,rounding:'half-up kopecks',targetMinor:target}}, {rootId:root.id,sourceId:source.id,rate,confirmation});
   await audit(tx,actorId,'TAX_FINALIZE',e.id,e);return e;
+ }
+ private async monobankConfig():Promise<MonobankConfig|null>{
+  const row=await this.prisma.appSetting.findUnique({where:{section_key:monobankSetting}});
+  const value=row?.value;
+  if(!value || typeof value!=='object' || Array.isArray(value)
+     || typeof value.sourceAccount!=='string' || typeof value.encryptedToken!=='string')return null;
+  return {sourceAccount:value.sourceAccount,encryptedToken:value.encryptedToken};
+ }
+ async monobankSettings(actor:Actor){
+  allow(actor,true);
+  const config=await this.monobankConfig();
+  return {configured:Boolean(config),sourceAccount:config?.sourceAccount??''};
+ }
+ async saveMonobankSettings(input:{token:string;sourceAccount:string},actor:Actor){
+  allow(actor,true);
+  const sourceAccount=input.sourceAccount;
+  const value={sourceAccount,encryptedToken:encryptSecret(input.token)};
+  await this.prisma.$transaction(async tx=>{
+   await tx.appSetting.upsert({where:{section_key:monobankSetting},create:{...monobankSetting,value},update:{value}});
+   await audit(tx,actor.id,'TAX_MONOBANK_CONFIGURED','monobank',{sourceAccount});
+  });
+  return {configured:true,sourceAccount};
+ }
+ async previewMonobankReceipt(rootId:string,actor:Actor){
+  allow(actor);
+  const root=await this.root(this.prisma,rootId);
+  const payment=root.paymentId ? await this.prisma.payment.findUnique({
+   where:{id:root.paymentId},
+   select:{reference:true,receivedAt:true,sourceSystem:true,sourceAccount:true,voidedAt:true,externalStatus:true,order:{select:{externalId:true,externalNumber:true,externalData:true,archivedAt:true}}},
+  }) : null;
+  const config=await this.monobankConfig();
+  if(!config || !payment || payment.sourceAccount!==config.sourceAccount || payment.voidedAt || payment.sourceSystem!=='YOLEOTARD_WEBSITE' || payment.externalStatus!=='paid'
+     || !payment.reference || !payment.order?.externalId || payment.order.archivedAt){
+   throw new BadRequestException('У оплаты нет идентификатора счёта Monobank для сверки.');
+  }
+  const raw=payment.order.externalData as {payment?:{provider?:string;reference?:string}}|null;
+  const suffix=payment.order.externalNumber;
+  if(raw?.payment?.provider!=='monobank' || raw.payment.reference!==payment.reference || !suffix || !/^\d{2}-\d+$/.test(suffix)){
+   throw new BadRequestException('Полное назначение платежа Monobank не подтверждено. Сверьте оплату вручную.');
+  }
+  const merchantReference=`${payment.order.externalId}/${suffix}`;
+  const matches=await this.prisma.payment.count({
+   where:{sourceSystem:'YOLEOTARD_WEBSITE',reference:payment.reference},
+  });
+  if(matches!==1)throw new ConflictException('Идентификатор Monobank связан с несколькими оплатами. Проверьте выписку вручную.');
+  return lookupMonobankReceipt(payment.reference,merchantReference,payment.receivedAt,decryptSecret(config.encryptedToken));
  }
  async confirmSource(rootId:string,d:Command&{grossMinor:number;grossCurrency?:'UAH';incomeDate:string;evidence:string;postingPeriod?:string},actor:Actor){
   allow(actor);key(d.operationKey);const replay=await this.prisma.auditLog.findFirst({where:{requestId:'tax:'+d.operationKey,entityType:'TaxCommand'}});if(replay){const a=replay.after as Row;if(a.payloadHash!==hash({action:'TAX_CONFIRM_SOURCE',...d,rootId}))throw new ConflictException('Ключ операции использован с другими данными');return a.result as TaxEntry;}

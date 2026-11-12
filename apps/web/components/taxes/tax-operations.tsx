@@ -10,13 +10,41 @@ import { groupTaxEntries } from './entry-groups';
 type Field = { name: string; label: string; type?: 'date' | 'month' | 'money' | 'signed' | 'textarea'; options?: { value: string; label: string }[]; optional?: boolean; requiredWhen?: (values: Values) => boolean };
 type Values = Record<string, string>;
 type ValidatedValues = Record<'expenseId' | 'component' | 'amount' | 'date' | 'categoryId' | 'notes' | 'linkId' | 'rootId' | 'id' | 'reason' | 'gross' | 'evidence' | 'period' | 'month' | 'exempt', string> & { postingPeriod?: string; grossCurrency?: string };
-type CommandFormProps = { title: string; fields: Field[]; submit: string; disabled?: boolean; onExecute: (values: ValidatedValues, operationKey: string) => Promise<unknown>; onSaved: () => void; validate?: (values: Values) => boolean };
+type CommandFormProps = { title: string; fields: Field[]; submit: string; disabled?: boolean; onExecute: (values: ValidatedValues, operationKey: string) => Promise<unknown>; onSaved: () => void; validate?: (values: Values) => boolean; monobank?: boolean };
 
 /** A domain command form keeps input, explicit confirmation and retry identity together. */
-function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, validate }: CommandFormProps) {
+function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, validate, monobank }: CommandFormProps) {
   const [values, setValues] = useState<Values>({}), [confirmed, setConfirmed] = useState(false), [validation, setValidation] = useState('');
   const mutation = useTaxMutation();
-  function change(name: string, value: string) { setValues(v => ({ ...v, [name]: value })); setConfirmed(false); }
+  const [bankLoading, setBankLoading] = useState(false);
+  async function loadReceipt() {
+    const rootId = values.rootId;
+    if (!rootId) return;
+    setBankLoading(true); setValidation(''); setConfirmed(false);
+    try {
+      const receipt = await taxApi.monobankReceipt(rootId);
+      setValues(current => current.rootId !== rootId ? current : ({
+        ...current,
+        grossCurrency: 'UAH',
+        gross: (receipt.grossMinor / 100).toFixed(2),
+        date: '',
+        evidence: `${ui.monobankEvidence} ${receipt.operationDate}. ${ui.gross}: ${taxAmount(receipt.grossMinor)}. ${ui.amount}: ${taxAmount(receipt.netMinor)}.`,
+      }));
+    } catch {
+      setValidation(ui.monobankError);
+    } finally {
+      setBankLoading(false);
+    }
+  }
+  function change(name: string, value: string) {
+    setValues((current): Values => {
+      if (monobank && name === 'rootId') return { rootId: value };
+      if (monobank && name === 'grossCurrency') return { ...current, grossCurrency: value, gross: '', evidence: '' };
+      return { ...current, [name]: value };
+    });
+    setConfirmed(false);
+    setValidation('');
+  }
   async function save(event: React.FormEvent) {
     event.preventDefault(); setValidation('');
     const valid = confirmed && fields.every(f => {
@@ -34,7 +62,7 @@ function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, v
     // Only configured fields are consumed; all configured required fields passed validation above.
     if (await mutation.run(title, values, key => onExecute(values as ValidatedValues, key))) { setConfirmed(false); onSaved(); }
   }
-  return <form onSubmit={save}><Fieldset legend={title} disabled={disabled || mutation.busy}><Stack gap="sm"><SimpleGrid cols={{ base: 1, sm: 2 }}>{fields.map(f => f.options ? <Select key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} searchable data={f.options} value={values[f.name] ?? null} onChange={value => change(f.name, value ?? '')} /> : f.type === 'textarea' ? <Textarea key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} autosize minRows={2} /> : <TextInput key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} type={f.type === 'date' || f.type === 'month' ? f.type : 'text'} inputMode={f.type === 'money' || f.type === 'signed' ? 'decimal' : undefined} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} />)}</SimpleGrid><Checkbox label={ui.confirmMutation} checked={confirmed} onChange={e => setConfirmed(e.currentTarget.checked)} /><TaxFeedback error={validation || mutation.error} success={mutation.success} /><Button type="submit" disabled={!confirmed} loading={mutation.busy}>{submit}</Button></Stack></Fieldset></form>;
+  return <form onSubmit={save}><Fieldset legend={title} disabled={disabled || mutation.busy || bankLoading}><Stack gap="sm"><SimpleGrid cols={{ base: 1, sm: 2 }}>{fields.map(f => f.options ? <Select key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} searchable data={f.options} value={values[f.name] ?? null} onChange={value => change(f.name, value ?? '')} /> : f.type === 'textarea' ? <Textarea key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} autosize minRows={2} /> : <TextInput key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} type={f.type === 'date' || f.type === 'month' ? f.type : 'text'} inputMode={f.type === 'money' || f.type === 'signed' ? 'decimal' : undefined} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} />)}</SimpleGrid>{monobank && <Button type="button" variant="light" disabled={!values.rootId} loading={bankLoading} onClick={loadReceipt}>{ui.monobankLoad}</Button>}<Checkbox label={ui.confirmMutation} checked={confirmed} onChange={e => setConfirmed(e.currentTarget.checked)} /><TaxFeedback error={validation || mutation.error} success={mutation.success} /><Button type="submit" disabled={!confirmed} loading={mutation.busy}>{submit}</Button></Stack></Fieldset></form>;
 }
 const components = Object.entries(ui.components).map(([value, label]) => ({ value, label }));
 const componentField: Field = { name: 'component', label: ui.component, options: components };
@@ -82,7 +110,7 @@ export function TaxOperations({ report, settings, role, onSaved, onCashSaved }: 
     <TaxCommandForm title={ui.adjustExpense} submit={ui.adjustExpense} fields={[{ name: 'id', label: ui.paymentLink, options: links }, amountField, { name: 'date', label: ui.incurredAt, type: 'date' }, reasonField]} onSaved={savedCash} onExecute={(v, key) => taxApi.correctSettlement(v.id, { ...command(key), amountMinor: parseTaxMinor(v.amount)!, incurredAt: `${v.date}T12:00:00Z`, reason: v.reason.trim() })} />
     <TaxCommandForm title={ui.cancelExpense} submit={ui.cancelExpense} fields={[{ name: 'id', label: ui.paymentLink, options: links }, reasonField]} onSaved={savedCash} onExecute={(v, key) => taxApi.correctSettlement(v.id, { ...command(key), cancel: true, reason: v.reason.trim() })} />
   </Stack></Accordion.Panel></Accordion.Item>
-  <Accordion.Item value="sources"><Accordion.Control>{ui.confirmSource}</Accordion.Control><Accordion.Panel><Stack gap="sm"><Text size="sm">{ui.sourceHint}</Text>{canManageTaxes(role) && <Text size="xs" c="dimmed">{contractUi.closedSourceHint}</Text>}<TaxCommandForm title={ui.confirmSource} submit={ui.confirmSource} fields={[sourceRootField, { name: 'grossCurrency', label: ui.grossInputCurrency, optional: true, options: [{ value: 'order', label: ui.grossOriginalCurrency }, { value: 'UAH', label: 'UAH' }] }, { name: 'gross', label: ui.gross, type: 'money' }, { name: 'date', label: ui.incomeDate, type: 'date' }, evidenceField, ...(canManageTaxes(role) ? [{ name: 'postingPeriod', label: ui.postingPeriod, type: 'month' as const, optional: true, requiredWhen: (v: Values) => Boolean(v.rootId && closedRoots.has(v.rootId)) }] : [])]} validate={v => !v.rootId || !closedRoots.has(v.rootId) || (canManageTaxes(role) && Boolean(v.postingPeriod && taxMonth(v.postingPeriod)))} onSaved={onSaved} onExecute={(v, key) => taxApi.confirm(v.rootId, { ...command(key), grossMinor: parseTaxMinor(v.gross)!, ...(v.grossCurrency === 'UAH' ? { grossCurrency: 'UAH' as const } : {}), incomeDate: v.date, evidence: v.evidence.trim(), ...(v.postingPeriod ? { postingPeriod: v.postingPeriod } : {}) })} /></Stack></Accordion.Panel></Accordion.Item>
+  <Accordion.Item value="sources"><Accordion.Control>{ui.confirmSource}</Accordion.Control><Accordion.Panel><Stack gap="sm"><Text size="sm">{ui.sourceHint}</Text>{canManageTaxes(role) && <Text size="xs" c="dimmed">{contractUi.closedSourceHint}</Text>}<TaxCommandForm monobank title={ui.confirmSource} submit={ui.confirmSource} fields={[sourceRootField, { name: 'grossCurrency', label: ui.grossInputCurrency, optional: true, options: [{ value: 'order', label: ui.grossOriginalCurrency }, { value: 'UAH', label: 'UAH' }] }, { name: 'gross', label: ui.gross, type: 'money' }, { name: 'date', label: ui.incomeDate, type: 'date' }, evidenceField, ...(canManageTaxes(role) ? [{ name: 'postingPeriod', label: ui.postingPeriod, type: 'month' as const, optional: true, requiredWhen: (v: Values) => Boolean(v.rootId && closedRoots.has(v.rootId)) }] : [])]} validate={v => !v.rootId || !closedRoots.has(v.rootId) || (canManageTaxes(role) && Boolean(v.postingPeriod && taxMonth(v.postingPeriod)))} onSaved={onSaved} onExecute={(v, key) => taxApi.confirm(v.rootId, { ...command(key), grossMinor: parseTaxMinor(v.gross)!, ...(v.grossCurrency === 'UAH' ? { grossCurrency: 'UAH' as const } : {}), incomeDate: v.date, evidence: v.evidence.trim(), ...(v.postingPeriod ? { postingPeriod: v.postingPeriod } : {}) })} /></Stack></Accordion.Panel></Accordion.Item>
   <Accordion.Item value="corrections"><Accordion.Control>{ui.correction}</Accordion.Control><Accordion.Panel><Stack gap="md"><Text size="sm">{ui.closedHint}</Text><TaxCommandForm title={ui.correction} submit={ui.draft} fields={[rootField, { name: 'period', label: ui.postingPeriod, options: periodOptions }, { name: 'amount', label: ui.signedAmount, type: 'signed' }, reasonField, evidenceField]} onSaved={onSaved} onExecute={(v, key) => taxApi.correction({ ...command(key), rootId: v.rootId, period: v.period, amountMinor: parseTaxMinor(v.amount, true)!, reason: v.reason.trim(), evidence: v.evidence.trim() })} />
   {canManageTaxes(role) && <TaxCommandForm title={ui.publish} submit={ui.publish} fields={[{ name: 'id', label: ui.correctionId, options: report.entries.filter(e => e.kind === 'DRAFT').map(e => ({ value: e.id, label: `${e.id} · ${taxAmount(e.amountMinor)}` })) }]} onSaved={onSaved} onExecute={(v, key) => taxApi.publish(v.id, command(key))} />}</Stack></Accordion.Panel></Accordion.Item>
   {canManageTaxes(role) && <><Accordion.Item value="backfill"><Accordion.Control>{ui.backfill}</Accordion.Control><Accordion.Panel><BackfillPanel settings={settings} onSaved={onSaved} /></Accordion.Panel></Accordion.Item>
