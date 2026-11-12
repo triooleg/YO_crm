@@ -6,6 +6,9 @@
 - Receipt capture remains atomic with payment creation. Scheduled tax
   calculation and immediate post-payment reconciliation no longer run.
 - Cash KPI comparisons use their own known amounts even if taxes are incomplete.
+- A report request superseded by a month or filter change cannot announce a
+  successful refresh after manual calculation. Browser regression covers a
+  delayed old request and a failure loading the newly selected month.
 
 ## 2026-11-12 - Clients filters and actions on one row
 

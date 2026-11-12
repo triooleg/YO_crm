@@ -72,7 +72,8 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
       catch(reason){if(!(reason instanceof FinanceRequestError)||reason.status!==409)throw reason;if(sequence!==reportSequence.current)return;valuation.current=undefined;setData(undefined);setNotice(ui.valuationChanged);result=await request(`/finance/report?${financeReportQuery(selected)}`);}
       if(sequence!==reportSequence.current)return;
       valuation.current=result.valuationVersion;loadedReportKey.current=financeReportQuery(selected).toString();setData(result);summaryScope.current=scope;setRatesNotice(rateWarning);
-    }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';}if(propagateError)throw reason;}finally{if(sequence===reportSequence.current)setLoading(false)}
+      return true;
+    }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';if(propagateError)throw reason;}}finally{if(sequence===reportSequence.current)setLoading(false)}
   },[request]);
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);let currency:DisplayCurrency='EUR';
@@ -115,8 +116,9 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     setNotice('');
     try{
       const result:{from:string;through:string}=await request('/finance/taxes/calculate',{method:'POST'});
-      await load(true,true);
-      setNotice(taxUi.calculationUpdated.replace('{from}',financeDate(result.from)).replace('{through}',financeDate(result.through)));
+      if(await load(true,true)){
+        setNotice(taxUi.calculationUpdated.replace('{from}',financeDate(result.from)).replace('{through}',financeDate(result.through)));
+      }
     }catch(reason){setError((reason as Error).message)}
     finally{setCalculatingTaxes(false)}
   }
@@ -173,7 +175,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
       <article className="finance-report-card"><header><h2>{ui.upcoming}</h2><UnstyledButton className="finance-report-link" onClick={()=>patch({tab:'payments',scope:'forecast',status:'',categoryId:'',from:'',to:''})}>{ui.all} →</UnstyledButton></header>{data.upcoming.map(row=><UnstyledButton key={row.id} className="finance-report-upcoming" onClick={()=>openOrder(row)}><FinanceIcon name="calendar"/><time>{financeDate(row.forecastDate)}</time><span>{row.number} — {row.clientName}</span><b>{money(row.balanceMinor)}</b><small>{row.forecastSource==='production'?ui.forecastProduction:ui.forecastDeadline}</small></UnstyledButton>)}{!data.upcoming.length&&<p className="finance-report-empty">{ui.emptyForecast}</p>}</article></aside></section>
       <footer className="finance-report-valuation">{taxUi.legacyValuation}: {data.valuation.provider} · {ui.effectiveDate} {financeDate(data.valuation.effectiveDate)} · {ui.fetchedAt} {financeDate(data.valuation.fetchedAt)} {data.valuation.officialUrl&&/^https:\/\//.test(data.valuation.officialUrl)&&<a href={data.valuation.officialUrl} target="_blank" rel="noopener noreferrer">{ui.source} ↗</a>}</footer>
     </>}
-    {data&&expense!==undefined&&<FinanceExpenseDialog report={data} row={expense||undefined} request={request} onClose={()=>setExpense(undefined)} onSaved={()=>load(true)}/>}{data&&categoriesOpen&&<FinanceCategoryDialog categories={data.options.categories} request={request} onClose={()=>setCategoriesOpen(false)} onSaved={()=>load(true)}/>}
+    {data&&expense!==undefined&&<FinanceExpenseDialog report={data} row={expense||undefined} request={request} onClose={()=>setExpense(undefined)} onSaved={async()=>{await load(true)}}/>}{data&&categoriesOpen&&<FinanceCategoryDialog categories={data.options.categories} request={request} onClose={()=>setCategoriesOpen(false)} onSaved={async()=>{await load(true)}}/>}
     {detail&&<FinanceOrderDialog order={detail.order} row={detail.row} currency={filters.currency} onClose={()=>setDetail(undefined)}/>}{payment&&canPay&&<QuickPayment order={payment} request={request} onClose={()=>setPayment(undefined)} onSaved={async()=>{setPayment(undefined);await load(true)}}/>}{invoice&&(invoice.invoice ? <InvoiceEditor canManageStatus={canWrite} order={invoice.order} invoice={invoice.invoice} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/> : <NewTemplateInvoice order={invoice.order} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/>)}
     {pickOrder&&<CrmModal busy={actionBusy} title={pickOrder==='payment'?ui.addPayment:ui.addInvoice} close={()=>{if(!actionBusy){actionSequence.current++;setPickOrder(undefined)}}}><Stack><Select label={ui.chooseOrder} searchable onSearchChange={setRemoteSearch} value={pickedOrder} onChange={setPickedOrder} data={orders.map(item=>({value:item.id,label:`${item.number} · ${item.clientName}`}))}/><CrmButton loading={actionBusy} disabled={!pickedOrder} onClick={()=>pickedOrder&&void orderAction(pickedOrder,pickOrder==='payment'?'payment':'invoice')}>{ui.open}</CrmButton></Stack></CrmModal>}
   </div></MantineProvider>;

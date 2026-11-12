@@ -33,6 +33,38 @@ test('a failed report refresh after calculation shows the error without a succes
  await expect(page.getByText('Налоговый отчёт обновлён',{exact:false})).toHaveCount(0);
 });
 
+test('changing month during the calculation refresh does not announce a stale success',async({page})=>{
+ await setup(page);
+ let calculationStarted=false;
+ let releaseOld!:()=>void;
+ const oldResponse=new Promise<void>(resolve=>releaseOld=resolve);
+ let held=false;
+ await page.route('**/api/finance/report?*',async route=>{
+  if(!calculationStarted)return route.fallback();
+  const month=new URL(route.request().url()).searchParams.get('month');
+  if(month==='2026-10'){
+   held=true;
+   await oldResponse;
+   return route.fallback();
+  }
+  return route.fulfill({status:503,json:{message:'Новый период временно недоступен'}});
+ });
+ await page.route('**/api/finance/taxes/calculate',route=>{
+  calculationStarted=true;
+  return route.fulfill({json:{from:'2026-11-09',through:'2026-11-12'}});
+ });
+ try{
+  await page.goto('/?section=finance&period=2026-10');
+  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+  await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
+  await expect.poll(()=>held).toBe(true);
+  await page.getByRole('button',{name:'Следующий месяц',exact:true}).click();
+  await expect(page.getByText('Новый период временно недоступен',{exact:false})).toBeVisible();
+  releaseOld();
+  await expect(page.getByText('Налоговый отчёт обновлён',{exact:false})).toHaveCount(0);
+ }finally{releaseOld();}
+});
+
 test('order deep-link filter stays visible and can be removed without leaving Finance',async({page})=>{
  const calls=await setup(page);await page.goto('/?section=finance&orderId=order-1');
  await expect(page.getByRole('status').filter({hasText:'Заказ: TEST-001'})).toBeVisible();
