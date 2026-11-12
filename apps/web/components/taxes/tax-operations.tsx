@@ -26,6 +26,7 @@ function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, v
       const receipt = await taxApi.monobankReceipt(rootId, reference);
       setValues(current => current.rootId !== rootId ? current : ({
         ...current,
+        bankReference: reference,
         grossCurrency: 'UAH',
         gross: (receipt.grossMinor / 100).toFixed(2),
         date: '',
@@ -40,8 +41,8 @@ function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, v
   function change(name: string, value: string) {
     setValues((current): Values => {
       if (monobank && name === 'rootId') return { rootId: value };
-      if (monobank && name === 'merchantReference' && current.grossCurrency === 'UAH') return { rootId: current.rootId ?? '', merchantReference: value };
-      if (monobank && name === 'grossCurrency') return { ...current, grossCurrency: value, gross: '', evidence: '' };
+      if (monobank && name === 'merchantReference' && current.bankReference) return { rootId: current.rootId ?? '', merchantReference: value };
+      if (monobank && name === 'grossCurrency') return { ...current, grossCurrency: value, gross: '', evidence: '', bankReference: '' };
       return { ...current, [name]: value };
     });
     setConfirmed(false);

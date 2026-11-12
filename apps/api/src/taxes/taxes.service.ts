@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma.service';
 import { HistoricalNbuService, type HistoricalRate } from './historical-nbu.service';
@@ -195,12 +195,12 @@ export class TaxesService {
   return {sourceAccount:value.sourceAccount,encryptedToken:value.encryptedToken};
  }
  async monobankSettings(actor:Actor){
-  allow(actor,true);
+  if(actor.role!=='OWNER')throw new ForbiddenException('Настроить токен Monobank может только владелец CRM.');
   const config=await this.monobankConfig();
   return {configured:Boolean(config),sourceAccount:config?.sourceAccount??''};
  }
  async saveMonobankSettings(input:{token:string;sourceAccount:string},actor:Actor){
-  allow(actor,true);
+  if(actor.role!=='OWNER')throw new ForbiddenException('Настроить токен Monobank может только владелец CRM.');
   const sourceAccount=input.sourceAccount.toLowerCase();
   const value={sourceAccount,encryptedToken:encryptSecret(input.token)};
   await this.prisma.$transaction(async tx=>{

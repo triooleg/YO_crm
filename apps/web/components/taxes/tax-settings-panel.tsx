@@ -155,7 +155,7 @@ function SettingsContent({ role }: { role: string }) {
           <Button variant="light" onClick={resource.refresh}>{ui.retry}</Button>
         </Group><Text size="xs" c="dimmed">{ui.startHint}</Text>
       </TaxSection>
-      {canManageTaxes(role) && <MonobankSettings />}
+      {role === 'OWNER' && <MonobankSettings />}
       <TaxSection title={integrationUi.rules}><CurrentPolicyRules policy={settings.currentPolicy} /></TaxSection>
       <TaxSection title={integrationUi.policyLogic}><Text size="sm">{integrationUi.policyLogicHint}</Text><Text size="sm">{integrationUi.receiptRules}</Text></TaxSection>
       <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>

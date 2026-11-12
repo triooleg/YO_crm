@@ -129,7 +129,7 @@ test('Monobank settings encrypt the token and only return account and configured
  };
  const taxes = new TaxesService(db, {});
  const owner = {id:'owner',role:'OWNER'};
- const accountant = {id:'accountant',role:'ACCOUNTANT'};
+ const accountant = {id:'accountant',role:'ADMIN'};
  try {
   await assert.rejects(taxes.monobankSettings(accountant), {status:403});
   await assert.rejects(taxes.saveMonobankSettings({sourceAccount:'shop.example',token:'synthetic-token'},accountant), {status:403});

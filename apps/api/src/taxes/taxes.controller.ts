@@ -10,8 +10,8 @@ type AuthRequest=Request&{user:User};
 @Controller('finance/taxes') @UseGuards(SessionGuard,RolesGuard) @Roles('OWNER','ADMIN','ACCOUNTANT')
 export class TaxesController {
  constructor(private readonly taxes:TaxesService){}
- @Header('Cache-Control','no-store') @Get('monobank/settings') @Roles('OWNER','ADMIN') monobankSettings(@Req() req:AuthRequest){return this.taxes.monobankSettings(req.user);}
- @Header('Cache-Control','no-store') @Post('monobank/settings') @Roles('OWNER','ADMIN') saveMonobankSettings(@Body() d:TaxMonobankSettingsDto,@Req() req:AuthRequest){return this.taxes.saveMonobankSettings(d,req.user);}
+ @Header('Cache-Control','no-store') @Get('monobank/settings') @Roles('OWNER') monobankSettings(@Req() req:AuthRequest){return this.taxes.monobankSettings(req.user);}
+ @Header('Cache-Control','no-store') @Post('monobank/settings') @Roles('OWNER') saveMonobankSettings(@Body() d:TaxMonobankSettingsDto,@Req() req:AuthRequest){return this.taxes.saveMonobankSettings(d,req.user);}
  @Header('Cache-Control','no-store') @Get('settings') settings(@Req() req:AuthRequest){return this.taxes.settings(req.user);}
  @Header('Cache-Control','no-store') @Post('settings') @Roles('OWNER','ADMIN') saveSettings(@Body() d:TaxSettingsDto,@Req() req:AuthRequest){return this.taxes.saveSettings(d,req.user);}
  @Header('Cache-Control','no-store') @Post('policies') @Roles('OWNER','ADMIN') policy(@Body() d:TaxPolicyDto,@Req() req:AuthRequest){return this.taxes.publishPolicy(d,req.user);}
