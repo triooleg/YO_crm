@@ -41,6 +41,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const [taxEpoch,setTaxEpoch]=useState(0);
   const [calculatingTaxes,setCalculatingTaxes]=useState(false);
   const taxCalculationRequest=useRef<AbortController|null>(null);
+  const taxCalculationId=useRef<string|null>(null);
   useEffect(()=>()=>taxCalculationRequest.current?.abort(),[]);
   const [initialChartMetric,setInitialChartMetric]=useState<'received'|'expenses'|'result'>('received');
   const [expense,setExpense]=useState<FinanceExpenseView|null>(),[categoriesOpen,setCategoriesOpen]=useState(false),[detail,setDetail]=useState<{order:FinanceOrder;row?:PaymentRow}>(),[payment,setPayment]=useState<FinanceOrder>(),[invoice,setInvoice]=useState<{order:FinanceOrder;invoice?:FinanceInvoice}>(),[pickOrder,setPickOrder]=useState<'payment'|'invoice'>(),[pickedOrder,setPickedOrder]=useState<string|null>(null),[actionBusy,setActionBusy]=useState(false);
@@ -122,13 +123,27 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     setError('');
     setNotice('');
     try{
-      let state:TaxCalculation=await request('/finance/taxes/calculate',{method:'POST',signal});
+      let state:TaxCalculation=taxCalculationId.current
+        ?{id:taxCalculationId.current,status:'RUNNING'}
+        :await request('/finance/taxes/calculate',{method:'POST',signal});
+      taxCalculationId.current=state.id;
+      let failures=0;
       while(state.status==='RUNNING'){
-        await new Promise(resolve=>setTimeout(resolve,1500));
+        await new Promise(resolve=>setTimeout(resolve,1500*2**Math.min(failures,3)));
         if(signal.aborted)return;
-        state=await request(`/finance/taxes/calculate/${encodeURIComponent(state.id)}`,{signal});
+        try{
+          state=await request(`/finance/taxes/calculate/${encodeURIComponent(state.id)}`,{signal});
+          failures=0;
+        }catch(reason){
+          if(signal.aborted)return;
+          if(reason instanceof FinanceRequestError&&reason.status===404)taxCalculationId.current=null;
+          const transient=reason instanceof TypeError||reason instanceof FinanceRequestError&&[429,502,503,504].includes(reason.status);
+          if(!transient)throw reason;
+          if(++failures===4)throw new Error(taxUi.calculationConnectionLost);
+        }
       }
       if(signal.aborted)return;
+      taxCalculationId.current=null;
       if(state.status==='FAILED'){
         await load(true);
         throw new Error(state.reason==='SETTINGS_CHANGED'?taxUi.calculationSettingsChanged:taxUi.calculationFailed);

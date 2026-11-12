@@ -4,8 +4,8 @@ import {join} from 'node:path';
 const calculationAccepted={id:'tax-test',status:'RUNNING'};
 const calculationCompleted={id:'tax-test',status:'COMPLETED',result:{from:'2026-11-09',through:'2026-11-12'}};
 
-test('manual tax calculation posts once and refreshes the selected finance report',async({page})=>{
- await page.setViewportSize({width:390,height:844});
+for(const [width,height] of [[1920,1080],[1366,768],[390,844]])test(`manual tax calculation posts once and refreshes the selected finance report at ${width}px`,async({page},info)=>{
+ await page.setViewportSize({width,height});
  const calls=await setup(page);
  let writes=0;
  await page.route('**/api/finance/taxes/calculate',route=>{
@@ -14,17 +14,23 @@ test('manual tax calculation posts once and refreshes the selected finance repor
   return route.fulfill({status:202,json:calculationAccepted});
  });
  let polls=0;
- await page.route('**/api/finance/taxes/calculate/tax-test',route=>route.fulfill({json:++polls===1?calculationAccepted:calculationCompleted}));
+ await page.route('**/api/finance/taxes/calculate/tax-test',route=>{
+  if(++polls===1)return route.fulfill({status:503,json:{message:'Временная ошибка'}});
+  return route.fulfill({json:polls===2?calculationAccepted:calculationCompleted});
+ });
  await page.goto('/?section=finance&period=2026-10');
  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+ await page.screenshot({path:info.outputPath('finance-before-calculation.png')});
  const reads=calls.filter(call=>call.path==='/api/finance/report').length;
  await page.getByRole('button',{name:'Рассчитать',exact:true}).click();
  await expect(page.getByText('Налоговый расчёт выполняется.',{exact:false})).toBeVisible();
+ await page.screenshot({path:info.outputPath('finance-during-calculation.png')});
  await expect(page.getByRole('status').filter({hasText:'Налоговый отчёт обновлён'})).toBeVisible();
  expect(writes).toBe(1);
- expect(polls).toBe(2);
+ expect(polls).toBe(3);
  expect(calls.filter(call=>call.path==='/api/finance/report').length).toBeGreaterThan(reads);
  await expect(page).toHaveURL(/period=2026-10/);
+ await page.screenshot({path:info.outputPath('finance-after-calculation.png')});
 });
 
 test('a failed report refresh after calculation shows the error without a success notice',async({page})=>{

@@ -3380,6 +3380,7 @@ export const taxIntegrationFinanceUi = {
   ordinaryExpenses: 'Расходы (без налогов)', taxes: 'Налоги ФОП', accruedTaxes: 'Налоги ФОП (начислено)',
   calculate: 'Рассчитать',
   calculationRunning: 'Налоговый расчёт выполняется. Отчёт обновится после завершения.',
+  calculationConnectionLost: 'Связь с сервером потеряна. Нажмите «Рассчитать», чтобы снова проверить статус текущего расчёта.',
   calculationSettingsChanged: 'Расчёт остановлен. Проверьте, включён ли налоговый учёт и актуальны ли настройки.',
   calculationFailed: 'Расчёт прерван. Проверьте отчёт и повторите запуск.',
   calculationUpdated: 'Налоговый отчёт обновлён за период {from} – {through}.',
