@@ -91,7 +91,7 @@ export class SalesStatisticsService {
   private async readIn(tx: Prisma.TransactionClient, now: Date): Promise<Snapshot> {
     const [orders, payments, expenses, redirects, clients, settings] = await Promise.all([
       batches(cursor => tx.order.findMany({ ...args(cursor), select: orderSelect })),
-      batches(cursor => tx.payment.findMany({ ...args(cursor), where: { voidedAt: null }, select: paymentSelect })),
+      batches(cursor => tx.payment.findMany({ ...args(cursor), where: { voidedAt: null, OR: [{ externalStatus: null }, { externalStatus: { not: 'sandbox_paid' } }] }, select: paymentSelect })),
       batches(cursor => tx.expense.findMany({ ...args(cursor), where: { archivedAt: null }, select: expenseSelect })),
       tx.clientMergeRedirect.findMany({ select: { sourceClientId: true, targetClientId: true } }),
       batches(cursor => tx.client.findMany({ ...args(cursor), select: { id: true, displayName: true } })),

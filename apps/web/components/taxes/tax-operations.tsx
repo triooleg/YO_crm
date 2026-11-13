@@ -19,14 +19,14 @@ function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, v
   const [bankLoading, setBankLoading] = useState(false);
   async function loadReceipt() {
     const rootId = values.rootId;
-    const reference = values.merchantReference?.trim();
-    if (!rootId || !reference) return;
+    const reference = values.merchantReference?.trim() || undefined;
+    if (!rootId) return;
     setBankLoading(true); setValidation(''); setConfirmed(false);
     try {
       const receipt = await taxApi.monobankReceipt(rootId, reference);
-      setValues(current => current.rootId !== rootId ? current : ({
+      setValues(current => current.rootId !== rootId || (current.merchantReference?.trim() || undefined) !== reference ? current : ({
         ...current,
-        bankReference: reference,
+        bankReference: reference ?? 'stored',
         grossCurrency: 'UAH',
         gross: (receipt.grossMinor / 100).toFixed(2),
         date: '',
@@ -65,7 +65,7 @@ function TaxCommandForm({ title, fields, submit, onExecute, onSaved, disabled, v
     // Only configured fields are consumed; all configured required fields passed validation above.
     if (await mutation.run(title, values, key => onExecute(values as ValidatedValues, key))) { setConfirmed(false); onSaved(); }
   }
-  return <form onSubmit={save}><Fieldset legend={title} disabled={disabled || mutation.busy || bankLoading}><Stack gap="sm"><SimpleGrid cols={{ base: 1, sm: 2 }}>{fields.map(f => f.options ? <Select key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} searchable data={f.options} value={values[f.name] ?? null} onChange={value => change(f.name, value ?? '')} /> : f.type === 'textarea' ? <Textarea key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} autosize minRows={2} /> : <TextInput key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} type={f.type === 'date' || f.type === 'month' ? f.type : 'text'} inputMode={f.type === 'money' || f.type === 'signed' ? 'decimal' : undefined} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} />)}</SimpleGrid>{monobank && <><TextInput label={ui.monobankReference} value={values.merchantReference ?? ''} maxLength={253} onChange={e => change('merchantReference', e.currentTarget.value)} /><Button type="button" variant="light" disabled={!values.rootId || !values.merchantReference?.trim()} loading={bankLoading} onClick={loadReceipt}>{ui.monobankLoad}</Button></>}<Checkbox label={ui.confirmMutation} checked={confirmed} onChange={e => setConfirmed(e.currentTarget.checked)} /><TaxFeedback error={validation || mutation.error} success={mutation.success} /><Button type="submit" disabled={!confirmed} loading={mutation.busy}>{submit}</Button></Stack></Fieldset></form>;
+  return <form onSubmit={save}><Fieldset legend={title} disabled={disabled || mutation.busy || bankLoading}><Stack gap="sm"><SimpleGrid cols={{ base: 1, sm: 2 }}>{fields.map(f => f.options ? <Select key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} searchable data={f.options} value={values[f.name] ?? null} onChange={value => change(f.name, value ?? '')} /> : f.type === 'textarea' ? <Textarea key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} autosize minRows={2} /> : <TextInput key={f.name} label={f.label} required={!f.optional || Boolean(f.requiredWhen?.(values))} type={f.type === 'date' || f.type === 'month' ? f.type : 'text'} inputMode={f.type === 'money' || f.type === 'signed' ? 'decimal' : undefined} value={values[f.name] ?? ''} onChange={e => change(f.name, e.currentTarget.value)} />)}</SimpleGrid>{monobank && <><TextInput label={ui.monobankReference} description={ui.monobankReferenceHint} value={values.merchantReference ?? ''} maxLength={253} onChange={e => change('merchantReference', e.currentTarget.value)} /><Button type="button" variant="light" disabled={!values.rootId} loading={bankLoading} onClick={loadReceipt}>{ui.monobankLoad}</Button></>}<Checkbox label={ui.confirmMutation} checked={confirmed} onChange={e => setConfirmed(e.currentTarget.checked)} /><TaxFeedback error={validation || mutation.error} success={mutation.success} /><Button type="submit" disabled={!confirmed} loading={mutation.busy} h="auto" mih={36} py="xs" styles={{ label: { whiteSpace: "normal", lineHeight: 1.25 } }}>{submit}</Button></Stack></Fieldset></form>;
 }
 const components = Object.entries(ui.components).map(([value, label]) => ({ value, label }));
 const componentField: Field = { name: 'component', label: ui.component, options: components };

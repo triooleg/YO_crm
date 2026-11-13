@@ -2,7 +2,7 @@ import { ArgumentsHost, Body, Catch, Controller, ExceptionFilter, Header, HttpCo
 import type { Request, Response } from 'express';
 import { WebsiteOrdersService } from './website-orders.service';
 import { WEBSITE_ORDER_AUTHENTICATOR, WebsiteOrdersGuard, websiteOrderPrincipal, type WebsiteOrderAuthenticator } from './website-orders-security';
-import { parseWebsiteOrder } from './website-orders-contract';
+import { normalizeWebsiteSourceAccount, parseWebsiteCartKey, parseWebsiteCheckoutId, parseWebsiteOrder } from './website-orders-contract';
 import { WebsiteOrderError, websiteErrorMessage } from './website-orders-errors';
 
 @Catch()
@@ -21,6 +21,16 @@ export class WebsiteOrdersExceptionFilter implements ExceptionFilter {
 export class WebsiteOrdersController {
  constructor(@Inject(WebsiteOrdersService) private readonly orders:WebsiteOrdersService,
   @Inject(WEBSITE_ORDER_AUTHENTICATOR) private readonly authenticator:WebsiteOrderAuthenticator){}
+ @Post('orders/number-reservation') @HttpCode(200) @Header('Cache-Control','no-store')
+ async reserve(@Body() body:unknown,@Req() request:Request){
+  const data=body as Record<string,unknown>|null;
+  if(typeof data?.sourceAccount!=='string')throw new WebsiteOrderError('WEBSITE_INVALID_PAYLOAD',400);
+  const principal=websiteOrderPrincipal(request);
+  const sourceAccount=normalizeWebsiteSourceAccount(data.sourceAccount);
+  await this.authenticator.authorizeSource(principal,sourceAccount);
+  const externalId=data.externalId===undefined?undefined:parseWebsiteCheckoutId(sourceAccount,data.externalId);
+  return this.orders.reserveNumber(sourceAccount,parseWebsiteCartKey(data.cartKey),externalId,principal.kind==='key'?principal.sourceAccount:undefined);
+ }
  @Post('orders') @HttpCode(200) @Header('Cache-Control','no-store')
  async receive(@Body() body:unknown,@Req() request:Request){
   const principal=websiteOrderPrincipal(request);

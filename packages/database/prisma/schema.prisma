@@ -615,6 +615,19 @@ model Measurement {
   parentAssignmentsAfter MeasurementSubmissionTarget[] @relation("ParentMeasurementTargetAfter")
 }
 
+model WebsiteOrderNumberReservation {
+  sourceAccount String
+  cartKey       String
+  number        String   @unique
+  sequence      Int      @unique
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+  externalId    String?
+
+  @@id([sourceAccount, cartKey])
+  @@unique([sourceAccount, externalId])
+}
+
 model Order {
   shipmentNotifications ShipmentNotification[]
   taxEntries TaxEntry[]

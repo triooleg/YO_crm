@@ -21,7 +21,7 @@ const NOW = new Date('2026-10-18T10:00:00Z');
 const date = value => new Date(value);
 const actor = { id: 'owner', role: 'OWNER' };
 const query = { from: '2026-10-01', to: '2026-10-31', currency: 'EUR' };
-function matches(row, where = {}) { return Object.entries(where).every(([key, value]) => value === null ? row[key] == null : value && typeof value === 'object' && 'in' in value ? value.in.includes(row[key]) : row[key] === value); }
+function matches(row, where = {}) { return Object.entries(where).every(([key, value]) => key === 'OR' ? value.some(clause => matches(row, clause)) : value === null ? row[key] == null : value && typeof value === 'object' && 'in' in value ? value.in.includes(row[key]) : value && typeof value === 'object' && 'not' in value ? row[key] != null && row[key] !== value.not : row[key] === value); }
 function project(row, select) {
   if (!select) return structuredClone(row);
   return Object.fromEntries(Object.entries(select).filter(([, value]) => value).map(([key, value]) => {
@@ -135,4 +135,18 @@ test('FX paused before mutation cannot publish or re-register an obsolete CSV to
     assert.throws(()=>service.export({...query,valuationVersion:previous.valuationVersion},actor,NOW),/Обновите статистику/);
   }finally{release();SalesStatisticsFx.prototype.prepare=prepare}
   assert.equal((await service.report(query,actor,NOW)).current.orders,0);
+});
+
+test('sales receipts retain genuine archived payments and omit sandbox payments', async () => {
+  const { SalesStatisticsService } = load('overview/sales-statistics.service.ts');
+  const { db, dataset } = database(2);
+  for (const order of dataset.order) order.archivedAt = NOW;
+  dataset.payment[0].externalStatus = 'paid';
+  dataset.payment[1].externalStatus = 'sandbox_paid';
+  dataset.payment[1].amountMinor = 98765;
+  const service = new SalesStatisticsService(db);
+  const report = await service.report({ ...query, drill: 'payments' }, actor, NOW);
+  assert.equal(report.current.receivedMinor, 6000);
+  const csv = service.export({ ...query, drill: 'payments', valuationVersion: report.valuationVersion }, actor, NOW);
+  assert.doesNotMatch(csv, /98765/);
 });

@@ -13,7 +13,7 @@ export type FiscalLedger = { months: FiscalLedgerMonth[]; links: { expenseId: st
 export type FiscalSources = {
   orders: { id: string; number: string; clientId: string; client: { displayName: string }; archivedAt?: Date | string | null }[];
   orderSources?: Record<string, OrderSource>;
-  payments: { id: string; orderId: string | null; amountMinor: number; currency: string; receivedAt: Date | string; voidedAt?: Date | string | null }[];
+  payments: { id: string; orderId: string | null; amountMinor: number; currency: string; receivedAt: Date | string; sourceSystem?: string | null; externalStatus?: string | null; reference?: string | null; voidedAt?: Date | string | null }[];
   expenses: { id: string; categoryId: string; category?: { name: string }; amountMinor: number; currency: string; incurredAt: Date | string; archivedAt?: Date | string | null; orderId?: string | null; order?: { number: string } | null; notes?: string | null; orderShipment?: { id: string } | null }[];
   ledger: FiscalLedger;
 };
@@ -210,10 +210,21 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
     const oldExpenseIds=new Set(expenseValues.keys()),oldCategories=[...categoryValues],oldComponents=[...componentValues];
     const ledger = activeLedgerMonths.find(row => row.month === m);
     const startMissing = missing.length;
+    const paymentsById = new Map(activePayments.map(payment => [payment.id, payment]));
+    const checkoutEstimates = new Set(ledger?.pendingStatuses.filter(status => {
+      if (status.status !== 'RECEIPT_CONFIRMATION_REQUIRED' || !status.sourceId || !status.rootId) return false;
+      const payment = paymentsById.get(status.paymentId);
+      if (payment?.sourceSystem !== 'YOLEOTARD_WEBSITE' || payment.externalStatus !== 'paid' || !payment.reference?.trim()) return false;
+      return ledger.entries.some(entry => monetary.has(entry.kind) && entry.rootId === status.rootId &&
+        entry.paymentId === payment.id && entry.snapshot.sourceId === status.sourceId &&
+        entry.snapshot.receiptConfirmed === false && entry.amountMinor !== null);
+    }) ?? []);
+    const onlyCheckoutEstimates = checkoutEstimates.size > 0 && checkoutEstimates.size === ledger?.pendingCount;
     const taxPending = !ledger || ledger.incomplete || data.ledger.unavailable || m < ACCOUNTING_START.slice(0, 7);
     if (!ledger || data.ledger.unavailable) addMissing('TAX_LEDGER_UNAVAILABLE', m);
     if (m < ACCOUNTING_START.slice(0, 7)) addMissing('BEFORE_ACCOUNTING_START', m);
-    if (ledger?.incomplete) addMissing('TAX_CALCULATION_INCOMPLETE', m);
+    if (ledger?.incomplete && !onlyCheckoutEstimates) addMissing('TAX_CALCULATION_INCOMPLETE', m);
+    if (checkoutEstimates.size) addMissing('CHECKOUT_PRELIMINARY', m);
     const income: (number | null)[] = [], ordinary: (number | null)[] = [], paid: (number | null)[] = [], accrued: (number | null)[] = [];
     const sourceValues = new Map<string, (number | null)[]>(ORDER_SOURCES.map(s => [s, []]));
     for (const p of activePayments.filter(p => kyivDate(p.receivedAt).slice(0, 7) === m)) {
@@ -239,15 +250,15 @@ export async function projectFiscalReport(data: FiscalSources, query: FinanceRep
       if (m === month) { const values = componentValues.get(e.component) ?? []; values.push(v.value); componentValues.set(e.component, values); }
       const order = e.orderId ? orders.get(e.orderId) : undefined;
        const receipt = e.paymentId ? activePayments.find(p => p.id === e.paymentId) : undefined;
-      const pending = ledger?.pendingStatuses.find(p => p.rootId === (e.rootId ?? e.id) || p.paymentId && p.paymentId === e.paymentId);
-      const provisionalStatus = pending?.status ?? (e.paymentId && e.snapshot.receiptConfirmed === false ? 'RECEIPT_CONFIRMATION_REQUIRED' : null);
+      const pending = ledger?.pendingStatuses.find(p => p.rootId ? p.rootId === (e.rootId ?? e.id) : p.paymentId && p.paymentId === e.paymentId);
+      const provisionalStatus = pending && checkoutEstimates.has(pending) ? 'CHECKOUT_PRELIMINARY' : pending?.status ?? (e.paymentId && e.snapshot.receiptConfirmed === false ? 'RECEIPT_CONFIRMATION_REQUIRED' : null);
       allRows.push({ id: e.id, rootId: e.rootId, period: m, component: e.component, kind: e.kind, source: isCorrection ? 'CORRECTION' : monthly ? 'MONTHLY' : 'RECEIPT', orderId: e.orderId, paymentId: e.paymentId, clientId: order?.clientId ?? null, number: order?.number ?? null, clientName: order?.client.displayName ?? null, orderSource: origin(e.orderId), date, incomeDate: e.snapshot.incomeDate ?? null, receivedAt: receipt ? new Date(receipt.receivedAt).toISOString() : null, valuationDate: v.rate?.effectiveDate ?? date, valuationBasis: basis, uahAmountMinor: e.amountMinor, amountMinor: v.value, currency, policyId: e.policyId, status: provisionalStatus ?? (v.value === null ? 'VALUATION_PENDING' : !date ? 'DATE_EVIDENCE_MISSING' : periodMap.get(e.periodId)?.state === 'CLOSED' ? 'CLOSED' : 'CALCULATED'), incomplete: Boolean(provisionalStatus) || v.value === null || !date, evidence: { ...e.snapshot, policy: e.snapshot.valuationPolicy ?? e.snapshot.policy ?? entries.find(root => root.id === e.rootId)?.snapshot?.policy ?? periodMap.get(e.periodId)?.snapshot?.policy ?? null }, fxEvidence: v.rate });
     }
     for (const p of ledger?.pendingStatuses ?? []) {
        const root = entries.find(e => e.id === p.rootId), payment = activePayments.find(row => row.id === (p.paymentId ?? root?.paymentId)), orderId = root?.orderId ?? payment?.orderId ?? null, order = orderId ? orders.get(orderId) : undefined;
       allRows.push({ id: String(p.draftId ?? p.rootId ?? p.paymentId ?? `${m}:${p.component ?? 'coverage'}:${p.status}`) + ':pending', rootId: p.rootId ?? null, period: m, component: p.component ?? root?.component ?? null, kind: 'PENDING', source: 'PENDING', orderId, paymentId: p.paymentId ?? root?.paymentId ?? null, clientId: order?.clientId ?? null, number: order?.number ?? null, clientName: order?.client.displayName ?? null, orderSource: origin(orderId), date: p.incomeDate ?? null, incomeDate: p.incomeDate ?? null, receivedAt: payment ? new Date(payment.receivedAt).toISOString() : null, valuationDate: null, valuationBasis: 'UNKNOWN', uahAmountMinor: null, amountMinor: null, currency, policyId: root?.policyId ?? null, status: String(p.status), incomplete: true, evidence: p, fxEvidence: null });
     }
-    const receivedMinor = nullableSum(income), ordinaryExpensesMinor = nullableSum(ordinary), taxPaidMinor = nullableSum(paid), accruedTaxesMinor = taxPending || undatedAccrual ? null : nullableSum(accrued);
+    const receivedMinor = nullableSum(income), ordinaryExpensesMinor = nullableSum(ordinary), taxPaidMinor = nullableSum(paid), accruedTaxesMinor = (taxPending && !onlyCheckoutEstimates) || undatedAccrual || data.ledger.unavailable || m < ACCOUNTING_START.slice(0, 7) ? null : nullableSum(accrued);
     const breakdown = ORDER_SOURCES.map(source => ({ source, amountMinor: nullableSum(sourceValues.get(source)!) }));
     breakdowns.push({ month: m, breakdown });
     const resultAfterAccrualMinor = nullableSum([receivedMinor, ordinaryExpensesMinor === null ? null : -ordinaryExpensesMinor, accruedTaxesMinor === null ? null : -accruedTaxesMinor]);

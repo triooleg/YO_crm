@@ -30,3 +30,16 @@ test('direct identity uses the same canonical website marker profile as KeyCRM',
  for(const value of ['0','00123','1:a','1.5','',0]){const p=payload();p.order.externalId=value;assert.throws(()=>parseWebsiteOrder(p),e=>e.code==='WEBSITE_INVALID_PAYLOAD');}
  const p=payload();p.order.externalId='9223372036854775807';assert.equal(parseWebsiteOrder(p).order.externalId,p.order.externalId);
 });
+test('Calendar sandbox receipt preserves its UAH amount independently of the order total',()=>{
+ const p=payload();
+ p.order.checkoutMode='card';
+ p.order.paymentStatus='paid';
+ p.payment={provider:'monobank',testMode:true,amountMinor:100,currency:'UAH',status:'paid',receivedAt:'2026-10-20T12:05:00Z'};
+ assert.equal(parseWebsiteOrder(p).payment.amountMinor,100);
+ assert.equal(parseWebsiteOrder(p).payment.currency,'UAH');
+ assert.equal(parseWebsiteOrder(p).totals.chargedMinor,21500);
+ for(const payment of [{testMode:undefined},{amountMinor:0},{currency:'USD'},{provider:'western_bid'}]){
+  assert.throws(()=>parseWebsiteOrder({...p,payment:{...p.payment,...payment}}),e=>e.code==='WEBSITE_INVALID_PAYLOAD');
+ }
+ assert.equal(parseWebsiteOrder({...p,payment:{...p.payment,amountMinor:21500,currency:'EUR'}}).payment.currency,'EUR');
+});

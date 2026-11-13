@@ -72,6 +72,7 @@ function harness(t, { detail = rawOrder(), detailStatus = 200, sourcePages = 1, 
       findMany: async ({ where }) => clone(issues.filter(row => row.runId === where.runId)),
     },
     auditLog: { create: async ({ data }) => { audits.push(clone(data)); return { id: `audit-${audits.length}`, ...clone(data) }; } },
+    websiteOrderNumberReservation: { findFirst: async () => null },
     order: {
       findUnique: async ({ where }) => linked && where.sourceSystem_sourceAccount_externalId?.externalId === '675'
         ? { id: 'already-imported-675', externalUpdatedAt: new Date('2026-10-03T00:00:00Z'),

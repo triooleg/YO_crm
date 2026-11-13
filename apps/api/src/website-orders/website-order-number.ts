@@ -31,11 +31,16 @@ function keycrmBusinessSequence(value: string | null | undefined) {
   return Number.isSafeInteger(sequence) ? sequence : 0;
 }
 
+export async function lockOrderNumber(tx: Prisma.TransactionClient) {
+  await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', NUMBER_LOCK);
+}
+
 export async function nextOrderNumber(
   tx: Prisma.TransactionClient,
   createdAt = new Date(),
 ) {
-  await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', NUMBER_LOCK);
+  await lockOrderNumber(tx);
+  const reserved = await tx.websiteOrderNumberReservation.findFirst({ orderBy: { sequence: 'desc' }, select: { sequence: true } });
   const history = await tx.order.findMany({
     select: { number: true, externalNumber: true, externalId: true, sourceSystem: true },
   });
@@ -44,7 +49,7 @@ export async function nextOrderNumber(
     websiteBusinessSequence(order.number),
     order.sourceSystem === 'KEYCRM' ? keycrmBusinessSequence(order.externalNumber) : 0,
     order.sourceSystem === 'KEYCRM' ? keycrmBusinessSequence(order.externalId) : 0,
-  ), 0);
+  ), reserved?.sequence ?? 0);
   const next = maximum + 1;
   if (next > 999_999_999) throw new Error('WEBSITE_ORDER_NUMBER_EXHAUSTED');
   return yearOrderNumber(next, createdAt);

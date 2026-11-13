@@ -1,3 +1,11 @@
+## Автоматический расчёт налогов по оплатам сайта
+
+- Финансовый отчёт использует предварительные начисления Checkout, если других препятствий для расчёта нет. Налоговый реестр сохраняет исходный статус зачисления. Проверка рабочего релиза ещё не завершена.
+
+## 2026-11-13 - Monobank sandbox receipt amount
+
+- CRM 0.19.7 accepts verified Calendar Monobank sandbox receipts in UAH independently of the commercial order total. The payment remains on the archived order and is excluded from taxes and revenue. Legacy sandbox payloads remain supported.
+
 ## 2026-11-12 - Website acquiring tax reconciliation
 
 - Tax reconciliation accepts confirmed UAH gross and deposit date for a foreign-currency order. The original payment is retained in the audit snapshot. The UAH amount comes from the bank statement, including the actual acquiring fee.
@@ -885,3 +893,29 @@ FOP taxes. The token is write-only and encrypted in AppSetting. Tax review only
 prefills UAH amounts for an exact invoice and full merchant reference. The
 operation date is evidence only. Enter the actual credit date separately.
 No production tax entries were changed by implementation.
+
+Installed 0.19.5 on 2026-11-12. Runtime commit
+`2c7afebc84431ca0f614f20bce8567e808af09c1`, snapshot
+`7f0f69a2fd230cf4450db4aca3d51cbd42cec0de9c862baa77e4156ca632ee46`.
+Public health and the authenticated settings page, version badge, and release
+journal matched. The two app images were replaced. PostgreSQL and Redis were
+preserved and no migrations ran. The 0.19.4 app rollback source and Compose are
+retained in the r4 deployment planner. Owner entry of the merchant token and
+live receipt reconciliation remain separate steps.
+
+Monobank: checkout now pins verified paid receipt; CRM accepts merchantReference and statement profit. Early shared order numbering is specified in docs/checkout-order-number-reservation.md. Changes not deployed.
+
+## Early website order number reservation — local
+- Checkout asynchronously requests a number after the product reservation. The website credential scopes the reserve; paid Monobank card imports require the exact reserved number in the merchant reference. The bank invoice ID stays separate.
+- Reservation table and shared sequence verified locally; PHP-to-CRM synthetic integration passed. No production mode change, payment, deployment or push. Screenshot shows the Monobank toggle belongs to the live WordPress instance. Use isolated WordPress + CRM and the Monobank test token for acceptance.
+- Rollout: additive CRM migration and compatible ingress first, then Checkout. After the first reservation, do not revert CRM to a build without reservation-aware allocation and ingestion; keep a compatible fallback build and preserve the table.
+
+## Checkout and Monobank isolated acceptance
+- Started isolated CRM API at 127.0.0.1:14583 and UI at 127.0.0.1:13583. Applied all 56 migrations on a fresh PostgreSQL container. The Checkout test network reaches the API via TLS at crm-stage.example with its own CA.
+- Verified HTTP authentication, legacy import, idempotent reserve and binding, rejection of a mismatching reference, successful synthetic import and one Payment row after replay. Parallel reservations on PostgreSQL were unique and stable on retry.
+- A real Monobank sandbox payment remains the acceptance gate. The production WordPress token selector was not changed.
+
+## Calendar WordPress Monobank sandbox
+- The Checkout v5.2.3 test ZIP emits payment.testMode for verified Monobank sandbox receipts.
+- CRM accepts this marker only through the calendar.yoleotard.com scoped API credential with a matching bound reservation. It archives the order at creation, records the payment for verification, and skips tax capture.
+- Targeted ingestion and replay tests passed. Production installation and the first Calendar sandbox payment are pending.

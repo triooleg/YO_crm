@@ -286,3 +286,33 @@ test('paid creation requires native tax capture inside the same transaction and 
  const failure=websiteDatabase(),broken=new WebsiteOrdersService(failure,{capturePayment:async()=>{throw Error('synthetic tax failure');}},()=>['calendar.yoleotard.com']);
  await assert.rejects(broken.ingest(p),/synthetic tax failure/);assert.ok(Object.values(failure.state).every(rows=>rows.length===0));
 });
+
+test('Calendar archives a UAH sandbox receipt and never captures it for taxes',async()=>{
+ const db=websiteDatabase(),p=websitePayload();
+ let captures=0;
+ const service=new WebsiteOrdersService(db,{capturePayment:async()=>{captures++;}},()=>[p.sourceAccount]);
+ const cartKey='a'.repeat(64),number='26-718';
+ db.state.websiteOrderNumberReservation.push({sourceAccount:p.sourceAccount,externalId:p.order.externalId,cartKey,number,sequence:718});
+ p.order.numberReservation=cartKey;
+ p.order.paymentStatus='paid';
+ p.payment={externalId:'sandbox-payment',provider:'monobank',testMode:true,amountMinor:100,currency:'UAH',reference:'sandbox-invoice',merchantReference:number,status:'paid',receivedAt:'2026-10-20T12:05:00Z'};
+ await assert.rejects(service.ingest(p),e=>e.code==='WEBSITE_SOURCE_NOT_ALLOWED');
+ assert.equal((await service.ingest(p,p.sourceAccount)).orderNumber,number);
+ assert.equal((await service.ingest(p,p.sourceAccount)).created,false);
+ assert.ok(db.state.order[0].archivedAt);
+ assert.equal(db.state.order[0].priceMinor,21500);
+ assert.equal(db.state.payment.length,1);
+ const receipt=db.state.payment[0];
+ assert.equal(receipt.amountMinor,100);
+ assert.equal(receipt.currency,'UAH');
+ assert.equal(receipt.appliedAmountMinor,0);
+ assert.equal(receipt.externalStatus,'sandbox_paid');
+ assert.equal(captures,0);
+});
+
+test('a sandbox receipt never applies to a same-currency order',()=>{
+ const {appliedPaymentMinor}=loadTargetModule('finance/exchange-rates.ts');
+ const receipt={amountMinor:100,currency:'UAH',appliedAmountMinor:0,appliedCurrency:'UAH'};
+ assert.equal(appliedPaymentMinor({...receipt,externalStatus:'sandbox_paid'},'UAH'),0);
+ assert.equal(appliedPaymentMinor(receipt,'UAH'),100);
+});

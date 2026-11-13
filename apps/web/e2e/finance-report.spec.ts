@@ -95,7 +95,7 @@ test('order deep-link filter stays visible and can be removed without leaving Fi
 import { moveFinanceMonth } from '../lib/finance-report';
 
 // Synthetic reporting records only; no customer data or provider requests.
-async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;delayDetail?:Promise<void>}={}){
+async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;delayDetail?:Promise<void>;checkoutEstimate?:boolean}={}){
  const calls:{path:string;method:string;query:URLSearchParams}[]=[];let conflict=options.conflictExport;
  await page.route('**/api/**',async route=>{
   const url=new URL(route.request().url()),path=url.pathname;calls.push({path,method:route.request().method(),query:url.searchParams});
@@ -111,7 +111,10 @@ async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;del
    const amount=(n:number)=>Math.round(n*mult),payment={id:'row-1',orderId:'order-1',number:'TEST-001',clientId:'client-1',clientName:'Тестовый клиент',date:'2026-10-10T12:00:00Z',amountMinor:amount(50000),paidMinor:amount(25000),balanceMinor:amount(25000),status:'PARTIAL',method:'BANK_TRANSFER',notes:'Длинное примечание клиента, размеры и пожелания для изготовления. '.repeat(12),originalCurrency:'EUR',originalAmountMinor:50000,originalPaidMinor:25000,originalBalanceMinor:25000,roundingDifferenceMinor:0,forecastDate:'2026-10-21',forecastSource:'deadline'};
    const expense={id:'expense-1',date:'2026-10-10',categoryId:'materials',categoryName:'Материалы',orderId:'order-1',number:'TEST-001',notes:'Ткань',amountMinor:amount(4500),originalAmountMinor:4500,originalCurrency:'EUR',shipmentId:null};
    const invoice={id:'inv-1',orderId:'order-1',number:'INV-001',orderNumber:'TEST-001',clientId:'client-1',clientName:'Тестовый клиент',date:'2026-10-10',dueDate:'2026-10-21',status:'ISSUED',amountMinor:amount(50000),paidMinor:null,balanceMinor:null,originalCurrency:'EUR',originalAmountMinor:50000};
-   return route.fulfill({json:{month,currency,valuationVersion:'v1',valuation:{provider:'NBU',effectiveDate:'2026-10-15',fetchedAt:'2026-10-15T08:00:00Z',officialUrl:'https://bank.gov.ua/'},today:'2026-10-15',forecastUntil:'2026-11-14',current:{receivedMinor:amount(312368),expensesMinor:amount(62435),resultMinor:amount(249933)},previous:{receivedMinor:amount(745872),expensesMinor:amount(48800),resultMinor:amount(697072)},debtMinor:amount(124000),forecastMinor:amount(218000),forecastCount:6,invoiceCount:3,invoiceTotalMinor:amount(145000),unpaidInvoiceCount:2,monthlyTrend:Array.from({length:6},(_,index)=>moveFinanceMonth(month,index-5)).map((value,i)=>({month:value,receivedMinor:amount([460315,593098,521900,882381,745872,312368][i]!),expensesMinor:amount([32050,41020,29530,52015,48800,62435][i]!),resultMinor:amount([428265,552078,492370,830366,697072,249933][i]!)})),categoryBreakdown:[{id:'delivery',name:'Доставка',amountMinor:amount(30035)},{id:'materials',name:'Материалы',amountMinor:amount(13200)},{id:'fees',name:'Комиссии',amountMinor:amount(8640)},{id:'packaging',name:'Упаковка',amountMinor:amount(6210)},{id:'other',name:'Прочие',amountMinor:amount(4350)}],recentExpenses:[expense],upcoming:[payment],table:{tab,rows:tab==='expenses'?[expense]:tab==='invoices'?[invoice]:[payment],total:1,page:Number(url.searchParams.get('page')||1),pageSize:Number(url.searchParams.get('pageSize')||10)},options:{clients:[{id:'client-1',name:'Тестовый клиент'}],categories:[{id:'materials',name:'Материалы'}],orders:[{id:'order-1',number:'TEST-001',clientName:'Тестовый клиент',currency:'EUR'}]}}});
+   const period={month,receivedMinor:312368,ordinaryExpensesMinor:62435,accruedTaxesMinor:23456,resultAfterAccrualMinor:226477,taxPaidMinor:0,cashResultMinor:249933,websiteReceivedMinor:54080,incomplete:true};
+   const taxRow={id:'synthetic-tax-row',period:month,source:'RECEIPT',kind:'FINALIZE',paymentId:'test-payment',orderId:'order-1',number:'TEST-001',component:'UNIFIED',status:'CHECKOUT_PRELIMINARY',incomplete:true,uahAmountMinor:138014,amountMinor:2704,valuationBasis:'INCOME_DATE',evidence:{receiptConfirmed:false}};
+   const fiscal=options.checkoutEstimate?{current:period,previous:period,trend:[period],missing:[{code:'CHECKOUT_PRELIMINARY',month}],rows:[{...taxRow,source:"PENDING",status:"RECEIPT_CONFIRMATION_REQUIRED"}],expenseStructure:{rows:[],drawable:false,totalMinor:85891},taxSummary:{pendingCount:2}}:undefined;
+   return route.fulfill({json:{month,currency,fiscal,projection:options.checkoutEstimate&&url.searchParams.get('projection')==='summary'?'summary':undefined,receiptConfirmationCount:1,valuationVersion:'v1',valuation:{provider:'NBU',effectiveDate:'2026-10-15',fetchedAt:'2026-10-15T08:00:00Z',officialUrl:'https://bank.gov.ua/'},today:'2026-10-15',forecastUntil:'2026-11-14',current:{receivedMinor:amount(312368),expensesMinor:amount(62435),resultMinor:amount(249933)},previous:{receivedMinor:amount(745872),expensesMinor:amount(48800),resultMinor:amount(697072)},debtMinor:amount(124000),forecastMinor:amount(218000),forecastCount:6,invoiceCount:3,invoiceTotalMinor:amount(145000),unpaidInvoiceCount:2,monthlyTrend:Array.from({length:6},(_,index)=>moveFinanceMonth(month,index-5)).map((value,i)=>({month:value,receivedMinor:amount([460315,593098,521900,882381,745872,312368][i]!),expensesMinor:amount([32050,41020,29530,52015,48800,62435][i]!),resultMinor:amount([428265,552078,492370,830366,697072,249933][i]!)})),categoryBreakdown:[{id:'delivery',name:'Доставка',amountMinor:amount(30035)},{id:'materials',name:'Материалы',amountMinor:amount(13200)},{id:'fees',name:'Комиссии',amountMinor:amount(8640)},{id:'packaging',name:'Упаковка',amountMinor:amount(6210)},{id:'other',name:'Прочие',amountMinor:amount(4350)}],recentExpenses:[expense],upcoming:[payment],table:{tab,rows:tab==='expenses'?[expense]:tab==='invoices'?[invoice]:tab==='taxes'&&options.checkoutEstimate?[taxRow]:[payment],total:1,page:Number(url.searchParams.get('page')||1),pageSize:Number(url.searchParams.get('pageSize')||10)},options:{clients:[{id:'client-1',name:'Тестовый клиент'}],categories:[{id:'materials',name:'Материалы'}],orders:[{id:'order-1',number:'TEST-001',clientName:'Тестовый клиент',currency:'EUR'}]}}});
   }
   return route.fulfill({json:[]});
  });return calls;
@@ -271,4 +274,30 @@ for(const width of [1536,1366,390]) for(const currency of ['EUR','USD','UAH']) t
   return {inside:badge.right<=cell.right,gap:method.left-badge.right};
  });expect(clearance.inside).toBe(true);expect(clearance.gap).toBeGreaterThanOrEqual(8);
  expect(calls.filter(call=>call.method!=='GET')).toEqual([]);
+});
+
+for(const [width,height] of [[1920,1080],[1366,768],[390,844]])test(`Checkout preliminary figures are visible at ${width}px`,async({page},info)=>{
+ await page.setViewportSize({width,height});
+ const calls=await setup(page,'OWNER',{checkoutEstimate:true});
+ await page.goto('/?section=finance&period=2026-11');
+ const metrics=page.locator('.finance-report-kpi');
+ await expect(metrics.filter({hasText:'Налоги ФОП'})).toContainText(/234,56/);
+ await expect(metrics.filter({hasText:'Финансовый результат'})).toContainText(/2\s*264,77/);
+ const notice=page.getByText(/Предварительный расчёт по данным Checkout/);
+ await expect(notice).toBeVisible();
+ await notice.scrollIntoViewIfNeeded();
+ await page.screenshot({path:info.outputPath('checkout-notice.png')});
+ await expect(page.getByText(/Ожидают сверки оплаты/)).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Перейти к налоговой сверке'})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ expect(calls.filter(call=>call.method!=='GET').map(call=>call.path).every(path=>path==='/api/finance/exchange-rates/ensure-current')).toBe(true);
+ await page.screenshot({path:info.outputPath('checkout-preliminary.png'),fullPage:true});
+ await page.getByRole('button',{name:'Перейти к налоговой сверке'}).click();
+ await expect(page.getByRole('tab',{name:'Налоги ФОП',exact:true})).toHaveAttribute('aria-selected','true');
+ await page.getByRole('combobox',{name:'Статус',exact:true}).click();
+ await page.getByRole('option',{name:'Предварительно · Checkout',exact:true}).click();
+ await expect.poll(()=>calls.some(call=>call.query.get('status')==='CHECKOUT_PRELIMINARY')).toBe(true);
+ await expect(page.locator('.finance-tax-entries')).toContainText('Предварительно · Checkout');
+ await page.locator('.finance-tax-entries').scrollIntoViewIfNeeded();
+ await page.screenshot({path:info.outputPath('checkout-tax-tab.png')});
 });

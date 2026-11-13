@@ -66,6 +66,7 @@ test("manual order creation materializes one active instance per item quantity",
     client: { findFirst: async () => ({ id: "client-1" }) },
     athlete: { count: async () => 1 },
     measurement: { findMany: async () => [{ id: "measurement-1", athleteId: "athlete-1" }] },
+    websiteOrderNumberReservation: { findFirst: async () => null },
     order: {
       findMany: async () => [], // Empty persisted number history for the real shared generator.
       findFirst: async () => null,

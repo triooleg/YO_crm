@@ -10,6 +10,7 @@ type StatementRow = {
   date?: string;
   amount?: number;
   profitAmount?: number;
+  profit?: number;
   cancelList?: unknown[];
 };
 
@@ -19,9 +20,10 @@ export function matchMonobankReceipt(statement: { list?: StatementRow[] }, invoi
     : [];
   const row = matches[0];
   const grossMinor = row?.amount ?? 0;
-  const netMinor = row?.profitAmount ?? 0;
+  const netMinor = row?.profitAmount ?? row?.profit ?? 0;
   const date = row?.date ?? '';
   if (matches.length !== 1 || !row || row.reference !== merchantReference || row.status !== 'success' || row.ccy !== 980
+      || (row.profitAmount !== undefined && row.profit !== undefined && row.profitAmount !== row.profit)
       || (row.cancelList != null && (!Array.isArray(row.cancelList) || row.cancelList.length > 0))
       || !Number.isSafeInteger(grossMinor) || !Number.isSafeInteger(netMinor)
       || grossMinor <= 0 || netMinor <= 0 || netMinor > grossMinor

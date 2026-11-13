@@ -109,6 +109,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   useTaxPendingRefresh(data?.fiscal?.current.incomplete === true, () => void load(true), filters.month + ':' + filters.currency, pending);
   const labels={payments:ui.paymentsTab,expenses:ui.expensesTab,invoices:ui.invoicesTab,taxes:taxUi.taxes};
   const fiscal=data?.fiscal, current=fiscal?.current, previous=fiscal?.previous;
+  const checkoutPreliminary=current?.accruedTaxesMinor!=null&&fiscal?.missing.some(row=>row.month===filters.month&&row.code==='CHECKOUT_PRELIMINARY');
   const receiptConfirmationCount=data?fiscalReceiptConfirmationCount(data):0;
   const selectedTable=data&&filters.tab==='expenses'?financeExpenseTable(data):data?.table;
   const recentExpenses=data?financeRecentExpenses(data):[];
@@ -182,7 +183,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
         <Metric title={ui.debt} amount={money(data.debtMinor)} icon="clock" color="orange" hint={ui.currentOrders} tooltip={ui.debtHint}/>
         <Metric title={ui.forecast} amount={money(data.forecastMinor)} icon="calendar" color="blue" extra={`${data.forecastCount} ${ui.orders}`} hint={ui.horizon} tooltip={`${ui.forecastHint} ${financeDate(data.today)} – ${financeDate(data.forecastUntil)}`}/>
       </section>
-      {(!fiscal||current?.incomplete)&&<Alert color="yellow" role="status">{fiscal?taxUi.incomplete:taxUi.unavailable}{receiptConfirmationCount>0&&<div>{taxUi.receiptConfirmation.replace('{count}',String(receiptConfirmationCount))} <CrmButton size="compact-xs" tone="secondary" onClick={()=>patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'})}>{taxUi.openReceiptConfirmation}</CrmButton></div>}</Alert>}
+      {(!fiscal||current?.incomplete)&&<Alert color="yellow" role="status">{!fiscal?taxUi.unavailable:checkoutPreliminary?taxUi.checkoutPreliminary:taxUi.incomplete}{receiptConfirmationCount>0&&<div>{!checkoutPreliminary&&taxUi.receiptConfirmation.replace('{count}',String(receiptConfirmationCount))} <CrmButton size="compact-xs" tone="secondary" onClick={()=>patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'})}>{taxUi.openReceiptConfirmation}</CrmButton></div>}</Alert>}
       {fiscal?.missing.some(item=>item.month===filters.month&&item.code==='FUTURE_PRESENTATION_DATE')&&<Alert color="yellow" role="status">{taxUi.futurePresentation}</Alert>}
       <FinanceInformationNotices presentation={fiscalPresentationNotice(data)} />
       {data&&fiscalExpenseViewUnavailable(data)&&<Alert color="orange" role="status">{taxUi.cashFallback}</Alert>}

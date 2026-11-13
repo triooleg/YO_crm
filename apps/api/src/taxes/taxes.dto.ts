@@ -10,7 +10,7 @@ export class TaxMonobankSettingsDto {
  @IsString() @Matches(/^[A-Za-z0-9._-]{1,253}$/) sourceAccount!:string;
 }
 export class TaxMonobankReceiptDto {
- @IsString() @MaxLength(253) @Matches(/^[^\r\n]+$/) merchantReference!:string;
+ @IsOptional() @IsString() @MaxLength(253) @Matches(/^[^\r\n]+$/) merchantReference?:string;
 }
 export class TaxSettingsDto extends TaxCommandDto { @IsBoolean() enabled!:boolean; }
 export class TaxPolicyDto extends TaxCommandDto {

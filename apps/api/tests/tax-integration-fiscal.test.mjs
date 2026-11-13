@@ -480,3 +480,29 @@ test('receipt lifecycle ADJUST including zero uses recognized income day, distin
  const before=JSON.stringify(source);const r=await projectFiscalReport(source,{month:'2026-10',currency:'EUR',range:3},async(c,d)=>{if(d==='2026-10-12')throw Error('not published');return rate(c,d);},now);
  assert.equal(r.expenseTable.rows[0].date,'2026-10-12');assert.equal(r.expenseTable.rows[0].valuationDate,'2026-10-11');assert.equal(r.expenseTable.rows[0].amountMinor,200);assert.equal(r.expenseTable.rows[0].originalAmountMinor,10000);assert.equal(r.current.ordinaryExpensesMinor,200);assert.equal(JSON.stringify(source),before);
  });
+
+test('a valued Checkout payment shows preliminary totals without confirming receipt', async () => {
+  const { projectFiscalReport } = load('finance/finance-fiscal-model.ts');
+  const source = data();
+  Object.assign(source.payments[0], { sourceSystem:'YOLEOTARD_WEBSITE', externalStatus:'paid', reference:'provider-reference' });
+  const ledger = source.ledger.months[2];
+  ledger.incomplete = true;
+  ledger.entries[0].snapshot.receiptConfirmed = false;
+  ledger.entries[0].snapshot.sourceId = 'latest';
+  ledger.pendingStatuses = [{rootId:'root',paymentId:'p',sourceId:'latest',status:'RECEIPT_CONFIRMATION_REQUIRED'}];
+  const calculate = () => projectFiscalReport(source,{month:'2026-10',currency:'UAH',range:3},rate,now);
+  const report = await calculate();
+  assert.equal(report.current.accruedTaxesMinor,2051000);
+  assert.equal(report.current.resultAfterAccrualMinor,18459000);
+  assert.equal(report.current.incomplete,true);
+  assert.equal(report.taxSummary.accruedMinor,null);
+  assert.equal(report.rows.length,2);
+  assert.ok(report.rows.some(row=>row.source==='PENDING'&&row.status==='RECEIPT_CONFIRMATION_REQUIRED'));
+  assert.equal(report.rows[0].status,'CHECKOUT_PRELIMINARY');
+  assert.equal(report.rows[0].evidence.receiptConfirmed,false);
+  source.payments[0].externalStatus = 'sandbox_paid';
+  assert.equal((await calculate()).current.accruedTaxesMinor,null);
+  source.payments[0].externalStatus = 'paid';
+  ledger.pendingStatuses[0].sourceId = 'newer';
+  assert.equal((await calculate()).current.accruedTaxesMinor,null);
+});

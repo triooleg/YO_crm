@@ -7,6 +7,21 @@ Git-тег `crm-vX.Y.Z` и GitHub Release публикуются только с
 
 ## [Unreleased]
 
+## [0.19.8] - 2026-11-13
+
+- Предварительные налоги и финансовый результат по данным Checkout видны без ручной сверки. Статус зачисления в налоговом реестре сохраняется.
+
+## [0.19.7] - 2026-11-13
+
+- Record authenticated Calendar Monobank sandbox receipts in UAH without applying them to the order balance or reports.
+
+## [0.19.6] - 2026-11-12
+
+- Calendar Checkout sandbox orders are archived on import and excluded from revenue and tax reports.
+
+- Интернет-магазин резервирует номер заказа при добавлении товара в корзину. При импорте CRM сохраняет этот номер.
+- Сверка карточных оплат Monobank учитывает сохранённое назначение платежа.
+
 ## [0.19.5] - 2026-11-12
 
 - Владелец может подключить эквайринг Monobank в настройках налогов и загрузить подтверждённые суммы в гривнах из выписки по идентификатору платежа.

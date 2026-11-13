@@ -7,12 +7,12 @@ type Json=Prisma.InputJsonValue;
 type RecordValue=Record<string,unknown>;
 export type WebsiteOrder={
  raw:Json;sourceAccount:string;
- order:{externalId:string;externalNumber?:string;orderedAt:string;updatedAt?:string;checkoutMode:'card'|'bank_invoice';paymentStatus:'paid'|'unpaid';currency:string;notes?:string;sourceUrl?:string};
+ order:{externalId:string;externalNumber?:string;numberReservation?:string;orderedAt:string;updatedAt?:string;checkoutMode:'card'|'bank_invoice';paymentStatus:'paid'|'unpaid';currency:string;notes?:string;sourceUrl?:string};
  customer:{fullName:string;email?:string;phone?:string;country?:string;city?:string;addressLine1?:string;addressLine2?:string;postalCode?:string};
  delivery:{amountMinor:number;serviceName?:string;addressText?:string};
  totals:{itemsMinor:number;discountMinor:number;deliveryMinor:number;cardFeeMinor:number;chargedMinor:number};
  items:{externalId:string;productId?:string;sku?:string;name:string;quantity:number;unitPriceMinor:number;originalPriceMinor?:number;discountMinor?:number;imageUrl?:string;selectedServices?:Json;reductions?:Json;adjustedMeasurements?:Json;properties?:Json;notes?:string}[];
- payment?:{externalId?:string;provider?:string;reference?:string;amountMinor:number;currency:string;status:'paid'|'unpaid';receivedAt?:string;notes?:string};
+ payment?:{testMode?:true;externalId?:string;provider?:string;reference?:string;merchantReference?:string;amountMinor:number;currency:string;status:'paid'|'unpaid';receivedAt?:string;notes?:string};
 };
 function invalid():never{throw new WebsiteOrderError('WEBSITE_INVALID_PAYLOAD');}
 const object=(value:unknown):RecordValue=>value&&typeof value==='object'&&!Array.isArray(value)?value as RecordValue:invalid();
@@ -54,15 +54,25 @@ export function normalizeWebsiteSourceAccount(value:unknown):string {
 }
 
 /** Checkout v1 sends net item prices; discountMinor is informational. Charge includes delivery and card surcharge. */
+export function parseWebsiteCheckoutId(sourceAccount:string,value:unknown):string {
+ const externalId=id(value)!;
+ try{websiteCheckoutMarker(sourceAccount,externalId);}catch{invalid();}
+ return externalId;
+}
+
+export function parseWebsiteCartKey(value:unknown):string {
+ if(typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value))invalid();
+ return value;
+}
+
 export function parseWebsiteOrder(input:unknown):WebsiteOrder {
  const p=object(input);fields(p,['contractVersion','sourceAccount','order','customer','delivery','totals','items','payment']);
  const raw=json(p)!;
  if(p.contractVersion!==1||Buffer.byteLength(JSON.stringify(raw))>262144)invalid();
  const sourceAccount=normalizeWebsiteSourceAccount(p.sourceAccount);
- const o=object(p.order);fields(o,['externalId','externalNumber','orderedAt','updatedAt','checkoutMode','paymentStatus','currency','notes','sourceUrl']);
+ const o=object(p.order);fields(o,['externalId','externalNumber','numberReservation','orderedAt','updatedAt','checkoutMode','paymentStatus','currency','notes','sourceUrl']);
  if(typeof o.checkoutMode!=='string'||typeof o.paymentStatus!=='string'||!['card','bank_invoice'].includes(o.checkoutMode)||!['paid','unpaid'].includes(o.paymentStatus))invalid();
- const order:WebsiteOrder['order']={externalId:id(o.externalId)!,externalNumber:text(o.externalNumber,100),orderedAt:date(o.orderedAt),updatedAt:o.updatedAt==null?undefined:date(o.updatedAt),checkoutMode:o.checkoutMode as 'card'|'bank_invoice',paymentStatus:o.paymentStatus as 'paid'|'unpaid',currency:currency(o.currency),notes:text(o.notes,8000),sourceUrl:publicUrl(o.sourceUrl)};
- try{websiteCheckoutMarker(sourceAccount,order.externalId);}catch{invalid();}
+ const order:WebsiteOrder['order']={externalId:parseWebsiteCheckoutId(sourceAccount,o.externalId),externalNumber:text(o.externalNumber,100),numberReservation:o.numberReservation===undefined?undefined:parseWebsiteCartKey(o.numberReservation),orderedAt:date(o.orderedAt),updatedAt:o.updatedAt==null?undefined:date(o.updatedAt),checkoutMode:o.checkoutMode as 'card'|'bank_invoice',paymentStatus:o.paymentStatus as 'paid'|'unpaid',currency:currency(o.currency),notes:text(o.notes,8000),sourceUrl:publicUrl(o.sourceUrl)};
  const c=object(p.customer);fields(c,['fullName','email','phone','country','city','addressLine1','addressLine2','postalCode']);
  const customer:WebsiteOrder['customer']={fullName:text(c.fullName,200,true)!};
  for(const key of ['country','city','addressLine1','addressLine2','postalCode'] as const)customer[key]=text(c[key],500);
@@ -86,9 +96,11 @@ export function parseWebsiteOrder(input:unknown):WebsiteOrder {
  const lineSum=items.reduce((n,i)=>n+BigInt(i.quantity)*BigInt(i.unitPriceMinor),0n);
  if(lineSum!==BigInt(totals.itemsMinor)||delivery.amountMinor!==totals.deliveryMinor||BigInt(totals.chargedMinor)!==lineSum+BigInt(totals.deliveryMinor)+BigInt(totals.cardFeeMinor))throw new WebsiteOrderError('WEBSITE_TOTALS_MISMATCH');
  let payment:WebsiteOrder['payment'];
- if(p.payment!=null){const q=object(p.payment);fields(q,['externalId','provider','reference','amountMinor','currency','status','receivedAt','notes']);if(typeof q.status!=='string'||!['paid','unpaid'].includes(q.status))invalid();payment={externalId:id(q.externalId,false),provider:text(q.provider,100),reference:text(q.reference,300),amountMinor:minor(q.amountMinor),currency:currency(q.currency),status:q.status as 'paid'|'unpaid',receivedAt:q.receivedAt==null?undefined:date(q.receivedAt),notes:text(q.notes,4000)};}
+ if(p.payment!=null){const q=object(p.payment);fields(q,['externalId','provider','reference','merchantReference','amountMinor','currency','status','receivedAt','notes','testMode']);if(q.testMode!==undefined&&(q.testMode!==true||q.provider!=='monobank'||q.status!=='paid'||order.checkoutMode!=='card'))invalid();if(typeof q.status!=='string'||!['paid','unpaid'].includes(q.status))invalid();payment={testMode:q.testMode===true?true:undefined,externalId:id(q.externalId,false),provider:text(q.provider,100),reference:text(q.reference,300),merchantReference:text(q.merchantReference,253),amountMinor:minor(q.amountMinor),currency:currency(q.currency),status:q.status as 'paid'|'unpaid',receivedAt:q.receivedAt==null?undefined:date(q.receivedAt),notes:text(q.notes,4000)};}
  if(order.checkoutMode==='bank_invoice'&&(order.paymentStatus!=='unpaid'||totals.cardFeeMinor!==0))invalid();
- if(payment&&(payment.currency!==order.currency||payment.status!==order.paymentStatus))invalid();
- if(order.paymentStatus==='paid'&&(!payment||!payment.receivedAt||payment.amountMinor!==totals.chargedMinor||payment.amountMinor<1))invalid();
+ // Legacy sandbox payloads still use the checkout total and order currency.
+ const sandboxReceipt=payment?.testMode===true&&payment.currency==='UAH';
+ if(payment&&(payment.status!==order.paymentStatus||(!sandboxReceipt&&payment.currency!==order.currency)))invalid();
+ if(order.paymentStatus==='paid'&&(!payment||!payment.receivedAt||payment.amountMinor<1||(!sandboxReceipt&&payment.amountMinor!==totals.chargedMinor)))invalid();
  return {raw,sourceAccount,order,customer,delivery,totals,items,payment};
 }

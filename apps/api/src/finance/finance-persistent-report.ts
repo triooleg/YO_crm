@@ -21,7 +21,7 @@ type ReportView=Omit<Summary,'table'>&{table:Awaited<ReturnType<typeof readFinan
 type Query = ReturnType<typeof normalizeFinanceQuery>;
 type ReadSources = (tx: Prisma.TransactionClient, query: Query, from: Date, end: Date,purpose?:'full'|'cash'|'fiscal') => Promise<Sources>;
 const CALCULATION_VERSION = 'finance-projection-v1';
-const TAX_POLICY_VERSION = 'fop-ledger-projection-v1';
+const TAX_POLICY_VERSION = 'fop-ledger-projection-v2';
 class FinanceCacheBypass extends Error {}
 const cacheRows=(rows:Record<string,unknown>[])=>rows.map(row=>{
   if(typeof row.id!=='string')throw new Error('Invalid financial projection identity');

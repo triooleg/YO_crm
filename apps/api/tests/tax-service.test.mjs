@@ -107,7 +107,8 @@ test('Monobank reconciliation accepts one successful UAH invoice with exact ID a
  const { matchMonobankReceipt } = loadTax('monobank-receipt.ts');
  const receipt = {invoiceId:'mono-test', reference:'123/26-456', status:'success', ccy:980, date:'2026-11-10T17:39:00Z', amount:10000, profitAmount:9800};
  assert.deepEqual(matchMonobankReceipt({list:[receipt]}, 'mono-test', '123/26-456'), {grossMinor:10000, netMinor:9800, commissionMinor:200, operationDate:'2026-11-10'});
- for(const list of [[receipt,receipt], [{...receipt,ccy:978}], [{...receipt,cancelList:[{}]}], [{...receipt,invoiceId:'other'}], [{...receipt,reference:'124/26-456'}], [{...receipt,reference:'123/26-457'}]]){
+ assert.equal(matchMonobankReceipt({list:[{...receipt,profitAmount:undefined,profit:9800}]}, 'mono-test', '123/26-456').commissionMinor,200);
+ for(const list of [[{...receipt,profit:9900}], [receipt,receipt], [{...receipt,ccy:978}], [{...receipt,cancelList:[{}]}], [{...receipt,invoiceId:'other'}], [{...receipt,reference:'124/26-456'}], [{...receipt,reference:'123/26-457'}]]){
   assert.throws(() => matchMonobankReceipt({list}, 'mono-test', '123/26-456'));
  }
 });

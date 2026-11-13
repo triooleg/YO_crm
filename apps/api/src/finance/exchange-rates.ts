@@ -182,7 +182,8 @@ export function buildPaymentConversion(cache: ExchangeRateCache, amountMinor: nu
   return { appliedAmountMinor: convertMinorWithRate(amountMinor, rate), appliedCurrency: to, snapshot };
 }
 
-export function appliedPaymentMinor(payment: { amountMinor: number; currency: string; appliedAmountMinor?: number | null; appliedCurrency?: string | null }, orderCurrency: string) {
+export function appliedPaymentMinor(payment: { amountMinor: number; currency: string; appliedAmountMinor?: number | null; appliedCurrency?: string | null; externalStatus?: string | null }, orderCurrency: string) {
+  if (payment.externalStatus === "sandbox_paid") return 0;
   if (payment.currency === orderCurrency) return payment.amountMinor;
   return payment.appliedCurrency === orderCurrency && Number.isSafeInteger(payment.appliedAmountMinor) && (payment.appliedAmountMinor ?? -1) >= 0 ? payment.appliedAmountMinor! : 0;
 }

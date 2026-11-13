@@ -7,7 +7,7 @@ import { parcelHasDispatchEvidence, shippingEvidence } from '../orders/order-shi
 import { appliedPaymentMinor } from '../finance/exchange-rates';
 import { parseWebsiteOrder, type WebsiteOrder } from './website-orders-contract';
 import { WebsiteOrderError } from './website-orders-errors';
-import { nextWebsiteOrderNumber } from './website-order-number';
+import { lockOrderNumber, nextWebsiteOrderNumber, websiteBusinessSequence } from './website-order-number';
 
 export const WEBSITE_SYSTEM=WEBSITE_CHECKOUT_SYSTEM;
 type Tx=Prisma.TransactionClient;
@@ -20,12 +20,45 @@ const normalizedTitle=(name:string)=>name.replace(/\\?u201c/g,'“').replace(/\\
 @Injectable()
 export class WebsiteOrdersService {
  constructor(private readonly prisma:PrismaService,private readonly taxes:TaxesService,private readonly allowedAccounts=scopes){}
+ async reserveNumber(sourceAccount:string,cartKey:string,externalId?:string,authorizedSourceAccount?:string){
+  const allowed=authorizedSourceAccount===undefined?this.allowedAccounts():[authorizedSourceAccount];
+  if(!allowed.length)throw new WebsiteOrderError('WEBSITE_DISABLED',503);
+  if(!allowed.includes(sourceAccount))throw new WebsiteOrderError('WEBSITE_SOURCE_NOT_ALLOWED',403);
+  return this.prisma.$transaction(async tx=>{
+   if(externalId)await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',`${WEBSITE_SYSTEM}:${sourceAccount}:${externalId}`);
+   await lockOrderNumber(tx);
+   const where={sourceAccount_cartKey:{sourceAccount,cartKey}};
+   const previous=await tx.websiteOrderNumberReservation.findUnique({where});
+   const now=new Date();
+   if(externalId!==undefined){
+    if(!previous || (previous.externalId!==externalId&&(previous.externalId||previous.expiresAt<=now)))conflict();
+    if(!previous.externalId){
+     const existing=await tx.order.findUnique({where:{sourceSystem_sourceAccount_externalId:{sourceSystem:WEBSITE_SYSTEM,sourceAccount,externalId}},select:{number:true}});
+     if(existing)return {ok:true,orderNumber:existing.number,legacy:true};
+     if(await tx.websiteOrderNumberReservation.findUnique({where:{sourceAccount_externalId:{sourceAccount,externalId}}}))conflict();
+     await tx.websiteOrderNumberReservation.update({where,data:{externalId}});
+    }
+    return {ok:true,orderNumber:previous.number};
+   }
+   if(previous){
+    if(!previous.externalId&&previous.expiresAt<=now)await tx.websiteOrderNumberReservation.update({where,data:{expiresAt:new Date(now.getTime()+24*60*60*1000)}});
+    return {ok:true,orderNumber:previous.number};
+   }
+   const number=await nextWebsiteOrderNumber(tx,now);
+   await tx.websiteOrderNumberReservation.create({data:{sourceAccount,cartKey,number,sequence:websiteBusinessSequence(number),expiresAt:new Date(now.getTime()+24*60*60*1000)}});
+   return {ok:true,orderNumber:number};
+  },{isolationLevel:'ReadCommitted'});
+ }
  async ingest(input:unknown,authorizedSourceAccount?:string){
   const p=parseWebsiteOrder(input);
   // Only the authenticated controller supplies this in-process scope. Legacy callers
   // retain the original environment allowlist; payload fields cannot grant access.
   const allowed=authorizedSourceAccount===undefined?this.allowedAccounts():[authorizedSourceAccount];if(!allowed.length)throw new WebsiteOrderError('WEBSITE_DISABLED',503);
   if(!allowed.includes(p.sourceAccount))throw new WebsiteOrderError('WEBSITE_SOURCE_NOT_ALLOWED',403);
+  const sandbox=p.payment?.testMode===true;
+  if(sandbox&&(authorizedSourceAccount!=='calendar.yoleotard.com'||!p.order.numberReservation||!p.payment?.reference)){
+   throw new WebsiteOrderError('WEBSITE_SOURCE_NOT_ALLOWED',403);
+  }
   return this.prisma.$transaction(async tx=>{
    // Same lock as canonical client merge and KeyCRM import: no duplicate contacts across writers.
    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtextextended($1,0))','client-merge-global');
@@ -35,7 +68,8 @@ export class WebsiteOrdersService {
    if(existing){await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',existing.id);existing=await tx.order.findUnique({where:{id:existing.id},include:{shipment:true,orderShipments:{where:{archivedAt:null},include:{instances:{select:{id:true}}}}}});}
    if(existing&&fingerprint(existing.externalData)===fingerprint(p.raw))return this.result(existing,false);
    const previous=existing?parseWebsiteOrder(existing.externalData):undefined;
-   const warnings:string[]=[];
+   if(existing&&Boolean(previous?.payment?.testMode)!==sandbox)conflict();
+   const warnings:string[]=sandbox?['SANDBOX_ORDER_ARCHIVED']:[];
    if(existing&&previous){
     if(shippingEvidence(existing).complete||existing.orderShipments.some(parcelHasDispatchEvidence)||existing.archivedAt||['CANCELLED','COMPLETED','SHIPPED','DELIVERED','REVIEW_REQUESTED'].includes(existing.salesStatus)||['REFUNDED','CANCELLED'].includes(existing.paymentStatus)||['SHIPPED','IN_TRANSIT','DELIVERED','RETURNED','LOST'].includes(existing.shippingStatus))conflict();
     if(existing.currency!==p.order.currency||previous.order.orderedAt!==p.order.orderedAt||existing.type!=='READY_MODEL')conflict();
@@ -43,15 +77,19 @@ export class WebsiteOrdersService {
     if(existing.priceMinor!==previous.totals.chargedMinor||existing.deliveryMinor!==previous.totals.deliveryMinor||existing.discountMinor!==previous.totals.discountMinor||existing.depositRequiredMinor!==0)conflict();
     if(existing.externalNumber&&p.order.externalNumber&&existing.externalNumber!==p.order.externalNumber)conflict();
    }
-   const clientId=await this.resolveClient(tx,p,existing?.clientId);
+   const clientId=sandbox?undefined:await this.resolveClient(tx,p,existing?.clientId);
    await this.rejectOtherProvider(tx,p);
-   const client=await this.client(tx,p,clientId);
+   const client=sandbox?await tx.client.create({data:{firstName:'Monobank sandbox',displayName:'Monobank sandbox',source:'WEBSITE',archivedAt:new Date()}}):await this.client(tx,p,clientId);
    const image=p.items.find(i=>i.imageUrl)?.imageUrl;
    const manualDelivery=existing&&previous&&Object.entries(this.delivery(previous)).some(([k,v])=>((existing as Record<string,unknown>)[k]??null)!==(v??null));
    if(manualDelivery)warnings.push('LOCAL_DELIVERY_PRESERVED');
    const common={priceMinor:p.totals.chargedMinor,depositRequiredMinor:0,deliveryMinor:p.totals.deliveryMinor,discountMinor:p.totals.discountMinor,externalUpdatedAt:p.order.updatedAt?new Date(p.order.updatedAt):null,externalNumber:p.order.externalNumber??existing?.externalNumber,externalData:json(p.raw),externalImageUrl:image,...(manualDelivery?{}:this.delivery(p)),...(!existing||(existing.buyerComment??null)===(previous?.order.notes??null)?{buyerComment:p.order.notes}:{} )};
-   const websiteNumber=existing?.number??await nextWebsiteOrderNumber(tx,new Date(p.order.orderedAt));
-   let order=existing?await tx.order.update({where:{id:existing.id},data:common}):await tx.order.create({data:{...identity,...common,number:websiteNumber,clientId:client.id,type:'READY_MODEL',sourceLinkMode:'IMPORTED',taxMinor:0,currency:p.order.currency,createdAt:new Date(p.order.orderedAt),websiteNoticeAt:new Date(),websiteReviewedAt:null}});
+   const bound=await tx.websiteOrderNumberReservation.findUnique({where:{sourceAccount_externalId:{sourceAccount:p.sourceAccount,externalId:p.order.externalId}}});
+   if(sandbox&&!bound)conflict();
+   if((bound?.cartKey??undefined)!==p.order.numberReservation || (bound&&existing&&bound.number!==existing.number))conflict();
+   if(bound&&p.order.checkoutMode==='card'&&p.payment?.provider==='monobank'&&p.order.paymentStatus==='paid'&&p.payment.merchantReference!==bound.number)conflict();
+   const websiteNumber=existing?.number??bound?.number??await nextWebsiteOrderNumber(tx,new Date(p.order.orderedAt));
+   let order=existing?await tx.order.update({where:{id:existing.id},data:common}):await tx.order.create({data:{...identity,...common,number:websiteNumber,clientId:client.id,type:'READY_MODEL',sourceLinkMode:'IMPORTED',taxMinor:0,currency:p.order.currency,createdAt:new Date(p.order.orderedAt),websiteNoticeAt:sandbox?null:new Date(),websiteReviewedAt:null,...(sandbox?{archivedAt:new Date()}:{})}});
    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',order.id);
    await this.items(tx,order.id,p,previous,warnings);
    const paymentStatus=await this.payment(tx,order.id,p,order.clientId);
@@ -101,15 +139,18 @@ export class WebsiteOrdersService {
    const receipt=p.payment!;
    if(before&&(before.amountMinor!==receipt.amountMinor||before.currency!==receipt.currency||new Date(before.receivedAt).toISOString()!==receipt.receivedAt))conflict('WEBSITE_PAYMENT_CONFLICT');
    if(!before&&active.length)conflict('WEBSITE_PAYMENT_CONFLICT');
-   if(!before){const saved=await tx.payment.create({data:{...identity,orderId,amountMinor:receipt.amountMinor,currency:receipt.currency,receivedAt:new Date(receipt.receivedAt!),method:'CARD',reference:receipt.reference??null,notes:receipt.notes??null,externalStatus:'paid',appliedAmountMinor:receipt.amountMinor,appliedCurrency:receipt.currency}});
-    await this.taxes.capturePayment(tx,saved.id,'WEBSITE_CREATE');
-    await tx.activity.create({data:{clientId,orderId,type:'PAYMENT_RECEIVED',summary:'Получена оплата с сайта',metadata:{paymentId:saved.id,amountMinor:saved.amountMinor,currency:saved.currency,sourceSystem:WEBSITE_SYSTEM}}});
+   const sandboxUahReceipt=receipt.testMode===true&&receipt.currency==='UAH';
+   if(!before){const saved=await tx.payment.create({data:{...identity,orderId,amountMinor:receipt.amountMinor,currency:receipt.currency,receivedAt:new Date(receipt.receivedAt!),method:'CARD',reference:receipt.reference??null,notes:receipt.notes??null,externalStatus:receipt.testMode?'sandbox_paid':'paid',appliedAmountMinor:sandboxUahReceipt?0:receipt.amountMinor,appliedCurrency:sandboxUahReceipt?p.order.currency:receipt.currency}});
+    if(!receipt.testMode)await this.taxes.capturePayment(tx,saved.id,'WEBSITE_CREATE');
+    await tx.activity.create({data:{clientId,orderId,type:'PAYMENT_RECEIVED',summary:receipt.testMode?'Получена тестовая оплата Monobank':'Получена оплата с сайта',metadata:{paymentId:saved.id,amountMinor:saved.amountMinor,currency:saved.currency,sourceSystem:WEBSITE_SYSTEM}}});
     await tx.auditLog.create({data:{action:'CREATE',entityType:'Payment',entityId:saved.id,after:json(saved)}});active.push(saved);
    }else if((receipt.reference&&receipt.reference!==before.reference)||(receipt.notes&&receipt.notes!==before.notes)){
     const updated=await tx.payment.update({where:{id:before.id},data:{...(receipt.reference?{reference:receipt.reference}:{}),...(receipt.notes?{notes:receipt.notes}:{})}});
     await tx.auditLog.create({data:{action:'UPDATE',entityType:'Payment',entityId:before.id,before:json(before),after:json(updated)}});
    }
   }
+  // A sandbox receipt confirms the checkout without settling the commercial order.
+  if(p.payment?.testMode)return 'PAID';
   let paid=0;try{paid=active.reduce((sum,row)=>sum+appliedPaymentMinor(row,p.order.currency),0);}catch{conflict('WEBSITE_PAYMENT_CONFLICT');}
   if(!Number.isSafeInteger(paid)||paid>2147483647)conflict('WEBSITE_PAYMENT_CONFLICT');
   return paid>0&&paid>=p.totals.chargedMinor?'PAID':paid>0?'PARTIALLY_PAID':'UNPAID';

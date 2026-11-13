@@ -17,7 +17,7 @@ import { FinancePersistentReport, type FinanceDeferredSnapshot } from './finance
 
 const BATCH_SIZE = 500;
 const orderSelect = { ...orderOriginSelect, id: true, number: true, clientId: true, client: { select: { displayName: true } }, priceMinor: true, currency: true, salesStatus: true, paymentStatus: true, shippingStatus: true, requiredDeliveryAt: true, archivedAt: true, productionSlot: { select: { endsAt: true } } } satisfies Prisma.OrderSelect;
-const paymentSelect = { id: true, orderId: true, amountMinor: true, currency: true, receivedAt: true, method: true, notes: true, appliedAmountMinor: true, appliedCurrency: true } satisfies Prisma.PaymentSelect;
+const paymentSelect = { id: true, orderId: true, amountMinor: true, currency: true, receivedAt: true, method: true, notes: true, appliedAmountMinor: true, appliedCurrency: true, sourceSystem: true, externalStatus: true, reference: true } satisfies Prisma.PaymentSelect;
 const expenseSelect = { id: true, categoryId: true, category: { select: { name: true } }, amountMinor: true, currency: true, incurredAt: true, orderId: true, order: { select: { number: true } }, notes: true, orderShipment: { select: { id: true } } } satisfies Prisma.ExpenseSelect;
 const invoiceSelect = { id: true, number: true, documentOptions: true, orderId: true, order: { select: { number: true, clientId: true, client: { select: { displayName: true } } } }, issueDate: true, dueDate: true, totalMinor: true, currency: true, status: true } satisfies Prisma.InvoiceSelect;
 
@@ -217,7 +217,7 @@ export class FinanceReportService {
     return this.prisma.$transaction(async tx => {
       const valuation = await this.valuation(tx);
       assertValuationVersion(query, valuation, now);
-      const order = await tx.order.findFirst({ where: { id }, select: { id: true, number: true, priceMinor: true, depositRequiredMinor: true, currency: true, requiredDeliveryAt: true, archivedAt: true, client: { select: { displayName: true, country: true, language: true } }, payments: { where: { voidedAt: null }, orderBy: [{ receivedAt: "desc" }, { id: "asc" }], select: { ...paymentSelect, reference: true, sourceSystem: true } }, invoices: { where: { archivedAt: null }, orderBy: [{ issueDate: "desc" }, { id: "asc" }] } } });
+      const order = await tx.order.findFirst({ where: { id }, select: { id: true, number: true, priceMinor: true, depositRequiredMinor: true, currency: true, requiredDeliveryAt: true, archivedAt: true, client: { select: { displayName: true, country: true, language: true } }, payments: { where: { voidedAt: null }, orderBy: [{ receivedAt: "desc" }, { id: "asc" }], select: paymentSelect }, invoices: { where: { archivedAt: null }, orderBy: [{ issueDate: "desc" }, { id: "asc" }] } } });
       if (!order) throw new NotFoundException("Заказ не найден");
       const convert = createReportConverter(normalized.currency, valuation, now);
       return { ...order, ...(order.invoices ? { invoices: order.invoices.map(presentInvoice) } : {}), displayCurrency: normalized.currency, payments: order.payments.map(payment => ({ ...payment, displayAmountMinor: convert(payment.amountMinor, payment.currency) })) };
