@@ -16,7 +16,7 @@ test("exchange-rate status is read-only for managers while mutations remain owne
   assert.match(controller, /@Patch\("exchange-rates\/settings"\) @Roles\("OWNER","ADMIN"\)/);
   assert.match(controller, /@Post\("exchange-rates\/refresh"\) @Roles\("OWNER","ADMIN"\)/);
   assert.match(financeDto, /class UpdateExchangeRateProviderDto/);
-  assert.match(financeDto, /@IsIn\(\["ECB","NBU"\]\)/);
+  assert.match(financeDto, /@IsIn\(\["ECB","NBU","MONOBANK"\]\)/);
   assert.match(appModule, /ExchangeRatesService/);
 });
 
@@ -32,6 +32,7 @@ test("order currency endpoint validates supported ISO currencies and delegates t
 test("official provider adapters use fixed HTTPS URLs, timeout and no API keys", () => {
   assert.match(exchange, /https:\/\/data-api\.ecb\.europa\.eu/);
   assert.match(exchange, /https:\/\/bank\.gov\.ua/);
+  assert.match(exchange, /https:\/\/api\.monobank\.ua\/bank\/currency/);
   assert.match(exchange, /FETCH_TIMEOUT_MS = 8_000/);
   assert.match(exchange, /AbortController/);
   assert.doesNotMatch(exchange, /api[_-]?key|authorization/i);

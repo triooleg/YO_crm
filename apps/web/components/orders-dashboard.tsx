@@ -1082,7 +1082,7 @@ function ownedMeasurement(measurement: Order["measurement"], athlete: Order["ath
 function slotDateRange(order: Order) { return order.productionSlot ? `${shortDate(order.productionSlot.startsAt)} – ${shortDate(order.productionSlot.endsAt)}` : ui.notSpecified; }
 function shortDate(value: string) { return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" }).format(new Date(value)).replace(".", ""); }
 
-type ExchangeRateStatus = { provider: "ECB" | "NBU"; officialUrl: string; supportedPairs: readonly string[]; cache: null | { effectiveDate: string; fetchedAt: string } };
+type ExchangeRateStatus = { provider: "ECB" | "NBU" | "MONOBANK"; officialUrl: string; supportedPairs: readonly string[]; cache: null | { effectiveDate: string; fetchedAt: string } };
 
 function CustomerWishesModal({ order, kind = "buyer", request, onClose, onSaved }: { kind?: "buyer" | "manager"; order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
   const manager = kind === "manager";
@@ -1126,7 +1126,7 @@ function CurrencyChangeModal({ order, request, onClose, onSaved }: { order: Orde
     <form className="orders-currency-form" onSubmit={submit}>
       <p>{ui.currencyChangeHint}</p>
       <div className="orders-currency-pair"><strong>{order.currency}</strong><span aria-hidden="true">→</span><CrmNativeSelect label={ui.newCurrency} value={targetCurrency} onChange={(event) => setTargetCurrency(event.target.value)} data={["EUR", "USD", "UAH"].filter((currency) => currency !== order.currency)} /></div>
-      {status ? <div className="orders-currency-source"><span>{ui.officialRateSource}</span><strong>{status.provider === "NBU" ? ui.nbuName : ui.ecbName}</strong><a href={status.officialUrl} target="_blank" rel="noreferrer">{ui.openOfficialSource}</a><small>{status.cache ? `${ui.rateEffectiveDate}: ${new Intl.DateTimeFormat("ru-RU").format(new Date(`${status.cache.effectiveDate}T00:00:00Z`))}` : ui.rateNotLoaded}</small></div> : !error && <p>{ui.rateLoading}</p>}
+      {status ? <div className="orders-currency-source"><span>{ui.officialRateSource}</span><strong>{{ NBU: ui.nbuName, ECB: ui.ecbName, MONOBANK: ui.monobankName }[status.provider]}</strong><a href={status.officialUrl} target="_blank" rel="noreferrer">{ui.openOfficialSource}</a><small>{status.cache ? `${ui.rateEffectiveDate}: ${new Intl.DateTimeFormat("ru-RU").format(new Date(`${status.cache.effectiveDate}T00:00:00Z`))}` : ui.rateNotLoaded}</small></div> : !error && <p>{ui.rateLoading}</p>}
       <p className="orders-currency-warning">{ui.currencyHistoryWarning}</p>
       {status && !supported && <div className="phase2-error" role="alert">{ui.currencyPairUnsupported}</div>}
       {error && <div className="phase2-error" role="alert">{error}</div>}

@@ -4,7 +4,7 @@ import {classifyOrderSource,orderOriginSelect,loadOrderSourceMap} from '../order
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
-import { parseExchangeRateCache, type ExchangeRateCache } from "./exchange-rates";
+import { resolveExchangeRateProvider, parseExchangeRateCache, type ExchangeRateCache } from "./exchange-rates";
 import { assertValuationVersion, buildFinanceReport, createReportConverter, financePeriod, financeReportCsv, normalizeFinanceQuery, type FinanceReportQuery, type FinanceValuation } from "./finance-report-model";
 import { presentInvoice } from "./invoice-number";
 import { TaxesService } from '../taxes/taxes.service';
@@ -81,7 +81,7 @@ export class FinanceReportService {
 
   private async valuation(tx: Prisma.TransactionClient): Promise<FinanceValuation> {
     const settings = await tx.appSetting.findMany({ where: { section: "finance", key: { in: ["exchangeRateProvider", "exchangeRateCache"] } }, select: { key: true, value: true } });
-    const selected = settings.find(setting => setting.key === "exchangeRateProvider")?.value, provider = selected === "ECB" ? "ECB" : "NBU";
+    const selected = settings.find(setting => setting.key === "exchangeRateProvider")?.value, provider = resolveExchangeRateProvider(selected);
     let cache: ExchangeRateCache | null = null;
     try { cache = parseExchangeRateCache(settings.find(setting => setting.key === "exchangeRateCache")?.value); } catch { /* Missing/invalid cache is explicit when conversion is needed. */ }
     return { provider, cache: cache?.provider === provider ? cache : null };

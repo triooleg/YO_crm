@@ -2,7 +2,7 @@ import { ConflictException, Injectable, ServiceUnavailableException } from "@nes
 import type { Prisma, User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 
-export const EXCHANGE_RATE_PROVIDERS = ["ECB", "NBU"] as const;
+export const EXCHANGE_RATE_PROVIDERS = ["ECB", "NBU", "MONOBANK"] as const;
 export const EXCHANGE_RATE_CURRENCIES = ["EUR", "USD", "UAH"] as const;
 export const EXCHANGE_RATE_ADVISORY_LOCK = "yoleotard-exchange-rates";
 export type ExchangeRateProvider = typeof EXCHANGE_RATE_PROVIDERS[number];
@@ -34,10 +34,16 @@ export type PaymentConversionSnapshot = {
   sourceObservations: ExchangeRateObservation[];
 };
 
+export const MONOBANK_CURRENCY_URL = "https://api.monobank.ua/bank/currency";
+
 const PROVIDER_INFO = {
   ECB: {
     officialUrl: "https://data.ecb.europa.eu/help/api/data",
     supportedPairs: ["EUR/USD", "USD/EUR"],
+  },
+  MONOBANK: {
+    officialUrl: MONOBANK_CURRENCY_URL,
+    supportedPairs: ["EUR/USD", "USD/EUR", "EUR/UAH", "UAH/EUR", "USD/UAH", "UAH/USD"],
   },
   NBU: {
     officialUrl: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew",
@@ -155,7 +161,7 @@ export function buildRateForPair(cache: ExchangeRateCache, from: ExchangeRateCur
   if (direct) return { numerator: direct.numerator, denominator: direct.denominator, sourceRates: [`${from}/${to}`] };
   const inverse = cacheObservation(cache, to, from);
   if (inverse) return { numerator: inverse.denominator, denominator: inverse.numerator, sourceRates: [`${to}/${from}`] };
-  if (cache.provider === "NBU") {
+  if (cache.provider === "NBU" || cache.provider === "MONOBANK") {
     const fromUah = from === "UAH" ? { numerator: "1", denominator: "1" } : cacheObservation(cache, from, "UAH");
     const toUah = to === "UAH" ? { numerator: "1", denominator: "1" } : cacheObservation(cache, to, "UAH");
     if (fromUah && toUah) {
@@ -188,7 +194,11 @@ export function appliedPaymentMinor(payment: { amountMinor: number; currency: st
   return payment.appliedCurrency === orderCurrency && Number.isSafeInteger(payment.appliedAmountMinor) && (payment.appliedAmountMinor ?? -1) >= 0 ? payment.appliedAmountMinor! : 0;
 }
 
-function isProvider(value: unknown): value is ExchangeRateProvider { return value === "ECB" || value === "NBU"; }
+function isProvider(value: unknown): value is ExchangeRateProvider { return EXCHANGE_RATE_PROVIDERS.some(provider => provider === value); }
+
+export function resolveExchangeRateProvider(value: unknown): ExchangeRateProvider {
+  return isProvider(value) ? value : "NBU";
+}
 
 export function parseExchangeRateCache(value: unknown): ExchangeRateCache {
   if (!value || typeof value !== "object") throw new Error("Кэш курсов отсутствует");
@@ -204,7 +214,7 @@ export function parseExchangeRateCache(value: unknown): ExchangeRateCache {
   const actualPairs = cache.rates.map(rate => `${rate.baseCurrency}/${rate.quoteCurrency}`).sort();
   if (actualPairs.join(",") !== expectedPairs.sort().join(",")) throw new Error("Кэш курсов содержит неожиданный набор валют");
   if (cache.provider === "ECB" && cache.rates[0]?.sourceSeriesOrValcode !== "EXR/D.USD.EUR.SP00.A") throw new Error("Кэш ECB содержит неожиданный идентификатор ряда");
-  if (cache.provider === "NBU" && cache.rates.some(rate => rate.sourceSeriesOrValcode !== rate.baseCurrency)) throw new Error("Кэш НБУ содержит неожиданный код валюты");
+  if (cache.provider !== "ECB" && cache.rates.some(rate => rate.sourceSeriesOrValcode !== rate.baseCurrency)) throw new Error("Кэш НБУ содержит неожиданный код валюты");
   return cache as ExchangeRateCache;
 }
 
@@ -226,12 +236,42 @@ export async function fetchOfficialRates(provider: ExchangeRateProvider, fetcher
     assertEffectiveDateFresh(observation.effectiveDate, now);
     return { version: 1, provider, officialUrl: PROVIDER_INFO.ECB.officialUrl, effectiveDate: observation.effectiveDate, fetchedAt: now.toISOString(), rates: [{ baseCurrency: "EUR", quoteCurrency: "USD", decimal: observation.decimal, numerator: observation.numerator, denominator: observation.denominator, sourceSeriesOrValcode: "EXR/D.USD.EUR.SP00.A" }] };
   }
-  const [eurText, usdText] = await Promise.all([fetchText(`${NBU_URL}EUR`, fetcher), fetchText(`${NBU_URL}USD`, fetcher)]);
-  let eurPayload: unknown, usdPayload: unknown;
-  try { eurPayload = JSON.parse(eurText); usdPayload = JSON.parse(usdText); } catch { throw new Error("НБУ вернул некорректный JSON"); }
-  const eur = parseNbuResponse(eurPayload, "EUR"), usd = parseNbuResponse(usdPayload, "USD");
-  if (eur.effectiveDate !== usd.effectiveDate) throw new Error("НБУ вернул курсы на разные даты");
-  // NBU may publish tomorrow's official rate during the preceding calendar day.
+  if (provider === "MONOBANK") {
+    const quotes: unknown = JSON.parse(await fetchText(MONOBANK_CURRENCY_URL, fetcher));
+    if (!Array.isArray(quotes)) throw new Error("Monobank вернул некорректный список курсов");
+    const observations = ([["EUR", 978], ["USD", 840]] as const).map(([baseCurrency, code]) => {
+      const pairs = quotes.filter(quote => quote?.currencyCodeA === code && quote.currencyCodeB === 980);
+      const quote = pairs[0];
+      if (pairs.length !== 1 || !Number.isSafeInteger(quote?.date) || quote.date <= 0 ||
+          typeof quote.rateBuy !== "number" || !Number.isFinite(quote.rateBuy)) {
+        throw new Error(`Monobank вернул некорректный курс покупки ${baseCurrency}/UAH`);
+      }
+      const timestamp = quote.date * 1000;
+      if (timestamp > now.getTime() + 60_000) throw new Error("Дата курса Monobank находится в будущем");
+      const day = businessCalendarDate(new Date(timestamp));
+      assertEffectiveDateFresh(day, now);
+      const decimal = String(quote.rateBuy);
+      return { day, rate: { baseCurrency, quoteCurrency: "UAH" as const, decimal,
+        ...parseDecimalRational(decimal), sourceSeriesOrValcode: baseCurrency } };
+    });
+    // The older quote puts a conservative bound on the freshness of the whole snapshot.
+    const effectiveDate = observations.map(({ day }) => day).sort()[0]!;
+    return { version: 1, provider, officialUrl: MONOBANK_CURRENCY_URL, effectiveDate,
+      fetchedAt: now.toISOString(), rates: observations.map(({ rate }) => rate) };
+  }
+  const readNbu = async (currency: "EUR" | "USD", date?: string) => {
+    const url = date ? NBU_URL.replace("valcode=", "date=" + date.replaceAll("-", "") + "&valcode=") : NBU_URL;
+    const raw = await fetchText(url + currency, fetcher);
+    return parseNbuResponse(JSON.parse(raw), currency);
+  };
+  let [eur, usd] = await Promise.all([readNbu("EUR"), readNbu("USD")]);
+  const today = businessCalendarDate(now);
+  const tomorrow = new Date(Date.parse(today + "T00:00:00Z") + CALENDAR_DAY_MS).toISOString().slice(0, 10);
+  if (eur.effectiveDate > tomorrow || usd.effectiveDate > tomorrow || eur.effectiveDate !== usd.effectiveDate) {
+    [eur, usd] = await Promise.all([readNbu("EUR", today), readNbu("USD", today)]);
+    if (eur.effectiveDate > today || usd.effectiveDate > today) throw new Error("Дата официального курса находится в будущем");
+    if (eur.effectiveDate !== today || usd.effectiveDate !== today) throw new Error("НБУ не вернул курсы на запрошенную дату");
+  }
   assertEffectiveDateFresh(eur.effectiveDate, now, 1);
   return { version: 1, provider, officialUrl: PROVIDER_INFO.NBU.officialUrl, effectiveDate: eur.effectiveDate, fetchedAt: now.toISOString(), rates: [
     { baseCurrency: "EUR", quoteCurrency: "UAH", decimal: eur.decimal, numerator: eur.numerator, denominator: eur.denominator, sourceSeriesOrValcode: "EUR" },
@@ -250,7 +290,7 @@ export class ExchangeRatesService {
       this.prisma.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } }),
       this.prisma.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateCache" } } }),
     ]);
-    const provider = isProvider(providerSetting?.value) ? providerSetting.value : "NBU";
+    const provider = resolveExchangeRateProvider(providerSetting?.value);
     let cache: ExchangeRateCache | null = null;
     try { if (cacheSetting?.value) cache = parseExchangeRateCache(cacheSetting.value); } catch { cache = null; }
     return { provider, ...PROVIDER_INFO[provider], cache: cache?.provider === provider ? cache : null };
@@ -298,13 +338,13 @@ export class ExchangeRatesService {
 
   async refresh(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {
     const providerSetting = await this.prisma.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } });
-    const provider = isProvider(providerSetting?.value) ? providerSetting.value : "NBU";
+    const provider = resolveExchangeRateProvider(providerSetting?.value);
     let cache: ExchangeRateCache;
     try { cache = await fetchOfficialRates(provider, fetcher, now); } catch (error) { throw new ServiceUnavailableException(`Не удалось получить официальный курс ${provider}: ${error instanceof Error ? error.message : "неизвестная ошибка"}`); }
     return this.prisma.$transaction(async tx => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
       const currentProvider = await tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } });
-      const effectiveProvider = isProvider(currentProvider?.value) ? currentProvider.value : "NBU";
+      const effectiveProvider = resolveExchangeRateProvider(currentProvider?.value);
       if (effectiveProvider !== provider) throw new ConflictException("Источник курсов изменился во время обновления. Повторите запрос");
       const before = await tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateCache" } } });
       const setting = await tx.appSetting.upsert({ where: { section_key: { section: "finance", key: "exchangeRateCache" } }, create: { section: "finance", key: "exchangeRateCache", value: cache as unknown as Prisma.InputJsonValue }, update: { value: cache as unknown as Prisma.InputJsonValue } });

@@ -1,4 +1,4 @@
-import { assertExchangeRateCacheFresh, buildRateForPair, convertMinorWithRate, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
+import { resolveExchangeRateProvider, assertExchangeRateCacheFresh, buildRateForPair, convertMinorWithRate, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import type { Prisma } from "@prisma/client";
 
 const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -18,7 +18,6 @@ export type OrderCurrencyExpectedState = {
   modelImagePath: string | null;
 };
 
-function provider(value: unknown) { return value === "ECB" || value === "NBU" ? value : "NBU"; }
 
 export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, orderId: string, targetCurrency: ExchangeRateCurrency, actorId: string, now = new Date(), expected?: OrderCurrencyExpectedState) {
   await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
@@ -42,7 +41,7 @@ export async function changeOrderCurrencyTransaction(tx: CurrencyTransaction, or
   ]);
   let cache;
   try { cache = parseExchangeRateCache(cacheSetting?.value); } catch { throw new OrderCurrencyChangeError("RATE_CACHE_INVALID", "Официальные курсы недоступны; обновите курсы в настройках"); }
-  const selectedProvider = provider(providerSetting?.value);
+  const selectedProvider = resolveExchangeRateProvider(providerSetting?.value);
   try {
     assertExchangeRateCacheFresh(cache, now);
   } catch {

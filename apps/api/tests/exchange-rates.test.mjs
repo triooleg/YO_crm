@@ -336,3 +336,37 @@ test("legacy currentOrRefresh retains its seven-day cache policy for payment and
   assert.equal(result.fetchedAt, "2026-10-17T08:00:00.000Z");
   assert.equal(state.transactions, 0);
 });
+
+test("Monobank uses the public quote and exact buy rates in both directions", async () => {
+  const now = new Date("2026-11-14T12:00:00Z");
+  const date = now.getTime() / 1000 - 60;
+  const quotes = [
+    { currencyCodeA: 978, currencyCodeB: 980, date, rateBuy: 49.25, rateSell: 50 },
+    { currencyCodeA: 840, currencyCodeB: 980, date, rateBuy: 41.5, rateSell: 42 },
+  ];
+  const cache = await fetchOfficialRates("MONOBANK", async (url, options) => {
+    assert.equal(url, "https://api.monobank.ua/bank/currency");
+    assert.equal(options.headers["X-Token"], undefined);
+    return {ok:true,text:async()=>JSON.stringify(quotes)};
+  }, now);
+  assert.equal(cache.provider, "MONOBANK");
+  assert.equal(cache.effectiveDate, "2026-11-14");
+  assert.equal(exchangeExports.parseExchangeRateCache(cache).rates.length, 2);
+  assert.equal(convertMinorWithRate(100,buildRateForPair(cache,"EUR","UAH")),4925);
+  assert.equal(convertMinorWithRate(4925,buildRateForPair(cache,"UAH","EUR")),100);
+  quotes[0].date = date + 86400;
+  await assert.rejects(fetchOfficialRates("MONOBANK",async()=>({ok:true,text:async()=>JSON.stringify(quotes)}),now),/будущем/);
+});
+
+test("NBU requests the Kyiv calendar date when Monday rates are published on Saturday", async () => {
+  const now = new Date("2026-11-13T22:10:00Z");
+  const requests = [];
+  const cache = await fetchOfficialRates("NBU", async url => {
+    requests.push(url);
+    const eur = url.includes("valcode=EUR");
+    const exchangedate = url.includes("date=20261114") ? "14.11.2026" : "16.11.2026";
+    return {ok:true,text:async()=>JSON.stringify([{cc:eur?"EUR":"USD",rate:eur?51:44,exchangedate}])};
+  },now);
+  assert.equal(cache.effectiveDate,"2026-11-14");
+  assert.equal(requests.filter(url=>url.includes("date=20261114")).length,2);
+});

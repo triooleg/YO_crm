@@ -1,5 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
-import { buildPaymentConversion, buildRateForPair, convertMinorWithRate, parseDecimalRational, EXCHANGE_RATE_CURRENCIES, type ExchangeRateCurrency, type PaymentConversionSnapshot } from "../finance/exchange-rates";
+import { MONOBANK_CURRENCY_URL, buildPaymentConversion, buildRateForPair, convertMinorWithRate, parseDecimalRational, EXCHANGE_RATE_CURRENCIES, type ExchangeRateCurrency, type PaymentConversionSnapshot } from "../finance/exchange-rates";
 
 type Charge = {
   customerChargeMinor: number;
@@ -10,7 +10,7 @@ type Charge = {
 };
 
 function assertSavedSnapshot(saved: PaymentConversionSnapshot) {
-  const officialUrls = { NBU: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew", ECB: "https://data.ecb.europa.eu/help/api/data" };
+  const officialUrls = { MONOBANK: MONOBANK_CURRENCY_URL, NBU: "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchangeNew", ECB: "https://data.ecb.europa.eu/help/api/data" };
   if (saved.officialUrl !== officialUrls[saved.provider] || !/^\d{4}-\d{2}-\d{2}$/.test(saved.effectiveDate ?? "") ||
       new Date(`${saved.effectiveDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== saved.effectiveDate ||
       typeof saved.fetchedAt !== "string" || !Number.isFinite(Date.parse(saved.fetchedAt)) ||
@@ -54,7 +54,7 @@ export function unchangedShippingCharge(current: Charge | null, amount: number, 
     assertShippingMoney(original, originalCurrency);
     const saved = snapshot as PaymentConversionSnapshot;
     try {
-      if (original <= 0 || originalCurrency === current.currency || saved.from !== originalCurrency || saved.to !== current.currency || !["NBU", "ECB"].includes(saved.provider) || !saved.rate || convertMinorWithRate(original, saved.rate) !== current.customerChargeMinor) throw new Error();
+      if (original <= 0 || originalCurrency === current.currency || saved.from !== originalCurrency || saved.to !== current.currency || !["NBU", "ECB", "MONOBANK"].includes(saved.provider) || !saved.rate || convertMinorWithRate(original, saved.rate) !== current.customerChargeMinor) throw new Error();
       assertSavedSnapshot(saved);
     } catch { throw new BadRequestException("Повреждена история конвертации доставки"); }
   }

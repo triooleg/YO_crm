@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   buildRateForPair, parseDecimalRational, parseEcbCsv, parseExchangeRateCache,
   type ExchangeRateCache, type ExchangeRateCurrency, type ExchangeRateObservation,
-  type ExchangeRateProvider, type PaymentConversionSnapshot,
+  type ExchangeRateProvider as CurrentExchangeRateProvider, type PaymentConversionSnapshot,
 } from '../finance/exchange-rates';
 import { convertReportMinor, financeBusinessDay } from '../finance/finance-report-model';
 
@@ -14,6 +14,8 @@ type Input = {
   priority?: { from: string; to: string };
 };
 type Observation = { day: string; rate: ExchangeRateObservation; url: string; fetchedAt: string; provenance: string };
+type ExchangeRateProvider = Exclude<CurrentExchangeRateProvider, "MONOBANK">;
+
 type Range = { provider: ExchangeRateProvider; currency: 'EUR' | 'USD'; start: string; end: string; url: string; requiredDays: string[] };
 type Records = { observations: Observation[]; blocked: string[] };
 const DAY = 86_400_000, TTL = 30 * 60_000, RETRY_TTL = 30_000;

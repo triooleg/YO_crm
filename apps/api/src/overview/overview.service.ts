@@ -2,7 +2,7 @@ import {loadOrderSourceMap,countOrderSources} from '../orders/order-source';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
-import { parseExchangeRateCache, type ExchangeRateCache } from '../finance/exchange-rates';
+import { resolveExchangeRateProvider, parseExchangeRateCache, type ExchangeRateCache } from '../finance/exchange-rates';
 import { createReportConverter, financeBusinessDay, financePeriod, normalizeFinanceQuery } from '../finance/finance-report-model';
 import { classifyOverviewOrder, eligibleUpcomingShipmentRecords, hasTrustedOverviewDeadline, loadOverviewOrderSources, OVERVIEW_BUCKETS, validateOverviewPeriod } from './overview-order-model';
 import type { OverviewOrdersQueryDto } from './overview.dto';
@@ -48,7 +48,7 @@ export class OverviewService {
       `);
       const recent=await tx.order.findMany({where:{archivedAt:null},take:5,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,number:true,priceMinor:true,currency:true,salesStatus:true,createdAt:true,sourceSystem:true,modelImagePath:true,externalImageUrl:true,client:{select:{displayName:true}},items:{where:{archivedAt:null,OR:[{modelImagePath:{not:null}},{externalImageUrl:{not:null}}]},orderBy:{id:'asc'},select:{modelImagePath:true,externalImageUrl:true}}}});
       const settings=await tx.appSetting.findMany({where:{section:'finance',key:{in:['exchangeRateProvider','exchangeRateCache']}},select:{key:true,value:true}});
-      const provider=settings.find(setting=>setting.key==='exchangeRateProvider')?.value==='ECB'?'ECB':'NBU';
+      const provider=resolveExchangeRateProvider(settings.find(setting=>setting.key==='exchangeRateProvider')?.value);
       let cache:ExchangeRateCache|null=null;
       try{cache=parseExchangeRateCache(settings.find(setting=>setting.key==='exchangeRateCache')?.value);}catch{/* Converter exposes unavailable rates only for needed conversions. */}
       const convert=createReportConverter(query.currency,{provider,cache:cache?.provider===provider?cache:null},now);
