@@ -20,6 +20,7 @@ import "./clients/styles.css";
 import {useStickyListControls} from "./crm/use-sticky-list-controls";
 export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:string}={}){
  const state=useWorkspace(),{query,update,detail}=state;
+ const [listOnly,setListOnly]=useState(true);
  const {workspaceRef,controlsRef,tableRef}=useStickyListControls(state.list);
  const desktop=useMediaQuery("(min-width: 75em)",false),mobile=useMediaQuery("(max-width: 45em)",false);
  const [checked,setChecked]=useState(new Map<string,ClientRow>()),[creating,setCreating]=useState(false),[duplicates,setDuplicates]=useState(false),[mergeRows,setMergeRows]=useState<ClientRow[]>(),[flow,setFlow]=useState<"order"|"measure"|"athlete"|"review-measurements">(),[allowStale,setAllowStale]=useState(false),[initialAthleteId,setInitialAthleteId]=useState<string>(),[overlay,setOverlay]=useState(false),[moreFilters,setMoreFilters]=useState(false);
@@ -102,7 +103,7 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
   {label:ui.leadClients,value:statistics?.leads,icon:"inbox",color:"blue"},
   {label:ui.repeatClients,value:statistics?.repeat,icon:"orders",color:"yoleotard"},
  ] as const;
- return <main ref={workspaceRef} className="clients-workspace">
+ return <main ref={workspaceRef} className="clients-workspace" data-list-only={listOnly}>
   <header className="clients-page-header">
    <div className="clients-page-title"><Text size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><Title order={1}>{ui.title}</Title></div>
    <section aria-label={ui.listStatistics} className="clients-header-stats">
@@ -120,7 +121,7 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
   {returnChat&&returnChat.clientId===query.clientId&&<Button mb="sm" variant="subtle" disabled={!detail?.displayName&&!returnChat.clientName} onClick={()=>onNavigate?.("inbox",{...returnChat,clientName:detail?.displayName||returnChat.clientName,clientsReturn:window.location.pathname+window.location.search})}>{ui.returnChat}</Button>}
   <div ref={controlsRef} className="clients-sticky-controls">
   <div className="clients-list-controls">
-  <div className="clients-toolbar"><TextInput ref={searchRef} aria-label={ui.search} placeholder={ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Group gap="xs" wrap="nowrap"><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button>
+  <div className="clients-toolbar"><TextInput ref={searchRef} aria-label={ui.search} placeholder={mobile?ui.mobileSearch:ui.search} value={query.search} onChange={e=>update({search:e.currentTarget.value,page:1})}/><Button variant="default" className="clients-list-toggle" aria-label={listOnly?ui.showClientsPanel:ui.listOnly} aria-expanded={!listOnly} onClick={()=>setListOnly(value=>!value)}>{listOnly?ui.clientsPanel:ui.listOnly}</Button><Select aria-label={ui.source} placeholder={ui.allSources} clearable value={query.source||null} data={(options?.sources??[]).map(value=>({value,label:ui.channels[value]??ui.unavailable}))} onChange={value=>update({source:value??"",page:1})}/><Select aria-label={ui.country} placeholder={ui.allCountries} clearable searchable value={query.country||null} data={options?.countries??[]} onChange={value=>update({country:value??"",page:1})}/><Select aria-label={ui.status} placeholder={ui.allStatuses} clearable value={query.status||null} data={(options?.statuses??[]).map(value=>({value,label:ui.statuses[value]??ui.unavailable}))} onChange={value=>update({status:value??"",page:1})}/><Group gap="xs" wrap="nowrap"><Button variant="default" aria-expanded={moreFilters} onClick={()=>setMoreFilters(!moreFilters)}>{ui.filters}</Button>
    {canArchive&&<ActionIcon color="red" variant="light" size="input-sm" aria-label={ui.archiveClient} title={ui.archiveClient}
     disabled={!selectedForArchive.length||archiving} onClick={event=>openArchive(event.currentTarget)}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>
@@ -132,7 +133,7 @@ export function ClientWorkspace({onNavigate,role}:{onNavigate?:Navigate;role?:st
     <Button ref={createClientTriggerRef} onClick={()=>setCreating(true)}>{ui.create}</Button>
    </Group>
   </div>
-  {(moreFilters||query.period)&&<Group mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
+  {(moreFilters||query.period)&&<Group className="clients-extra-filters" mb="md" align="flex-end"><TextInput type="month" label={ui.period} value={query.period} onChange={e=>update({period:e.currentTarget.value,page:1})}/><Button variant="subtle" onClick={()=>update({page:1,search:"",source:"",country:"",status:"",period:""})}>{ui.clear}</Button></Group>}
   </div>
   <div className="clients-columns">
    <ClientsTable tableRef={tableRef} data={state.list} error={state.listError} retry={state.refresh} query={query} onQuery={update} onSelect={select} checked={checked} onCheck={onCheck} onOrder={onOrder}

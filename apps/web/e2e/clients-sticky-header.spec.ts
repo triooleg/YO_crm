@@ -20,6 +20,7 @@ for (const width of [1920, 1366, 390]) {
       } });
     });
     await page.goto('/?section=clients');
+    if (width <= 720) await page.getByRole('button', { name: 'Показать панель клиентов', exact: true }).click();
     await expect(page.locator('.clients-table tbody tr')).toHaveCount(20);
     const searchFits = await page.locator('.clients-toolbar input').first().evaluate((input: HTMLInputElement) => {
       const style = getComputedStyle(input);

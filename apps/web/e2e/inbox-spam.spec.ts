@@ -29,7 +29,9 @@ for(const width of [1920,1366,390])test(`спам скрывает клиент�
   if(width!==390)await row.click();
   await expect(page.locator('.communications-message-stack')).toContainText('Последний реальный ответ');
   await page.screenshot({path:process.env.YO_CRM_VISUAL_DIR?join(process.env.YO_CRM_VISUAL_DIR,`inbox-chronology-${width}.png`):info.outputPath('inbox-chronology.png')});
-  const mark=page.locator('.communications-chat-header').getByRole('button',{name:'Пометить как спам',exact:true});
+   const chatActions=page.getByRole('button',{name:'Действия чата',exact:true});
+   if(width===390)await chatActions.click();
+   const mark=page.locator('.communications-chat-header').getByRole('button',{name:'Пометить как спам',exact:true});
   await expect(mark).toBeVisible();
   const markBox=await mark.boundingBox();
   expect(markBox).not.toBeNull();expect(markBox!.x).toBeGreaterThanOrEqual(0);expect(markBox!.x+markBox!.width).toBeLessThanOrEqual(width);
@@ -52,7 +54,8 @@ for(const width of [1920,1366,390])test(`спам скрывает клиент�
   await expect(page.locator('.communications-message-stack')).not.toContainText('Черновик не является сообщением');
   const restoreButton=page.locator('.communications-chat-header').getByRole('button',{name:'Вернуть из спама',exact:true});
   await expect(restoreButton).toBeVisible();
-  const restoreBox=await restoreButton.boundingBox();
+   if(width===390&&await chatActions.getAttribute('aria-expanded')!=='true')await chatActions.click();
+   const restoreBox=await restoreButton.boundingBox();
   expect(restoreBox).not.toBeNull();expect(restoreBox!.x).toBeGreaterThanOrEqual(0);expect(restoreBox!.x+restoreBox!.width).toBeLessThanOrEqual(width);
   await restoreButton.click();
   const restore=page.getByRole('dialog',{name:'Вернуть из спама',exact:true});

@@ -6,7 +6,7 @@ const read=path=>readFile(new URL(path,import.meta.url),"utf8");
 const workspace=await read("../components/client-workspace.tsx"),dialogs=await read("../components/clients/client-dialogs.tsx"),detail=await read("../components/clients/client-details.tsx");
 
 test("новый workspace использует Mantine, legacy форма спортсмена сохраняет общие контролы",()=>{
- assert.match(workspace,/from "@mantine\/core"/);assert.match(workspace,/<TextInput[^>]*placeholder=\{ui\.search\}/);
+ assert.match(workspace,/from "@mantine\/core"/);assert.match(workspace,/<TextInput[^>]*aria-label=\{ui\.search\}/);
  assert.match(workspace,/<Button[^>]*ref=\{createClientTriggerRef\}/);
  assert.match(dialogs,/<TextInput[^>]*name="firstName"[^>]*required/);
  assert.match(workspace,/<CrmNativeSelect[\s\S]*name="discipline"/);

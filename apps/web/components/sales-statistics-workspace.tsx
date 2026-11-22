@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Badge, Button, Drawer, Loader, MantineProvider, Pagination, SegmentedControl, Select, Skeleton, Table, Tooltip, UnstyledButton } from '@mantine/core';
 import { DatePickerInput, DatesProvider } from '@mantine/dates';
 import 'dayjs/locale/ru';
+import { useCrmNoticeOnce } from '../lib/use-crm-notice-once';
 import { salesStatisticsUi as ui } from '../lib/i18n';
 import { orderLabel } from '../lib/orders-i18n';
 import { salesStatisticsTheme as overviewTheme } from '../lib/mantine-theme';
@@ -14,7 +15,7 @@ import { SalesGroupTable } from './sales-statistics-tables';
 import { SalesWorldMap } from './sales-statistics-map';
 import { CrmButton } from './crm/settings-controls';
 
-type WorkspaceProps={role:string;onNavigate:OverviewNavigate;onModeChange?:(mode:'overview'|'statistics')=>void};
+type WorkspaceProps={role:string;accountId?:string;onNavigate:OverviewNavigate;onModeChange?:(mode:'overview'|'statistics')=>void};
 function Panel({title,action,children,note,className=''}:{title:string;action?:ReactNode;children:ReactNode;note?:string;className?:string}){return <article className={`sales-statistics-panel ${className}`}><header><h2>{note?<Tooltip label={note} multiline w={330}><span tabIndex={0}>{title}</span></Tooltip>:title}</h2>{action}</header>{children}</article>}
 function options(values:string[],labels:Record<string,string>){return values.map(value=>({value,label:labels[value]||ui.unknown}))}
 function useReport(key:string|null,version:number,role:string){
@@ -28,7 +29,7 @@ function useReport(key:string|null,version:number,role:string){
  },[key,version,role]);
  return state.key===identity?state:{key:identity,loading:!!key,error:false,data:key&&state.role===role?state.data:undefined};
 }
-export function SalesStatisticsWorkspace({role,onNavigate,onModeChange}:WorkspaceProps){
+export function SalesStatisticsWorkspace({role,accountId,onNavigate,onModeChange}:WorkspaceProps){
  const allowed=['OWNER','ADMIN','MANAGER','ACCOUNTANT'].includes(role),canOpenRecords=['OWNER','ADMIN','MANAGER'].includes(role);
  const [selection,setQuery]=useState<SalesQuery>(()=>parseSalesSelection('')),[draft,setDraft]=useState(selection),[ready,setReady]=useState(false),[version,setVersion]=useState(0),[filtersOpen,setFiltersOpen]=useState(false),[exporting,setExporting]=useState(false),[exportError,setExportError]=useState('');
  const exportController=useRef<AbortController|null>(null),exportSequence=useRef(0),currentKey=useRef('');
@@ -36,6 +37,14 @@ export function SalesStatisticsWorkspace({role,onNavigate,onModeChange}:Workspac
  // Retained data always keeps its own query (especially currency and dates).
  // The pending selection only drives controls and the next request.
  const query=report?.query??selection;
+ const allocationNotices=report?.warnings.filter(w=>salesWarningTone(w.code)==='blue')??[];
+ useCrmNoticeOnce(`sales-expense-allocation:${accountId??role}`, !request.loading&&!request.error&&allocationNotices.length ? {
+  title:ui.allocationInfo,
+  color:'blue',
+  autoClose:10000,
+  closeButtonProps:{'aria-label':ui.close},
+  message:allocationNotices.map(w=><div key={w.code}>{ui.warnings[w.code as keyof typeof ui.warnings]} ({salesCount(w.count)})</div>),
+ } : undefined, key??'');
  currentKey.current=`${role}:${key||''}:${version}`;
  useEffect(()=>{const load=()=>{const next=parseSalesSelection(window.location.search);setQuery(next);setDraft(next);setExportError('')};load();window.history.replaceState(window.history.state,'',salesUrl(window.location.href,parseSalesSelection(window.location.search)));setReady(true);window.addEventListener('popstate',load);return()=>{window.removeEventListener('popstate',load);exportController.current?.abort();++exportSequence.current}},[]);
  useEffect(()=>{exportController.current?.abort();++exportSequence.current;setExporting(false);setExportError('')},[key,role,version]);
@@ -72,6 +81,7 @@ export function SalesStatisticsWorkspace({role,onNavigate,onModeChange}:Workspac
  const selectMetric=<Select size="xs" aria-label={ui.metric} value={financial?selection.metric:selection.metric==='amount'?'orders':selection.metric} allowDeselect={false} data={metricOptions} onChange={value=>value&&update({metric:value as SalesMetric})}/>;
  const periodControl=<DatePickerInput type="range" aria-label={ui.period} value={[draft.from,draft.to]} onChange={value=>{changeDraft({from:value[0]||'',to:value[1]||''})}} valueFormat="DD.MM.YYYY" leftSection={<SalesIcon name="calendar"/>} clearable={false} minDate="2000-01-01" maxDate="2100-12-31"/>;
  function advancedFilters(){return <div className="sales-statistics-advanced"><Select label={ui.country} placeholder={ui.allCountryOptions} clearable searchable value={draft.country||null} data={[...(report?.options.countries||[]),...(draft.country.startsWith('OTHERS:')?[{value:draft.country,label:ui.others}]:[])]} onChange={value=>changeDraft({country:value||''})}/><Select label={ui.orderType} placeholder={ui.allTypes} clearable value={draft.orderType||null} data={options(report?.options.types||[],ui.types)} onChange={value=>changeDraft({orderType:value||''})}/><Select label={ui.discipline} placeholder={ui.allSports} clearable value={draft.discipline||null} data={options(report?.options.disciplines||[],ui.disciplines)} onChange={value=>changeDraft({discipline:value||''})}/><Select label={ui.scope} value={draft.scope} allowDeselect={false} data={[{value:'sales',label:ui.salesScope},{value:'all',label:ui.allScope}]} onChange={value=>value&&changeDraft({scope:value as SalesQuery['scope']})}/><Select label={ui.repeatFilter} placeholder={ui.allRepeat} clearable value={draft.repeat||null} data={[{value:'new',label:ui.newOnly},{value:'repeat',label:ui.repeatOnly},{value:'new-client',label:ui.newClients},{value:'returning-client',label:ui.returningClients}]} onChange={value=>changeDraft({repeat:(value||'') as SalesQuery['repeat']})}/><CrmButton onClick={apply} disabled={!draft.from||!draft.to||draft.from>draft.to}>{ui.apply}</CrmButton><CrmButton tone="secondary" onClick={reset}>{ui.reset}</CrmButton></div>}
+ const dataWarnings=report?.warnings.filter(w=>w.code!=='SPORT_ORDER_OVERLAP'&&salesWarningTone(w.code)==='orange')??[];
  const rangesValid=!!draft.from&&!!draft.to&&draft.from<=draft.to;
  return <MantineProvider theme={overviewTheme} forceColorScheme="light" cssVariablesSelector=".sales-statistics-page"><DatesProvider settings={{locale:'ru',firstDayOfWeek:1,weekendDays:[0,6]}}><section className="sales-statistics-page" aria-label={ui.title} aria-busy={request.loading} data-statistics-ready={ready&&!request.loading}>
   <header className="sales-statistics-header"><div><h1>{ui.title}</h1><p>{ui.subtitle}</p></div><SegmentedControl aria-label={ui.mode} className="sales-statistics-mode" value="statistics" data={[{value:'overview',label:ui.overview},{value:'statistics',label:ui.statistics}]} onChange={value=>{if(value!=='overview')return;if(onModeChange)onModeChange('overview');else {const url=new URL(window.location.href);url.searchParams.set('view','overview');window.history.pushState(null,'',`${url.pathname}${url.search}${url.hash}`);window.dispatchEvent(new PopStateEvent('popstate'))}}}/><div className="sales-statistics-period">{periodControl}<Button.Group><CrmButton tone="secondary" aria-label={ui.previousPeriod} onClick={()=>update(shiftSalesPeriod(selection,-1))}><SalesIcon name="left"/></CrmButton><CrmButton tone="secondary" aria-label={ui.nextPeriod} onClick={()=>update(shiftSalesPeriod(selection,1))}><SalesIcon name="right"/></CrmButton></Button.Group>{financial&&<Select aria-label={ui.currency} value={selection.currency} allowDeselect={false} data={['EUR','USD','UAH']} onChange={value=>value&&update({currency:value as SalesQuery['currency']})}/>}<CrmButton tone="secondary" leftSection={<SalesIcon name="export"/>} disabled={!report||request.loading||request.error||!allowed} loading={exporting} onClick={()=>void exportCsv()}>{ui.export}</CrmButton></div></header>
@@ -83,10 +93,7 @@ export function SalesStatisticsWorkspace({role,onNavigate,onModeChange}:Workspac
   {report&&request.error&&<Alert color="red" role="alert">{ui.error}<CrmButton onClick={retry}>{ui.retry}</CrmButton></Alert>}
   {request.loading&&!report?<div className="sales-statistics-state" role="status"><Loader size="sm"/>{ui.loading}</div>:request.error&&!report?<div className="sales-statistics-state" role="alert"><p>{ui.error}</p><CrmButton tone="secondary" onClick={retry}>{ui.retry}</CrmButton></div>:report?<>
   {financial&&report.valuation.missingCount>0&&<Alert color="orange">{ui.missingFx} ({report.valuation.missingCount})</Alert>}
-  {(['orange','blue'] as const).map(tone=>{
-   const notices=report.warnings.filter(w=>w.code!=='SPORT_ORDER_OVERLAP'&&salesWarningTone(w.code)===tone);
-   return notices.length>0&&<Alert key={tone} color={tone} data-statistics-notice={tone} title={tone==='blue'?ui.allocationInfo:ui.dataWarning} className="sales-statistics-notice"><ul>{notices.map(w=><li key={w.code}>{(ui.warnings as Record<string,string>)[w.code]||`${ui.dataWarning}: ${w.code}`} ({salesCount(w.count)})</li>)}</ul></Alert>;
-  })}
+  {dataWarnings.length>0&&<Alert color="orange" data-statistics-notice="orange" title={ui.dataWarning} className="sales-statistics-notice"><ul>{dataWarnings.map(w=><li key={w.code}>{(ui.warnings as Record<string,string>)[w.code]||`${ui.dataWarning}: ${w.code}`} ({salesCount(w.count)})</li>)}</ul></Alert>}
   {!report.current.orders&&(!financial||(report.current.receivedMinor===0&&report.current.expensesMinor===0))?<div className="sales-statistics-state"><p>{ui.empty}</p><small>{ui.emptyHint}</small><CrmButton tone="secondary" onClick={reset}>{ui.reset}</CrmButton><CrmButton tone="secondary" onClick={retry}>{ui.retry}</CrmButton></div>:<div className="sales-statistics-grid">
    <Panel title={query.tab==='countries'?ui.geography:query.tab==='clients'?ui.metrics.lifetimeOrders:ui.tabs[query.tab]} action={query.tab==='clients'||query.tab==='sports'?undefined:selectMetric} note={query.tab==='clients'?ui.hints.lifetime:undefined} className="sales-statistics-primary">{query.tab==='countries'?<><p className="sales-statistics-panel-subtitle">{ui.geographySubtitle}</p><SalesWorldMap groups={report.countries} metric={metric} currency={query.currency} onCountry={country=>drill({country})}/></>:query.tab==='clients'?<SalesGroupTable groups={report.clients} query={query} financial={financial} kind="clients" onGroup={g=>groupDrill(g,'clients')} onSort={sortClients} lifetime/>:<SalesDonut financial={financial} groups={groups} metric={query.tab==='sports'?'pieces':metric} currency={query.currency} kind={query.tab} onGroup={g=>groupDrill(g,query.tab,query.tab==='sports'||metric==='pieces'?'pieces':'orders')}/>}</Panel>
    <Panel title={query.tab==='countries'?ui.countryTrend:query.tab==='sources'?ui.sourceTrend:query.tab==='sports'?ui.sportTrend:query.tab==='types'?ui.typeTrend:ui.metrics.orders} action={monthControl}><SalesBars months={months.map(m=>m.month)} series={query.tab==='countries'?countrySeries:query.tab==='clients'?[{key:'clients',label:ui.metrics.orders,color:salesPalette[0]!,values:months.map(m=>m.orders)}]:groupSeries} currency={query.currency} money={query.tab!=='clients'&&metric==='amount'} details={trendDetails} label={ui.tabs[query.tab]} onPoint={(month,group)=>monthDrill(month,query.tab==='clients'?{}:{[query.tab==='countries'?'country':query.tab==='sources'?'source':query.tab==='sports'?'discipline':'orderType']:group})}/></Panel>

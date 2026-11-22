@@ -157,9 +157,7 @@ test("черновик восстанавливается в редактор, �
   assert.doesNotMatch(component,/communications-send-saved-draft/);
 });
 
-test("быстрое переключение канала не теряет текст и даты считают только видимые сообщения",()=>{
-  assert.match(component,/volatileDrafts\.current\.set\(activeChannel,text\)/);
-  assert.match(component,/restoreInboxDraft\(messages,nextChannel,volatileDrafts\.current\.get\(nextChannel\)\)/);
+test("даты считают только видимые сообщения",()=>{
   assert.match(component,/displayMessages\[messageIndex-1\]/);
   assert.doesNotMatch(component,/messages\[messageIndex-1\]/);
 });
@@ -233,14 +231,14 @@ test("иконки действий появляются при наведени
 test("composer сохраняет штатную вставку текста и превращает изображение из буфера во вложение",()=>{
   assert.match(component,/function handleComposerPaste\(event:ClipboardEvent<HTMLTextAreaElement>\)/);
   assert.match(component,/event\.clipboardData\.items/);
-  assert.match(component,/item\.kind==="file"&&item\.type\.startsWith\("image\/"\)/);
-  assert.match(component,/if\(!imageItem\)return/);
+  assert.match(component,/item\.kind === "file" && item\.type\.startsWith\("image\/"\)/);
+  assert.match(component,/if \(!images\.length\) return/);
   assert.match(component,/event\.preventDefault\(\)/);
-  assert.match(component,/new File\(\[blob\],clipboardImageName\(blob\.type\),\{type:blob\.type\}\)/);
+  assert.match(component,/new File\(\[image\], clipboardImageName\(image\.type\), \{ type: image\.type \}\)/);
   assert.match(component,/onPaste=\{handleComposerPaste\}/);
   assert.match(component,/function clipboardImageName\(mimeType:string/);
   assert.match(component,/clipboard-image-/);
-  assert.match(component,/chooseAttachment\(file\)/);
+  assert.match(component,/appendAttachments\(images\)/);
   const pasteHandler=component.slice(component.indexOf("function handleComposerPaste"),component.indexOf("async function setReaction"));
   assert.ok(pasteHandler.indexOf("if(!imageItem)return")<pasteHandler.indexOf("event.preventDefault()"));
 });
@@ -753,7 +751,7 @@ test("вставленный AI ответ сохраняет provenance до я
   assert.match(component,/setComposerAiRunId\(prepared\.draftAiRunId\)/);
   assert.match(component,/lastAutosavedAiRunId=useRef<string\|undefined>/);
   assert.match(component,/inboxDraftNeedsSave\(lastAutosavedText\.current,lastAutosavedAiRunId\.current,content,composerAiRunId\)/);
-  assert.match(component,/lastAutosavedAiRunId\.current=operationAiRunId/);
+  assert.match(component,/lastAutosavedAiRunId\.current=content\.trim\(\)\?operationAiRunId:undefined/);
   assert.match(component,/lastAutosavedAiRunId\.current=prepared\.draftAiRunId/);
   assert.match(component,/async function changeReplyChannel[\s\S]*await flushComposerDraftBeforeNavigation\(\)[\s\S]*setActiveChannel\(nextChannel\)/);
   assert.match(component,/onChange=\{event=>void changeReplyChannel\(event\.target\.value\)\}/);
@@ -884,18 +882,13 @@ test("к сообщению можно прикрепить изображени
   assert.match(component, /\/communications\/attachments/);
   assert.match(component, /pendingSend/);
   assert.match(component, /attachmentDelivered/);
-  assert.match(component, /prepareAttachmentAttempt\(pendingSend\.current/);
   assert.match(component, /settleAttachmentAttempt\(pendingSend\.current, result\.status\)/);
   assert.match(component, /pendingSend\.current\.textRequestId/);
   assert.match(component, /shouldResetAttachmentForClient\(selectedClientId\.current, c\.id\)/);
-  assert.match(component, /setAttachment\(undefined\)[\s\S]*setAttachmentPreview\(""\)[\s\S]*pendingSend\.current\s*=\s*\{\}/);
-  assert.match(component, /readFile\(attachment\)/);
   assert.match(component, /attachment: file/);
-  assert.match(component, /attachmentCarriesText = !sendingInvoice && \(activeChannel === "EMAIL" \|\| activeChannel === "WHATSAPP"\)/);
-  assert.match(component, /sendOne\(attachmentContent, uploaded, requestId\)/);
-  assert.match(component, /!uploaded \|\| !attachmentCarriesText/);
+  assert.match(component, /type="file" multiple/);
+  assert.match(component, /attachments: file/);
   assert.match(component, /communications-selected-attachment/);
-  assert.match(component, /attachment\?\.type\.startsWith\("video\/"\)\?<video src=\{attachmentPreview\}/);
   assert.match(css, /\.communications-selected-attachment img,.communications-selected-attachment video\{[^}]*object-fit:cover/);
   assert.match(component, /message\.status === "FAILED"/);
   assert.match(css, /\.communications-attach/);

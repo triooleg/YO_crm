@@ -12,7 +12,8 @@ const config: NextConfig = {
   },
   async headers() {
     const script = process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline' 'unsafe-eval'" : "'self' 'unsafe-inline'";
-    return [{source:'/parent-measurements/:path*',headers:[
+    return [{ source: "/crm-sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+    {source:'/parent-measurements/:path*',headers:[
       {key:'Cache-Control',value:'no-store'},
       {key:'Referrer-Policy',value:'no-referrer'},
       {key:'X-Robots-Tag',value:'noindex, nofollow, noarchive'},

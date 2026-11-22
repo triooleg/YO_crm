@@ -1,3 +1,27 @@
+## 2026-11-18 — Приоритет доставки Push
+
+Web 0.21.2 установлен и проверен на рабочем коротком Hi: дата/время13.187px при line-height13.2,nowrap. В телефоне обработчик готов и OSразрешение включено. Три обычных push приняты FCM, но не показаны. Одно техническое diagnostic-high:e3eeac0a-a040-47e1-ab7a-7705af359f12 прошло через реальные проверки worker с единственным переопределением urgency=high, SENT23:33:10UTC; владелец подтвердил «Да, появилось». Кандидат API/Web0.21.3 закрепляет urgencyhigh для двух существующих видимых тем. Регрессия реального worker tick проверяет оба topic и отсутствие повторного send. APIконтракты, согласие и схема сохраняются.
+
+## 2026-11-18 — Время сообщений и готовность уведомлений
+
+Кандидат Web 0.21.2 исправляет перенос даты в коротких touch-сообщениях. Float действий сужал meta до пяти строк; clear/nowrap сохраняют полную дату. Настройки проверяют ответ активного service worker через MessageChannel и предупреждают о необходимости обновления, сохраняя согласие. Диагностика телефона подтвердила FCM SENT двух входящих в 00:45/00:46 и одного явного технического probe после перезапуска. Фактический показ ждёт подтверждения пользователя. API и схема сохраняются.
+
+## 2026-11-18 — Мобильный список клиентов
+
+Кандидат Web 0.21.1 расширяет установленный компактный режим на «Клиентов». До 720 px по умолчанию видны поиск, «Панель» и тот же список. Кнопка возвращает навигацию, показатели, фильтры и действия. Выделение, поиск, горизонтальная прокрутка и Drawer сохраняются. API 0.21.0 и схема базы используются в прежней версии. Браузерные и итоговые проверки выполняются перед деплоем.
+
+## 2026-11-17 — Кандидат 0.21.0
+
+Бронирование, создание без фото, очистка черновика и opt-in Web Push. Новая функция уведомлений требует MINOR по docs/versioning.md. Первый изолированный запуск обнаружил отсутствие Corepack-кэша в API-образе; пакет pnpm теперь копируется из build stage. Контейнеры рабочей версии защищены, новая сборка проходит повторную проверку.
+
+## 2026-11-17 — frontend Web Push, кандидат 0.20.5
+
+Изменения выполнены только в этой temp-копии. Добавлены `apps/web/components/web-push-settings.tsx`, обработчики push/click в `apps/web/public/crm-sw.js`, отдельный блок `webPushUi` в конце `i18n.ts`, вкладка уведомлений в settings и один вызов очистки устройства в shell logout. Общие стили не менялись. Подписка opt-in для messages и websiteOrders, темы сохраняются через API. GET `/web-push/config` без параметров, POST `/web-push/subscriptions/current` с endpoint в JSON body. PUT/DELETE `/web-push/subscriptions` также используют JSON body.
+
+Worker игнорирует приватный текст и URL payload, показывает фиксированное нейтральное уведомление, допускает только `/?section=inbox` и `/?section=orders`. Cache Storage не используется обработчиками push. Проверенный стабильный tag и `renotify: false` сворачивают повторные уведомления. Logout cleanup ограничен двумя секундами для всех browser/network шагов, позднее завершение getRegistration не изменяет подписку. Серверная проверка живой сессии реализуется backend-агентом Parfit.
+
+Локальная проверка frontend завершилась успешно. 7 целевых worker/browser тестов PASS, 14 тестов auth/shell PASS, Web TypeScript PASS. Браузерный тест монтирует production-компонент с настоящей Mantine theme и подменяет HTTP/browser Push API. Проверены 320/390/1366/1920 px, отсутствие горизонтального переполнения и page errors, opt-in, восстановление тем, отказ/ошибки, iOS-инструкция и зависшие cleanup шаги logout. Логи и screenshots находятся в `.local/web-push-browser/`. Раздел Push в `docs/PWA.md` актуализирован. Реальная push-доставка и установка на физических устройствах не проверялись. Общий quality/build точного кандидата после объединения с backend и независимые release reviews остаются обязательными. Commit/deploy не выполнялись.
+
 ## Источник текущих курсов Monobank
 
 - В настройках финансов добавлен публичный курс покупки EUR/USD к UAH от Monobank. При публикации НБУ курса более чем на день вперёд CRM запрашивает обе валюты на текущую дату по Киеву. Историческая оценка и налоговый реестр используют прежние датированные источники.
@@ -923,3 +947,81 @@ Monobank: checkout now pins verified paid receipt; CRM accepts merchantReference
 - The Checkout v5.2.3 test ZIP emits payment.testMode for verified Monobank sandbox receipts.
 - CRM accepts this marker only through the calendar.yoleotard.com scoped API credential with a matching bound reservation. It archives the order at creation, records the payment for verification, and skips tax capture.
 - Targeted ingestion and replay tests passed. Production installation and the first Calendar sandbox payment are pending.
+
+## 2026-11-16 — Order status administration
+
+Settings → Interface → Order statuses manages names, colors and availability.
+Custom options reference a fixed system sales stage. Hiding an option retains
+existing assignments. Automatic system stage changes clear the custom option.
+Deployment requires applying the additive order-status-options migration.
+Installed 0.20.0 revision b0be8c7e05f566fcde75f40de92cd9c5ca9a882b6b63c6fb01ba6fc6a8db72ac. Applied migration 20261116120000_order_status_options with Prisma. Public app and API health returned 200. Exact installed images matched candidate. Authenticated browser verified status settings form and Orders dropdown. Version Guardian INSTALLED PASS. Checksummed predeploy dump and 0.19.9 rollback Compose retained.
+
+Order status colors in Orders now use the shared settings catalog and standard palette. The row-level browser-local color picker was removed.
+0.20.1 WEB_ONLY installed, revision c07c0e316286e6d9efe0f386a048164ef57e8a3ae953916c9d3cce807a5df09b. API 0.20.0 retained. Public site and API health passed. Verified Orders has no picker. Changed existing Reserved status via Settings, confirmed both rows changed, restored #eb17c4 and verified both rows again. Checksummed rollback Compose retained.
+
+Orders production cells show a quick preview and compact editor for the existing short note (buyerComment, legacy notes fallback).
+
+## 2026-11-17 — PWA, мобильный чат и загрузка отчётов
+
+Локальная реализация расширяет CRM через Next.js manifest и service worker с кэшем только публичных ресурсов сборки. Установка предлагается после проверки сессии и доступна в настройках. При обновлении браузер ждёт закрытия контролируемых окон. API установки, подписки и отправка Web Push отсутствуют. Архитектура будущего opt-in и проверка на устройствах описаны в `docs/PWA.md`.
+
+На телефоне открытый чат занимает больше экрана. Второстепенные действия появляются по кнопке «Действия чата», а поле ввода, вложения и карточка клиента доступны сразу. В финансах запрос отчёта запускается одновременно с проверкой курса. При подтверждённой смене курса выполняется повторное чтение, а версия оценки проверяется сервером. В обзоре повторно используются результаты классификации заказов и форматтер даты.
+
+Основные изменения находятся в этом worktree. Для проверки актуальной линии 0.20.2 они перенесены в локальную копию `%TEMP%/yo-crm-status-admin` с сохранением двухфазной загрузки финансов. Миграций и изменений production нет. Проверка установки и камеры на физических Android и iOS остаётся отдельным шагом.
+
+В локальной копии `pnpm quality:check` прошёл. Тесты дали 3399 PASS и 111 SKIP, проверки типов и production-сборки API и web завершились успешно. Прошли 20 целевых сценариев Playwright, включая ожидание обновления при двух окнах, задержку FX, независимую загрузку обзора, мобильную переписку и замеры. Собранный фронтенд зарегистрировал worker в Edge и WebKit с профилем iPhone. Cache Storage содержал 21 публичный ресурс Next.js. Edge подтвердил критерии установки в отдельном профиле.
+
+## 2026-11-17 - Web Push backend candidate
+
+Implemented only in C:/Users/Family/AppData/Local/Temp/yo-crm-status-admin.
+WebPushModule provides cookie-authenticated GET /api/web-push/config,
+POST /api/web-push/subscriptions/current with JSON {endpoint}, and PUT/DELETE
+/api/web-push/subscriptions. No endpoint query is used. OWNER/ADMIN/MANAGER
+may opt in to messages and websiteOrders. Keys and endpoints are never returned
+or written to audit/logs. Subscription cap is 10 active devices per user.
+Subscriptions are bound to yoleotard_crm_session SHA-256 and a live Session.
+Logout, session expiry, inactive/archived users and role changes stop new sends.
+
+Server-only env names are WEB_PUSH_ENABLED (explicit true), WEB_PUSH_VAPID_PUBLIC_KEY,
+WEB_PUSH_VAPID_PRIVATE_KEY, WEB_PUSH_VAPID_SUBJECT. Default is disabled.
+No VAPID secret was created or configured by this task. Recovery modes and
+AUTH_DISABLED cannot send push. Persistent appSetting web-push/activatedAt sets
+the first activation watermark. There is no historical scanner. Capture checks
+both watermark and subscription updatedAt <= event occurredAt.
+
+Migration 20261117170000_web_push adds WebPushSubscription, WebPushEvent and
+WebPushDelivery. Event registry dedupes by source event independently of recipients.
+Inbound Meta, Chatwoot and email use existing persistInbound transaction.
+Website capture runs only on first persisted paid transition, excluding sandbox.
+Event and delivery rows roll back together with the message/order transaction.
+Payloads contain generic text and canonical /?section=inbox or /?section=orders.
+
+Worker uses transactional row locks, live consent/session checks, bounded 8s send,
+and SKIP LOCKED claim. HTTP404/410 revokes/scrubs expired subscriptions.
+HTTP429/5xx retries are bounded. Unknown transport outcomes and expired PROCESSING
+claims become terminal INDETERMINATE and are never automatically replayed.
+This policy may omit a notification after a crash but prevents uncertain replay.
+Stable delivery tags support notification replacement without renotify.
+Provider TTL is the remaining delivery window, capped at24h.
+
+Local targeted validation and final API typecheck/build are recorded under
+.local/web-push-backend. Full release quality is owned by the integrator.
+Independent business/security review accepted the consent, event registry and
+delivery changes. Physical-device/provider delivery remains unverified.
+No commit, deployment, production migration or production mutation performed.
+
+
+Web Push timestamp compatibility correction: capture now uses the exact raw
+provider timestamp via apps/api/src/web-push/web-push-timestamp.ts. Meta DM and
+WhatsApp source events are matched by message/sender/receiver identity within
+the batch. Social source created_time is required; entry.time alone does not
+establish freshness. Chatwoot passes the original payload into persistInbound.
+Chatwoot created_at and social created_time accept Unix timestamps and valid
+zoned ISO strings. EmailSync adds a server-owned pushSourceTimestamp from a
+valid parsed Date or IMAP INTERNALDATE. Existing receivedAt/messageTime fallback
+and message persistence remain unchanged. Missing/invalid/old timestamp paths
+exclude notifications. Final Web Push tests12/12, timestamp regressions263/263.
+Newton independently confirmed compatibility PASS before the final ISO addition;
+the narrow ISO amendment is being rechecked before freeze.
+
+Final ISO amendment independently rechecked by Newton: compatibility PASS, exact12/12 runtime tests PASS. Final API typecheck/build exit0 after ISO amendment. Candidate backend is ready for integrator quality/freeze.

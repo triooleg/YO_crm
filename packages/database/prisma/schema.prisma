@@ -270,6 +270,7 @@ enum KeycrmSyncStatus {
 }
 
 model User {
+  webPushSubscriptions WebPushSubscription[]
   historyMigrationJobs HistoryMigrationJob[]
   historyMigrationRuns HistoryMigrationPilotRun[]
   shipmentNotifications ShipmentNotification[]
@@ -665,6 +666,8 @@ model Order {
   taxMinor               Int              @default(0)
   giftWrapMinor          Int              @default(0)
   productionCostMinor  Int?
+  salesStatusOptionId  String?
+  salesStatusOption    OrderStatusOption? @relation(fields: [salesStatusOptionId], references: [id], onDelete: Restrict)
   salesStatus          SalesStatus      @default(NEW_LEAD)
   productionStatus     ProductionStatus @default(NOT_SCHEDULED)
   paymentStatus        PaymentStatus    @default(UNPAID)
@@ -1076,7 +1079,7 @@ model Message {
   author                  User?                    @relation("MessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   workTasks               WorkTask[]
   deliveryAttempts        MessageDeliveryAttempt[]
-  communicationAttachment CommunicationAttachment?
+  communicationAttachments CommunicationAttachment[]
   attachments             MessageAttachment[]
   replyToMessage          Message?                 @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies                 Message[]                @relation("MessageReplies")
@@ -1436,8 +1439,8 @@ model CommunicationAttachment {
   mimeType        String
   sizeBytes       Int
   createdById     String
-  clientRequestId String?   @unique
-  messageId       String?   @unique
+  clientRequestId String?
+  messageId       String?
   createdAt       DateTime  @default(now())
   claimedAt       DateTime?
   createdBy       User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
@@ -1445,6 +1448,8 @@ model CommunicationAttachment {
 
   @@index([createdById, createdAt])
   @@index([claimedAt, createdAt])
+  @@index([clientRequestId])
+  @@index([messageId])
 }
 
 model MessageDeliveryAttempt {
@@ -2139,4 +2144,62 @@ model WebsiteApiKey {
   rotatedFrom WebsiteApiKey? @relation("WebsiteApiKeyRotation",fields:[rotatedFromId],references:[id],onDelete:Restrict,onUpdate:NoAction)
   rotations WebsiteApiKey[] @relation("WebsiteApiKeyRotation")
   @@index([createdAt,id])
+}
+
+model OrderStatusOption {
+  id          String      @id @default(uuid())
+  baseStatus  SalesStatus
+  label       String?
+  color       String?
+  archivedAt  DateTime?
+  orders      Order[]
+}
+
+model WebPushSubscription {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sessionTokenHash String
+  endpointHash     String   @unique
+  endpoint         String
+  p256dh           String
+  auth             String
+  messages         Boolean  @default(false)
+  websiteOrders    Boolean  @default(false)
+  version          Int      @default(1)
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deliveries       WebPushDelivery[]
+
+  @@index([userId, revokedAt])
+}
+
+model WebPushDelivery {
+  id                  String   @id @default(cuid())
+  eventKey            String
+  topic               String
+  subscriptionId      String
+  subscription        WebPushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  event               WebPushEvent @relation(fields: [eventKey], references: [eventKey], onDelete: Restrict)
+  subscriptionVersion Int
+  status              String   @default("PENDING")
+  attempts            Int      @default(0)
+  availableAt         DateTime @default(now())
+  lockedUntil         DateTime?
+  leaseToken          String?
+  lastError           String?
+  createdAt           DateTime @default(now())
+  sentAt              DateTime?
+
+  @@unique([eventKey, subscriptionId])
+  @@index([status, availableAt])
+}
+
+model WebPushEvent {
+  eventKey   String   @id
+  topic      String
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+  deliveries WebPushDelivery[]
 }

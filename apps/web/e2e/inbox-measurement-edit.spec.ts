@@ -44,6 +44,34 @@ async function mockInbox(page: Page) {
   return postedBodies;
 }
 
+test("mobile chat gives the message list priority and keeps chat actions reachable", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await mockInbox(page);
+  await page.goto("/?section=inbox");
+
+  const chat = page.locator(".communications-chat");
+  const messages = chat.locator(".communications-messages");
+  const actions = chat.getByRole("button", { name: "Действия чата" });
+  const spam = chat.getByRole("button", { name: "Пометить как спам" });
+  await expect(chat.getByText("Размеры отправлены", { exact: true })).toBeVisible();
+  await expect(chat.getByRole("button", { name: "Чаты" })).toBeVisible();
+  await expect(chat.getByRole("button", { name: "Карточка клиента" })).toBeVisible();
+  await expect(spam).toBeHidden();
+  await expect(chat.locator(".communications-ai-manual-hint")).toBeHidden();
+  const compact = (await messages.boundingBox())!.height;
+  await expect(page.locator(".crm-topbar")).toHaveCSS("height", "48px");
+  await page.screenshot({ path: testInfo.outputPath("inbox-compact.png") });
+  expect(compact).toBeGreaterThan(300);
+  await actions.click();
+  await expect(spam).toBeVisible();
+  await expect.poll(async () => (await messages.boundingBox())!.height).toBeLessThan(compact);
+  await actions.click();
+  await expect(spam).toBeHidden();
+  await chat.locator('.communications-compose input[type="file"]').setInputFiles("public/meta/crm-pwa-192.png");
+  await expect(chat.locator(".communications-selected-attachment img")).toBeVisible();
+  await expect(chat.getByRole("button", { name: "Отправить", exact: true })).toBeEnabled();
+});
+
 for (const viewport of [{ name: "wide", width: 1920, height: 1080 }, { name: "desktop", width: 1366, height: 768 }, { name: "mobile", width: 390, height: 844 }]) {
   test(`текущие размеры корректируются из Входящих — ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
@@ -69,7 +97,7 @@ for (const viewport of [{ name: "wide", width: 1920, height: 1080 }, { name: "de
 
     const dialog = page.getByRole("dialog", { name: "Изменить размеры" });
     await expect(dialog.getByLabel("1. Обхват груди (под мышками)")).toHaveValue("82");
-    await expect(dialog.getByLabel("15. Обхват через пах и плечо")).toHaveValue("145");
+    await expect(dialog.getByRole("spinbutton", { name: /^15\. / })).toHaveValue("145");
     await page.screenshot({ path: testInfo.outputPath(`inbox-measurement-drawer-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await dialog.getByLabel("1. Обхват груди (под мышками)").fill("82.5");
     await dialog.getByRole("button", { name: "Сохранить замеры" }).click();

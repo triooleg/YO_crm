@@ -17,7 +17,7 @@ const orders = Array.from({ length: 78 }, (_, index) => ({
   payments: [],
 }));
 
-async function mockOrders(page: Page, options: { hold?: Promise<void>; drift?: "overlap" | "delete"; fail?: boolean } = {}) {
+async function mockOrders(page: Page, options: { hold?: Promise<void>; drift?: "overlap" | "delete"; fail?: boolean; shortNotes?: Map<string, { buyerComment: string | null; notes?: string }> } = {}) {
   const requests: { page: number; size: number; search: string; focus: string | null }[] = [];
   const archivedIds = new Set<string>();
   let fail = options.fail;
@@ -48,7 +48,7 @@ async function mockOrders(page: Page, options: { hold?: Promise<void>; drift?: "
       const matching = orders.filter(order => !archivedIds.has(order.id) && order.number.includes(search));
       const focusIndex = matching.findIndex(order => order.id === focus);
       const current = focusIndex >= 0 ? Math.floor(focusIndex / size) + 1 : Math.min(requestedPage, Math.max(1, Math.ceil(matching.length / size)));
-      const items = matching.slice((current - 1) * size, current * size);
+      const items = matching.slice((current - 1) * size, current * size).map(order => ({ ...order, ...options.shortNotes?.get(order.id) }));
       if (driftingPage === "overlap") items[0] = matching[size - 1];
       return route.fulfill({ json: {
         items, total: matching.length, page: current, pageSize: size, focusFound: !focus || focusIndex >= 0,
@@ -58,7 +58,7 @@ async function mockOrders(page: Page, options: { hold?: Promise<void>; drift?: "
       } });
     }
     const order = orders.find(item => pathname === `/api/orders/${item.id}`);
-    return route.fulfill({ json: order ? { ...order, activities: [] } : {} });
+    return route.fulfill({ json: order ? { ...order, ...options.shortNotes?.get(order.id), activities: [] } : {} });
   });
   return requests;
 }
@@ -185,67 +185,86 @@ test("archiving an appended order reconciles the loaded range", async ({ page })
   await expect(rows(page).last()).toContainText("26-1041");
 });
 
-test("customizes the row tint for one status and restores its default", async ({ page }, testInfo) => {
+test("uses only shared status colors and restores the status after a rejected change", async ({ page }, testInfo) => {
   await mockOrders(page);
-  await page.goto("/?section=orders");
+  await page.addInitScript(() => localStorage.setItem("orders-dashboard-status-color-v1:WAITING_DEPOSIT", "#0000ff"));
+  await page.route("**/api/orders/status-options", route => route.fulfill({
+    json: [{ id: "NEW_LEAD", baseStatus: "NEW_LEAD", label: null, color: "#ff0000", archivedAt: null }],
+  }));
   const statusChanges: unknown[] = [];
   await page.route("**/api/orders/order-1/statuses", async route => {
     statusChanges.push(route.request().postDataJSON());
     await route.fulfill({ status: 409, json: { message: "Тестовый отказ смены статуса" } });
   });
+  await page.goto("/?section=orders");
   const matching = rows(page).filter({ hasText: "26-1001" });
   const other = rows(page).filter({ hasText: "26-1002" });
-  await expect(matching).toBeVisible();
-  const readTint = () => matching.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor);
-  const original = await readTint();
-  const otherOriginal = await other.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor);
-  const button = matching.getByRole("button", { name: "Изменить цвет статуса: Новый заказ" });
-  await button.click();
-  const picker = page.getByRole("dialog", { name: "Цвет статуса: Новый заказ" });
-  await picker.getByLabel("Выбрать цвет").fill("#ff0000");
-  await picker.screenshot({ path: testInfo.outputPath("status-color-desktop.png") });
-  await expect.poll(readTint).not.toBe(original);
-  await expect(rows(page).filter({ hasText: "26-1003" })).toHaveCSS("--order-status-color", "#ff0000");
-  expect(await other.locator("td").first().evaluate(cell => getComputedStyle(cell).backgroundColor)).toBe(otherOriginal);
-  await page.reload();
   await expect(matching).toHaveCSS("--order-status-color", "#ff0000");
-  expect(statusChanges).toEqual([]);
-  const status = matching.getByRole("combobox");
+  await expect(other).not.toHaveCSS("--order-status-color", "#0000ff");
+  const status = matching.getByRole("combobox", { name: "Изменить статус заказа" });
   await status.click();
   await page.getByRole("option", { name: "Ожидается предоплата" }).click();
-  await expect.poll(() => statusChanges).toEqual([{ salesStatus: "WAITING_DEPOSIT" }]);
+  await expect.poll(() => statusChanges).toEqual([{ salesStatusOptionId: "WAITING_DEPOSIT" }]);
   await expect(status).toBeEnabled();
   await expect(status).toHaveValue("Новый заказ");
   await expect(matching).toHaveCSS("--order-status-color", "#ff0000");
-  await button.click();
-  await picker.getByRole("button", { name: "Вернуть стандартный цвет" }).click();
-  await expect.poll(readTint).toBe(original);
-  const secondTab = await page.context().newPage();
-  await secondTab.route("**/status-color-test-tab", route => route.fulfill({ body: "<html></html>", contentType: "text/html" }));
-  await secondTab.goto("/status-color-test-tab");
-  await secondTab.evaluate(() => {
-    localStorage.setItem("orders-dashboard-status-color-v1:WAITING_DEPOSIT", "#0000ff");
+
+  for (const [width, height] of [[1920, 1080], [1366, 768], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await expect(page.getByRole("button", { name: /Изменить цвет статуса/ })).toHaveCount(0);
+    const longStatus = other.getByRole("combobox", { name: "Изменить статус заказа" });
+    await expect(longStatus).toHaveValue("Ожидается предоплата");
+    const fits = await longStatus.evaluate(input => {
+      const field = input as HTMLInputElement;
+      const style = getComputedStyle(field);
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.font = style.font;
+      return field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) >= ctx.measureText(field.value).width;
+    });
+    expect(fits).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`shared-status-color-${width}.png`) });
+  }
+});
+
+test("short note has a preview and opens the same note for editing", async ({ page }, testInfo) => {
+  const notes = new Map<string, { buyerComment: string | null; notes?: string }>([
+    ["order-1", { buyerComment: null, notes: "Клиент оплатит в январе" }],
+  ]);
+  await mockOrders(page, { shortNotes: notes });
+  await page.route("**/api/orders/order-1/buyer-comment", async route => {
+    expect(route.request().postDataJSON()).toEqual({ buyerComment: "Клиент оплатит в феврале", expectedBuyerComment: null });
+    notes.set("order-1", { ...notes.get("order-1"), buyerComment: "Клиент оплатит в феврале" });
+    await route.fulfill({ json: {} });
   });
-  await expect(other).toHaveCSS("--order-status-color", "#0000ff");
-  await expect.poll(readTint).toBe(original);
-  await secondTab.close();
-  await page.reload();
-  await expect.poll(readTint).toBe(original);
-  await page.setViewportSize({ width: 390, height: 844 });
-  const longStatus = other.getByRole("combobox");
-  await expect(longStatus).toHaveValue("Ожидается предоплата");
-  const widths = await longStatus.evaluate(input => {
-    const field = input as HTMLInputElement;
-    const style = getComputedStyle(field);
-    const context = document.createElement("canvas").getContext("2d")!;
-    context.font = style.font;
-    const contentWidth = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    return { text: context.measureText(field.value).width, available: contentWidth };
-  });
-  expect(widths.available).toBeGreaterThanOrEqual(widths.text);
-  await button.click();
-  await expect(picker).toBeInViewport({ ratio: 0.95 });
-  await picker.screenshot({ path: testInfo.outputPath("status-color-mobile.png") });
-  await page.keyboard.press("Escape");
-  await expect(button).toBeFocused();
+  await page.goto("/?section=orders");
+  const existing = page.getByRole("button", { name: "Краткие заметки: 26-1001" });
+  const empty = page.getByRole("button", { name: "Краткие заметки: 26-1002" });
+  await expect(existing).toHaveAttribute("data-has-note", "true");
+  await expect(empty).toHaveAttribute("data-has-note", "false");
+  await existing.hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Клиент оплатит в январе");
+  await existing.click();
+  const dialog = page.getByRole("dialog", { name: /Краткие заметки/ });
+  const input = dialog.getByRole("textbox", { name: "Краткие заметки" });
+  await expect(input).toHaveValue("Клиент оплатит в январе");
+  const save = dialog.getByRole("button", { name: "Сохранить" });
+  await expect(save).toBeDisabled();
+  await input.fill("");
+  await expect(save).toBeDisabled();
+  await expect(dialog.getByText("Для архивной заметки введите новый текст.")).toBeVisible();
+  await input.fill("Клиент оплатит в феврале");
+  await dialog.getByRole("button", { name: "Сохранить" }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.mouse.move(0, 0);
+  await existing.hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Клиент оплатит в феврале");
+  await empty.click();
+  await expect(input).toHaveValue("");
+  await dialog.getByRole("button", { name: "Отмена" }).click();
+  for (const [width, height] of [[1920, 1080], [1366, 768], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await existing.scrollIntoViewIfNeeded();
+    await expect(existing).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath(`short-note-${width}.png`) });
+  }
 });

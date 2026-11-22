@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
-import { ProductionStatus, type Prisma, type User } from "@prisma/client";
+import { ProductionStatus, SalesStatus, type Prisma, type User } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 import { appliedPaymentMinor, buildPaymentConversion, ExchangeRatesService, EXCHANGE_RATE_ADVISORY_LOCK, parseExchangeRateCache, type ExchangeRateCurrency } from "../finance/exchange-rates";
 import { presentClientContact } from "../communications/inbound-routing";
@@ -189,7 +189,7 @@ export class OrdersService {
         deliveryTrackingCode: true,
         requiredDeliveryAt: true, promisedProductionAt: true, priority: true, priceMinor: true,
         deliveryMinor: true, discountMinor: true, taxMinor: true, giftWrapMinor: true,
-        depositRequiredMinor: true, currency: true, salesStatus: true, productionStatus: true,
+        depositRequiredMinor: true, currency: true, salesStatus: true, salesStatusOptionId: true, productionStatus: true,
         paymentStatus: true, shippingStatus: true, modelImagePath: true, externalImageUrl: true, notes: true,
         buyerComment: true, managerComment: true, giftMessage: true, promocode: true, isGift: true,
         sourceSystem: true, sourceAccount: true, externalId: true, externalNumber: true, externalUpdatedAt: true, externalData: true,
@@ -206,7 +206,12 @@ export class OrdersService {
         const candidates:Prisma.OrderGetPayload<{select:typeof orderListCandidateSelect}>[]=[];let cursor:string|undefined;
         for(;;){const batch=await db.order.findMany({where,select:orderListCandidateSelect,orderBy:{id:'asc'},take:500,...(cursor?{cursor:{id:cursor},skip:1}:{})});candidates.push(...batch);if(batch.length<500)break;cursor=batch.at(-1)!.id;}
         const origins=await loadOrderSourceMap(db,candidates.map(order=>order.id));
-        const result=buildOrderListPage(candidates.map(order=>({...order,orderSource:origins[order.id]??'UNKNOWN'})),overview??{});
+        const statusLabels = new Map<string, string>();
+        if (options.sort === 'status') {
+          const optionsWithLabels = await db.orderStatusOption.findMany({ select: { id: true, label: true } });
+          for (const option of optionsWithLabels) if (option.label) statusLabels.set(option.id, option.label);
+        }
+        const result=buildOrderListPage(candidates.map(order=>({...order,orderSource:origins[order.id]??'UNKNOWN'})),overview??{},new Date(),statusLabels);
         const pageIds=result.items.map(order=>order.id);
         const rich=pageIds.length?await db.order.findMany({where:{id:{in:pageIds},...(clientId===undefined?{}:{clientId})},select:richSelect,take:options.pageSize}):[];
         const byId=new Map(rich.map(order=>[order.id,order]));
@@ -364,13 +369,56 @@ export class OrdersService {
   }
 
 
+  orderStatusOptions() {
+    return this.prisma.orderStatusOption.findMany({ orderBy: { id: "asc" } });
+  }
+
+  saveOrderStatusOption(id: string | null, dto: import("./orders.dto").SaveOrderStatusOptionDto, actor: User) {
+    const label = dto.label?.trim() || null;
+    const color = dto.color ?? null;
+    if (color && !/^#[0-9a-f]{6}$/i.test(color)) throw new BadRequestException("Укажите цвет в формате #RRGGBB");
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", "order-status-options");
+      const before = id ? await tx.orderStatusOption.findUnique({ where: { id } }) : null;
+      if (id && !before && id !== dto.baseStatus) throw new NotFoundException("Статус не найден");
+      if (before && before.baseStatus !== dto.baseStatus) throw new BadRequestException("Системный этап сохранённого статуса фиксирован");
+      if ((!id || (before && id !== before.baseStatus && dto.label !== undefined)) && !label) throw new BadRequestException("Введите название статуса");
+      const data = { baseStatus: dto.baseStatus, label, color, archivedAt: dto.archived ? before?.archivedAt ?? new Date() : null };
+      const saved = id
+        ? await tx.orderStatusOption.upsert({ where: { id }, create: { id, ...data }, update: {
+            ...(dto.label !== undefined ? { label } : {}),
+            ...(dto.color !== undefined ? { color } : {}),
+            ...(dto.archived !== undefined ? { archivedAt: data.archivedAt } : {}),
+          } })
+        : await tx.orderStatusOption.create({ data });
+      await tx.auditLog.create({ data: { actorId: actor.id, action: before ? "UPDATE" : "CREATE",
+        entityType: "OrderStatusOption", entityId: saved.id, before: before ?? undefined, after: saved } });
+      return saved;
+    });
+  }
+
   async updateStatuses(orderId: string, dto: UpdateOrderStatusesDto, actor: User) {
-    const data = { salesStatus: dto.salesStatus, productionStatus: dto.productionStatus };
-    if (!Object.values(data).some(Boolean)) throw new BadRequestException("Укажите хотя бы один статус");
+    if (!(dto.salesStatus || dto.productionStatus || dto.salesStatusOptionId)) throw new BadRequestException("Укажите хотя бы один статус");
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", orderId);
       const order = await tx.order.findFirst({ where: { id: orderId, archivedAt: null }, include: { payments: { where: { voidedAt: null } } } });
       if (!order) throw new NotFoundException("Заказ не найден");
+      if (dto.salesStatusOptionId && (dto.salesStatus || dto.productionStatus)) {
+        throw new BadRequestException("Выберите один способ изменения статуса заказа");
+      }
+      let salesStatus = dto.salesStatus;
+      let salesStatusOptionId: string | null | undefined = salesStatus ? null : undefined;
+      if (dto.salesStatusOptionId) {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", "order-status-options");
+        const option = await tx.orderStatusOption.findUnique({ where: { id: dto.salesStatusOptionId } });
+        const builtIn = Object.values(SalesStatus).find(status => status === dto.salesStatusOptionId);
+        if (option?.archivedAt || (!option && !builtIn)) {
+          throw new BadRequestException("Этот статус недоступен для выбора");
+        }
+        salesStatus = option?.baseStatus ?? builtIn;
+        salesStatusOptionId = builtIn ? null : option!.id;
+      }
+      const data = { salesStatus, salesStatusOptionId, productionStatus: dto.productionStatus };
       if (dto.productionStatus && dto.productionStatus !== "NOT_SCHEDULED" && !requiresProduction(order.type)) {
         throw new BadRequestException("Быстрые продажи и готовые изделия не планируются в производство");
       }
@@ -381,7 +429,7 @@ export class OrdersService {
         if (paidMinor < order.depositRequiredMinor) throw new BadRequestException("До получения требуемой предоплаты заказ можно планировать только предварительно");
       }
       const updated = dto.productionStatus
-        ? await updateProductionStatusGraph(tx, orderId, dto.productionStatus, dto.salesStatus ? { salesStatus: dto.salesStatus } : {})
+        ? await updateProductionStatusGraph(tx, orderId, dto.productionStatus, salesStatus ? { salesStatus, ...(order.salesStatusOptionId ? { salesStatusOption: { disconnect: true } } : {}) } : {})
         : await tx.order.update({ where: { id: orderId }, data });
       const summary = "Изменены рабочие статусы заказа";
       await tx.activity.create({ data: { clientId: order.clientId, orderId, type: "ORDER_STATUSES_UPDATED", summary, metadata: data } });
@@ -946,9 +994,18 @@ export class OrdersService {
         const measurementById = new Map(measurements.map((measurement) => [measurement.id, measurement.athleteId]));
         if (measurementRefs.some((reference) => measurementById.get(reference.measurementId) !== reference.athleteId)) throw new BadRequestException("Снимок замеров не принадлежит выбранному спортсмену клиента");
       }
+      let booking: { id: string; baseStatus: SalesStatus } | undefined;
+      if (dto.initialStatus === "BOOKING") {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", "order-status-options");
+        const option = await tx.orderStatusOption.findUnique({ where: { id: "manual-booking" } });
+        if (!option || option.archivedAt || option.baseStatus !== SalesStatus.NEW_LEAD) {
+          throw new BadRequestException("Статус бронирования недоступен в настройках");
+        }
+        booking = option;
+      }
       const createdAt = new Date();
       const number = await nextOrderNumber(tx, createdAt);
-      const order = await tx.order.create({ data: { number, createdAt, clientId: dto.clientId, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
+      const order = await tx.order.create({ data: { number, createdAt, clientId: dto.clientId, salesStatus: booking?.baseStatus, salesStatusOptionId: booking?.id, athleteId: dto.athleteId, measurementId: dto.measurementId, type: dto.type, notes: dto.description, modelImagePath: dto.modelImagePath, requiredDeliveryAt: dto.requiredDeliveryAt ? new Date(dto.requiredDeliveryAt) : undefined, priceMinor: dto.priceMinor, depositRequiredMinor, currency: dto.currency.toUpperCase(), responsibleManagerId: actor.id, items: { create: items.map((item) => ({ athleteId: item.athleteId, measurementId: item.measurementId, name: item.name, quantity: item.quantity, priceMinor: item.priceMinor, modelImagePath: item.modelImagePath })) } } });
       await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", order.id);
       const createdItems = await tx.orderItem.findMany({ where: { orderId: order.id, archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
       for (const item of createdItems) await reconcileAndPropagateOrderItemInstances(tx, item);

@@ -75,6 +75,7 @@ for(const width of [1366,390]) test(`client archive needs confirmation and refre
   return route.fulfill({json:{id:'c',archivedAt:now}});
  });
  await page.goto('/?section=clients&country=Spain');
+ if(width<=720)await page.getByRole('button',{name:'Показать панель клиентов',exact:true}).click();
  const stats=page.getByRole('region',{name:'По выбранным фильтрам'});
  await expect(stats.getByText('41',{exact:true})).toBeVisible();
  await expect(stats.getByText('7',{exact:true})).toBeVisible();

@@ -390,7 +390,7 @@ test("composer autosave updates one owned draft instead of appending duplicates"
   assert.match(service,/action:existing\?"UPDATE":"CREATE",entityType:"Message"/);
   assert.match(dto,/classUpdateMessageDraftDto[\s\S]*aiRunId/);
   assert.match(service,/scopedFeedback=awaittx\.aiResponseFeedback\.findFirst/);
-  assert.match(service,/metadata=\{\.\.\.preservedMetadata,composerDraftKey:draftKey,\.\.\.\(d\.aiRunId\?\{aiRunId:d\.aiRunId\}:\{\}\)\}/);
+  assert.match(service,/metadata=\{\.\.\.preservedMetadata,composerDraftKey:draftKey,\.\.\.\(content&&d\.aiRunId\?\{aiRunId:d\.aiRunId\}:\{\}\)\}/);
 });
 
 test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundaries",async()=>{

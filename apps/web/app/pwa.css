@@ -1,0 +1,54 @@
+.inbox-reference-shell > .crm-pwa-notice {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  padding: 8px 12px;
+}
+
+.crm-content > .crm-pwa-notice {
+  padding: 12px 12px 0;
+}
+
+.inbox-reference-shell {
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.phase2-login {
+  box-sizing: border-box;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-right: max(12px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+}
+
+@media (max-width: 720px) {
+  .inbox-reference-shell:has(.communications-chat[data-client-selected], .crm-content > :is(.production-page, .orders-dashboard)) {
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+
+  .inbox-reference-shell:has(.communications-chat[data-client-selected], .crm-content > :is(.production-page, .orders-dashboard)) .crm-topbar {
+    grid-template-rows: 48px;
+    padding-inline: 6px;
+    column-gap: 2px;
+  }
+
+  .inbox-reference-shell:has(.communications-chat[data-client-selected], .crm-content > :is(.production-page, .orders-dashboard)) .crm-topbar-brand {
+    display: none;
+  }
+
+  .inbox-reference-shell:has(.communications-chat[data-client-selected], .crm-content > :is(.production-page, .orders-dashboard)) .crm-topbar-nav {
+    grid-area: 1 / 1;
+    min-width: 0;
+    padding: 2px 0;
+    scrollbar-width: none;
+  }
+
+  .inbox-reference-shell:has(.production-page[data-calendar-only="true"], .orders-dashboard[data-list-only="true"], .clients-workspace[data-list-only="true"]) {
+    grid-template-rows: 0 minmax(0, 1fr);
+  }
+
+  .inbox-reference-shell:has(.production-page[data-calendar-only="true"], .orders-dashboard[data-list-only="true"], .clients-workspace[data-list-only="true"]) .crm-topbar {
+    display: none;
+  }
+}

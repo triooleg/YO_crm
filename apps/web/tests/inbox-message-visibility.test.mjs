@@ -47,3 +47,14 @@ test("autosaves AI provenance changes even when the visible text stays the same"
   assert.equal(inboxDraftNeedsSave("Одинаковый текст", "ai-run-1", "  Одинаковый текст  ", "ai-run-1"), false);
   assert.equal(inboxDraftNeedsSave("", undefined, "   ", undefined), false);
 });
+
+test("clearing a saved draft is a write, but an untouched empty editor is not", () => {
+  assert.equal(inboxDraftNeedsSave("Старый черновик", undefined, "", undefined), true);
+  assert.equal(inboxDraftNeedsSave("", undefined, "", undefined), false);
+  assert.equal(inboxDraftNeedsSave("", undefined, "", "old-ai-run"), false);
+  const messages = [
+    { id: "older", status: "DRAFT", channel: "WHATSAPP", content: "Старый", createdAt: "2026-01-01T00:00:00Z" },
+    { id: "cleared", status: "DRAFT", channel: "WHATSAPP", content: "", createdAt: "2026-01-02T00:00:00Z" },
+  ];
+  assert.equal(restoreInboxDraft(messages, "WHATSAPP").content, "");
+});

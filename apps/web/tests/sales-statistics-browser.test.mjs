@@ -158,17 +158,22 @@ test('sales statistics independent synthetic browser regression', { skip: !enabl
     const s=await session('OWNER',{unallocated:true});
     try {
       await s.page.goto(base.origin+startQuery);await ready(s.page);
-      const notice=s.page.locator('[data-statistics-notice="blue"]');
+      const notice=s.page.locator('.crm-notifications [role="alert"]').filter({hasText:'Учёт расходов'});
+      await expect(s.page.locator('[data-statistics-notice="blue"]')).toHaveCount(0);
       await expect(notice).toContainText('Расходы без привязки к заказу');
       await expect(notice).toContainText('не распределяются по странам');
       await expect(notice).not.toContainText('требующие проверки');
       await s.page.screenshot({path:resolve(artifacts,'overhead-notice.png')});
+      await notice.getByRole('button',{name:'Закрыть',exact:true}).click();
+      await expect(notice).toHaveCount(0);
+      await s.page.reload();await ready(s.page);
+      await expect(notice).toHaveCount(0);
     } finally {await s.finish('overhead-notice')}
     const missing=await session('OWNER',{unallocated:true,missingFx:true});
     try {
       await missing.page.goto(base.origin+startQuery);await ready(missing.page);
       await expect(missing.page.locator('[data-statistics-notice="orange"]')).toContainText('Не найден исторический курс');
-      await expect(missing.page.locator('[data-statistics-notice="blue"]')).toBeVisible();
+      await expect(missing.page.locator('.crm-notifications').getByText('Учёт расходов')).toBeVisible();
     } finally {await missing.finish('overhead-and-missing-fx')}
   });
 

@@ -1,3 +1,4 @@
+import { trustedEmailTimestamp } from "../web-push/web-push-timestamp";
 import { shipmentEmailAccountIdentity } from "./shipment-email-account";
 import { recoveryIsolationEnabled } from "../recovery-safety";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -104,7 +105,7 @@ export class EmailSyncService implements OnModuleInit,OnModuleDestroy{
       const from=parsed.from?.value[0],email=from?.address?.trim().toLowerCase();
       if(!email||email===own)return false;
       const attachments=await this.storedAttachments(parsed,directory,written);
-      return this.communications.receiveEmailMessage({externalMessageId,externalSenderId:email,email,displayName:from?.name||email,content,emailHtml,receivedAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize})
+      return this.communications.receiveEmailMessage({externalMessageId,externalSenderId:email,email,displayName:from?.name||email,content,emailHtml,receivedAt:occurredAt,subject,inReplyTo:parsed.inReplyTo,messageId:parsed.messageId,references:this.references(parsed),rawPath,attachments},{mailbox:mailbox.path,uid,uidValidity,rawPath,sizeBytes:sourceSize,pushSourceTimestamp:trustedEmailTimestamp(parsed.date,internalDate)})
     }
     const recipients=[...new Set(this.recipients(parsed).filter(address=>address!==own))];
     if(recipients.length!==1){await this.prisma.auditLog.create({data:{action:"EMAIL_SENT_SKIPPED",entityType:"EmailMessage",entityId:createHash("sha256").update(externalMessageId).digest("hex").slice(0,24),after:{channel:"EMAIL",reason:recipients.length?"AMBIGUOUS_RECIPIENTS":"RECIPIENT_MISSING",recipientCount:recipients.length}}});return false}

@@ -75,6 +75,30 @@ test('старый поиск после сохранения черновика
  expect(requests.some(r=>r.search==='Контакт 0')).toBe(false);expect(requests.some(r=>r.search==='Контакт 04')).toBe(true);
 });
 
+test('очищенный черновик не возвращается после переключения клиента',async({page})=>{
+ await page.setViewportSize({width:1366,height:900});
+ await setup(page);
+ let content='Сохранённый черновик';
+ const draft={id:'saved-draft',status:'DRAFT',direction:'OUTBOUND',channel:'CHATWOOT',createdAt:'2026-10-14T12:00:00Z'};
+ await page.route('**/api/communications/contact-0',route=>route.fulfill({json:{messages:[{...draft,content}]}}));
+ await page.route('**/api/communications/contact-0/drafts/**',route=>{
+  content=route.request().postDataJSON().content;
+  return route.fulfill({json:{...draft,content}});
+ });
+ await page.goto('/?section=inbox');
+ const editor=page.locator('.communications-compose textarea');
+ const heading=page.locator('.communications-chat-client');
+ const rows=page.locator('.communications-client-list>button');
+ await expect(editor).toHaveValue(content);
+ await editor.fill('');
+ await rows.filter({hasText:'Контакт 01'}).click();
+ await expect(heading).toContainText('Контакт 01');
+ expect(content).toBe('');
+ await rows.filter({hasText:'Контакт 00'}).click();
+ await expect(heading).toContainText('Контакт 00');
+ await expect(editor).toHaveValue('');
+});
+
 test('ошибка страницы сохраняет строки и допускает повтор без сброса offset',async({page})=>{
  const requests=await setup(page,{fail:true});await page.goto('/?section=inbox');const rows=page.locator('.communications-client-list>button');await expect(rows).toHaveCount(15);
  await scrollEnd(page);const retry=page.locator('.communications-client-pagination').getByRole('button',{name:'Повторить',exact:true});await expect(retry).toBeVisible();await expect(rows).toHaveCount(15);

@@ -1,3 +1,4 @@
+import { captureWebPush } from '../web-push/web-push-capture';
 import { Injectable } from '@nestjs/common';
 import { websiteCheckoutMarker, WEBSITE_CHECKOUT_SYSTEM } from '../keycrm/website-checkout-correlation';
 import type { Prisma, Client } from '@prisma/client';
@@ -96,6 +97,7 @@ export class WebsiteOrdersService {
    if(paymentStatus!==order.paymentStatus)order=await tx.order.update({where:{id:order.id},data:{paymentStatus}});
    await tx.activity.create({data:{clientId:client.id,orderId:order.id,type:existing?'WEBSITE_ORDER_SYNCED':'WEBSITE_ORDER_IMPORTED',summary:existing?'Обновлён заказ сайта':'Получен заказ с сайта',metadata:{sourceSystem:WEBSITE_SYSTEM,sourceAccount:p.sourceAccount,externalId:p.order.externalId}}});
    await tx.auditLog.create({data:{action:existing?'UPDATE':'CREATE',entityType:'Order',entityId:order.id,...(existing?{before:json(existing)}:{}),after:json(order)}});
+   if (!sandbox && p.order.paymentStatus === 'paid' && previous?.order.paymentStatus !== 'paid' && p.payment?.receivedAt) await captureWebPush(tx, 'websiteOrders', 'website-order:' + order.id, new Date(p.payment.receivedAt));
    return this.result(order,!existing,[...new Set(warnings)]);
   },{timeout:30000,isolationLevel:'ReadCommitted'});
  }

@@ -86,10 +86,11 @@ async function mockOrdersApi(page: Page) {
   const statusUpdates: Record<string, string>[] = [];
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/orders/status-options") return route.fulfill({ json: [] });
     if (route.request().method() === "PATCH" && pathname === "/api/orders/order-1/statuses") {
       const update = route.request().postDataJSON() as Record<string, string>;
       statusUpdates.push(update);
-      currentOrder = { ...currentOrder, ...update };
+      currentOrder = { ...currentOrder, ...update, ...(update.salesStatusOptionId ? { salesStatus: update.salesStatusOptionId, salesStatusOptionId: null } : {}) };
       await route.fulfill({ json: currentOrder });
       return;
     }
@@ -188,7 +189,7 @@ for (const viewport of [
     await expect(statusControls[0]).toHaveValue("Оплачено");
     await statusControls[1].selectOption("SEWING");
     await expect(statusControls[1]).toHaveValue("SEWING");
-    expect(statusUpdates).toEqual([{ salesStatus: "PAID" }, { productionStatus: "SEWING", expectedUpdatedAt:"2026-10-01T12:00:00Z" }]);
+    expect(statusUpdates).toEqual([{ salesStatusOptionId: "PAID" }, { productionStatus: "SEWING", expectedUpdatedAt:"2026-10-01T12:00:00Z" }]);
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -246,4 +247,30 @@ test("чужой снимок мерок не показывается у поз
     await expect(expanded.locator(".orders-expanded-measurements")).toHaveCount(0);
     await page.getByRole("button", { name: number, exact: true }).click();
   }
+});
+
+test("custom status is assigned, colored and retained after hiding", async ({ page }) => {
+  const option = { id: "3e9a0808-7afd-4da7-9e24-c8b145bad772", baseStatus: "ORDER_CONFIRMED", label: "Дизайн на согласовании", color: "#228833", archivedAt: null as string | null };
+  const updates = await mockOrdersApi(page);
+  await page.route("**/api/orders/status-options", route => route.fulfill({ json: [option] }));
+  await page.route("**/api/orders/order-1/statuses", route => {
+    updates.push(route.request().postDataJSON());
+    return route.fulfill({ json: { salesStatus: option.baseStatus, salesStatusOptionId: option.id } });
+  });
+  await page.goto("/?section=orders");
+  const selector = page.getByRole("combobox", { name: "Изменить статус заказа" }).first();
+  await expect(page.getByRole("button", { name: /Изменить цвет статуса/ })).toHaveCount(0);
+  await selector.click();
+  await page.getByRole("option", { name: option.label }).click();
+  await expect.poll(() => updates.at(-1)).toEqual({ salesStatusOptionId: option.id });
+  await page.unroute("**/api/orders/order-1/statuses");
+  option.archivedAt = "2026-11-16T00:00:00.000Z";
+  await page.route("**/api/orders**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path !== "/api/orders") return route.fallback();
+    return route.fulfill({ json: [{ ...order, salesStatusOptionId: option.id }] });
+  });
+  await page.reload();
+  await expect(selector).toHaveValue(option.label);
+  await expect(page.locator(".orders-summary-row").first()).toHaveCSS("--order-status-color", option.color);
 });

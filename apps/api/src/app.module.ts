@@ -13,6 +13,7 @@ import { SalesStatisticsController } from "./overview/sales-statistics.controlle
 import { SalesStatisticsService } from "./overview/sales-statistics.service";
 import { OverviewService } from "./overview/overview.service";
 import { Module } from "@nestjs/common";
+import { WebPushModule } from "./web-push/web-push.module";
 import { ConfigModule } from "@nestjs/config";
 import { HealthController } from "./health.controller";
 import { PrismaModule } from "./prisma.module";
@@ -57,7 +58,7 @@ import { WebsiteOrdersModule } from "./website-orders/website-orders.module";
 import { HistoryMigrationModule } from './history-migration/history-migration.module';
 
 @Module({
-  imports: [HistoryMigrationModule, WebsiteOrdersModule, ConfigModule.forRoot({ isGlobal: true }), PrismaModule, TaxesModule, BackupsModule, IntelligenceModule],
+  imports: [WebPushModule, HistoryMigrationModule, WebsiteOrdersModule, ConfigModule.forRoot({ isGlobal: true }), PrismaModule, TaxesModule, BackupsModule, IntelligenceModule],
   controllers: [ShipmentNotificationController, TaxesController, ParentMeasurementsRangesController, ParentMeasurementsPublicController, ParentMeasurementsStaffController, OverviewController, SalesStatisticsController, HealthController, AuthController, ClientsController, OrdersController, OrderTabsController, OrderCompositionController, OrderMeasurementAssignmentsController, FinanceController, ShippingController, CommunicationsController, CommunicationFilesController, CommunicationMetaFilesController, MetaWebhookController, ChatwootWebhookController, AiAssistantController, TasksController, BrandingController, KeycrmController],
   providers: [ClientsWorkspaceReadService, ShipmentNotificationService, ParentMeasurementsRangesService, ParentMeasurementsAccessService, ParentMeasurementsService, ParentMeasurementsGuard, ParentMeasurementsRetentionService, OverviewService, SalesStatisticsService, AuthService, SessionGuard, RolesGuard, { provide: ClientsService, useFactory: (prisma: PrismaService, statistics: SalesStatisticsService) => new ClientsService(prisma, statistics), inject: [PrismaService, SalesStatisticsService] }, { provide: OrdersService, useFactory: (prisma: PrismaService, rates: ExchangeRatesService, taxes: TaxesService, statistics: SalesStatisticsService) => new OrdersService(prisma, rates, taxes, statistics), inject: [PrismaService, ExchangeRatesService, TaxesService, SalesStatisticsService] }, OrderTabsService, OrderCompositionService, OrderMeasurementAssignmentsService, OrderDocumentsService, { provide: FinanceService, useFactory: (prisma: PrismaService, taxes: TaxesService, documents: OrderDocumentsService) => new FinanceService(prisma, taxes, documents), inject: [PrismaService, TaxesService, OrderDocumentsService] }, { provide: FinanceReportService, useFactory: (prisma: PrismaService, taxes: TaxesService) => new FinanceReportService(prisma, taxes), inject: [PrismaService, TaxesService] }, ExchangeRatesService, ShippingService, EmailTransportService, CommunicationsService, EmailSyncService, AiAssistantService, TasksService, BrandingService, { provide: KeycrmService, useFactory: (prisma: PrismaService, taxes: TaxesService) => new KeycrmService(prisma, taxes), inject: [PrismaService, TaxesService] }, KeycrmWorkerService],
 })

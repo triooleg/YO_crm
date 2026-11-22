@@ -12,7 +12,7 @@ import { orderMeasurementState } from "../lib/order-measurement-state";
 import { dataEvidenceUi } from "../lib/i18n";
 import type { ClipboardEvent, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Alert, Box, Button, Group, Modal, NativeSelect, Switch, Text } from "@mantine/core";
+import { Alert, Box, Button, Group, Modal, NativeSelect, Switch, Text, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { communicationsUi as ui, labels, ordersUi, overviewTargetUi, productionUi } from "../lib/i18n";
 import {
@@ -177,8 +177,7 @@ const reactionEmojisByChannel:Record<string,string[]>={INSTAGRAM:["❤️"],WHAT
 const channel = (c?: Client) => c?.preferredChannel || c?.source || "MANUAL";
 const isInstagramScopedId = (value?: string) => /^\d+$/.test(value || "");
 const instagramHandle = (value?: string) => value ? `@${value.replace(/^@/, "")}` : "";
-function sourceBadge(c?: Client) {
-  const key = channel(c);
+function sourceBadge(key: string) {
   return {
     icon: icons[key] || icons.MANUAL,
     label: ui.sources[key as keyof typeof ui.sources] || ui.sources.MANUAL,
@@ -199,7 +198,7 @@ function clientBadges(c: Client) {
   return (keys.length ? keys : [channel(c)]).map((key) => ({
     key,
     accountName:c.linkedAccounts?.find(item=>item.channel===key)?.accountName,
-    ...sourceBadge({ source: key } as Client),
+    ...sourceBadge(key),
   }));
 }
 function latestConversation(c: Client) {
@@ -255,6 +254,7 @@ function showInboxNotification(message:string){
   notifications.show({message,color:"teal",autoClose:3000,withCloseButton:true,closeButtonProps:{"aria-label":ui.close}});
 }
 function showInboxErrorNotification(message:string){
+  notifications.hide("communications-error");
   notifications.show({id:"communications-error",message,color:"red",autoClose:5000,withCloseButton:true,closeButtonProps:{"aria-label":ui.close}});
 }
 function formatMessageDateTime(value:string){
@@ -320,12 +320,12 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [clientsAppending,setClientsAppending]=useState(false),
     [clientsAppendError,setClientsAppendError]=useState(false),
     [busy, setBusy] = useState(false),
+    [changingReplyChannel, setChangingReplyChannel] = useState(false),
     [loading, setLoading] = useState(true),
     [messagesLoading, setMessagesLoading] = useState(false),
     [error, setError] = useState(""),
     [connectionLost,setConnectionLost]=useState(false),
-    [attachment, setAttachment] = useState<File>(),
-    [attachmentPreview, setAttachmentPreview] = useState(""),
+    [attachments, setAttachments] = useState<{file: File; preview: string}[]>([]),
     [creating, setCreating] = useState(false),
     [noteOpen,setNoteOpen]=useState(false),
     [noteText,setNoteText]=useState(""),
@@ -346,6 +346,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     [contextOpen,setContextOpen]=useState(false),
     [contextCollapsed,setContextCollapsed]=useState(false),
     [mobileClientListOpen,setMobileClientListOpen]=useState(false),
+    [mobileChatActionsFor,setMobileChatActionsFor]=useState<string>(),
     [contextTab,setContextTab]=useState<ContextTab>(()=>typeof window!=="undefined"&&new URLSearchParams(window.location.search).has("orderId")?"ORDERS":"CLIENT"),
     [conversationSummaries,setConversationSummaries]=useState<ConversationSummaryItem[]>([]),
     [summaryFirstMessageDate,setSummaryFirstMessageDate]=useState(""),
@@ -390,7 +391,9 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     readOperationSequence = useRef(0),
     readOperations = useRef(new Map<string, number>()),
     pendingReads = useRef(new Map<string, Map<string, number>>()),
-    pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string; invoiceRequestFingerprint?: string }>({}),
+    pendingSend = useRef<PendingAttachmentSend<File, UploadedAttachment> & { textContent?: string; textRequestId?: string; attachmentRequestFingerprint?: string; pendingBundle?: { body: string; draftId?: string } }>({}),
+    pendingFiles = useRef(new Map<File, PendingAttachmentSend<File, UploadedAttachment>>()),
+    selectedAttachments = useRef(attachments),
     composerDraftId=useRef<string|undefined>(undefined),
     composerDraftKey=useRef<string|undefined>(undefined),
     draftSavePromise=useRef<Promise<boolean>|null>(null),
@@ -417,6 +420,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     invoiceAttachment=useRef<File | undefined>(undefined),
     currentInvoiceScope=useRef(""),
     currentInvoiceBusy=useRef(false),
+    replyChannelSwitchPending=useRef(false),
     emojiTrigger=useRef<HTMLButtonElement|null>(null),
     emojiPicker=useRef<HTMLDivElement|null>(null),
     deleteTrigger=useRef<HTMLElement|null>(null),
@@ -441,6 +445,11 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   currentConversationScope.current=conversationScope;
   currentClientCount.current=visibleClientCount;
   currentMessages.current=messages;
+  useEffect(() => () => {
+    for (const { preview } of selectedAttachments.current) if (preview) URL.revokeObjectURL(preview);
+  }, []);
+  const attachment = attachments[0]?.file;
+  const bundleAwaitingResult = !!pendingSend.current.pendingBundle;
   const invoiceConversationId = client?.conversations.find(conversation => conversation.channel === activeChannel)?.id;
   const invoiceEpoch = composeEpoch.current;
   const invoiceScope = JSON.stringify([client?.id, activeChannel, invoiceConversationId, invoiceEpoch]);
@@ -450,20 +459,20 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   currentInvoiceBusy.current = busy;
   const accountUrl = activeChannel === "EMAIL" ? gmailConversationUrl(messages) : connectedAccountUrl(client, activeChannel);
   function updateMessagesScrollIntent(){const viewport=messagesViewport.current;if(!viewport)return;stickToBottom.current=viewport.scrollHeight-viewport.scrollTop-viewport.clientHeight<=48;if(stickToBottom.current)setNewMessageCount(0)}
-  function insertEmoji(emoji:string){const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
+  function insertEmoji(emoji:string){if(pendingSend.current.pendingBundle||currentInvoiceBusy.current)return;const editor=composerTextarea.current,start=editor?.selectionStart??text.length,end=editor?.selectionEnd??start;invalidateAiOperation();setText(text.slice(0,start)+emoji+text.slice(end));setEmojiOpen(false);requestAnimationFrame(()=>{composerTextarea.current?.focus();composerTextarea.current?.setSelectionRange(start+emoji.length,start+emoji.length)})}
   function handleComposerKeyDown(event:KeyboardEvent<HTMLTextAreaElement>){
     if(event.key!=="Enter"||!(event.ctrlKey||event.metaKey)||event.nativeEvent.isComposing)return;
     if(busy||!client||invoiceAttachmentBlocked||(!text.trim()&&!attachment)||!sendableChannels.includes(activeChannel as SocialChannel))return;
     event.preventDefault();void save("SEND");
   }
   function handleComposerPaste(event:ClipboardEvent<HTMLTextAreaElement>){
-    const imageItem=Array.from(event.clipboardData.items).find(item=>item.kind==="file"&&item.type.startsWith("image/"));
-    if(!imageItem)return;
-    const blob=imageItem.getAsFile();
-    if(!blob)return;
+    const images = Array.from(event.clipboardData.items).flatMap(item => {
+      const image = item.kind === "file" && item.type.startsWith("image/") ? item.getAsFile() : null;
+      return image ? [new File([image], clipboardImageName(image.type), { type: image.type })] : [];
+    });
+    if (!images.length) return;
     event.preventDefault();
-    const file=new File([blob],clipboardImageName(blob.type),{type:blob.type});
-    chooseAttachment(file);
+    appendAttachments(images);
   }
   function closeDeleteDialog(){
     if(deleteBusy)return;
@@ -507,16 +516,14 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       composeEpoch.current++;draftSequence.current++;aiOperationSequence.current++;summaryRequestSequence.current++;
       composerDraftId.current=undefined;composerDraftKey.current=undefined;draftSavePromise.current=null;lastAutosavedText.current="";lastAutosavedAiRunId.current=undefined;
       pendingSend.current={};
-      currentAttachment.current = undefined;
-      invoiceAttachment.current = undefined;
-      if(attachmentPreview)URL.revokeObjectURL(attachmentPreview);
+      replaceAttachments([]);
       if(attachmentInput.current)attachmentInput.current.value="";
       const removedChannels=splitResult.movedChannels?.length?splitResult.movedChannels:fallbackRemovedChannels,movedConversationIds=new Set(splitResult.movedConversationIds||[]),detachedSourceClientIds=new Set(splitResult.detachedSourceClientIds||[splitSourceId]);
       const survivingConversations=client.conversations.filter(item=>movedConversationIds.size?!movedConversationIds.has(item.id):!removedChannels.includes(item.channel as SocialChannel));
       const survivingChannels=[...new Set(survivingConversations.map(item=>item.channel).filter((channel):channel is string=>Boolean(channel)))],survivingChannel=survivingChannels[0]||"MANUAL";
       const reconciledClient={...client,linkedChannels:survivingChannels,linkedAccounts:client.linkedAccounts?.filter(item=>!item.sourceClientId||(!detachedSourceClientIds.has(item.sourceClientId)&&survivingChannels.includes(item.channel))),mergedClients:client.mergedClients?.filter(item=>!detachedSourceClientIds.has(item.sourceClientId)),conversations:survivingConversations};
       setClient(reconciledClient);setClients(items=>items.map(item=>item.id===targetId?reconciledClient:item));setActiveChannel(survivingChannel);setMessages([]);setNewMessageCount(0);setMessagesLoading(true);
-      setText("");setComposerAiRunId(undefined);setDraftStatus("IDLE");setAttachment(undefined);setAttachmentPreview("");setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiPanelOpen(false);setAiTargetLanguage("auto");setAiReply(null);setAiDraftText("");setTranslatingId(null);setShownTranslations(new Set());setAiPreparing(false);setReactionBusyIds(new Set());setReactionPickerMessageId(undefined);
+      setText("");setComposerAiRunId(undefined);setDraftStatus("IDLE");setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);setSelectedMessageIds([]);setReplyInstruction("");setReplyMode(false);setAiPanelOpen(false);setAiTargetLanguage("auto");setAiReply(null);setAiDraftText("");setTranslatingId(null);setShownTranslations(new Set());setAiPreparing(false);setReactionBusyIds(new Set());setReactionPickerMessageId(undefined);
       setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
       const nextFilters=currentSocialFilters.current.filter(channel=>!removedChannels.includes(channel));
       if(nextFilters.length!==currentSocialFilters.current.length){skipNextFilterReload.current=true;currentSocialFilters.current=nextFilters;setSocialFilters(nextFilters)}
@@ -535,7 +542,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     });
     if (!r.ok) {
       const x = await r.json().catch(() => ({}));
-      throw new Error(x.message || ui.requestError);
+      throw Object.assign(new Error(x.message || ui.requestError), { status: r.status, validationErrors: Array.isArray(x.message) });
     }
     return r.json();
   }
@@ -575,9 +582,12 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     setDraftStatus("SAVING");
     try{
       const draftKey=composerDraftKey.current||crypto.randomUUID();composerDraftKey.current=draftKey;
-      const result=await api(`/communications/${operationClientId}/drafts/${encodeURIComponent(draftKey)}`,{method:"PUT",body:JSON.stringify({content:content.trim(),channel:operationChannel,...(operationAiRunId?{aiRunId:operationAiRunId}:{})})}) as Message;
+      const storedDraft = messages.find(message => message.id === composerDraftId.current && message.status === "DRAFT");
+      const legacyDraftId = !storedDraft?.metadata?.composerDraftKey && storedDraft?.metadata?.attachments?.length
+        ? storedDraft.id : undefined;
+      const result=await api(`/communications/${operationClientId}/drafts/${encodeURIComponent(draftKey)}`,{method:"PUT",body:JSON.stringify({content:content.trim(),channel:operationChannel,...(operationAiRunId?{aiRunId:operationAiRunId}:{}),...(legacyDraftId?{legacyDraftId}:{})})}) as Message;
       if(selectedClientId.current!==operationClientId||composeEpoch.current!==operationEpoch||sequence!==draftSequence.current)return true;
-      composerDraftId.current=result.id;lastAutosavedText.current=content.trim();lastAutosavedAiRunId.current=operationAiRunId;setDraftStatus("SAVED");
+      composerDraftId.current=result.id;lastAutosavedText.current=content.trim();lastAutosavedAiRunId.current=content.trim()?operationAiRunId:undefined;setDraftStatus(content.trim()?"SAVED":"IDLE");
       setMessages(current=>current.some(message=>message.id===result.id)?current.map(message=>message.id===result.id?{...message,...result}:message):[...current,result]);
       return true;
     }catch{
@@ -621,24 +631,42 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     const conversation=client.conversations.find(item=>item.channel===activeChannel);
     void navigateFromInbox("clients",createInboxClientContext(window.location.search,client.id,conversation?.id,conversation?.channel,client.displayName));
   }
-  async function changeReplyChannel(nextChannel:string){
-    if(nextChannel===activeChannel||(busy&&attachment&&invoiceAttachment.current===attachment))return;
-    if(!await flushComposerDraftBeforeNavigation()){setError(ui.draftAutosaveFailed);return}
-    if (currentAttachment.current && invoiceAttachment.current === currentAttachment.current) {
-      if (currentInvoiceBusy.current) return;
-      if (pendingSend.current.requestId) {
-        chooseAttachment();
-        showInboxNotification(ui.invoiceAttachmentClearedOnChannelChange);
+  async function changeReplyChannel(nextChannel:string) {
+    const operationClientId = selectedClientId.current;
+    const operationEpoch = composeEpoch.current;
+    const previousChannel = currentActiveChannel.current;
+    if (!operationClientId || nextChannel === previousChannel || currentInvoiceBusy.current || replyChannelSwitchPending.current) return;
+
+    replyChannelSwitchPending.current = true;
+    setChangingReplyChannel(true);
+    try {
+      const saved = await flushComposerDraftBeforeNavigation();
+      if (selectedClientId.current !== operationClientId || composeEpoch.current !== operationEpoch || currentActiveChannel.current !== previousChannel) return;
+      if (!saved) {
+        setError(ui.draftAutosaveFailed);
+        return;
       }
+      if (currentAttachment.current && (pendingSend.current.requestId ||
+          selectedAttachments.current.some(({ file }) => pendingFiles.current.get(file)?.requestId))) {
+        const clearedInvoice = !!invoiceAttachment.current;
+        replaceAttachments([]);
+        showInboxNotification(clearedInvoice ? ui.invoiceAttachmentClearedOnChannelChange : ui.attachmentClearedOnChannelChange);
+      }
+      currentInvoiceScope.current = "";
+      volatileDrafts.current.set(previousChannel, currentComposerText.current);
+      const prepared = restoreInboxDraft(messages, nextChannel, volatileDrafts.current.get(nextChannel));
+      draftSequence.current++;summaryRequestSequence.current++;
+      composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";lastAutosavedAiRunId.current=prepared.draftAiRunId;
+      currentActiveChannel.current = nextChannel;
+      currentComposerText.current = prepared.content;
+      currentComposerAiRunId.current = prepared.draftAiRunId;
+      setText(prepared.content);setComposerAiRunId(prepared.draftAiRunId);setDraftStatus(prepared.draft?"SAVED":"IDLE");setActiveChannel(nextChannel);
+      setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
+      setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);
+    } finally {
+      replyChannelSwitchPending.current = false;
+      setChangingReplyChannel(false);
     }
-    currentInvoiceScope.current = "";
-    volatileDrafts.current.set(activeChannel,text);
-    const prepared=restoreInboxDraft(messages,nextChannel,volatileDrafts.current.get(nextChannel));
-    draftSequence.current++;summaryRequestSequence.current++;
-    composerDraftId.current=prepared.draft?.id;composerDraftKey.current=prepared.draftKey;lastAutosavedText.current=prepared.draft?.content||"";lastAutosavedAiRunId.current=prepared.draftAiRunId;
-    setText(prepared.content);setComposerAiRunId(prepared.draftAiRunId);setDraftStatus(prepared.draft?"SAVED":"IDLE");setActiveChannel(nextChannel);
-    setConversationSummaries([]);setSummaryProgress(undefined);setSummaryFirstMessageDate("");setSummaryDate("");setSummaryCalendarOpen(false);setSummaryLoading(false);setSummaryGenerating(false);
-    setEmailReplyTarget(undefined);setSocialReplyTarget(undefined);setEmojiOpen(false);
   }
   useEffect(()=>{onRegisterBeforeLeave?.(flushComposerDraftBeforeNavigation);return()=>onRegisterBeforeLeave?.(null)},[onRegisterBeforeLeave,activeChannel,composerAiRunId]);
   function clientScopeKey(query=currentSearch.current,channels=currentSocialFilters.current,orders=currentOrderScope.current,scope=currentConversationScope.current,spam=currentSpamScope.current){return JSON.stringify([query.trim(),channels,orders,scope,spam])}
@@ -892,12 +920,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     if(context)initialConversationContext.current=undefined;
     setMobileClientListOpen(false);
     if (shouldResetAttachmentForClient(selectedClientId.current, c.id)) {
-      if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
-      currentAttachment.current = undefined;
-      invoiceAttachment.current = undefined;
-      setAttachment(undefined);
-      setAttachmentPreview("");
-      pendingSend.current = {};
+      replaceAttachments([]);
     }
     selectedClientId.current = c.id;
     volatileDrafts.current.clear();
@@ -1130,7 +1153,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   useEffect(()=>{
     const content=text.trim();
     if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}
-    if(!client||busy||splitBusy||!inboxDraftNeedsSave(lastAutosavedText.current,lastAutosavedAiRunId.current,content,composerAiRunId)){if(!content)setDraftStatus("IDLE");return}
+    if(!client||busy||splitBusy||(!draftSavePromise.current&&!inboxDraftNeedsSave(lastAutosavedText.current,lastAutosavedAiRunId.current,content,composerAiRunId))){if(!content&&!draftSavePromise.current)setDraftStatus("IDLE");return}
     autosaveTimer.current=setTimeout(()=>{autosaveTimer.current=undefined;const previous=draftSavePromise.current,promise=(async()=>{if(previous)await previous;return autosaveDraft(content,composerAiRunId)})();draftSavePromise.current=promise;void promise.finally(()=>{if(draftSavePromise.current===promise)draftSavePromise.current=null})},900);
     return()=>{if(autosaveTimer.current){clearTimeout(autosaveTimer.current);autosaveTimer.current=undefined}};
   },[text,client?.id,activeChannel,busy,splitBusy,composerAiRunId]);
@@ -1217,20 +1240,45 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
   }
   async function save(action: "DRAFT" | "SEND",contentOverride?:string) {
     const messageText=(contentOverride??text).trim();
-    if (!client || invoiceAttachmentBlocked || (!messageText && !attachment)) return false;
+    if (!client || currentInvoiceBusy.current || replyChannelSwitchPending.current || invoiceAttachmentBlocked || (!messageText && !attachment)) return false;
+    if (action === "SEND" && attachments.length > 1 && (activeChannel === "EMAIL" || activeChannel === "CHATWOOT")) {
+      const maxTotalMb = activeChannel === "EMAIL" ? 18 : 24;
+      if (attachments.reduce((bytes, item) => bytes + item.file.size, 0) > maxTotalMb * 1024 * 1024) {
+        setError(ui.attachmentsTotalTooLarge.replace("{size}", String(maxTotalMb)));
+        return false;
+      }
+    }
+    const savedDraft = messages.find(message => message.id === composerDraftId.current && message.status === "DRAFT");
+    if (action === "SEND" && !attachment && savedDraft?.metadata?.attachments?.length) {
+      setError(ui.reattachSavedDraftFile);
+      return false;
+    }
     const sendingInvoice = !!attachment && invoiceAttachment.current === attachment;
-    if (sendingInvoice && (action !== "SEND" || currentInvoiceBusy.current)) return false;
-    if(!sendingInvoice&&action==="SEND"&&draftSavePromise.current)await draftSavePromise.current;
+    if (sendingInvoice && action !== "SEND") return false;
+    if (currentActiveChannel.current !== activeChannel || selectedClientId.current !== client.id) return false;
     if(action==="DRAFT")invalidateAiOperation();
     const operationClientId=client.id,operationEpoch=composeEpoch.current;
     const isComposerActive=()=>selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch;
     const isActive=()=>isComposerActive()&&(!sendingInvoice||
       (currentInvoiceScope.current===invoiceScope&&currentAttachment.current===attachment));
     if (sendingInvoice && !isActive()) return false;
-    if (sendingInvoice) currentInvoiceBusy.current = true;
+    currentInvoiceBusy.current = true;
     setBusy(true);
     setError("");
     try {
+      if (!sendingInvoice && action === "SEND" && !pendingSend.current.pendingBundle) {
+        if (messageText && (composerDraftId.current || draftSavePromise.current)) {
+          // The backend uses stored draft content when a draft ID is supplied.
+          if (!await flushComposerDraftBeforeNavigation()) {
+            if (isActive()) setError(ui.draftAutosaveFailed);
+            return false;
+          }
+          if (!isActive() || currentComposerText.current.trim() !== messageText) return false;
+        } else if (draftSavePromise.current) {
+          await draftSavePromise.current;
+          if (!isActive()) return false;
+        }
+      }
       if (sendingInvoice) {
         if (draftSavePromise.current) await draftSavePromise.current;
         if (!isActive()) return false;
@@ -1240,51 +1288,103 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         }
         if (!isActive()) return false;
       }
-      let uploaded: UploadedAttachment | undefined;
-      if (attachment) {
-        if (pendingSend.current.file === attachment && pendingSend.current.uploaded) uploaded = pendingSend.current.uploaded;
-        else {
-          const data = await readFile(attachment);
-          if (sendingInvoice && !isActive()) return false;
-          uploaded = await api("/communications/attachments", {
-            method: "POST",
-            body: JSON.stringify({ name: attachment.name, mimeType: attachment.type, data }),
-          });
-          if(!isActive())return false;
-          pendingSend.current = { file: attachment, uploaded };
+      const uploadedFiles: UploadedAttachment[] = [];
+      for (const { file } of attachments) {
+        const attempt = pendingFiles.current.get(file);
+        if (attempt?.uploaded) {
+          uploadedFiles.push(attempt.uploaded);
+          continue;
         }
+        const data = await readFile(file);
+        if (!isActive()) return false;
+        const uploaded: UploadedAttachment = await api("/communications/attachments", {
+          method: "POST",
+          body: JSON.stringify({ name: file.name, mimeType: file.type, data }),
+        });
+        if (!isActive()) return false;
+        pendingFiles.current.set(file, { ...attempt, file, uploaded });
+        uploadedFiles.push(uploaded);
       }
-      const sendOne = async (content?: string, file?: UploadedAttachment, requestId?: string) => {
-        const draftId=action==="SEND"&&content&&!(sendingInvoice&&file)?composerDraftId.current:undefined;
-        const body = JSON.stringify({ ...(content ? { content } : {}), ...(file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(content&&composerAiRunId?{aiRunId:composerAiRunId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) });
-        if (sendingInvoice && file) {
+      const sendOne = async (content?: string, file?: UploadedAttachment | UploadedAttachment[], requestId?: string) => {
+        const isBundle = Array.isArray(file);
+        const retry = isBundle ? pendingSend.current.pendingBundle : undefined;
+        const draftId = retry ? retry.draftId : action==="SEND"&&content&&!(sendingInvoice&&file)?composerDraftId.current:undefined;
+        const body = retry?.body ?? JSON.stringify({ ...(content ? { content } : {}), ...(Array.isArray(file) ? { attachments: file } : file ? { attachment: file } : {}), channel: activeChannel, action, ...(action === "SEND" ? { clientRequestId: requestId || crypto.randomUUID(), ...(draftId?{draftMessageId:draftId}:{}), ...(content&&composerAiRunId?{aiRunId:composerAiRunId}:{}), ...(activeChannel === "EMAIL" && emailReplyTarget ? { replyToMessageId: emailReplyTarget.id } : {}), ...(["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel) && socialReplyTarget ? { replyToMessageId:socialReplyTarget.id } : {}) } : {}) });
+        if (file && requestId && sendingInvoice) {
           const fingerprint = JSON.stringify([invoiceScope, body]);
-          if (pendingSend.current.invoiceRequestFingerprint && pendingSend.current.invoiceRequestFingerprint !== fingerprint) {
+          if (pendingSend.current.attachmentRequestFingerprint && pendingSend.current.attachmentRequestFingerprint !== fingerprint)
             throw new Error(ui.invoiceRetryHold);
-          }
-          pendingSend.current.invoiceRequestFingerprint = fingerprint;
+          pendingSend.current.attachmentRequestFingerprint = fingerprint;
         }
-        const result = await api("/communications/" + client.id + "/messages", { method: "POST", body });
+        // Old cached tabs and rolled-back API versions must fail explicitly.
+        // The single-file route predates attachments[] and may discard it.
+        const endpoint = isBundle ? "/message-bundles" : "/messages";
+        if (isBundle && action === "SEND") pendingSend.current.pendingBundle = { body, draftId };
+        let result: Message;
+        try {
+          result = await api("/communications/" + client.id + endpoint, { method: "POST", body });
+        } catch (error) {
+          // Only release a first attempt that was definitively rejected before delivery.
+          const failure = error as Error & { status?: number; validationErrors?: boolean };
+          if (isBundle && !retry && isActive() &&
+              (failure.status === 404 || failure.status === 401 || failure.status === 403 ||
+               (failure.status === 400 && failure.validationErrors))) {
+            pendingSend.current = {};
+          }
+          throw error;
+        }
+        if (isBundle && isActive()) delete pendingSend.current.pendingBundle;
         if(isActive())setMessages((current) => {const next=socialReplyTarget&&["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)?{...result,replyToMessage:{id:socialReplyTarget.id,content:socialReplyTarget.content,metadata:{attachments:socialReplyTarget.metadata?.attachments}}}:result;return draftId&&current.some(message=>message.id===draftId)?current.map(message=>message.id===draftId?next:message):[...current,next]});
         return result as Message;
       };
       const sent: Message[] = [];
+      const bundle = uploadedFiles.length > 1 ? uploadedFiles : uploadedFiles[0];
       if (action === "DRAFT") {
-        sent.push(await sendOne(messageText || undefined, uploaded));
+        sent.push(await sendOne(messageText || undefined, bundle));
       } else {
-        // Keep invoice retries attachment-only even if the text becomes a server draft later.
-        const attachmentCarriesText = !sendingInvoice && (activeChannel === "EMAIL" || activeChannel === "WHATSAPP");
-        if (uploaded && !pendingSend.current.attachmentDelivered) {
-          const attempt = prepareAttachmentAttempt(pendingSend.current, () => crypto.randomUUID());
-          pendingSend.current = attempt.state;
-          const { requestId } = attempt;
-          const attachmentContent = attachmentCarriesText ? messageText || undefined : undefined;
-          const result = await sendOne(attachmentContent, uploaded, requestId);
-          if(!isActive())return false;
-          sent.push(result);
-          pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
+        const combined = activeChannel === "EMAIL" || activeChannel === "CHATWOOT";
+        const firstMediaAlreadySent = attachment && pendingFiles.current.get(attachment)?.attachmentDelivered;
+        const attachmentCarriesText = !sendingInvoice && (combined || (activeChannel === "WHATSAPP" && !firstMediaAlreadySent));
+        if (bundle && (combined || sendingInvoice)) {
+          if (!pendingSend.current.attachmentDelivered) {
+            const previous = pendingSend.current;
+            const attempt = prepareAttachmentAttempt(previous, () => crypto.randomUUID());
+            pendingSend.current = attempt.state;
+            const result = await sendOne(attachmentCarriesText ? messageText || undefined : undefined, bundle, attempt.requestId);
+            if (!isActive()) return false;
+            sent.push(result);
+            pendingSend.current = settleAttachmentAttempt(pendingSend.current, result.status);
+            if (result.status === "FAILED") pendingFiles.current.clear();
+          }
+        } else {
+          for (const [index, { file }] of attachments.entries()) {
+            const uploaded = uploadedFiles[index]!;
+            const previous = pendingFiles.current.get(file)!;
+            if (previous.attachmentDelivered) continue;
+            const attempt = prepareAttachmentAttempt(previous, () => crypto.randomUUID());
+            pendingFiles.current.set(file, attempt.state);
+            const caption = attachmentCarriesText && index === 0 ? messageText || undefined : undefined;
+            const result = await sendOne(caption, uploaded, attempt.requestId);
+            if (!isActive()) return false;
+            sent.push(result);
+            pendingFiles.current.set(file, settleAttachmentAttempt(attempt.state, result.status));
+            if (result.status === "FAILED") break;
+            if (caption && attachments.length > 1) {
+              // The first WhatsApp image already delivered the caption. A
+              // retry of remaining images must not resend it or its draft.
+              if (currentComposerText.current.trim() === caption) setText("");
+              setComposerAiRunId(undefined);
+              composerDraftId.current = undefined;
+              composerDraftKey.current = undefined;
+              lastAutosavedText.current = "";
+              lastAutosavedAiRunId.current = undefined;
+              volatileDrafts.current.delete(activeChannel);
+              draftSequence.current++;
+              setDraftStatus("IDLE");
+            }
+          }
         }
-        if ((!uploaded || !attachmentCarriesText) && messageText && !sent.some(message => message.status === "FAILED")) {
+        if ((!bundle || !attachmentCarriesText) && messageText && !sent.some(message => message.status === "FAILED")) {
           const content = messageText;
           const textRequestId = pendingSend.current.textContent === content && pendingSend.current.textRequestId
             ? pendingSend.current.textRequestId
@@ -1317,12 +1417,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
         setSocialReplyTarget(undefined);
         setEmojiOpen(false);
         if(action==="DRAFT"){setAiReply(null);setAiDraftText("")}
-        currentAttachment.current = undefined;
-        invoiceAttachment.current = undefined;
-        setAttachment(undefined);
-        pendingSend.current = {};
-        if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
-        setAttachmentPreview("");
+        replaceAttachments([]);
         return true;
       }
     } catch (e) {
@@ -1330,22 +1425,50 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
       return false;
     } finally {
       if (isComposerActive()) {
-        if (sendingInvoice) currentInvoiceBusy.current = false;
+        currentInvoiceBusy.current = false;
         setBusy(false);
       }
     }
   }
-  function chooseAttachment(file?: File) {
-    if(file&&!attachmentMimeTypes.includes(file.type)){setError(ui.unsupportedAttachmentType);return}
-    const maxBytes=file?.type==="video/mp4"?COMMUNICATION_VIDEO_MAX_BYTES:COMMUNICATION_FILE_MAX_BYTES;
-    if(file&&file.size>maxBytes){setError(ui.attachmentTooLarge.replace("{size}",file.type==="video/mp4"?"16 МБ":"5 МБ"));return}
-    setError("");
-    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
-    currentAttachment.current = file;
-    invoiceAttachment.current = undefined;
-    setAttachment(file);
+  function replaceAttachments(files: File[]) {
+    const previous = selectedAttachments.current;
+    for (const item of previous) {
+      if (!files.includes(item.file)) {
+        if (item.preview) URL.revokeObjectURL(item.preview);
+        pendingFiles.current.delete(item.file);
+      }
+    }
+    const next = files.map(file => previous.find(item => item.file === file) ?? {
+      file,
+      preview: file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : "",
+    });
+    selectedAttachments.current = next;
+    currentAttachment.current = next[0]?.file;
+    if (invoiceAttachment.current && !files.includes(invoiceAttachment.current)) invoiceAttachment.current = undefined;
     pendingSend.current = {};
-    setAttachmentPreview(file&&(file.type.startsWith("image/")||file.type.startsWith("video/")) ? URL.createObjectURL(file) : "");
+    setAttachments(next);
+  }
+  function appendAttachments(files: File[]) {
+    if (currentInvoiceBusy.current || !files.length) return;
+    if (bundleAwaitingResult) { setError(ui.attachmentRetryHold); return; }
+    if (invoiceAttachment.current) { setError(ui.invoiceChooseAfterRemoval); return; }
+    const selected = selectedAttachments.current.map(item => item.file);
+    const next = [...selected, ...files];
+    if (next.length > 10) { setError(ui.attachmentCountExceeded); return; }
+    for (const file of files) {
+      if (!attachmentMimeTypes.includes(file.type)) { setError(ui.unsupportedAttachmentType); return; }
+      const maxBytes = file.type === "video/mp4" ? COMMUNICATION_VIDEO_MAX_BYTES : COMMUNICATION_FILE_MAX_BYTES;
+      if (file.size > maxBytes) {
+        setError(ui.attachmentTooLarge.replace("{size}", file.type === "video/mp4" ? "16 МБ" : "5 МБ"));
+        return;
+      }
+    }
+    setError("");
+    replaceAttachments(next);
+  }
+  function chooseAttachment(file?: File) {
+    if (file) appendAttachments([file]);
+    else replaceAttachments([]);
   }
   function attachSavedInvoice(file: File) {
     if (!client || !canAttachInvoice || selectedClientId.current !== client.id ||
@@ -1369,7 +1492,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           clientId: operationClientId,
         }),
       });
-      if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setComposerAiRunId(undefined);setAiReply(null);setAiDraftText("")}
+      if(!pendingSend.current.pendingBundle&&!currentInvoiceBusy.current&&selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence){setText(x.text);setComposerAiRunId(undefined);setAiReply(null);setAiDraftText("")}
     } catch (e) {
       if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message);
     } finally {
@@ -1438,6 +1561,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     catch(e){if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setError((e as Error).message)}finally{if(selectedClientId.current===operationClientId&&composeEpoch.current===operationEpoch&&aiOperationSequence.current===operationSequence)setAiPreparing(false)}
   }
   function insertAiReplyIntoComposer(){
+    if(pendingSend.current.pendingBundle||currentInvoiceBusy.current)return;
     if(!aiPanelOpen||!aiReply||aiReply.phase!=="TRANSLATED"||!aiDraftText.trim())return;
     if(text.trim()&&!window.confirm(ui.replaceComposerWithAi))return;
     setText(aiDraftText.trim());setComposerAiRunId(aiReply.aiRunId);setDraftStatus("IDLE");closeAiPanel();requestAnimationFrame(()=>composerTextarea.current?.focus());
@@ -1456,6 +1580,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     catch(e){setError((e as Error).message)}finally{setTemplateBusy(false)}
   }
   function chooseTemplate(template: Template) {
+    if (pendingSend.current.pendingBundle || currentInvoiceBusy.current) return;
     invalidateAiOperation();
     setText(template.content);setComposerAiRunId(undefined);
     setAiReply(null);
@@ -1495,7 +1620,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
     }
   }
   const availableChannels = client ? clientBadges(client) : [],
-    active = availableChannels.find(item=>item.key===activeChannel)||{...sourceBadge({source:activeChannel} as Client),accountName:undefined as string|undefined},
+    active = availableChannels.find(item=>item.key===activeChannel)||{...sourceBadge(activeChannel),accountName:undefined as string|undefined},
     activeOrders=client?.orders||[],
     orderCards=clientOrderCards?.clientId===client?.id?clientOrderCards?.cards:undefined,
     contextOrders=orderCards??[],
@@ -1632,7 +1757,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
           onPointer={resize}
           onKey={resizeByKeyboard}
         />
-        <main className="communications-chat">
+        <main className="communications-chat" data-client-selected={client ? "" : undefined} data-actions-open={client && mobileChatActionsFor===client.id ? "" : undefined}>
           <Modal opened={Boolean(spamTarget)} onClose={()=>!spamBusy&&setSpamTarget(undefined)} title={spamTarget?.spam?ui.markSpam:ui.restoreSpam} centered closeOnEscape={!spamBusy} closeOnClickOutside={!spamBusy} closeButtonProps={{"aria-label":ui.close,disabled:spamBusy}}><p>{spamTarget?.name}</p><p>{spamTarget?.spam?ui.spamConfirmHint:ui.spamRestoreHint}</p>{error&&<Alert color="red" role="alert">{error}</Alert>}<CrmButton tone="secondary" disabled={spamBusy} onClick={()=>setSpamTarget(undefined)}>{ui.cancel}</CrmButton><CrmButton loading={spamBusy} disabled={spamBusy} onClick={()=>void confirmSpam()}>{spamTarget?.spam?ui.markSpam:ui.restoreSpam}</CrmButton></Modal>
           <header className="communications-chat-header">
             <button type="button" className="communications-mobile-list-toggle" aria-expanded={mobileClientListOpen} onClick={()=>setMobileClientListOpen(true)}>{ui.openClientList}</button>
@@ -1640,17 +1765,19 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               {client && <ClientAvatar className="communications-avatar" displayName={client.displayName} avatarUrl={client?.avatarUrl} />}
               <span className="communications-chat-client-copy">
                 <b>{client?.displayName || ui.selectClient}</b>
+                {client&&<small className="communications-mobile-active-channel">{active.label}</small>}
                 {client&&<span className="communications-chat-badges">{availableChannels.map(item=>{const channelText=`${item.label}${item.accountName?` / ${item.accountName}`:""}`;return <span className="is-channel" aria-label={channelText} title={channelText} key={item.key}><i aria-hidden="true">{item.icon}</i><b>{item.label}</b>{item.accountName&&<small> / {item.accountName}</small>}</span>})}{client.status!=="LEAD"&&<span>{ui.clientFilter}</span>}{activeOrders.length>0&&<span className="success">{activeOrders.length} {ui.activeOrdersShort}</span>}{client.waitingForReply&&<span className="waiting-reply">{ui.waitingReply}</span>}{client.hasSummary&&<span className="success">{ui.contextSummary}</span>}</span>}
                 {accountUrl && <a className="communications-chat-account" href={accountUrl} target="_blank" rel="noopener noreferrer" title={activeChannel === "INSTAGRAM" ? ui.instagramProfileHint : ui.openInSocialNetwork}><span>{ui.openConversationByChannel[activeChannel as keyof typeof ui.openConversationByChannel] || ui.openInSocialNetwork} ↗</span></a>}
               </span>
             </span>
-            {client&&<CrmButton type="button" tone="secondary" onClick={()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}>{client.inboxSpamAt?ui.restoreSpam:ui.markSpam}</CrmButton>}
+            {client&&<CrmButton className="communications-chat-spam" type="button" tone="secondary" onClick={()=>setSpamTarget({id:client.id,name:client.displayName,spam:!client.inboxSpamAt,expectedSpamAt:client.inboxSpamAt||null})}>{client.inboxSpamAt?ui.restoreSpam:ui.markSpam}</CrmButton>}
             {client?.mergedClients?.length?<CrmActionIcon ref={splitTriggerRef} type="button" className="communications-split-client" variant="light" color="violet" size={40} aria-label={ui.splitAccounts} title={ui.splitAccounts} onClick={openSplitDialog}>⇄</CrmActionIcon>:null}
             {client && availableChannels.length > 1 && (
-              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} disabled={busy && !!attachment && invoiceAttachment.current === attachment} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
+              <CrmNativeSelect label={ui.replyChannel} value={activeChannel} disabled={busy || changingReplyChannel} onChange={event=>void changeReplyChannel(event.target.value)} data={availableChannels.map(item=>({value:item.key,label:`${item.icon} ${item.label}${item.accountName?` / ${item.accountName}`:""}`}))}/>
             )}
             {client&&client.status!=="LEAD"&&<button type="button" className="communications-open-client" onClick={openClientFromInbox}>{ui.openClient}</button>}
             {client&&<button type="button" className="communications-context-toggle" aria-expanded={contextOpen} onClick={()=>setContextOpen(true)}>{ui.clientCard}</button>}
+            {client&&<CrmActionIcon className="communications-mobile-chat-actions" type="button" variant="light" size={40} aria-label={ui.chatActions} aria-expanded={mobileChatActionsFor===client.id} title={ui.chatActions} onClick={()=>setMobileChatActionsFor(current=>current===client.id?undefined:client.id)}>⋯</CrmActionIcon>}
           </header>
           <div className="communications-messages" ref={messagesViewport} onScroll={updateMessagesScrollIntent}>
             <div className="communications-message-stack">
@@ -1658,6 +1785,14 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <InboxSkeleton kind="messages" rows={4}/>
             ) : (
               displayMessages.map((message,messageIndex) => {
+                const messageSource = availableChannels.length > 1 && Object.hasOwn(ui.sources, message.channel)
+                  ? sourceBadge(message.channel)
+                  : undefined;
+                const canChooseReplySource = message.direction === "INBOUND" && availableChannels.some(item => item.key === message.channel);
+                const sourceClass = `communications-source-icon communications-message-source source-${message.channel.toLowerCase()}`;
+                const sourceLabel = messageSource && (message.direction === "OUTBOUND"
+                  ? ui.sentMessageChannel.replace("{channel}", messageSource.label)
+                  : messageSource.label);
                 const attachments = message.metadata?.attachments || [];
                 const hasVisualAttachment = attachments.some((attachment) => ["image", "sticker", "video"].includes(attachment.type));
                 const canSelectForReply = replyMode && !hasVisualAttachment && message.direction === "INBOUND";
@@ -1745,12 +1880,20 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                       {canReact&&reactionPickerMessageId===message.id&&<span className="communications-reaction-picker" role="dialog" aria-label={ui.reactionPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setReactionPickerMessageId(undefined)}}}>{reactionEmojis.map(emoji=><button type="button" key={emoji} className={businessReaction?.emoji===emoji?"selected":undefined} disabled={reactionBusyIds.has(message.id)} aria-label={`${businessReaction?.emoji===emoji?ui.removeReaction:ui.addReaction} ${emoji}`} onClick={()=>void setReaction(message,emoji)}>{emoji}</button>)}</span>}
                     </span>}
                     <small className="communications-message-meta">
+                      {messageSource && (canChooseReplySource
+                        ? <UnstyledButton type="button" className="communications-message-source-button" aria-pressed={activeChannel === message.channel}
+                            aria-label={ui.chooseReplyChannel.replace("{channel}", messageSource.label)}
+                            title={ui.chooseReplyChannel.replace("{channel}", messageSource.label)}
+                            disabled={busy || changingReplyChannel} onClick={() => void changeReplyChannel(message.channel)}>
+                            <span className={sourceClass} aria-hidden="true">{messageSource.icon}</span>
+                          </UnstyledButton>
+                        : <span className={sourceClass} role="img" aria-label={sourceLabel} title={sourceLabel}>{messageSource.icon}</span>)}
                       {message.status === "FAILED" ? ui.failed : ""}{message.status === "FAILED" ? " · " : ""}
                       {formatMessageDateTime(inboxMessageTimestamp(message))}
                       {message.direction === "OUTBOUND" && message.metadata?.metaReadAt && <span className="communications-message-read" title={ui.messageRead} aria-label={ui.messageRead} role="img"></span>}
                     </small>
                     {message.direction === "INBOUND" && !hasVisualAttachment && shouldOfferInboundTranslation(message.language) && <button type="button" className="communications-message-translate" aria-label={translatingId===message.id?ui.translating:message.metadata?.translation?.text?(shownTranslations.has(message.id)?ui.hideTranslation:ui.showTranslation):ui.translate} title={translatingId===message.id?ui.translating:message.metadata?.translation?.text?(shownTranslations.has(message.id)?ui.hideTranslation:ui.showTranslation):ui.translate} disabled={translatingId===message.id} onClick={()=>void translateMessage(message)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M8.5 3v3c0 4-2 7-5 9M6 10.5c1.4 2.1 3.5 3.7 6 4.5M13 21l4-10 4 10M14.5 17.5h5"/></svg></button>}
-                    {message.channel==="EMAIL"&&message.direction==="INBOUND"&&message.metadata?.messageId&&<button type="button" className="communications-email-reply" aria-label={`${ui.replyToEmail}: ${message.metadata.subject||ui.emailWithoutSubject}`} onClick={()=>{setEmailReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.replyToEmail}</button>}
+                    {message.channel==="EMAIL"&&message.direction==="INBOUND"&&message.metadata?.messageId&&<button type="button" className="communications-email-reply" disabled={busy||bundleAwaitingResult} aria-label={`${ui.replyToEmail}: ${message.metadata.subject||ui.emailWithoutSubject}`} onClick={()=>{setEmailReplyTarget(message);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>{ui.replyToEmail}</button>}
                     {message.direction === "OUTBOUND" && <button type="button" className="communications-save-template" aria-label={ui.saveAsTemplate} title={ui.saveAsTemplate} disabled={templateBusy} onClick={()=>void saveAsTemplate(message.content,message.channel)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z"/><path d="M12 7v6M9 10h6"/></svg></button>}
                   </article>
                 </Fragment>
@@ -1774,7 +1917,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 </Box>
                 <Switch size="sm" flex="0 0 auto" aria-label={ui.aiReplyToggle} label={aiPanelOpen?ui.aiReplyOn:ui.aiReplyOff} checked={aiPanelOpen} disabled={!client} onChange={event=>{if(event.currentTarget.checked)setAiPanelOpen(true);else closeAiPanel()}} />
               </Group>
-              <Text size="xs" c="dimmed" px="sm" pb="xs">{ui.aiManualGenerationHint}</Text>
+              <Text className="communications-ai-manual-hint" size="xs" c="dimmed" px="sm" pb="xs">{ui.aiManualGenerationHint}</Text>
               {aiPanelOpen&&<div id="communications-ai-panel-body" className="communications-ai-panel-body">
                 <div className="communications-ai-language-row">
                   <CrmNativeSelect label={ui.aiReplyLanguage} value={aiTargetLanguage} disabled={aiPreparing||Boolean(aiReply?.phase==="TRANSLATED")} onChange={event=>{invalidateAiOperation();setAiTargetLanguage(event.target.value);setAiReply(current=>current?.phase==="TRANSLATED"?null:current)}} data={[
@@ -1822,13 +1965,19 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 </article>}
               </div>}
             </section>
-            {activeChannel==="EMAIL"&&emailReplyTarget&&<div id="email-reply-target" role="status" className="communications-email-reply-target"><span><b>{ui.replyingToEmail}: {emailReplyTarget.metadata?.subject||ui.emailWithoutSubject}</b><small>{shortMessagePreview(emailReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelEmailReply} title={ui.cancelEmailReply} onClick={()=>{setEmailReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
+            {activeChannel==="EMAIL"&&emailReplyTarget&&<div id="email-reply-target" role="status" className="communications-email-reply-target"><span><b>{ui.replyingToEmail}: {emailReplyTarget.metadata?.subject||ui.emailWithoutSubject}</b><small>{shortMessagePreview(emailReplyTarget.content)}</small></span><button type="button" disabled={busy||bundleAwaitingResult} aria-label={ui.cancelEmailReply} title={ui.cancelEmailReply} onClick={()=>{setEmailReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
             {["FACEBOOK","INSTAGRAM","WHATSAPP"].includes(activeChannel)&&socialReplyTarget&&<div id="social-reply-target" role="status" className="communications-social-reply-target"><span><b>{socialReplyTarget.metadata?.engagement?.kind==="comment"?ui.replyingToComment:ui.replyingToMessage}</b><small>{shortMessagePreview(socialReplyTarget.content)}</small></span><button type="button" aria-label={ui.cancelSocialReply} title={ui.cancelSocialReply} onClick={()=>{setSocialReplyTarget(undefined);requestAnimationFrame(()=>composerTextarea.current?.focus())}}>×</button></div>}
-            {attachment && (
-              <div className="communications-selected-attachment">
-                {attachmentPreview && (attachment?.type.startsWith("video/")?<video src={attachmentPreview} aria-label={ui.selectedAttachment} preload="metadata" muted playsInline/>:<img src={attachmentPreview} alt={ui.selectedAttachment} />)}
-                <span><b>{attachment.name}</b><small>{formatBytes(attachment.size)}</small></span>
-                <button type="button" onClick={() => chooseAttachment()} aria-label={ui.removeAttachment}>×</button>
+            {attachments.length > 0 && (
+              <div className="communications-selected-attachments">
+                {attachments.map(({file, preview}, index) => (
+                  <div className="communications-selected-attachment" key={index}>
+                    {preview && (file.type.startsWith("video/") ? <video src={preview} aria-label={ui.selectedAttachment} preload="metadata" muted playsInline/> :
+                      <img src={preview} alt={ui.selectedAttachment}/>)}
+                    <span><b>{file.name}</b><small>{formatBytes(file.size)}</small></span>
+                    <button type="button" disabled={busy || bundleAwaitingResult} onClick={() => replaceAttachments(attachments.filter(item => item.file !== file).map(item => item.file))}
+                      aria-label={attachments.length === 1 ? ui.removeAttachment : ui.removeNamedAttachment.replace("{name}", file.name)}>×</button>
+                  </div>
+                ))}
                 {invoiceAttachmentBlocked && <small role="status">{ui.invoicePickerSwitchChannel}</small>}
                 {invoiceAttachment.current === attachment && (activeChannel === "EMAIL" || activeChannel === "WHATSAPP") &&
                   text.trim() && <small role="status">{ui.invoiceSeparateSend}</small>}
@@ -1837,7 +1986,10 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             <div className="communications-compose">
               <label className="communications-attach" aria-label={ui.attachFile}>
                 <span aria-hidden>＋</span>
-                <input ref={attachmentInput} type="file" accept={attachmentAccept} disabled={!client || busy} onChange={(event) => { chooseAttachment(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                <input ref={attachmentInput} type="file" multiple accept={attachmentAccept} disabled={!client || busy || bundleAwaitingResult} onChange={(event) => {
+                  appendAttachments(Array.from(event.target.files ?? []));
+                  event.currentTarget.value = "";
+                }} />
               </label>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT"].includes(activeChannel) && <span className="communications-emoji-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEmojiOpen(false)}}><button ref={emojiTrigger} type="button" className="communications-emoji-trigger" aria-label={ui.chooseEmoji} aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={!client||busy} onClick={()=>setEmojiOpen(value=>!value)}>☺</button>{emojiOpen&&<div ref={emojiPicker} className="communications-emoji-picker" role="dialog" aria-label={ui.emojiPanel} onKeyDown={event=>{if(event.key==="Escape"){event.preventDefault();setEmojiOpen(false);emojiTrigger.current?.focus()}}}>{standardEmojis.map(emoji=><button type="button" key={emoji} onClick={()=>insertEmoji(emoji)} aria-label={`${ui.insertEmoji} ${emoji}`}>{emoji}</button>)}</div>}</span>}
               <textarea
@@ -1849,6 +2001,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
                 onBlur={event=>{if((event.relatedTarget as HTMLElement|null)?.closest(".communications-client-list"))void flushComposerDraftBeforeNavigation()}}
                 onPaste={handleComposerPaste}
                 onKeyDown={handleComposerKeyDown}
+                readOnly={attachments.length > 1 && (busy || bundleAwaitingResult)}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 title={ui.sendShortcut}
                 placeholder={client?ui.writeToClient.replace("{name}",client.displayName):ui.messagePlaceholder}
@@ -1857,7 +2010,7 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
               <span className={`communications-draft-status is-${draftStatus.toLowerCase()}`} role="status">{draftStatus==="SAVING"?ui.draftAutosaving:draftStatus==="SAVED"?ui.draftAutosaved:draftStatus==="ERROR"?ui.draftAutosaveFailed:""}</span>
               {["FACEBOOK", "INSTAGRAM", "WHATSAPP", "CHATWOOT", "EMAIL"].includes(activeChannel) && (
                 <button
-                  disabled={busy || !client || invoiceAttachmentBlocked || (!text.trim() && !attachment)}
+                  disabled={busy || changingReplyChannel || !client || invoiceAttachmentBlocked || (!text.trim() && !attachment)}
                   onClick={() => void save("SEND")}
                 >
                   {busy ? ui.sending : ui.sendMessage}
@@ -1867,14 +2020,14 @@ export function CommunicationsWorkspace({onNavigate:navigate,onRegisterBeforeLea
             </div>
             <div className="communications-compose-shortcuts" aria-label={ui.composerShortcuts}>
               {client && <ShipmentNotificationAction key={`${client.id}:${activeChannel}`} clientId={client.id} conversationId={client.conversations.find(conversation=>conversation.channel===activeChannel)?.id} channel={activeChannel} canSend onSent={()=>void refreshInbox()} />}
-              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
-              <button type="button" disabled={!client||busy} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
+              <button type="button" disabled={!client||busy||bundleAwaitingResult} onClick={()=>attachmentInput.current?.click()}>＋ {ui.attachFileShort}</button>
+              <button type="button" disabled={!client||busy||bundleAwaitingResult} onClick={()=>attachmentInput.current?.click()}>▧ {ui.attachPhotoVideo}</button>
               {client ? <InboxInvoiceAction key={invoiceScope} clientId={client.id} disabled={busy}
                 canAttach={canAttachInvoice} attachmentOccupied={!!attachment} maxAttachmentBytes={COMMUNICATION_FILE_MAX_BYTES}
                 onAttach={attachSavedInvoice} activeOrders={activeOrders} onGenerate={activeOrders[0] && navigate ? generateInvoiceForActiveOrder : undefined}/>
                 : <button type="button" disabled>▤ {ui.invoiceShortcut}</button>}
               <button type="button" disabled={!client||client.status==="LEAD"} onClick={openClientFromInbox}>⌁ {ui.measurementsShortcut}</button>
-              {templates.slice(0,5).map(template=><button type="button" key={template.id} title={template.content} onClick={()=>chooseTemplate(template)}>{template.name}</button>)}
+              {templates.slice(0,5).map(template=><button type="button" key={template.id} title={template.content} disabled={busy||bundleAwaitingResult} onClick={()=>chooseTemplate(template)}>{template.name}</button>)}
               {templates.length>5&&<button type="button" onClick={()=>{setAiPanelOpen(true);setTemplatesOpen(true)}}>⋯ {ui.moreActions}</button>}
             </div>
           </footer>

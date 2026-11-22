@@ -517,6 +517,53 @@ for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",wi
   expect(consoleErrors).toEqual([]);
 });
 
+test("мобильное производство оставляет место календарю и раскрывает настройки по запросу", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 720 });
+  await mockWorkspaceApi(page, { denseProduction: true });
+  await page.goto("/?section=production");
+  const planner = page.locator(".production-page");
+  const board = planner.locator(".production-board-scroll");
+  const filters = planner.locator(".production-filter-primary").getByRole("button", { name: /Фильтры/ });
+  const sort = planner.getByLabel("Порядок заказов", { exact: true });
+  await expect(planner.locator(".production-order-row").first()).toBeVisible();
+  await expect(page.locator(".crm-topbar")).toBeHidden();
+  await expect(filters).toBeHidden();
+  await expect(planner.getByRole("button", { name: "Сегодня", exact: true })).toBeVisible();
+  const calendarHeight = (await board.boundingBox())!.height;
+  expect(calendarHeight).toBeGreaterThan(590);
+  await page.screenshot({ path: testInfo.outputPath("production-calendar-only.png") });
+  await planner.getByRole("button", { name: "Показать панель производства" }).click();
+  await expect(page.locator(".crm-topbar")).toHaveCSS("height", "48px");
+  await expect(sort).toBeHidden();
+  const dimensions = await board.evaluate(scroll => {
+    const fixed = scroll.querySelector(".production-order-summary")!.getBoundingClientRect();
+    const visible = scroll.getBoundingClientRect();
+    return { height: visible.height, calendarWidth: visible.right - fixed.right, horizontalScroll: scroll.scrollWidth > scroll.clientWidth };
+  });
+  expect(calendarHeight - dimensions.height).toBeGreaterThan(180);
+  await testInfo.attach("calendar-heights", { body: JSON.stringify({ calendarHeight, panelHeight: dimensions.height }), contentType: "application/json" });
+  expect(dimensions.calendarWidth).toBeGreaterThan(155);
+  expect(dimensions.horizontalScroll).toBe(true);
+  const descriptionFits = await planner.locator(".production-order-description").first().evaluate(description =>
+    description.getBoundingClientRect().bottom <= description.closest(".production-order-summary")!.getBoundingClientRect().bottom
+  );
+  expect(descriptionFits).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("production-compact-mobile.png") });
+  await filters.click();
+  await expect(sort).toBeVisible();
+  await expect(planner.getByRole("combobox", { name: "слотов / день" })).toBeVisible();
+  await filters.click();
+  await expect(sort).toBeHidden();
+  await page.setViewportSize({ width: 320, height: 640 });
+  const title = await planner.getByRole("heading", { name: "Производство", exact: true }).boundingBox();
+  const create = await planner.getByRole("button", { name: /Новый заказ/ }).boundingBox();
+  expect(title!.y + title!.height).toBeLessThan(create!.y);
+  await planner.getByRole("button", { name: "Только календарь" }).click();
+  await expect(filters).toBeHidden();
+  await planner.locator(".production-order-summary").first().click();
+  await expect(planner.locator(".production-order-details")).toBeVisible();
+});
+
 test("отправка видна в производстве даже когда слот вне видимого календаря", async ({ page }) => {
   await mockWorkspaceApi(page);
   await page.route("**/api/orders/production?*", route => route.fulfill({ json: [{ ...productionOrder, salesStatus: "SHIPPED", productionSlot: { ...productionOrder.productionSlot, startsAt: "2020-01-01", endsAt: "2020-01-07" } }] }));

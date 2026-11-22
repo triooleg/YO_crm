@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ValidationPipe } from "@nestjs/common";
 import { mkdir, mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +31,7 @@ function fixture(t, channel, { savedAttempt = attempt, stored = upload, savedMes
     client: { findFirst: async ({ where }) => where.id === "buyer" ? { source: channel, email: "buyer@example.test" } : null },
     conversation: { findFirst: async ({ where }) => {
       assert.deepEqual(where, { clientId: "buyer", channel, archivedAt: null,
-        ...(channel === "EMAIL" ? { externalId: { equals: "buyer@example.test", mode: "insensitive" } } : {}),
+        ...(channel === "EMAIL" && where.externalId ? { externalId: { equals: "buyer@example.test", mode: "insensitive" } } : {}),
       });
       return { id: "chat", externalId: "100:200", messages: [{ metadata: { chatwootConversationId: "42" } }] };
     } },
@@ -267,3 +268,317 @@ for (const channel of ["EMAIL", "CHATWOOT", "WHATSAPP"]) {
     assert.equal(provider.mock.callCount(), 0);
   });
 }
+for (const [channel, lostResponse, usesDraft = true] of [
+  ["EMAIL", false], ["CHATWOOT", false], ["WHATSAPP", false], ["CHATWOOT", true], ["CHATWOOT", true, false],
+]) {
+  test(`${channel} ${lostResponse ? (usesDraft ? "keeps a saved draft attachment on hold after a lost response" : "holds an unlinked attachment while allowing an independent reply") : "sends a saved draft and attachment in one delivery and safely replays it"}`, async t => {
+    await installTestUpload(t);
+    const { service, db, input } = fixture(t, channel, { savedAttempt: null });
+    if (lostResponse) {
+      t.mock.restoreAll();
+      delete service.sendChatwootProviderMessage;
+      t.mock.method(globalThis, "fetch", async (_url, init) => {
+        assert.equal(init.body.get("content"), "Дизайн на согласование");
+        assert.equal(init.body.get("attachments[]").name, attachment.name);
+        throw new Error("Synthetic timeout after provider acceptance");
+      });
+    }
+    const draftId = "saved-draft-with-attachment";
+    const caption = "Дизайн на согласование";
+    const oldAttachment = channel === "EMAIL" ? { ...attachment, path: "old.pdf" } : undefined;
+    let releasedOldAttachment = false;
+    let row = {
+      id: draftId, direction: "OUTBOUND", status: "DRAFT", conversationId: "chat", content: caption,
+      ...(oldAttachment ? { metadata: { attachments: [oldAttachment] } } : {}),
+    };
+    let currentAttempt;
+    let currentUpload = { ...upload, claimedAt: null, messageId: null };
+    db.message = {
+      findFirst: async ({ where }) => where.id === draftId && where.status === row.status ? row : null,
+      findUnique: async ({ where }) => where.id === row.id ? row : null,
+      update: async ({ where, data }) => {
+        assert.equal(where.id, draftId);
+        return row = { ...row, ...data };
+      },
+    };
+    db.messageDeliveryAttempt = {
+      findUnique: async () => currentAttempt,
+      findFirst: async () => null,
+      create: async ({ data }) => currentAttempt = data,
+      update: async ({ data }) => Object.assign(currentAttempt, data),
+    };
+    db.communicationAttachment = {
+      findUnique: async ({ where }) => where.path === path ? currentUpload : null,
+      updateMany: async ({ where, data }) => {
+        if (where.messageId === draftId) {
+          assert.ok(oldAttachment);
+          assert.deepEqual(where.path, { not: attachment.path });
+          assert.deepEqual(data, { messageId: null });
+          releasedOldAttachment = true;
+          return { count: 1 };
+        }
+        assert.equal(currentUpload.clientRequestId, null);
+        currentUpload = { ...currentUpload, ...data };
+        return { count: 1 };
+      },
+      update: async ({ data }) => {
+        if (oldAttachment) assert.ok(releasedOldAttachment);
+        return currentUpload = { ...currentUpload, ...data };
+      },
+    };
+    db.conversation.update = async () => ({});
+    db.activity = { create: async () => ({}) };
+    db.auditLog = { create: async () => ({}) };
+    const email = t.mock.fn(async payload => {
+      assert.equal(payload.text, caption);
+      assert.equal(payload.attachment.path, path);
+      return { messageId: "synthetic-email" };
+    });
+    const gmail = new CommunicationsService(db, { send: email });
+    const chatwoot = lostResponse ? fetch : t.mock.method(service, "sendChatwootProviderMessage", async (_settings, _recipient, text, file) => {
+      assert.equal(text, caption);
+      assert.equal(file.path, path);
+      return { id: 99, content: "Provider-normalized caption" };
+    });
+    const whatsapp = t.mock.method(service, "whatsappGraph", async (_url, _token, payload) => {
+      assert.equal(payload.document.caption, caption);
+      assert.equal(payload.document.filename, attachment.name);
+      return { messages: [{ id: "wamid.synthetic" }] };
+    });
+    const sender = channel === "EMAIL" ? gmail : service;
+    const providerSend = channel === "EMAIL" ? email : channel === "CHATWOOT" ? chatwoot : whatsapp;
+    const request = usesDraft ? { ...input, draftMessageId: draftId, content: "Stale composer text" } : { ...input, content: caption };
+    if (lostResponse) {
+      db.appSetting = { upsert: async () => ({}) };
+      await assert.rejects(sender.send("buyer", request, actor), { status: 409 });
+      assert.equal(currentAttempt.status, "UNCERTAIN");
+      assert.equal(currentUpload.clientRequestId, requestId);
+      assert.equal(row.status, "DRAFT");
+      await assert.rejects(sender.send("buyer", request, actor), { status: 409 });
+      assert.equal(providerSend.mock.callCount(), 1);
+      const held = currentAttempt;
+      if (usesDraft) {
+        db.messageDeliveryAttempt.findUnique = async ({ where }) => where.clientRequestId === requestId ? held : null;
+        db.messageDeliveryAttempt.findFirst = async () => held;
+        db.messageDeliveryAttempt.findMany = async () => [held];
+        const retryId = "eae7c36b-4cb8-4696-aa9e-87c23768d7bf";
+        await assert.rejects(sender.send("buyer", { ...request, attachment: undefined, clientRequestId: retryId }, actor), { status: 409 });
+        assert.equal(providerSend.mock.callCount(), 1);
+      } else {
+        const independentId = "eae7c36b-4cb8-4696-aa9e-87c23768d7bf";
+        db.messageDeliveryAttempt.findUnique = async ({ where }) => where.clientRequestId === requestId ? held : null;
+        db.messageDeliveryAttempt.findFirst = async () => held;
+        db.messageDeliveryAttempt.findMany = async () => [held];
+        db.communicationAttachment.groupBy = async ({ where, by }) => {
+          assert.deepEqual(where, { clientRequestId: { in: [requestId] }, messageId: null });
+          assert.deepEqual(by, ["clientRequestId"]);
+          return [{ clientRequestId: requestId, _count: { _all: 1 } }];
+        };
+        db.message.upsert = async ({ create }) => ({ ...create, id: "independent-sent" });
+        const independentSend = t.mock.method(service, "sendChatwootProviderMessage", async (_settings, _id, text, file) => {
+          assert.equal(text, "Independent reply");
+          assert.equal(file, undefined);
+          return { id: 123, content: text };
+        });
+        const independent = await sender.send("buyer", {
+          action: "SEND", channel, clientRequestId: independentId, content: "Independent reply",
+        }, actor);
+        assert.equal(independent.status, "SENT");
+        assert.equal(held.status, "UNCERTAIN");
+        assert.equal(currentUpload.clientRequestId, requestId);
+        assert.equal(independentSend.mock.callCount(), 1);
+        assert.equal(providerSend.mock.callCount(), 1);
+      }
+      return;
+    }
+    const sent = await sender.send("buyer", request, actor);
+    assert.equal(sent.id, draftId);
+    assert.equal(sent.status, "SENT");
+    assert.equal(sent.metadata.attachments[0].name, attachment.name);
+    assert.equal(currentUpload.messageId, draftId);
+    assert.deepEqual(await sender.send("buyer", request, actor), sent);
+    await assert.rejects(sender.send("buyer", { ...request, content: "Different request" }, actor), { status: 409 });
+    await assert.rejects(sender.send("buyer", { ...request, attachment: { ...attachment, name: "replacement.pdf" } }, actor), { status: 409 });
+    await assert.rejects(sender.send("buyer", request, { id: "other-staff" }), { status: 409 });
+    await assert.rejects(sender.send("buyer", { ...request, attachment: undefined }, { id: "other-staff" }), { status: 409 });
+    await assert.rejects(sender.send("buyer", { ...request, attachment: undefined, draftMessageId: undefined }, { id: "other-staff" }), { status: 409 });
+    if (channel === "WHATSAPP") {
+      const originalUpload = currentUpload;
+      const replacementPath = path.replaceAll("1", "3");
+      const replacement = { ...attachment, path: replacementPath };
+      const available = { ...currentUpload, ...replacement, messageId: null, clientRequestId: null, claimedAt: null, createdById: "other-staff" };
+      const oldLookup = db.communicationAttachment.findUnique;
+      db.communicationAttachment.findUnique = async args => args.where.path === replacementPath ? available : oldLookup(args);
+      await writeFile(join(process.env.UPLOADS_DIR, "communication-files", replacementPath), pdf);
+      try {
+        await assert.rejects(sender.send("buyer", { ...request, draftMessageId: undefined, attachment: replacement }, { id: "other-staff" }), { status: 409 });
+      } finally {
+        await unlink(join(process.env.UPLOADS_DIR, "communication-files", replacementPath));
+      }
+      assert.equal(currentUpload, originalUpload);
+    }
+    assert.equal(providerSend.mock.callCount(), 1);
+  });
+}
+
+for (const channel of ["FACEBOOK", "INSTAGRAM"]) {
+  test(`${channel} rejects combined saved draft sends before a provider can drop the text`, async t => {
+    const { service, db, input, provider } = fixture(t, channel, { savedAttempt: null });
+    db.message.findFirst = async () => ({ id: "saved-draft-with-attachment", content: "Saved text", metadata: null });
+    await assert.rejects(service.send("buyer", { ...input, draftMessageId: "saved-draft-with-attachment" }, actor), { status: 400 });
+    assert.equal(provider.mock.callCount(), 0);
+  });
+}
+
+
+test("editing a legacy attachment draft preserves the same scoped draft and original file", async () => {
+  const draftId = "saved-draft-with-attachment";
+  let draft = { id: draftId, metadata: { attachments: [attachment] }, content: "Draft content" };
+  const db = {
+    $executeRaw: async () => {},
+    $transaction: async fn => fn(db),
+    conversation: { upsert: async () => ({ id: "scoped-email", channel: "EMAIL" }) },
+    message: {
+      findMany: async () => [],
+      findFirst: async ({ where }) => {
+        assert.deepEqual(where, {
+          id: draftId, conversationId: "scoped-email", status: "DRAFT", direction: "OUTBOUND",
+        });
+        return draft;
+      },
+      update: async ({ data }) => draft = { ...draft, ...data },
+      create: async () => assert.fail("editing must not create a newer text-only draft"),
+    },
+    auditLog: { create: async () => ({}) },
+  };
+  const service = new CommunicationsService(db);
+  const edit = { channel: "EMAIL", content: "Updated legacy draft", legacyDraftId: draftId };
+  const updated = await service.updateDraft("buyer", requestId, edit, actor);
+  assert.equal(updated.id, draftId);
+  assert.equal(updated.content, edit.content);
+  assert.deepEqual(updated.metadata, { composerDraftKey: requestId, attachments: [attachment] });
+  await assert.rejects(service.updateDraft("buyer", "eae7c36b-4cb8-4696-aa9e-87c23768d7bf", edit, actor), { status: 409 });
+});
+
+for (const [channel, ambiguous] of [["EMAIL",false], ["CHATWOOT",false], ["CHATWOOT",true]]) {
+  test(`${channel} ${ambiguous ? "holds a bundle after provider acceptance and permits an independent text reply" : "reserves and sends two photos as one message and safely replays the whole bundle"}`, async t => {
+    await installTestUpload(t);
+    const directory = join(process.env.UPLOADS_DIR, "communication-files");
+    const photoPaths = [
+      "11111111-1111-4111-8111-111111111111.png",
+      "22222222-2222-4222-8222-222222222222.png",
+    ];
+    const photos = photoPaths.map((path, index) => ({ path, name: index ? "back.png" : "front.png", mimeType: "image/png" }));
+    for (const photo of photos) await writeFile(join(directory, photo.path), pdf);
+    const { service, db, input } = fixture(t, channel, { savedAttempt: null });
+    const draftId = "saved-draft-two-photos";
+    const caption = "Front and back";
+    let draft = { id: draftId, conversationId: "chat", direction: "OUTBOUND", status: "DRAFT", content: caption };
+    let current;
+    const uploads = new Map(photos.map(photo => [photo.path, {
+      ...photo, originalName: photo.name, createdById: actor.id, sizeBytes: pdf.length,
+      messageId: null, clientRequestId: null, claimedAt: null,
+    }]));
+    db.communicationAttachment = {
+      findUnique: async ({ where }) => uploads.get(where.path),
+      updateMany: async ({ where, data }) => {
+        assert.deepEqual(where.path, { in: photos.map(file => file.path) });
+        assert.ok([...uploads.values()].every(file => file.clientRequestId === null));
+        for (const file of uploads.values()) Object.assign(file, data);
+        return { count: photos.length };
+      },
+      update: async ({ where, data }) => Object.assign(uploads.get(where.path), data),
+    };
+    db.messageDeliveryAttempt = {
+      findUnique: async () => current,
+      findFirst: async () => null,
+      create: async ({ data }) => current = data,
+      update: async ({ data }) => Object.assign(current, data),
+    };
+    db.message = {
+      findFirst: async ({ where }) => where.id === draftId && draft.status === where.status ? draft : null,
+      findUnique: async ({ where }) => where.id === draftId ? draft : null,
+      update: async ({ data }) => draft = { ...draft, ...data },
+    };
+    db.conversation.update = async () => ({});
+    db.activity = { create: async () => ({}) };
+    db.auditLog = { create: async () => ({}) };
+    const deliver = t.mock.fn(async (text, files) => {
+      assert.equal(text, caption);
+      assert.deepEqual(files.map(file => file.path), photoPaths);
+      assert.ok([...uploads.values()].every(upload => upload.clientRequestId === requestId));
+      return { messageId: "provider-mail", id: 42, content: caption };
+    });
+    const gmail = new CommunicationsService(db, { send: body => deliver(body.text, body.attachments) });
+    service.sendChatwootProviderMessage = (_settings, _conversation, content, attachments) => deliver(content, attachments);
+    const sender = channel === "EMAIL" ? gmail : service;
+    const request = { ...input, attachment: undefined, attachments: photos, content: caption, draftMessageId: ambiguous ? undefined : draftId };
+    try {
+      if (ambiguous) {
+        db.appSetting = { upsert: async () => ({}) };
+        db.message.upsert = async () => { throw new Error("Commit failed after provider acceptance"); };
+        await assert.rejects(sender.send("buyer", request, actor), { status: 409 });
+        assert.equal(current.status, "UNCERTAIN");
+        assert.ok([...uploads.values()].every(upload => upload.clientRequestId === requestId));
+        await assert.rejects(sender.send("buyer", request, actor), { status: 409 });
+        assert.equal(deliver.mock.callCount(), 1);
+        const held = current;
+        db.messageDeliveryAttempt.findUnique = async ({ where }) => where.clientRequestId === requestId ? held : null;
+        db.messageDeliveryAttempt.findFirst = async () => held;
+        db.messageDeliveryAttempt.findMany = async () => [held];
+        db.communicationAttachment.groupBy = async () => [{ clientRequestId: requestId, _count: { _all: 2 } }];
+        const freshPaths = ["33333333-3333-4333-8333-333333333333.png", "44444444-4444-4444-8444-444444444444.png"];
+        const fresh = photos.map((photo, index) => ({ ...photo, path: freshPaths[index] }));
+        for (const photo of fresh) {
+          await writeFile(join(directory, photo.path), pdf);
+          uploads.set(photo.path, { ...uploads.get(photoPaths[0]), ...photo, originalName: photo.name, clientRequestId: null });
+        }
+        try {
+          await assert.rejects(sender.send("buyer", {
+            ...request, attachments: fresh, clientRequestId: "3c907117-7ea5-4798-8da5-80c3257af963",
+          }, actor), { status: 409 });
+          assert.equal(deliver.mock.callCount(), 1);
+        } finally {
+          for (const path of freshPaths) await unlink(join(directory, path));
+        }
+        db.message.upsert = async ({ create }) => ({ ...create, id: "independent-sent" });
+        const independent = t.mock.method(service, "sendChatwootProviderMessage", async (_settings, _id, text, files) => {
+          assert.equal(text, "Independent reply");
+          assert.equal(files, undefined);
+          return { id: 99, content: text };
+        });
+        await sender.send("buyer", {
+          action: "SEND", channel, content: "Independent reply", clientRequestId: "3c907117-7ea5-4798-8da5-80c3257af963",
+        }, actor);
+        assert.equal(held.status, "UNCERTAIN");
+        assert.equal(independent.mock.callCount(), 1);
+        return;
+      }
+      const sent = await sender.send("buyer", request, actor);
+      assert.equal(sent.status, "SENT");
+      assert.deepEqual(sent.metadata.attachments.map(file => file.name), photos.map(file => file.name));
+      assert.ok(sent.metadata.attachments.every(file => !file.providerUrl));
+      assert.ok([...uploads.values()].every(file => file.messageId === draftId && file.clientRequestId === null));
+      assert.deepEqual(await sender.send("buyer", request, actor), sent);
+      await assert.rejects(sender.send("buyer", { ...request, attachments: [...photos].reverse() }, actor), { status: 409 });
+      await assert.rejects(sender.send("buyer", { ...request, attachments: undefined, attachment: photos[0] }, actor), { status: 409 });
+      await assert.rejects(sender.send("buyer", request, { id: "other-staff" }), { status: 409 });
+      assert.equal(deliver.mock.callCount(), 1);
+    } finally {
+      for (const path of photoPaths) await unlink(join(directory, path));
+    }
+  });
+}
+
+test("the message bundle body accepts photos without a caption and still rejects empty messages", async () => {
+  const { SendMessageDto } = loadTargetModule("communications/communications.dto.ts");
+  const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+  const metadata = { type: "body", metatype: SendMessageDto };
+  const attachments = [attachment, { ...attachment, path: "22222222-2222-4222-8222-222222222222.pdf" }];
+  for (const channel of ["EMAIL", "CHATWOOT"]) {
+    const dto = await pipe.transform({ channel, action: "SEND", attachments }, metadata);
+    assert.deepEqual(dto.attachments.map(item => ({ ...item })), attachments);
+    assert.equal(dto.content, undefined);
+  }
+  await assert.rejects(pipe.transform({ action: "SEND" }, metadata));
+});

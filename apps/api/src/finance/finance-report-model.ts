@@ -33,8 +33,12 @@ export function convertReportMinor(amount: number, rate: RationalRate) {
   return Number(result);
 }
 
+const financeDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
 export function financeBusinessDay(now: Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const parts = financeDayFormatter.formatToParts(now);
   return ["year", "month", "day"].map(type => parts.find(part => part.type === type)!.value).join("-");
 }
 export function valuationVersion(valuation: FinanceValuation, now: Date) {

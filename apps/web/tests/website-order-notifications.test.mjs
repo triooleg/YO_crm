@@ -14,7 +14,7 @@ test('Orders navigation polls unread website purchases and shows a persistent ac
  assert.match(shell,/navigate\("orders",\{orderId:notice\.id\}\)/);
  assert.match(locale,/newWebsitePurchase/);assert.match(locale,/newWebsiteOrder/);
  assert.match(shell,/import \{ Button \} from "@mantine\/core"/);
- assert.match(shellCss,/\.crm-notifications\{top:70px!important;bottom:auto!important\}/);assert.match(shellCss,/@media\(max-width:720px\)\{\.crm-notifications\{top:110px!important;bottom:auto!important\}\}/);
+ assert.match(shellCss,/\.crm-notifications\[data-position\^="top"\]\{top:70px!important;bottom:auto!important\}/);assert.match(shellCss,/@media\(max-width:720px\)\{\s*\.crm-notifications\[data-position\^="top"\]\{top:110px!important;bottom:auto!important\}/);
 });
 
 test('a failed acknowledgement keeps the notice retryable and does not decrement the badge',()=>{

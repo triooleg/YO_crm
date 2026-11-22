@@ -135,6 +135,11 @@ export class ClientsWorkspaceReadService {
   async duplicates(query:ClientsWorkspaceQuery={}) {
     const q=normalizeClientsWorkspaceQuery(query),email=text(query.email).toLowerCase(),phone=text(query.phone).replace(/\D/g,''),name=text(query.name);
     const filter=Prisma.sql`c."archivedAt" IS NULL`;
+    // Sort the review list before pagination. Keep the creation-time lookup's
+    // order and use the same keys when assembling the response.
+    const nameOrder = email || phone || name
+      ? Prisma.sql`''::text`
+      : Prisma.sql`lower(regexp_replace(normalize(c."displayName"), '[[:space:][:punct:]]+', '', 'g'))`;
     // Strong keys are normalized contacts or exact account-scoped conversation IDs.
     // Names are a weak manual-review signal only. No mutation happens here.
     const keys=Prisma.sql`SELECT id,'EMAIL' reason,lower(trim(email)) key FROM "Client" WHERE "archivedAt" IS NULL AND email IS NOT NULL AND trim(email)<>'' AND email !~ '^[0-9]+@facebook[.]com$'
@@ -145,10 +150,10 @@ export class ClientsWorkspaceReadService {
     const results=await this.prisma.$queryRaw<{items:{id:string;reasons:string[];related:Related[]}[];total:number}[]>(Prisma.sql`
       WITH keys AS (${keys}), duplicate_keys AS (SELECT reason,key FROM keys GROUP BY reason,key HAVING count(DISTINCT id)>1),
       matched AS (SELECT k.id,array_agg(DISTINCT k.reason) reasons FROM keys k JOIN duplicate_keys d USING(reason,key) GROUP BY k.id),
-      candidates AS (SELECT c.id,coalesce(m.reasons,ARRAY[]::text[]) reasons FROM "Client" c LEFT JOIN matched m ON m.id=c.id WHERE ${filter} AND ${email||phone||name?Prisma.sql`(${Boolean(email)} AND lower(trim(c.email))=${email} OR ${Boolean(phone)} AND regexp_replace(c.phone,'[^0-9]','','g')=${phone} OR ${Boolean(name)} AND lower(trim(c."displayName"))=lower(${name}))`:Prisma.sql`m.id IS NOT NULL`} ${q.search?Prisma.sql`AND c."displayName" ILIKE ${'%'+q.search.replace(/[\\%_]/g,'\\$&')+'%'}`:Prisma.empty}),
-      page AS (SELECT * FROM candidates ORDER BY id LIMIT ${q.pageSize} OFFSET ${(q.page-1)*q.pageSize}),
+      candidates AS (SELECT c.id,${nameOrder} sort_name,coalesce(m.reasons,ARRAY[]::text[]) reasons FROM "Client" c LEFT JOIN matched m ON m.id=c.id WHERE ${filter} AND ${email||phone||name?Prisma.sql`(${Boolean(email)} AND lower(trim(c.email))=${email} OR ${Boolean(phone)} AND regexp_replace(c.phone,'[^0-9]','','g')=${phone} OR ${Boolean(name)} AND lower(trim(c."displayName"))=lower(${name}))`:Prisma.sql`m.id IS NOT NULL`} ${q.search?Prisma.sql`AND c."displayName" ILIKE ${'%'+q.search.replace(/[\\%_]/g,'\\$&')+'%'}`:Prisma.empty}),
+      page AS (SELECT * FROM candidates ORDER BY sort_name, id LIMIT ${q.pageSize} OFFSET ${(q.page-1)*q.pageSize}),
       presented AS (SELECT page.*,coalesce((SELECT json_agg(related ORDER BY related.id) FROM (SELECT b.id,array_agg(DISTINCT a.reason) reasons FROM keys a JOIN keys b ON a.key=b.key AND a.reason=b.reason AND a.id<>b.id WHERE a.id=page.id GROUP BY b.id ORDER BY b.id LIMIT 21) related),'[]'::json) related FROM page)
-      SELECT coalesce((SELECT json_agg(presented ORDER BY id) FROM presented),'[]'::json) items,(SELECT count(*)::int FROM candidates) total`);
+      SELECT coalesce((SELECT json_agg(presented ORDER BY sort_name, id) FROM presented),'[]'::json) items,(SELECT count(*)::int FROM candidates) total`);
     const projection=results[0]??{items:[],total:0},rows=projection.items;
     const clients=rows.length?await this.prisma.client.findMany({where:{id:{in:rows.map(row=>row.id)},archivedAt:null},select:contactSelect,take:q.pageSize}):[];
     const byId=new Map(clients.map(v=>[v.id,v]));

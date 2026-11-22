@@ -1,40 +1,28 @@
 "use client";
-import { ActionIcon, Button, ColorSwatch, Input, Popover, Select, Stack, Text, alpha, useMantineTheme } from "@mantine/core";
+import { Select, alpha, useMantineTheme } from "@mantine/core";
+import type { OrderStatusOption } from "../../lib/order-status-options";
 import { ordersDashboardUi as ui } from "../../lib/i18n";
 import { CrmStatusBadge, crmStatusPresentation } from "./status-badge";
 
-export function SalesStatusSelect({ value, statuses, disabled, onChange, color, onColorChange }: { value: string; statuses: string[]; disabled: boolean; onChange: (value: string) => void; color?: string; onColorChange: (color: string | undefined) => void }) {
+export function SalesStatusSelect({ value, baseStatus = value, overrides = [], statuses, disabled, onChange, color }: { value: string; baseStatus?: string; overrides?: OrderStatusOption[]; statuses: string[]; disabled: boolean; onChange: (value: string) => void; color?: string }) {
   const theme = useMantineTheme();
-  const presentation = crmStatusPresentation("sales",value);
+  const presentation = baseStatus === value ? crmStatusPresentation("sales",value) : crmStatusPresentation("sales",baseStatus);
+  const current = overrides.find(option => option.id === value);
+  const label = current?.label ?? presentation.label;
+  const options = [...new Set([...statuses, ...overrides.filter(option => option.id !== option.baseStatus).map(option => option.id), value])]
+    .filter(id => id === value || !overrides.find(option => option.id === id)?.archivedAt)
+    .map(id => {
+      const option = overrides.find(item => item.id === id);
+      return { value: id, label: option?.label ?? crmStatusPresentation("sales",option?.baseStatus ?? (id === value ? baseStatus : id)).label };
+    });
   const colors = theme.colors[presentation.color]!;
   const tint = color ?? colors[6]!;
-  const editLabel = ui.changeStatusColor.replace("{status}", presentation.label);
-  const title = ui.statusColorTitle.replace("{status}", presentation.label);
-  return <div className="orders-status-with-color">
-    <Select aria-label={ui.changeStatus} title={presentation.label} value={value} disabled={disabled} allowDeselect={false}
+  return <Select aria-label={ui.changeStatus} title={label} value={value} disabled={disabled} allowDeselect={false}
       className="orders-inline-status-control" classNames={{input:"orders-inline-status"}}
       comboboxProps={{width:280,position:"bottom-end"}}
       onChange={next => { if(next) onChange(next); }}
-      data={statuses.map(status=>({value:status,label:crmStatusPresentation("sales",status).label}))}
-      renderOption={({option}) => <CrmStatusBadge domain="sales" status={option.value} />}
-      styles={{input:{backgroundColor:alpha(colors[6]!,0.15),color:colors[9]!,border:0}}} />
-    <Popover width={240} position="bottom-end" trapFocus returnFocus withArrow>
-      <Popover.Target>
-        <ActionIcon type="button" variant="default" size="sm" aria-label={editLabel} title={editLabel}>
-          <ColorSwatch color={tint} size={13} />
-        </ActionIcon>
-      </Popover.Target>
-      <Popover.Dropdown aria-label={title}>
-        <Stack gap="xs">
-          <Text size="sm" fw={600}>{title}</Text>
-          <Text size="xs" c="dimmed">{ui.statusColorScope}</Text>
-          <Input type="color" aria-label={ui.chooseStatusColor} value={tint}
-            onChange={event => onColorChange(event.currentTarget.value)} />
-          <Button variant="subtle" size="compact-sm" disabled={!color} onClick={() => onColorChange(undefined)}>
-            {ui.resetStatusColor}
-          </Button>
-        </Stack>
-      </Popover.Dropdown>
-    </Popover>
-  </div>;
+      data={options}
+      renderOption={({option}) => <CrmStatusBadge domain="sales" status={overrides.find(item => item.id === option.value)?.baseStatus ?? option.value}
+        label={option.label} color={overrides.find(item => item.id === option.value)?.color ?? undefined} />}
+      styles={{input:{backgroundColor:alpha(tint,0.15),color:colors[9]!,border:0}}} />;
 }

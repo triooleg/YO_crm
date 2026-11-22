@@ -35,6 +35,9 @@ export type PaymentConversionSnapshot = {
 };
 
 export const MONOBANK_CURRENCY_URL = "https://api.monobank.ua/bank/currency";
+// Monobank caches this public quote list and updates it at most once per five minutes.
+const MONOBANK_REFRESH_INTERVAL_MS = 5 * 60_000;
+const MONOBANK_REFRESH_SETTING = { section: "finance", key: "monobankCurrencyLastAttemptAt" };
 
 const PROVIDER_INFO = {
   ECB: {
@@ -328,17 +331,62 @@ export class ExchangeRatesService {
       if (businessCalendarDate(new Date(current.cache.fetchedAt)) !== businessCalendarDate(now)) throw new Error("Кэш официальных курсов устарел");
       return current;
     } catch { /* Only this endpoint requires a fetch on the current business day. */ }
-    const inFlight = this.currentRefreshes.get(current.provider);
-    if (inFlight) return inFlight;
-    const pending = this.refresh(actor, fetcher, now);
-    this.currentRefreshes.set(current.provider, pending);
-    try { return await pending; }
-    finally { this.currentRefreshes.delete(current.provider); }
+    let pending = this.currentRefreshes.get(current.provider);
+    if (!pending) {
+      pending = this.refresh(actor, fetcher, now).finally(() => this.currentRefreshes.delete(current.provider));
+      this.currentRefreshes.set(current.provider, pending);
+    }
+    const result = await pending;
+    if ("cacheReused" in result && businessCalendarDate(new Date(result.cache.fetchedAt)) !== businessCalendarDate(now)) {
+      throw new ServiceUnavailableException("Курс Monobank на сегодня пока недоступен. Повторите обновление через несколько минут");
+    }
+    return result;
+  }
+
+  private async reserveMonobankRefresh(now: Date) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", EXCHANGE_RATE_ADVISORY_LOCK);
+      const providerSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } });
+      if (resolveExchangeRateProvider(providerSetting?.value) !== "MONOBANK") {
+        throw new ConflictException("Источник курсов изменился во время обновления. Повторите запрос");
+      }
+      const attempt = await tx.appSetting.findUnique({ where: { section_key: MONOBANK_REFRESH_SETTING } });
+      const cacheSetting = await tx.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateCache" } } });
+      let cache: ExchangeRateCache | undefined;
+      try {
+        const parsed = parseExchangeRateCache(cacheSetting?.value);
+        if (parsed.provider === "MONOBANK") cache = parsed;
+      } catch { /* An unreadable quote cannot be reused. */ }
+
+      const lastAttemptAt = typeof attempt?.value === "number" ? attempt.value : 0;
+      const lastSuccessfulFetchAt = cache ? Date.parse(cache.fetchedAt) : 0;
+      if (now.getTime() - Math.max(lastAttemptAt, lastSuccessfulFetchAt) < MONOBANK_REFRESH_INTERVAL_MS) {
+        if (cache) {
+          try {
+            assertExchangeRateCacheFresh(cache, now);
+            return cache;
+          } catch { /* The saved quote must still satisfy the existing freshness rules. */ }
+        }
+        throw new ServiceUnavailableException("Курс Monobank пока недоступен. Повторите обновление через несколько минут");
+      }
+
+      // Commit the attempt before I/O so errors, restarts and provider switches cannot reset the cooldown.
+      await tx.appSetting.upsert({
+        where: { section_key: MONOBANK_REFRESH_SETTING },
+        create: { ...MONOBANK_REFRESH_SETTING, value: now.getTime() },
+        update: { value: now.getTime() },
+      });
+      return null;
+    });
   }
 
   async refresh(actor: User, fetcher: typeof fetch = fetch, now = new Date()) {
     const providerSetting = await this.prisma.appSetting.findUnique({ where: { section_key: { section: "finance", key: "exchangeRateProvider" } } });
     const provider = resolveExchangeRateProvider(providerSetting?.value);
+    if (provider === "MONOBANK") {
+      const recent = await this.reserveMonobankRefresh(now);
+      if (recent) return { provider, ...PROVIDER_INFO[provider], cache: recent, cacheReused: true };
+    }
     let cache: ExchangeRateCache;
     try { cache = await fetchOfficialRates(provider, fetcher, now); } catch (error) { throw new ServiceUnavailableException(`Не удалось получить официальный курс ${provider}: ${error instanceof Error ? error.message : "неизвестная ошибка"}`); }
     return this.prisma.$transaction(async tx => {

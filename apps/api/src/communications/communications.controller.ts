@@ -61,6 +61,9 @@ private sessionBinding(r:Request,u:User,res?:Response,create=false){
 @Patch(":clientId/spam")@Roles("OWNER","ADMIN","MANAGER")spam(@Param("clientId")id:string,@Body()d:InboxSpamDto,@Req()r:Request&{user:User}){return this.c.setSpam(id,d,r.user)}
 @Put(":clientId/drafts/:draftKey")@Roles("OWNER","ADMIN","MANAGER")updateDraft(@Param("clientId")clientId:string,@Param("draftKey")draftKey:string,@Body()d:UpdateMessageDraftDto,@Req()r:Request&{user:User}){return this.c.updateDraft(clientId,draftKey,d,r.user)}
 @Get(":clientId")@Roles("OWNER","ADMIN","MANAGER")detail(@Param("clientId")id:string,@Query()query:ConversationQueryDto){return this.c.detail(id,query.channel)}
+@Post(":clientId/message-bundles")
+@Roles("OWNER","ADMIN","MANAGER")
+sendBundle(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}
 @Post(":clientId/messages")@Roles("OWNER","ADMIN","MANAGER")send(@Param("clientId")id:string,@Body()d:SendMessageDto,@Req()r:Request&{user:User}){return this.c.send(id,d,r.user)}}
 
 @Controller("communications/files")@UseGuards(SessionGuard,RolesGuard)

@@ -46,6 +46,13 @@ test('workspace aggregates, search and duplicate evidence run on isolated Postgr
   const dup=await service.duplicates({email:'SHARED@example.test'});
   assert.equal(dup.items.length,2);assert.ok(dup.items.every(v=>v.reasons.includes('EMAIL')&&v.related.some(other=>other.reasons.includes('EMAIL')&&other.reasons.includes('PHONE'))));
   await pg.exec(`UPDATE "Client" SET "displayName"='Same name' WHERE id IN ('c4','c5');`);
+  await pg.exec(`UPDATE "Client" SET "displayName"='Same name' WHERE id='c9000'; UPDATE "Client" SET "displayName"='Different name' WHERE id IN ('c6','c7');`);
+  const grouped=await service.duplicates();
+  assert.deepEqual(grouped.items.filter(v=>v.displayName==='Same name').map(v=>v.id),['c4','c5','c9000']);
+  const firstSame=grouped.items.findIndex(v=>v.id==='c4');
+  assert.deepEqual(grouped.items.slice(firstSame,firstSame+3).map(v=>v.id),['c4','c5','c9000']);
+  const filteredDuplicates=await service.duplicates({search:'same name'});
+  assert.deepEqual(filteredDuplicates.items.map(v=>v.id),['c4','c5','c9000']);
   const incoming=await service.duplicates({email:'person4@example.test'});
   assert.ok(incoming.items[0].reasons.includes('EMAIL'),'incoming exact email must remain explicit despite weak existing name match');
   const outOfRange=await service.duplicates({email:'SHARED@example.test',page:'2'});assert.equal(outOfRange.total,2);

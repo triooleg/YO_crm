@@ -30,6 +30,10 @@ changes. Update the handoff after meaningful implementation or deployment.
 - Prefer archive/soft delete and audit important mutations.
 - For fixes and risky rules: failing test first, then implementation.
 - Before completion run typecheck, tests, build and affected live smoke paths.
+- Finance and Overview reuse durable report snapshots for unchanged inputs. When
+  changing a finance projection or a table covered by its cache, test upgrades
+  in chronological migration order. Verify coverage, snapshot reuse without
+  rereading financial source tables, and invalidation after relevant writes.
 
 ## YO_crm UI Rules
 

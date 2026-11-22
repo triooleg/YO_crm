@@ -62,7 +62,7 @@ export class OutboundAttachmentDto {
   @IsString() @IsIn(["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "application/pdf", "text/plain"]) mimeType!: string;
 }
 export class SendMessageDto {
-  @ValidateIf((dto, value) => !dto.attachment || value !== undefined) @IsString() @Length(1, 5000) content?: string;
+  @ValidateIf((dto, value) => (!dto.attachment && !dto.attachments?.length) || value !== undefined) @IsString() @Length(1, 5000) content?: string;
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
   @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
   @IsOptional() @IsUUID("4") clientRequestId?: string;
@@ -70,9 +70,13 @@ export class SendMessageDto {
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @IsString() @Length(20, 80) replyToMessageId?: string;
   @IsOptional() @ValidateNested() @Type(() => OutboundAttachmentDto) attachment?: OutboundAttachmentDto;
+  @IsOptional() @IsArray() @ArrayMinSize(2) @ArrayMaxSize(10)
+  @ValidateNested({ each: true }) @Type(() => OutboundAttachmentDto)
+  attachments?: OutboundAttachmentDto[];
 }
 export class UpdateMessageDraftDto {
-  @IsString() @Length(1, 5000) content!: string;
+  @IsOptional() @IsString() @Length(20, 80) legacyDraftId?: string;
+  @IsString() @MaxLength(5000) content!: string;
   @IsEnum(ContactChannel) channel!: ContactChannel;
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
 }

@@ -3,21 +3,57 @@ import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 
-const migrationName = '20261102160000_finance_report_snapshots';
 const migrations = new URL('../prisma/migrations/', import.meta.url);
 
 // Always a fresh embedded database: no connection URL, persisted data or network.
-async function fixture() {
+async function fixture(through) {
   const db = new PGlite();
   try {
     const names = (await readdir(migrations)).filter(name => /^\d/.test(name)).sort();
-    for (const name of names.filter(name => name !== migrationName)) {
+    for (const name of names.filter(name => !through || name <= through)) {
       await db.exec(await readFile(new URL(`${name}/migration.sql`, migrations), 'utf8'));
     }
-    await db.exec(await readFile(new URL(`${migrationName}/migration.sql`, migrations), 'utf8'));
     return db;
   } catch (error) { await db.close(); throw error; }
 }
+
+
+test('finance coverage survives the order status schema upgrade in chronological migration order', async () => {
+  const db = await fixture();
+  try {
+    assert.equal((await db.query('SELECT public.yo_finance_cache_coverage() AS covered')).rows[0].covered,true);
+    assert.ok(await revision(db,'epoch') > 0,'older projections cannot be reused');
+    await db.exec(`
+      INSERT INTO "Client" (id,"firstName","displayName","updatedAt")
+      VALUES ('c','Synthetic','Synthetic',CURRENT_TIMESTAMP);
+      INSERT INTO "Order" (id,number,"clientId",type,"priceMinor","depositRequiredMinor","updatedAt")
+      VALUES ('o','Synthetic','c','CUSTOM_ORDER',10000,5000,CURRENT_TIMESTAMP);`);
+    await expectAdvanced(db,['orders','order:o'],()=>db.exec(`UPDATE "Order" SET "priceMinor"=12500 WHERE id='o'`));
+  } finally { await db.close(); }
+});
+
+
+test('coverage repair refuses unrelated schema and trigger drift without advancing the epoch', async () => {
+  const db = await fixture('20261120170000_multiple_communication_attachments');
+  const sql = await readFile(new URL('20261122090000_finance_coverage_order_status/migration.sql', migrations), 'utf8');
+  try {
+    const version = await revision(db,'epoch');
+    await db.exec(`ALTER TABLE "Order" ADD COLUMN "UnexpectedColumn" TEXT`);
+    await assert.rejects(db.exec(sql), /Unexpected Order schema drift/);
+    await db.exec('ROLLBACK');
+    assert.equal(await revision(db,'epoch'),version);
+    await db.exec(`
+      ALTER TABLE "Order" DROP COLUMN "UnexpectedColumn";
+      ALTER TABLE "Payment" DISABLE TRIGGER yo_finance_cache_row;`);
+    await assert.rejects(db.exec(sql), /Finance coverage is still incomplete/);
+    await db.exec('ROLLBACK');
+    assert.equal(await revision(db,'epoch'),version);
+    await db.exec(`ALTER TABLE "Payment" ENABLE ALWAYS TRIGGER yo_finance_cache_row`);
+    await db.exec(sql);
+    assert.equal(await revision(db,'epoch'),version+1);
+    assert.equal((await db.query('SELECT public.yo_finance_cache_coverage() AS covered')).rows[0].covered,true);
+  } finally { await db.close(); }
+});
 
 test('finance snapshots store versioned derivatives, enforce status and cascade only cache rows', async () => {
   const db = await fixture();
@@ -36,7 +72,7 @@ test('finance snapshots store versioned derivatives, enforce status and cascade 
   } finally { await db.close(); }
 });
 
-test('every supported monthly and global dependency exists at revision zero; order keys remain dynamic', async () => {
+test('every supported monthly and global dependency exists; order keys remain dynamic', async () => {
   const db=await fixture();
   try {
     const expected=['epoch','orders','metadata','settings','tax-global','fx-global'];
@@ -47,7 +83,7 @@ test('every supported monthly and global dependency exists at revision zero; ord
     const rows=(await db.query(`SELECT key,revision::text AS revision FROM "FinanceReportRevision" ORDER BY key`)).rows;
     assert.equal(rows.length,10806);
     assert.deepEqual(rows.map(row=>row.key),expected.sort());
-    assert.ok(rows.every(row=>row.revision==='0'));
+    assert.ok(rows.every(row=>row.revision===(row.key==='epoch'?'1':'0')));
     assert.equal(rows.some(row=>row.key.startsWith('order:')),false);
     assert.equal((await db.query('SELECT public.yo_finance_cache_coverage() AS covered')).rows[0].covered,true);
     // Read-only coverage must not repair a missing revision: the parent's
@@ -330,9 +366,11 @@ test('November FX recomposes composite reports without changing June child depen
     const keys=['fx-global','fx:2026-11','fx:2026-12'];
     const once=async sql=>{
       const before=await Promise.all(keys.map(key=>revision(db,key)));
+      const epochBefore=await revision(db,'epoch');
       await db.exec(sql);
       for(const [index,key] of keys.entries()) assert.equal(await revision(db,key),before[index]+1,key);
-      assert.deepEqual((await revisions(db)).map(row=>row.key),keys,'only global FX and the 31-day forward months change');
+      assert.equal(await revision(db,'epoch'),epochBefore,'FX changes do not invalidate all snapshots');
+      assert.deepEqual((await revisions(db)).map(row=>row.key),['epoch',...keys],'only global FX and the 31-day forward months change');
       for(const key of ['month:2026-06','tax:2026-06','fx:2026-06']) assert.equal(await revision(db,key),0,key);
     };
     await once(`INSERT INTO "HistoricalNbuRate" (currency,"incomeDate",status,"leaseToken","leaseUntil")

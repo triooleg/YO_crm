@@ -8,7 +8,7 @@ import type { ClientContactActions, ClientContactSaved } from "./orders/client-c
 import { queueParentMeasurementDraft } from "../lib/parent-measurements-message-draft";
 import {orderCostumeQuantity,orderAssignedAthleteCount,orderDesignCount,orderDesignImagePaths,orderImageUrl} from '../lib/order-composition-view';
 
-import { orderSourceUi as sourceUi } from "../lib/i18n";
+import { orderStatusSettingsUi, orderSourceUi as sourceUi } from "../lib/i18n";
 import { orderSources, parseSource, sourceOptions, sourceLabel, orderDisplayNumber, websiteItemName, type OrderSource, type OrderSourceFilter } from "../lib/order-source";
 import { ordersCsvCell } from "../lib/order-csv";
 import { CartIcon } from "./order-source-analytics";
@@ -17,12 +17,13 @@ import { orderSettlement } from "../lib/order-settlement.mjs";
 import { dataEvidenceUi } from "../lib/i18n";
 
 import { QuickPayment } from "./order-payment-dialog";
+import { SALES_STATUSES, type OrderStatusOption } from "../lib/order-status-options";
 import { SalesStatusSelect } from "./crm/sales-status-select";
 import { CountrySelect } from "./crm/country-select";
 import { findCountry } from "../lib/country-options.mjs";
-import { CSSProperties, Fragment, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Text, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
-import { useClickOutside } from "@mantine/hooks";
+import { CSSProperties, Fragment, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ActionIcon, Select, NumberInput, Badge, Button, Menu, Modal, Popover, Radio, Text, Tooltip, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { useClickOutside, useMediaQuery } from "@mantine/hooks";
 import { useStickyListControls } from "./crm/use-sticky-list-controls";
 import { designsInstancesUi as designsUi, orderFormUi, ordersDashboardUi as ui, productionUi, overviewContextUi, ordersClientHistoryUi } from "../lib/i18n";
 import { orderLabel, orderPaginationUi } from "../lib/orders-i18n";
@@ -67,56 +68,33 @@ const LEGACY_COLUMN_SETTINGS_KEY = "orders-dashboard-columns-v2";
 const SORT_SETTINGS_KEY = "orders-dashboard-sort-v1";
 const DEFAULT_COLUMNS: ColumnId[] = ["client", "model", "quantity", "deadline", "payment", "production", "delivery", "status", "created", "menu"];
 const SORTABLE_ORDER_COLUMNS: SortColumnId[] = [...DEFAULT_COLUMNS.filter((id): id is Exclude<ColumnId,"menu"> => id !== "menu"),"source"];
-const SALES_STATUSES = ["NEW_LEAD", "WAITING_CLIENT_REPLY", "NEEDS_ESTIMATE", "ESTIMATE_SENT", "DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL", "WAITING_DEPOSIT", "DEPOSIT_RECEIVED", "ORDER_CONFIRMED", "MEASUREMENTS_REQUIRED", "MEASUREMENTS_RECEIVED", "READY_FOR_PRODUCTION", "IN_PRODUCTION", "FINAL_DECORATION", "QUALITY_CONTROL", "PHOTO_SENT", "WAITING_FINAL_PAYMENT", "PAID", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "REVIEW_REQUESTED", "COMPLETED", "CANCELLED"];
+
 const DISCIPLINES = ["RHYTHMIC_GYMNASTICS", "ACROBATIC_GYMNASTICS", "FIGURE_SKATING", "AEROBIC_GYMNASTICS", "BATON_TWIRLING_MAJORETTE", "OTHER"] as const;
-const STATUS_COLOR_KEY_PREFIX = "orders-dashboard-status-color-v1:";
-type StatusColors = Partial<Record<string, string>>;
-
-function readStatusColors(): StatusColors {
-  const colors: StatusColors = {};
-  try {
-    for (const status of SALES_STATUSES) {
-      const color = window.localStorage.getItem(STATUS_COLOR_KEY_PREFIX + status);
-      if (color && /^#[0-9a-f]{6}$/i.test(color)) colors[status] = color;
-    }
-  } catch {
-    // Keep the standard palette when browser storage is unavailable.
-  }
-  return colors;
-}
-
 const NON_PRODUCTION_ORDER_TYPES = new Set(["READY_MODEL", "ACCESSORY", "WEBSITE_SALE", "STOCK_SALE"]);
 
 export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Props) {
   const { workspaceRef, controlsRef, tableRef } = useStickyListControls();
   const theme = useMantineTheme();
-  const [statusColors, setStatusColors] = useState<StatusColors>({});
+  const [statusOptions, setStatusOptions] = useState<OrderStatusOption[]>([]);
+  const [statusOptionsError, setStatusOptionsError] = useState(false);
+  const [statusOptionsAttempt, setStatusOptionsAttempt] = useState(0);
   useEffect(() => {
-    function syncStatusColors(event: StorageEvent) {
-      if (event.key === null || event.key.startsWith(STATUS_COLOR_KEY_PREFIX)) {
-        setStatusColors(readStatusColors());
-      }
-    }
-    setStatusColors(readStatusColors());
-    window.addEventListener("storage", syncStatusColors);
-    return () => window.removeEventListener("storage", syncStatusColors);
-  }, []);
-
-  function changeStatusColor(status: string, color: string | undefined) {
-    const key = STATUS_COLOR_KEY_PREFIX + status;
-    try {
-      if (color) window.localStorage.setItem(key, color);
-      else window.localStorage.removeItem(key);
-    } catch {
-      // The display can still be customized for the current page.
-    }
-    setStatusColors(current => {
-      const next = { ...current };
-      if (color) next[status] = color;
-      else delete next[status];
-      return next;
-    });
+    let active = true;
+    void request("/orders/status-options").then(options => {
+      if (!Array.isArray(options)) throw new Error();
+      if (active) { setStatusOptions(options); setStatusOptionsError(false); }
+    }).catch(() => { if (active) setStatusOptionsError(true); });
+    return () => { active = false; };
+  }, [statusOptionsAttempt]);
+  function statusLabel(status: string, fallback = status) {
+    const option = statusOptions.find(item => item.id === status);
+    return option?.label ?? orderLabel("sales", option?.baseStatus ?? fallback);
   }
+  function statusColor(order: Order) {
+    const option = statusOptions.find(item => item.id === (order.salesStatusOptionId ?? order.salesStatus));
+    return option?.color ?? undefined;
+  }
+
   const editableTextColor = (theme.other.crmControls as { editableTextColor: string }).editableTextColor;
   const [source,setSource]=useState<OrderSourceFilter>('');
   const [serverPage,setServerPage]=useState<LoadedOrderPage>();
@@ -194,6 +172,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const [deliveryContactOrderId, setDeliveryContactOrderId] = useState<string>();
   const [currencyOrderId, setCurrencyOrderId] = useState<string>();
   const [customerWishesOrderId, setCustomerWishesOrderId] = useState<string>();
+  const [shortNotesOrderId, setShortNotesOrderId] = useState<string>();
   const [managerCommentOrderId, setManagerCommentOrderId] = useState<string>();
   const [clientEditOrderId, setClientEditOrderId] = useState<string>();
   const [addDesignOrderId, setAddDesignOrderId] = useState<string>();
@@ -205,6 +184,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const [addAthleteOrderId, setAddAthleteOrderId] = useState<string>();
   const addAthleteTrigger = useRef<HTMLButtonElement>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [listOnly, setListOnly] = useState(true);
   const filtersRef = useClickOutside<HTMLDivElement>(() => setFilterOpen(false));
   const [columnsOpen, setColumnsOpen] = useState(false);
   const columnsTrigger = useRef<HTMLButtonElement>(null);
@@ -215,6 +195,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [preview, setPreview] = useState<Preview>();
+  const canHoverDesign = useMediaQuery("(width > 700px) and (hover: hover) and (pointer: fine)");
   const [newOrderOpen, setNewOrderOpen] = useState(false);
   const [newOrderClients, setNewOrderClients] = useState<OrderClientBrief[]>([]);
   const [newOrderClient, setNewOrderClient] = useState<OrderClientDetail>();
@@ -615,7 +596,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const filtered = useMemo(() => serverPage?orders.filter(order=>(!clientIdFilter||order.client.id===clientIdFilter)&&matchesClientOrderMinimum(order,minClientOrders)):orders.filter((order) => {
     if((clientIdFilter&&order.client.id!==clientIdFilter)||!matchesClientOrderMinimum(order,minClientOrders))return false;
     if (statusFilter === "active" && !isActiveOrder(order)) return false;
-    if (statusFilter !== "all" && statusFilter !== "active" && order.salesStatus !== statusFilter) return false;
+    if (statusFilter !== "all" && statusFilter !== "active" && order.salesStatus !== statusFilter && order.salesStatusOptionId !== statusFilter) return false;
     if (disciplineFilter !== "all" && order.discipline !== disciplineFilter) return false;
     if (quickFilter === "active" && !isActiveOrder(order)) return false;
     if (quickFilter === "urgent" && !(isOperationalOrder(order) && days(order) >= 0 && days(order) <= 7)) return false;
@@ -631,10 +612,10 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const sorted = useMemo<Order[]>(() => serverPage?filtered:sortOrders(filtered, sort, (order: Order, column: string) => {
     if (column === "model") return `${order.items[0]?.name || order.notes || ui.designMissing}|${discipline(order.discipline).label}`;
     if (column === "production") return `${order.productionSlot?.startsAt || ""}|${order.productionStatus}`;
-    if (column === "status") return orderLabel("sales", order.salesStatus);
+    if (column === "status") return statusLabel(order.salesStatusOptionId ?? order.salesStatus, order.salesStatus);
     if (column === "delivery") return `${countryLabel(deliveryCountry(order)) || ui.addressMissing}|${deliveryPlace(order)}|${orderLabel("shipping", order.shippingStatus)}`;
     return undefined;
-  }), [filtered, sort,serverPage]);
+  }), [filtered, sort, serverPage, statusOptions]);
   const orderPage = serverPage?{items:filtered,page:serverPage.page,totalPages:Math.max(1,Math.ceil(serverPage.total/pageSize))}:paginateOrders(sorted, page, pageSize);
   const totalRows=serverPage?.total??sorted.length;
   const totalPages = orderPage.totalPages;
@@ -705,6 +686,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   const deliveryContactOrder = orders.find((order) => order.id === deliveryContactOrderId);
   const currencyChangeOrder = orders.find((order) => order.id === currencyOrderId);
   const customerWishesOrder = orders.find((order) => order.id === customerWishesOrderId);
+  const shortNotesOrder = shortNotesOrderId ? orders.find(order => order.id === shortNotesOrderId) ?? orderDetails[shortNotesOrderId] : undefined;
   const managerCommentOrder = managerCommentOrderId ? orderDetails[managerCommentOrderId] ?? orders.find((order) => order.id === managerCommentOrderId) : undefined;
   const clientEditOrder = orders.find((order) => order.id === clientEditOrderId);
   const addDesignOrder = orders.find((order) => order.id === addDesignOrderId);
@@ -763,22 +745,26 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
   async function changeStatus(order: Order, field: "salesStatus" | "productionStatus", value: string) {
     if (statusRequests.current.has(order.id)) return;
     const previous = order[field];
+    const previousOptionId = order.salesStatusOptionId;
+    const option = field === "salesStatus" ? statusOptions.find(item => item.id === value && item.id !== item.baseStatus) : undefined;
+    const nextValue = option?.baseStatus ?? value;
     statusRequests.current.add(order.id);
     setStatusPending((current) => new Set(current).add(order.id));
-    const applyLocalStatus = (nextValue: string) => {
-      setOrders((items) => items.map((item) => item.id === order.id ? { ...item, [field]: nextValue } : item));
+    const applyLocalStatus = (nextValue: string, optionId?: string | null) => {
+      const changes = { [field]: nextValue, ...(field === "salesStatus" ? { salesStatusOptionId: optionId ?? null } : {}) };
+      setOrders((items) => items.map((item) => item.id === order.id ? { ...item, ...changes } : item));
       setOrderDetails((current) => {
         const detail = current[order.id];
-        return detail ? { ...current, [order.id]: { ...detail, [field]: nextValue } as OrderDetail } : current;
+        return detail ? { ...current, [order.id]: { ...detail, ...changes } as OrderDetail } : current;
       });
     };
-    applyLocalStatus(value);
+    applyLocalStatus(nextValue, option?.id);
     try {
-      const updated = await request(`/orders/${order.id}/statuses`, { method: "PATCH", body: JSON.stringify({ [field]: value }) }) as Partial<Order>;
-      applyLocalStatus(String(updated[field] ?? value));
+      const updated = await request(`/orders/${order.id}/statuses`, { method: "PATCH", body: field === "salesStatus" ? JSON.stringify({ salesStatusOptionId: value }) : JSON.stringify({ [field]: value }) }) as Partial<Order>;
+      applyLocalStatus(String(updated[field] ?? nextValue), updated.salesStatusOptionId);
     }
     catch (reason) {
-      applyLocalStatus(previous);
+      applyLocalStatus(previous, previousOptionId);
       setError((reason as Error).message);
       statusRequests.current.delete(order.id);
       setStatusPending((current) => { const next = new Set(current); next.delete(order.id); return next; });
@@ -810,14 +796,15 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       setError((reason as Error).message);
     }
   }
-  function showPreview(event: ReactMouseEvent<HTMLImageElement>) {
+  function showPreview(event: ReactPointerEvent<HTMLImageElement>) {
+    if (!canHoverDesign || event.pointerType !== "mouse") return;
     const image = event.currentTarget, width = Math.min(520, window.innerWidth - 24), left = event.clientX + width + 24 < window.innerWidth ? event.clientX + 16 : Math.max(12, event.clientX - width - 16), top = 12;
     setPreview({ src: image.src, left, top, width });
   }
   async function exportOrders() {
     let exported=sorted;
     try{if(serverPage){exported=[];for(let p=1;;p++){const result=await request(orderListPath(search,overviewContext,source,{page:String(p),pageSize:'100',focusId:''})) as OrderListPage;exported.push(...result.items);if(exported.length>=result.total||!result.items.length)break;}}}catch(reason){setError((reason as Error).message);return;}
-    const rows = [[...ui.csvHeaders,sourceUi.filter], ...exported.map((order) => [orderDisplayNumber(order), order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), orderLabel("sales", order.salesStatus), deliveryPlace(order), orderProblems(order).join("; "),sourceLabel(order.orderSource)])];
+    const rows = [[...ui.csvHeaders,sourceUi.filter], ...exported.map((order) => [orderDisplayNumber(order), order.client.displayName, String(itemQuantity(order)), discipline(order.discipline).label, deliveryDate(order), String(order.priceMinor), paid(order) == null ? "" : String(paid(order)), balance(order) == null ? "" : String(balance(order)), statusLabel(order.salesStatusOptionId ?? order.salesStatus, order.salesStatus), deliveryPlace(order), orderProblems(order).join("; "),sourceLabel(order.orderSource)])];
     const csv = rows.map((row) => row.map(ordersCsvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
@@ -860,7 +847,7 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
     }
   }
 
-  return <section ref={workspaceRef} className="phase2-main orders-page orders-dashboard" style={{ "--od-editable": editableTextColor } as CSSProperties}>
+  return <section ref={workspaceRef} className="phase2-main orders-page orders-dashboard" data-list-only={listOnly} style={{ "--od-editable": editableTextColor } as CSSProperties}>
     <header className="phase2-header orders-dashboard-header">
       <div className="orders-dashboard-title"><Text component="div" size="xs" fw={700} c="yoleotard">{ui.eyebrow}</Text><h1>{ui.title}</h1></div>
     <div className="orders-kpi-grid">
@@ -882,11 +869,15 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
     <div ref={controlsRef} className="orders-sticky-controls">
     <div className="orders-command-bar">
       <CrmSearchField className="orders-search" value={search} onValueChange={value=>{cancelPreviousOrderNavigation();setSearch(value);}} placeholder={ui.search} ariaLabel={ui.search} clearLabel={ui.clearSearch} showSearchIcon />
+      <CrmButton tone="secondary" className="orders-list-toggle" aria-label={listOnly ? ui.showOrdersPanel : ui.listOnly} onClick={() => {
+        if (!listOnly) setFilterOpen(false);
+        setListOnly(!listOnly);
+      }}>{listOnly ? ui.ordersPanel : ui.listOnly}</CrmButton>
       <div className="orders-filter-wrap" ref={filtersRef}>
         <CrmButton tone="secondary" className={`orders-filter-trigger${filterOpen ? " active" : ""}`} onClick={() => setFilterOpen((value) => !value)}><UiIcon name="filter" />{ui.filters}{filterCount > 0 && <b>{filterCount}</b>}</CrmButton>
         {filterOpen && <div className="orders-filter-popover" role="dialog" aria-label={ui.filters}>
           <Select label={sourceUi.filter} value={source} onChange={value=>{cancelPreviousOrderNavigation();setSource(parseSource(value));}} data={sourceOptions()} allowDeselect={false} comboboxProps={{withinPortal:false}}/>
-          <CrmNativeSelect label={ui.filterStatus} value={statusFilter} onChange={(event) => {cancelPreviousOrderNavigation();setStatusFilter(event.target.value);}} data={[{ value: "all", label: ui.allStatuses }, { value: "active", label: ui.kpis.active }, ...SALES_STATUSES.map((status) => ({ value: status, label: orderLabel("sales", status) }))]} />
+          <CrmNativeSelect label={ui.filterStatus} value={statusFilter} onChange={(event) => {cancelPreviousOrderNavigation();setStatusFilter(event.target.value);}} data={[{ value: "all", label: ui.allStatuses }, { value: "active", label: ui.kpis.active }, ...[...SALES_STATUSES, ...statusOptions.filter(option => option.id !== option.baseStatus).map(option => option.id)].map(status => ({ value: status, label: statusLabel(status) }))]} />
           <CrmNativeSelect label={ui.discipline} value={disciplineFilter} onChange={(event) => {cancelPreviousOrderNavigation();setDisciplineFilter(event.target.value);}} data={[{ value: "all", label: ui.anyDiscipline }, ...disciplines.map((value) => ({ value, label: discipline(value).label }))]} />
           <NumberInput label={ui.minClientOrders} placeholder={ui.minClientOrdersAny} value={minClientOrders} min={2} max={100000} step={1} allowDecimal={false} allowNegative={false} onChange={value=>{cancelPreviousOrderNavigation();setMinClientOrders(String(value));}}/>
           <CrmButton tone="secondary" onClick={clearFilters}>{ui.clearAll}</CrmButton>
@@ -904,7 +895,8 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       {minClientOrders&&<FilterChip label={`${ui.minClientOrders}: ${minClientOrders}`} onRemove={()=>{cancelPreviousOrderNavigation();setMinClientOrders('');}}/>}
       {source&&<FilterChip label={`${sourceUi.filter}: ${sourceLabel(source)}`} onRemove={()=>setSource('')}/>}
       {quickFilter !== "all" && <FilterChip label={quickFilterLabel(quickFilter)} onRemove={() => setQuickFilter("all")} />}
-      {statusFilter !== "all" && <FilterChip label={statusFilter === "active" ? ui.activeStatus : `${ui.statusPrefix}: ${orderLabel("sales", statusFilter)}`} onRemove={() => {cancelPreviousOrderNavigation();setStatusFilter("all");}} />}
+      {statusOptionsError && <Button size="compact-xs" variant="subtle" onClick={() => setStatusOptionsAttempt(attempt => attempt + 1)}>{orderStatusSettingsUi.retry}</Button>}
+      {statusFilter !== "all" && <FilterChip label={statusFilter === "active" ? ui.activeStatus : `${ui.statusPrefix}: ${statusLabel(statusFilter)}`} onRemove={() => {cancelPreviousOrderNavigation();setStatusFilter("all");}} />}
       {disciplineFilter !== "all" && <FilterChip label={`${ui.discipline}: ${discipline(disciplineFilter).label}`} onRemove={() => {cancelPreviousOrderNavigation();setDisciplineFilter("all");}} />}
       <button className="orders-clear-filters" onClick={clearFilters}>{ui.clearAll}</button>
     </div>}
@@ -920,9 +912,9 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
           {loading && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><span className="orders-loader" />{ui.loading}</td></tr>}
           {!loading && !error && !shown.length && <tr className="orders-state-row"><td colSpan={visibleColumns.length + 1}><strong>{ui.empty}</strong><small>{ui.emptyHint}</small>{(clientIdFilter || minClientOrders || source || quickFilter !== "all" || statusFilter !== "all" || disciplineFilter !== "all") && <button onClick={clearFilters}>{ui.clearAll}</button>}</td></tr>}
           {!loading && shown.map((order) => <Fragment key={order.id}>
-            <tr data-sales-status={order.salesStatus} style={{"--order-status-color":statusColors[order.salesStatus] ?? theme.colors[crmStatusPresentation("sales",order.salesStatus).color]![6]} as CSSProperties} className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
+            <tr data-sales-status={order.salesStatus} style={{"--order-status-color":statusColor(order) ?? theme.colors[crmStatusPresentation("sales",order.salesStatus).color]![6]} as CSSProperties} className={`orders-summary-row${expandedId === order.id ? " is-expanded" : ""}`}>
               <td className="orders-controls"><button className="orders-expand" aria-label={expandedId === order.id ? ui.collapse : ui.expand} aria-expanded={expandedId === order.id} aria-controls={`order-details-${order.id}`} onClick={() => void toggleExpanded(order)}><UiIcon name={expandedId === order.id ? "chevronDown" : "chevronRight"} /></button><input type="checkbox" aria-label={ui.selectOrder} checked={selectedIds.has(order.id)} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); event.target.checked ? next.add(order.id) : next.delete(order.id); return next; })} /></td>
-              {visibleColumns.map((id) => <OrderCell key={id} createdDateActions={["OWNER","ADMIN","MANAGER"].includes(role)?{request,onSaved:refreshCreatedDate}:undefined} id={id} order={order} historyCache={clientHistoryCache} historyEnabled={canReadClientHistory} historyRevision={clientHistoryRevision} onShowClientOrders={navigateClientHistory} onOpenClientOrder={(orderId,client)=>navigateClientHistory(client,orderId)} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} statusColor={statusColors[order.salesStatus]} onStatusColor={color => changeStatusColor(order.salesStatus, color)} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => void toggleExpanded(order)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onDelivery={() => setDeliveryOrderId(order.id)} />)}
+              {visibleColumns.map((id) => <OrderCell key={id} createdDateActions={["OWNER","ADMIN","MANAGER"].includes(role)?{request,onSaved:refreshCreatedDate}:undefined} id={id} order={order} historyCache={clientHistoryCache} historyEnabled={canReadClientHistory} historyRevision={clientHistoryRevision} onShowClientOrders={navigateClientHistory} onOpenClientOrder={(orderId,client)=>navigateClientHistory(client,orderId)} columnOrder={columnOrder} expanded={expandedId === order.id} detailsId={`order-details-${order.id}`} statusPending={statusPending.has(order.id)} statusColor={statusColor(order)} statusOptions={statusOptions} onStatus={(current, value) => void changeStatus(current, "salesStatus", value)} onDeadline={changeDeadline} onDiscipline={changeDiscipline} onPreview={showPreview} onPreviewLeave={() => setPreview(undefined)} onExpand={() => void toggleExpanded(order)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onShortNotes={() => setShortNotesOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} />)}
             </tr>
             {expandedId === order.id && <tr className="orders-expanded-row"><td colSpan={visibleColumns.length + 1}><div id={`order-details-${order.id}`} role="region" aria-label={`${ui.orderDetails} ${order.number}`}>{detailPending.has(order.id) && <span className="orders-detail-loading">{ui.loading}</span>}<ExpandedOrder clientHistory={canReadClientHistory?{cache:clientHistoryCache,revision:clientHistoryRevision,enabled:canReadClientHistory,renderSourceIcon:source=><OrderChannelIcon channel={source}/>,renderCountryFlag:country=><CountryFlag country={country}/>,onShowOrders:navigateClientHistory,onOpenOrder:(orderId,client)=>navigateClientHistory(client,orderId)}:undefined} clientContactActions={["OWNER","ADMIN","MANAGER"].includes(role)?{request,onSaved:refreshClientContactRows}:undefined} taxRole={role} onOpenOrder={id=>void openPreviousOrder(id)} expenseActions={canOpenOrderFinance(role)?{request,onSaved:()=>refreshAfterMutation(order.id).then(()=>undefined),onCancellationSaved:()=>refreshOrder(order.id,true).then(()=>undefined)}:undefined} compositionActions={["OWNER", "ADMIN", "MANAGER"].includes(role) ? { request, onSaved: () => refreshOrder(order.id, true).then(() => undefined) } : undefined} financeActions={["OWNER", "ADMIN", "MANAGER"].includes(role) ? { request, onSaved: () => refreshAfterMutation(order.id).then(() => undefined) } : undefined} onVoidPayment={["OWNER", "ADMIN", "ACCOUNTANT"].includes(role) ? (paymentId, reason, expectedOrderUpdatedAt) => voidOrderPayment(order.id, paymentId, reason, expectedOrderUpdatedAt) : undefined} measurementActions={["OWNER", "ADMIN", "MANAGER"].includes(role) ? { request, onSaved: () => refreshAfterMutation(order.id).then(() => undefined) } : undefined} order={orderDetails[order.id] ?? order} paymentTrigger={paymentTrigger} addAthleteButtonRef={addAthleteTrigger} statusPending={statusPending.has(order.id)} onStatus={(field, value) => void changeStatus(orderDetails[order.id] ?? order, field, value)} onClient={() => onNavigate("clients", { clientId: order.client.id, orderId: order.id })} onEditClient={() => setClientEditOrderId(order.id)} onConversation={() => onNavigate("inbox", { clientId: order.client.id, clientName: order.client.displayName, orderId: order.id })} onProduction={() => onNavigate("production", { orderId: order.id })} onFinance={canOpenOrderFinance(role) ? () => onNavigate("finance", { orderId: order.id }) : undefined} onPayment={() => setPaymentOrderId(order.id)} onDelivery={() => setDeliveryOrderId(order.id)} onDeliveryContact={() => setDeliveryContactOrderId(order.id)} onMeasurements={(itemId) => setMeasurementTarget({ orderId: order.id, itemId })} onAddAthlete={["OWNER", "ADMIN", "MANAGER"].includes(role) ? () => setAddAthleteOrderId(order.id) : undefined} onBindMeasurement={(itemId,measurementId,expectedMeasurementId)=>bindOrderItemMeasurement(order.id,itemId,measurementId,expectedMeasurementId)} onCurrency={() => setCurrencyOrderId(order.id)} onManagerComment={() => setManagerCommentOrderId(order.id)} onCustomerWishes={() => setCustomerWishesOrderId(order.id)} onEdit={() => void openEditOrder(order)} onAddDesign={()=>setAddDesignOrderId(order.id)} onEditItem={(itemId) => setEditDesign({ orderId: order.id, itemId })} onUploadFile={(file)=>uploadOrderFile(order.id,file)} onArchiveFile={canArchiveOrders ? fileId => archiveOrderFile(order.id, fileId) : undefined} onImage={(itemId, expectedModelImagePath, file) => changeOrderImage(order, itemId, expectedModelImagePath, file)} onCreateNote={(input) => createOrderNote(order.id, input)} onUpdateNote={(noteId, input) => updateOrderNote(order.id, noteId, input)} onArchiveNote={["OWNER", "ADMIN", "MANAGER"].includes(role) ? (noteId) => archiveOrderNote(order.id, noteId) : undefined} onCreateShipment={(input) => createOrderShipment(order.id, input)} onUpdateShipment={(shipmentId, input) => updateOrderShipment(order.id, shipmentId, input)} onUpdateInstance={(instanceId, input) => updateOrderItemInstance(order.id, instanceId, input)} onUpdateClientPreferences={(preferences) => updateClientPreferences(order.id, order.client.id, preferences, (orderDetails[order.id] ?? order).client.updatedAt)} onUploadClientFile={(file) => uploadClientFile(order.id, order.client.id, file)} /></div></td></tr>}
           </Fragment>)}
@@ -949,13 +941,14 @@ export function OrdersDashboard({ role, onNavigate, onWebsiteOrderReviewed }: Pr
       <p><strong>{ui.selected}: {selectedIds.size}</strong></p>
       <div className="orders-archive-actions"><CrmButton tone="secondary" disabled={archiving} onClick={() => setArchiveOpen(false)}>{ui.archiveOrdersCancel}</CrmButton><CrmButton color="red" loading={archiving} onClick={() => void archiveSelectedOrders()}>{archiving ? ui.archiving : ui.archiveOrdersConfirm}</CrmButton></div>
     </Modal>
-    {preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} referrerPolicy="no-referrer" style={{ left: preview.left, top: preview.top, width: preview.width }} />}
+    {canHoverDesign && preview && <img className="orders-image-preview" src={preview.src} alt={ui.enlargedModel} referrerPolicy="no-referrer" style={{ left: preview.left, top: preview.top, width: preview.width }} />}
     {newOrderOpen && !newOrderClient && <OrderClientPicker clients={newOrderClients} loading={newOrderLoading} query={newOrderQuery} onQuery={setNewOrderQuery} onSelect={(id) => void selectNewOrderClient(id)} onClose={closeNewOrder} />}
     {newOrderClient && <OrderPanel client={newOrderClient} request={request} onClose={closeNewOrder} onSaved={async () => { closeNewOrder(); await load({ background: true }); }} />}
     {paymentOrder && <QuickPayment order={paymentOrder} request={request} onClose={closePayment} onSaved={async () => { closePayment(); await refreshAfterMutation(paymentOrder.id); }} />}
     {deliveryOrder && <DeliveryAddressModal order={deliveryOrder} request={request} onClose={() => setDeliveryOrderId(undefined)} onSaved={async () => { setDeliveryOrderId(undefined); await refreshAfterMutation(deliveryOrder.id); }} />}
     {deliveryContactOrder && <DeliveryContactModal order={deliveryContactOrder} request={request} onClose={() => setDeliveryContactOrderId(undefined)} onSaved={async () => { const orderId = deliveryContactOrder.id; setDeliveryContactOrderId(undefined); await refreshAfterMutation(orderId); }} />}
     {currencyChangeOrder && <CurrencyChangeModal order={currencyChangeOrder} request={request} onClose={() => setCurrencyOrderId(undefined)} onSaved={async () => { setCurrencyOrderId(undefined); await refreshAfterMutation(currencyChangeOrder.id); }} />}
+    {shortNotesOrder && <CustomerWishesModal key={shortNotesOrder.id} compact order={shortNotesOrder} request={request} onClose={() => setShortNotesOrderId(undefined)} onSaved={async () => { setShortNotesOrderId(undefined); await refreshAfterMutation(shortNotesOrder.id); }} />}
     {managerCommentOrder && <CustomerWishesModal kind="manager" order={managerCommentOrder} request={request} onClose={() => setManagerCommentOrderId(undefined)} onSaved={async () => { const orderId = managerCommentOrder.id; setManagerCommentOrderId(undefined); await refreshAfterMutation(orderId); }} />}
     {customerWishesOrder && <CustomerWishesModal order={customerWishesOrder} request={request} onClose={() => setCustomerWishesOrderId(undefined)} onSaved={async () => { const orderId = customerWishesOrder.id; setCustomerWishesOrderId(undefined); await refreshAfterMutation(orderId); }} />}
     {clientEditOrder && <ClientEditModal order={orderDetails[clientEditOrder.id]??clientEditOrder} request={request} onClose={()=>setClientEditOrderId(undefined)} onSaved={async()=>{const orderId=clientEditOrder.id;setClientEditOrderId(undefined);await refreshAfterMutation(orderId)}}/>}
@@ -981,7 +974,7 @@ function OrderDisciplineMenu({ order, onChange }: { order: Order; onChange: (ord
   </Menu>;
 }
 
-function OrderCell({ createdDateActions, historyCache, historyRevision=0, historyEnabled=false, onShowClientOrders, onOpenClientOrder, id, order, columnOrder, expanded, detailsId, statusPending, statusColor, onStatusColor, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onDelivery }: { createdDateActions?:OrderCreatedDateActions; historyCache?:HistoryCache; historyRevision?:number; historyEnabled?:boolean; onShowClientOrders?:(client:HistoryClient)=>void; onOpenClientOrder?:(orderId:string,client:HistoryClient)=>void; id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; statusColor?: string; onStatusColor: (color: string | undefined) => void; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onDelivery: () => void }) {
+function OrderCell({ createdDateActions, historyCache, historyRevision=0, historyEnabled=false, onShowClientOrders, onOpenClientOrder, id, order, columnOrder, expanded, detailsId, statusPending, statusColor, statusOptions, onStatus, onDeadline, onDiscipline, onPreview, onPreviewLeave, onExpand, onClient, onProduction, onShortNotes, onDelivery }: { createdDateActions?:OrderCreatedDateActions; historyCache?:HistoryCache; historyRevision?:number; historyEnabled?:boolean; onShowClientOrders?:(client:HistoryClient)=>void; onOpenClientOrder?:(orderId:string,client:HistoryClient)=>void; id: ColumnId; order: Order; columnOrder: ColumnId[]; expanded: boolean; detailsId: string; statusPending: boolean; statusColor?: string; statusOptions: OrderStatusOption[]; onStatus: (order: Order, value: string) => void; onDeadline: (order: Order, value: string) => void; onDiscipline: (order: Order, value: string) => void; onPreview: (event: ReactPointerEvent<HTMLImageElement>) => void; onPreviewLeave: () => void; onExpand: () => void; onClient: () => void; onProduction: () => void; onShortNotes: () => void; onDelivery: () => void }) {
   const style = { order: columnOrder.indexOf(id) + 1 } as CSSProperties;
   if (id === "client") return <td className="orders-col orders-col-client" style={style}><div className="orders-client-cell"><button className="orders-order-number" onClick={onExpand} aria-expanded={expanded} aria-controls={detailsId} title={order.number}>{orderDisplayNumber(order)}</button>{order.orderSource==='WEBSITE' ? <span className="orders-channel website" role="img" aria-label={sourceLabel('WEBSITE')} title={sourceLabel('WEBSITE')}><CartIcon/></span> : <OrderChannelIcon channel={order.client.source} />}<div className="orders-client-identity-text"><div className="orders-client-name-row"><button className="orders-client-name-button" onClick={onClient} title={order.client.displayName} aria-label={order.client.displayName}><strong>{order.client.displayName}</strong></button>{historyCache&&onShowClientOrders&&onOpenClientOrder&&<ClientOrderHistory client={order.client} cache={historyCache} revision={historyRevision} enabled={historyEnabled} renderSourceIcon={source=><OrderChannelIcon channel={source}/>} renderCountryFlag={country=><CountryFlag country={country}/>} onShowOrders={onShowClientOrders} onOpenOrder={onOpenClientOrder}/>}</div><small title={countryLabel(order.client.country)||ui.countryMissing}><CountryFlag country={order.client.country}/>{countryLabel(order.client.country)||ui.countryMissing}</small></div></div></td>;
   if (id === "model") { const modelName = websiteItemName(order,order.items[0]?.name || order.notes || ui.designMissing); return <td className="orders-col orders-col-model" style={style}><div className="orders-model-sport-cell"><OrderDesigns order={order} onPreview={onPreview} onLeave={onPreviewLeave} /><div><strong title={modelName}>{modelName}</strong><OrderDisciplineMenu order={order} onChange={onDiscipline} />{designCount(order) > 1 && <em>+{designCount(order) - 1}</em>}</div></div></td>; }
@@ -989,13 +982,25 @@ function OrderCell({ createdDateActions, historyCache, historyRevision=0, histor
   if (id === "deadline") {const openPicker=(target:HTMLLabelElement)=>{const input=target.querySelector("input");if(typeof input?.showPicker==="function")input.showPicker();else input?.focus()};return <td className={`orders-col orders-col-deadline ${days(order) < 0 ? "orders-danger" : days(order) <= 7 ? "orders-warning" : ""}`} style={style}><label className="orders-deadline-button" role="button" tabIndex={0} onClick={event=>openPicker(event.currentTarget)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openPicker(event.currentTarget)}}}><strong>{deliveryDate(order)}</strong><small>{dayText(order)}</small><input tabIndex={-1} type="date" value={order.requiredDeliveryAt?.slice(0, 10) || ""} onChange={(event) => void onDeadline(order, event.target.value)} aria-label={ui.changeDeadline} /></label></td>}
   if (id === "payment") { const received = paid(order), percent = received === null ? null : order.priceMinor > 0 ? Math.min(100, Math.round(received / order.priceMinor * 100)) : 0; return <td className="orders-col orders-col-payment" style={style}><strong>{money(received, order.currency)} / {money(order.priceMinor, order.currency)}</strong><div className="orders-payment-progress" aria-label={percent === null ? dataEvidenceUi.unavailable : `${percent}%`}><i style={{ width: `${percent ?? 0}%` }} /></div><small className={hasBalance(order) ? "orders-balance-line" : "orders-paid-line"}>{balance(order) === null ? dataEvidenceUi.unavailable : hasBalance(order) ? `${ui.balancePrefix} ${money(balance(order), order.currency)}` : ui.paid}</small><em>{percent === null ? dataEvidenceUi.unavailable : `${percent}%`}</em></td>; }
   if (id === "production") {
-    if(order.salesStatus==='COMPLETED') return <td className="orders-col orders-col-production" style={style}>{hasDatedProductionSlot(order)&&<strong>{slotDateRange(order)}</strong>}<Badge component="span" color="green" variant="light" radius="xl" size="sm">{productionUi.productionFulfilled}</Badge></td>;
+    const note = order.buyerComment || order.notes;
+    const noteLabel = `${ui.shortNotes}: ${order.number}`;
+    const withNote = (content: ReactNode) => <td className="orders-col orders-col-production" style={style}>
+      <div className="orders-production-cell">
+        <div>{content}</div>
+        <Tooltip withinPortal multiline w={260} label={note || ui.emptyShortNotes}
+          events={{ hover: true, focus: true, touch: false }} classNames={{ tooltip: "orders-short-note-preview" }}>
+          <ActionIcon type="button" size="sm" variant={note ? "light" : "subtle"} color={note ? "violet" : "gray"}
+            aria-label={noteLabel} data-has-note={Boolean(note)} onClick={onShortNotes}><UiIcon name="note" /></ActionIcon>
+        </Tooltip>
+      </div>
+    </td>;
+    if(order.salesStatus==='COMPLETED') return withNote(<>{hasDatedProductionSlot(order)&&<strong>{slotDateRange(order)}</strong>}<Badge component="span" color="green" variant="light" radius="xl" size="sm">{productionUi.productionFulfilled}</Badge></>);
     const presentation = orderProductionStatusPresentation(order);
     const shippingLabels: Record<string, string> = { SHIPPED: productionUi.shippingShipped, DELIVERED: productionUi.shippingDelivered, RETURNED: productionUi.shippingReturned, LOST: productionUi.shippingLost };
     const badge = presentation.domain === "shipping" ? <Badge component="span" className="crm-status-badge" color={crmStatusPresentation("shipping", presentation.status).color} data-domain="shipping" data-status={presentation.status} radius="xl" size="sm" variant="light">{shippingLabels[presentation.status]}</Badge> : <CrmStatusBadge {...presentation}/>;
-    return <td className="orders-col orders-col-production" style={style}>{hasDatedProductionSlot(order) ? <><strong>{slotDateRange(order)}</strong>{badge}</> : <>{presentation.domain === "shipping" ? badge : order.orderSource!=='WEBSITE' && <small>{ui.notSpecified}</small>}{order.orderSource==='WEBSITE' ? <small className="orders-website-sale">{sourceUi.websiteSale}</small> : !NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</td>;
+    return withNote(<>{hasDatedProductionSlot(order) ? <><strong>{slotDateRange(order)}</strong>{badge}</> : <>{presentation.domain === "shipping" ? badge : order.orderSource!=='WEBSITE' && <small>{ui.notSpecified}</small>}{order.orderSource==='WEBSITE' ? <small className="orders-website-sale">{sourceUi.websiteSale}</small> : !NON_PRODUCTION_ORDER_TYPES.has(order.type) && <button className="orders-assign-production" title={ui.scheduleProduction} onClick={onProduction}>{ui.scheduleProduction}</button>}</>}</>);
   }
-  if (id === "status") return <td className="orders-col orders-col-status" style={style}><SalesStatusSelect disabled={statusPending} value={order.salesStatus} statuses={SALES_STATUSES} onChange={value => void onStatus(order,value)} color={statusColor} onColorChange={onStatusColor} /></td>;
+  if (id === "status") return <td className="orders-col orders-col-status" style={style}><SalesStatusSelect disabled={statusPending} value={order.salesStatusOptionId ?? order.salesStatus} baseStatus={order.salesStatus} statuses={SALES_STATUSES} overrides={statusOptions} onChange={value => void onStatus(order,value)} color={statusColor} /></td>;
   if (id === "delivery") { const shipped = orderHasShippedDelivery(order), tracking = orderTrackingNumber(order); return <td className="orders-col orders-col-delivery" style={style}><UnstyledButton className={shipped ? "orders-delivery-cell-button is-shipped" : "orders-delivery-cell-button"} onClick={onDelivery} aria-label={`${ui.editDeliveryAddress}: ${order.number}`}><strong><CountryFlag country={deliveryCountry(order)} />{countryLabel(deliveryCountry(order)) || ui.addressMissing}</strong>{shipped ? <small>{tracking || ui.trackingMissing}</small> : <><small>{deliveryPlace(order)}</small><small>{[order.shipment?.carrier ? carrierLabel(order.shipment.carrier) : order.deliveryServiceName, orderLabel("shipping", order.shippingStatus)].filter(Boolean).join(" · ")}</small>{tracking && <small>{tracking}</small>}</>}</UnstyledButton></td>; }
   if (id === "created") return <td className="orders-col orders-col-created" style={style}><OrderCreatedDateEditor order={order} actions={createdDateActions}>{orderCreatedDateLabel(order.createdAt)}</OrderCreatedDateEditor><small>{ageText(order.createdAt)}</small></td>;
   return <td className="orders-col orders-col-menu" style={style}><button className="orders-menu-button" onClick={onExpand} aria-label={expanded ? ui.collapse : ui.expand} title={expanded ? ui.collapse : ui.expand} aria-expanded={expanded} aria-controls={detailsId}>•••</button></td>;
@@ -1084,26 +1089,36 @@ function shortDate(value: string) { return new Intl.DateTimeFormat("ru-RU", { da
 
 type ExchangeRateStatus = { provider: "ECB" | "NBU" | "MONOBANK"; officialUrl: string; supportedPairs: readonly string[]; cache: null | { effectiveDate: string; fetchedAt: string } };
 
-function CustomerWishesModal({ order, kind = "buyer", request, onClose, onSaved }: { kind?: "buyer" | "manager"; order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
+function CustomerWishesModal({ order, kind = "buyer", compact = false, request, onClose, onSaved }: { compact?: boolean; kind?: "buyer" | "manager"; order: Order; request: (path: string, init?: RequestInit) => Promise<unknown>; onClose: () => void; onSaved: () => Promise<void> }) {
   const manager = kind === "manager";
-  const title = manager ? ui.editManagerComment : ui.editCustomerWishes;
-  const [value, setValue] = useState((manager ? order.managerComment : order.buyerComment) || "");
+  const title = compact ? ui.shortNotes : manager ? ui.editManagerComment : ui.editCustomerWishes;
+  const [snapshot] = useState(() => ({
+    buyerComment: order.buyerComment ?? null,
+    managerComment: order.managerComment ?? null,
+    legacyNote: compact ? order.notes?.trim() : undefined,
+  }));
+  const original = (manager ? snapshot.managerComment : snapshot.buyerComment || snapshot.legacyNote) || "";
+  const [value, setValue] = useState(original);
+  const changed = value.trim() !== original.trim();
+  const needsReplacement = Boolean(snapshot.legacyNote && !value.trim());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault();
+    if (compact && (!changed || needsReplacement)) return;
+    setBusy(true); setError("");
     try {
       const path = manager ? `/orders/${order.id}/manager-comment` : `/orders/${order.id}/buyer-comment`;
-      await request(path, { method: "PATCH", body: JSON.stringify(manager ? { managerComment: value.trim() || null, expectedManagerComment: order.managerComment ?? null } : { buyerComment: value.trim() || null, expectedBuyerComment: order.buyerComment ?? null }) });
+      await request(path, { method: "PATCH", body: JSON.stringify(manager ? { managerComment: value.trim() || null, expectedManagerComment: snapshot.managerComment } : { buyerComment: value.trim() || null, expectedBuyerComment: snapshot.buyerComment }) });
       await onSaved();
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
   }
-  return <Modal opened onClose={onClose} centered size={480} aria-label={`${title}: ${order.number}`} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus title={title}>
+  return <Modal opened onClose={onClose} centered size={compact ? 360 : 480} aria-label={`${title}: ${order.number}`} closeButtonProps={{ "aria-label": ui.close, disabled: busy }} closeOnEscape={!busy} closeOnClickOutside={!busy} returnFocus title={title}>
     <form className="orders-customer-wishes-form" onSubmit={submit}>
-      <CrmTextarea data-autofocus autoFocus highlighted label={manager ? ui.managerNotes : ui.customerWishes} value={value} onChange={(event) => setValue(event.target.value)} autosize minRows={4} maxRows={10} maxLength={5000} />
+      <CrmTextarea data-autofocus autoFocus highlighted label={compact ? ui.shortNotes : manager ? ui.managerNotes : ui.customerWishes} description={needsReplacement ? ui.replaceLegacyShortNote : undefined} value={value} onChange={(event) => setValue(event.target.value)} autosize minRows={compact ? 3 : 4} maxRows={10} maxLength={5000} />
       {error && <CrmAlert>{error}</CrmAlert>}
-      <footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy}>{ui.save}</CrmButton></footer>
+      <footer><CrmButton type="button" tone="secondary" disabled={busy} onClick={onClose}>{ui.cancel}</CrmButton><CrmButton type="submit" loading={busy} disabled={compact && (!changed || needsReplacement)}>{ui.save}</CrmButton></footer>
     </form>
   </Modal>;
 }
@@ -1221,7 +1236,7 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
 function Detail({ label, value }: { label: string; value: ReactNode }) { return <div className="orders-detail"><small>{label}</small><strong>{value}</strong></div>; }
 function EditableDetail({ label, value, onClick }: { label: string; value: ReactNode; onClick: () => void }) { return <UnstyledButton className="orders-detail orders-editable-detail" onClick={onClick} aria-label={`${ui.editDeliveryAddress}: ${label}`}><small>{label}</small><strong>{value}</strong></UnstyledButton>; }
 
-function UiIcon({ name }: { name: string }) { const paths: Record<string, React.ReactNode> = { reset: <><path d="M3 10a9 9 0 1 1 2 9"/><path d="M3 4v6h6"/></>, search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>, filter: <><path d="M4 5h16M7 12h10M10 19h4" /></>, settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></>, edit: <><path d="m4 20 4.2-1 10.4-10.4a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z" /><path d="m14.5 7.1 2.8 2.8" /></>, download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>, chevronRight: <path d="m9 6 6 6-6 6" />, chevronLeft: <path d="m15 6-6 6 6 6" />, chevronDown: <path d="m6 9 6 6 6-6" />, warning: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4m0 3h.01" /></>, image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 15-5-5L5 20" /></>, bag: <><path d="M6 8h12l1 13H5L6 8Z" /><path d="M9 9V6a3 3 0 0 1 6 0v3" /></>, payment: <><path d="M7 3h10v18H7z" /><path d="M10 7h4m-4 4h4m-5 6h6" /></>, calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>, clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>, truck: <><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>, check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></> }; return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.check}</svg>; }
+function UiIcon({ name }: { name: string }) { const paths: Record<string, React.ReactNode> = { note: <><path d="M6 3h9l3 3v15H6zM14 3v5h4M9 12h6m-6 4h6" /></>, reset: <><path d="M3 10a9 9 0 1 1 2 9"/><path d="M3 4v6h6"/></>, search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>, filter: <><path d="M4 5h16M7 12h10M10 19h4" /></>, settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></>, edit: <><path d="m4 20 4.2-1 10.4-10.4a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z" /><path d="m14.5 7.1 2.8 2.8" /></>, download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>, chevronRight: <path d="m9 6 6 6-6 6" />, chevronLeft: <path d="m15 6-6 6 6 6" />, chevronDown: <path d="m6 9 6 6 6-6" />, warning: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v4m0 3h.01" /></>, image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 15-5-5L5 20" /></>, bag: <><path d="M6 8h12l1 13H5L6 8Z" /><path d="M9 9V6a3 3 0 0 1 6 0v3" /></>, payment: <><path d="M7 3h10v18H7z" /><path d="M10 7h4m-4 4h4m-5 6h6" /></>, calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>, clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>, truck: <><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>, check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></> }; return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.check}</svg>; }
 function OrderChannelIcon({ channel }: { channel: string }) { const key = channel.toUpperCase(); if(key==="WEBSITE")return <span className="orders-channel website" role="img" aria-label={sourceLabel("WEBSITE")} title={sourceLabel("WEBSITE")}><CartIcon/></span>; if (key === "FACEBOOK") return <span className="orders-channel facebook" title="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4.3c-.5-.1-2-.3-3.8-.3C9.7 4 7.3 6.1 7.3 10v2H4v4h3.3v8h4V16h3.3l.5-4h-3.8v-1.6C11.3 8.8 11.7 8 14 8Z" /></svg></span>; if (key === "INSTAGRAM") return <span className="orders-channel instagram" title="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="5" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" /><circle cx="17" cy="7" r="1" /></svg></span>; if (key === "WHATSAPP") return <span className="orders-channel whatsapp" title="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.7a8 8 0 0 1-11.8 7L4 20l1.3-4A8 8 0 1 1 20 11.7Z" fill="none" stroke="currentColor" strokeWidth="2" /><path d="M9 8c.5 3 2 4.5 5 5l1-1 2 1.5c-1 2-3 2-5.5.7A8 8 0 0 1 7.8 10C7.5 8.5 8 7.5 9 8Z" /></svg></span>; if (key === "EMAIL") return <span className="orders-channel email" title="Email"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="2" /><path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></span>; if (key === "CHATWOOT") return <span className="orders-channel chatwoot" title="Chatwoot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z" /></svg></span>; return <span className="orders-channel manual" title={ui.manualChannel}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17-1 4 4-1L19 8l-3-3L4 17Z" /></svg></span>; }
 
 function isActiveOrder(order: Order) { return !["COMPLETED", "CANCELLED"].includes(order.salesStatus); }
@@ -1237,7 +1252,7 @@ function itemImage(item: Order["items"][number],sourceSystem?:string) { return o
 function designPaths(order: Order) { return orderDesignImagePaths(order); }
 function designCount(order: Order) { return orderDesignCount(order); }
 function quantitySummary(order: Order) { return `${itemQuantity(order)} ${ui.pieces}`; }
-function OrderDesigns({ order, onPreview, onLeave }: { order: Order; onPreview: (event: ReactMouseEvent<HTMLImageElement>) => void; onLeave: () => void }) { const paths = designPaths(order); if (!paths.length) return <span className="orders-design-placeholder"><UiIcon name="image" /></span>; return <div className="orders-design-stack">{paths.slice(0, 3).map((path) => <OrderImagePreview key={path} src={path} alt={ui.orderDesignAlt} order={order} imageProps={{loading:"lazy",onMouseEnter:onPreview,onMouseMove:onPreview,onMouseLeave:onLeave}}/>)}{paths.length > 3 && <b>+{paths.length - 3}</b>}</div>; }
+function OrderDesigns({ order, onPreview, onLeave }: { order: Order; onPreview: (event: ReactPointerEvent<HTMLImageElement>) => void; onLeave: () => void }) { const paths = designPaths(order); if (!paths.length) return <span className="orders-design-placeholder"><UiIcon name="image" /></span>; return <div className="orders-design-stack">{paths.slice(0, 3).map((path) => <OrderImagePreview key={path} src={path} alt={ui.orderDesignAlt} order={order} imageProps={{loading:"lazy",onPointerEnter:onPreview,onPointerMove:onPreview,onPointerLeave:onLeave}}/>)}{paths.length > 3 && <b>+{paths.length - 3}</b>}</div>; }
 function orderProblems(order: Order) { const problems: string[] = []; if (days(order) < 0 && isActiveOrder(order)) problems.push(ui.problems.overdue); if (orderMeasurementState(order).problem === "dimensions") problems.push(ui.problems.dimensions); if (!hasDeliveryAddress(order)) problems.push(ui.problems.address); if (paid(order) === null && isActiveOrder(order)) problems.push(dataEvidenceUi.unavailable); else if (depositShortfall(order) && isActiveOrder(order)) problems.push(ui.problems.payment); if (!designPaths(order).length) problems.push(ui.problems.design); return problems; }
 function nextOrderAction(order: Order): { label: string; detail?: string; tone: string; icon: string } { if (orderMeasurementState(order).nextAction === "dimensions") return { label: ui.actions.dimensions, tone: "amber", icon: "warning" }; if (!hasDeliveryAddress(order) && isReadyToShip(order)) return { label: ui.actions.address, tone: "red", icon: "warning" }; if (paid(order) === null) return { label: dataEvidenceUi.unavailable, tone: "amber", icon: "warning" }; if (depositShortfall(order)) return { label: ui.actions.deposit, detail: money(order.depositRequiredMinor - paid(order)!, order.currency), tone: "amber", icon: "payment" }; if (["DESIGN_DISCUSSION", "WAITING_COACH_APPROVAL"].includes(order.salesStatus)) return { label: ui.actions.design, tone: "purple", icon: "image" }; if (!NON_PRODUCTION_ORDER_TYPES.has(order.type) && order.productionStatus === "NOT_SCHEDULED") return { label: ui.actions.production, tone: "green", icon: "check" }; if (order.productionStatus === "READY" && hasBalance(order)) return { label: ui.actions.balance, detail: money(balance(order), order.currency), tone: "amber", icon: "payment" }; if (isReadyToShip(order)) return { label: ui.actions.shipping, tone: "green", icon: "truck" }; return { label: ui.actions.none, tone: "muted", icon: "check" }; }
 function hasMeasurements(order: Order) { return orderMeasurementState(order).complete; }

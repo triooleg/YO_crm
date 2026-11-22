@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import {
   ColorSchemeScript,
   MantineProvider,
@@ -10,6 +10,7 @@ import { Notifications } from "@mantine/notifications";
 import "@mantine/notifications/styles.css";
 import "flag-icons/css/flag-icons.min.css";
 import { yoleotardTheme } from "../lib/mantine-theme";
+import { CrmPwaProvider } from "../components/crm-pwa";
 import "./styles.css";
 import "./phase2.css";
 import "./crm-shell.css";
@@ -37,8 +38,17 @@ import "./sales-statistics-map.css";
 import "./tax-financial-integration.css";
 import "./tax-integration-order-settings.css";
 
+import "./pwa-mobile.css";
+import "./pwa.css";
+import "./pwa-inbox.css";
+
+export const viewport: Viewport = { themeColor: "#faf8fd", viewportFit: "cover" };
+
 export const metadata: Metadata = {
   title: "CRM Yoleotard",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "YOleotard CRM", statusBarStyle: "default" },
+  icons: { apple: "/meta/crm-pwa-180.png" },
   description:
     "Рабочая система управления клиентами, заказами и производством Yoleotard",
 };
@@ -54,7 +64,7 @@ export default function RootLayout({
       <body>
         <MantineProvider theme={yoleotardTheme} forceColorScheme="light">
           <Notifications className="crm-notifications" position="top-right" autoClose={3000} limit={3} containerWidth={360} />
-          {children}
+          <CrmPwaProvider>{children}</CrmPwaProvider>
         </MantineProvider>
       </body>
     </html>

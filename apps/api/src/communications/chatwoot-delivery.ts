@@ -25,12 +25,16 @@ export function remoteMediaUrl(value: unknown, additionalOrigin?: string) {
   } catch {}
 }
 
-export function chatwootMultipartBody(content: string, attachment: { bytes: Uint8Array; name: string; mimeType: string }) {
+type ChatwootUpload = { bytes: Uint8Array; name: string; mimeType: string };
+
+export function chatwootMultipartBody(content: string, attachment: ChatwootUpload | ChatwootUpload[]) {
   const form = new FormData();
   form.set("message_type", "outgoing");
   form.set("private", "false");
   if (content) form.set("content", content);
-  form.append("attachments[]", new Blob([Uint8Array.from(attachment.bytes).buffer], { type: attachment.mimeType }), attachment.name);
+  for (const file of Array.isArray(attachment) ? attachment : [attachment]) {
+    form.append("attachments[]", new Blob([Uint8Array.from(file.bytes).buffer], { type: file.mimeType }), file.name);
+  }
   return form;
 }
 

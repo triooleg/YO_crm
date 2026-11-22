@@ -32,6 +32,7 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
   const [productionSettings, setProductionSettings] = useState<ProductionSettings | null>(null);
   const [filters, setFilters] = useState<ProductionFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [calendarOnly, setCalendarOnly] = useState(true);
   const [overviewWork, setOverviewWork] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("overviewFilter") === "work");
   const [sortMode, setSortMode] = useState<ProductionSortMode>("schedule");
   const [capacityPerDay, setCapacity] = useState(3);
@@ -192,8 +193,8 @@ export function ProductionWorkspace({ role, onOpenOrder, onCreateOrder }: Props 
     void saveSlot(order, { startsAt: productionIso(productionAddDays(end, -(productionSettings.defaultDurationDays - 1))), endsAt: productionIso(end), capacity: 1, tentative: true, locked: false });
   }
 
-  return <main className="production-page">
-    <ProductionHeader periodLabel={periodLabel} mode={mode} onMode={setMode} onPrevious={() => setBase(productionAddDays(base, -range.shiftDays))} onNext={() => setBase(productionAddDays(base, range.shiftDays))} onToday={() => setBase(startOfCalendarWeek(new Date()))} onCreateOrder={onCreateOrder} canCreateOrder={canManageOrders}/>
+  return <main className="production-page" data-calendar-only={calendarOnly}>
+    <ProductionHeader periodLabel={periodLabel} mode={mode} onMode={setMode} onPrevious={() => setBase(productionAddDays(base, -range.shiftDays))} onNext={() => setBase(productionAddDays(base, range.shiftDays))} onToday={() => setBase(startOfCalendarWeek(new Date()))} onCreateOrder={onCreateOrder} canCreateOrder={canManageOrders} calendarOnly={calendarOnly} onToggleCalendar={() => setCalendarOnly(value => !value)}/>
     {overviewWork && <Group role="status"><Badge>{overviewTargetUi.workFilter}</Badge><CrmButton tone="secondary" onClick={clearOverviewFilter}>{productionUi.resetFilters}</CrmButton></Group>}
     {productionSettings && <ProductionKpis metrics={metrics} capacity={capacityPerDay}/>}
     <ProductionFiltersBar filters={filters} opened={filtersOpen} sortMode={sortMode} capacity={capacityPerDay} previewWidth={previewWidth} onSortMode={setSortMode} onCapacity={setCapacityValue} onPreviewWidth={setPreviewWidthValue} onToggle={() => setFiltersOpen((opened) => !opened)} onChange={setFilters} onReset={() => { setFilters(DEFAULT_FILTERS); if(overviewWork)clearOverviewFilter(); }}/>

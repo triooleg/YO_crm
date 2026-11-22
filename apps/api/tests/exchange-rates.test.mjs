@@ -370,3 +370,81 @@ test("NBU requests the Kyiv calendar date when Monday rates are published on Sat
   assert.equal(cache.effectiveDate,"2026-11-14");
   assert.equal(requests.filter(url=>url.includes("date=20261114")).length,2);
 });
+
+function monoRefreshFixture() {
+  let pendingTransaction = Promise.resolve();
+  const values = new Map([["exchangeRateProvider", "MONOBANK"]]);
+  const appSetting = {
+    findUnique: async ({ where }) => ({ id: where.section_key.key, value: values.get(where.section_key.key) }),
+    upsert: async ({ where, update }) => {
+      const id = where.section_key.key;
+      values.set(id, update.value);
+      return { id, value: update.value };
+    },
+  };
+  const tx = { appSetting, $executeRawUnsafe: async () => {}, auditLog: { create: async () => {} } };
+  const prisma = {
+    appSetting,
+    $transaction(callback) {
+      const result = pendingTransaction.then(() => callback(tx));
+      pendingTransaction = result.catch(() => {});
+      return result;
+    },
+  };
+  const calls = [];
+  const fetcher = async url => {
+    calls.push(url);
+    const date = ensureNow.getTime() / 1000;
+    return { ok: true, text: async () => JSON.stringify([
+      { currencyCodeA: 978, currencyCodeB: 980, date, rateBuy: 48 },
+      { currencyCodeA: 840, currencyCodeB: 980, date, rateBuy: 40 },
+    ]) };
+  };
+  return { newService: () => new ExchangeRatesService(prisma), values, calls, fetcher };
+}
+
+test("manual Monobank refresh across services reuses the same quote until five minutes elapse", async () => {
+  const { newService, calls, fetcher } = monoRefreshFixture();
+  const initial = await newService().refresh(ensureActor, fetcher, ensureNow);
+  const beforeLimit = new Date(+ensureNow + 299_999);
+  const reused = await newService().refresh(ensureActor, fetcher, beforeLimit);
+  assert.equal(reused.cache.fetchedAt, initial.cache.fetchedAt);
+  assert.equal(reused.cacheReused, true);
+  assert.equal(calls.length, 1);
+  const atLimit = new Date(+ensureNow + 300_000);
+  const updated = await newService().refresh(ensureActor, fetcher, atLimit);
+  assert.equal(updated.cache.fetchedAt, atLimit.toISOString());
+  assert.equal(calls.length, 2);
+});
+
+test("parallel and failed Monobank requests share a five-minute cooldown even without a quote", async () => {
+  const { newService, values, calls, fetcher } = monoRefreshFixture();
+  let attempts = 0;
+  const rateLimited = async () => { attempts++; return { ok: false, status: 429 }; };
+  const results = await Promise.allSettled([
+    newService().refresh(ensureActor, rateLimited, ensureNow),
+    newService().ensureCurrent(ensureActor, rateLimited, ensureNow),
+    newService().currentOrRefresh(ensureActor, rateLimited, ensureNow),
+  ]);
+  assert.ok(results.every(result => result.status === "rejected"));
+  assert.equal(attempts, 1);
+  values.set("exchangeRateProvider", "NBU");
+  values.delete("exchangeRateCache");
+  values.set("exchangeRateProvider", "MONOBANK");
+  await assert.rejects(newService().refresh(ensureActor, fetcher, new Date(+ensureNow + 299_999)), /Monobank/);
+  assert.equal(calls.length, 0);
+  await newService().refresh(ensureActor, fetcher, new Date(+ensureNow + 300_000));
+  assert.equal(calls.length, 1);
+});
+
+test("Monobank cooldown does not satisfy ensure-current with yesterday's quote after Kyiv midnight", async () => {
+  const { newService, calls, fetcher } = monoRefreshFixture();
+  const lateEvening = new Date("2026-10-18T20:59:00.000Z");
+  const midnight = new Date("2026-10-18T21:00:00.000Z");
+  await newService().refresh(ensureActor, fetcher, lateEvening);
+  await assert.rejects(newService().ensureCurrent(ensureActor, fetcher, midnight), /Monobank/);
+  assert.equal(calls.length, 1);
+  const afterCooldown = await newService().ensureCurrent(ensureActor, fetcher, new Date(+lateEvening + 300_000));
+  assert.equal(afterCooldown.cache.fetchedAt, "2026-10-18T21:04:00.000Z");
+  assert.equal(calls.length, 2);
+});

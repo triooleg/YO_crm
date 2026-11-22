@@ -121,7 +121,9 @@ export class CreateOrderDto {
   @ApiPropertyOptional() @IsOptional() @IsString() measurementId?: string;
   @ApiProperty({ enum: OrderType }) @IsEnum(OrderType) type!: OrderType;
   @ApiProperty() @IsString() @Length(1, 300) description!: string;
-  @ApiProperty() @IsString() modelImagePath!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() modelImagePath?: string;
+  @ApiPropertyOptional({ enum: ["NEW", "BOOKING"] })
+  @IsOptional() @IsIn(["NEW", "BOOKING"]) initialStatus?: "NEW" | "BOOKING";
   @ApiPropertyOptional() @IsOptional() @IsDateString() requiredDeliveryAt?: string;
   @ApiProperty() @IsInt() @Min(0) priceMinor!: number;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) depositRequiredMinor?: number;
@@ -138,7 +140,15 @@ export class AddOrderPaymentDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 120) reference?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(0, 300) notes?: string;
 }
+export class SaveOrderStatusOptionDto {
+  @IsEnum(SalesStatus) baseStatus!: SalesStatus;
+  @IsOptional() @IsString() @Length(1, 80) label?: string | null;
+  @IsOptional() @IsString() @Length(7, 7) color?: string | null;
+  @IsOptional() @IsBoolean() archived?: boolean;
+}
+
 export class UpdateOrderStatusesDto {
+  @IsOptional() @IsString() @Length(1, 36) salesStatusOptionId?: string;
   @ApiPropertyOptional({ enum: SalesStatus }) @IsOptional() @IsEnum(SalesStatus) salesStatus?: SalesStatus;
   @ApiPropertyOptional({ enum: ProductionStatus }) @IsOptional() @IsEnum(ProductionStatus) productionStatus?: ProductionStatus;
 }

@@ -76,6 +76,7 @@ for(const viewport of [
 ])test(`Mantine-контролы клиентов сохраняют сценарии и payload — ${viewport.name}`,async({page},info)=>{
  const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
  const {writes,reads}=await mockClients(page);await page.setViewportSize(viewport);await page.goto("/?section=clients");
+ if(viewport.width<=720)await page.getByRole("button",{name:"Показать панель клиентов",exact:true}).click();
  const profile=page.getByRole("button",{name:"Меню профиля"});await profile.click();
  await expect(page.getByRole("menuitem",{name:"Настройки"})).toBeVisible();await page.keyboard.press("Escape");await expect(profile).toBeFocused();
  const search=page.getByRole("textbox",{name:/Поиск по имени/});await expect(search).toHaveClass(/mantine-TextInput-input/);

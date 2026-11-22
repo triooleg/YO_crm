@@ -43,5 +43,5 @@ export function inboxDraftNeedsSave(
   nextAiRunId: string | undefined,
 ) {
   const normalizedText = nextText.trim();
-  return Boolean(normalizedText) && (normalizedText !== savedText || nextAiRunId !== savedAiRunId);
+  return normalizedText !== savedText || (Boolean(normalizedText) && nextAiRunId !== savedAiRunId);
 }

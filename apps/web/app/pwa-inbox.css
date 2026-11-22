@@ -1,0 +1,87 @@
+.inbox-reference-shell .communications-mobile-chat-actions,
+.communications-mobile-active-channel {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .inbox-reference-shell .communications-chat[data-client-selected] > .communications-chat-header {
+    min-height: 0;
+    justify-content: flex-start;
+    align-content: center;
+    gap: 6px;
+    padding: 4px 8px;
+  }
+
+  .inbox-reference-shell .communications-chat[data-client-selected] .communications-chat-header > .communications-chat-client {
+    order: 1;
+    flex: 1 1 0;
+    overflow: hidden;
+  }
+
+  .inbox-reference-shell .communications-chat[data-client-selected] .communications-context-toggle {
+    order: 2;
+    min-height: 40px;
+  }
+
+  .inbox-reference-shell .communications-mobile-chat-actions {
+    display: inline-flex;
+    flex-shrink: 0;
+    order: 3;
+  }
+
+  /* The legacy mobile inbox forces display for the badges and channel label. */
+  .inbox-reference-shell .communications-chat:not([data-actions-open]) .communications-chat-header :is(
+    .communications-chat-badges,
+    .communications-active-channel
+  ) {
+    display: none !important;
+  }
+
+  .inbox-reference-shell .communications-chat:not([data-actions-open]) .communications-chat-header :is(
+    .communications-chat-account,
+    .communications-chat-spam,
+    .communications-split-client,
+    .communications-open-client
+  ),
+  .inbox-reference-shell .communications-chat:not([data-actions-open]) .communications-chat-header > :is(label, .crm-native-select),
+  .inbox-reference-shell .communications-ai-panel.collapsed .communications-ai-manual-hint {
+    display: none;
+  }
+
+  .communications-mobile-active-channel {
+    display: block;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .inbox-reference-shell .communications-chat[data-actions-open] .communications-mobile-active-channel {
+    display: none;
+  }
+
+  .inbox-reference-shell .communications-chat[data-actions-open] .communications-chat-header > :is(
+    .communications-chat-spam, .communications-split-client,
+    .communications-open-client, label, .crm-native-select
+  ) {
+    order: 4;
+    max-width: 100%;
+  }
+
+  .inbox-reference-shell .communications-chat > footer {
+    padding: 5px 8px;
+  }
+
+  .inbox-reference-shell .communications-ai-panel.collapsed {
+    margin-bottom: 4px;
+  }
+
+  .inbox-reference-shell .communications-compose-shortcuts {
+    margin-block: 2px 0;
+  }
+
+  .inbox-reference-shell .communications-compose textarea {
+    font-size: 16px;
+  }
+}

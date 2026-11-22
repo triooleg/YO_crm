@@ -1,0 +1,241 @@
+/* Responsive adjustments for the existing CRM workspaces. */
+@media (max-width: 480px) {
+  .overview-order-row {
+    grid-template-columns: 36px minmax(0, 1fr) minmax(0, auto);
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+
+  .overview-order-row > .mantine-Badge-root {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--badge-height);
+  }
+
+  .overview-order-row .mantine-Badge-label,
+  .overview-order-identity > span:not(.overview-order-heading),
+  .overview-order-money b,
+  .overview-shipment-open b,
+  .overview-task-open strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-order-money {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .overview-shipment-open {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .overview-shipment-open > span:last-child {
+    grid-column: 2;
+  }
+
+  .orders-dashboard-table .orders-col-status {
+    width: 185px !important;
+  }
+
+  .orders-order-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .orders-order-actions .crm-button,
+  .orders-measurements-png .crm-button {
+    max-width: 100%;
+    height: auto;
+    min-height: 36px;
+    padding-block: 5px;
+  }
+
+  .orders-order-actions .mantine-Button-label,
+  .orders-measurements-png .crm-button .mantine-Button-label {
+    line-height: 1.25;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+}
+
+.production-heading > .production-calendar-toggle { display: none; }
+.orders-dashboard .orders-command-bar > .orders-list-toggle { display: none; }
+
+ .clients-workspace .clients-toolbar > .clients-list-toggle { display: none; }
+
+@media (max-width: 720px) {
+  .clients-workspace .clients-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .clients-workspace .clients-toolbar > div:first-child { grid-column: 1; }
+  .clients-workspace .clients-toolbar > .clients-list-toggle { display: inline-flex; grid-column: 2; grid-row: 1; }
+  .clients-workspace[data-list-only="true"] { padding: 8px; }
+  .clients-workspace[data-list-only="true"] > .clients-page-header,
+  .clients-workspace[data-list-only="true"] .clients-header-actions,
+  .clients-workspace[data-list-only="true"] .clients-extra-filters,
+  .clients-workspace[data-list-only="true"] .clients-toolbar > :not(:first-child, .clients-list-toggle) { display: none; }
+  .clients-workspace[data-list-only="true"] .clients-sticky-controls { padding: 0 0 6px; margin-bottom: 0; }
+  .clients-workspace[data-list-only="true"] .clients-list-controls { gap: 0; }
+
+  .orders-dashboard .orders-command-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    align-items: center;
+    gap: 6px;
+  }
+  .orders-dashboard .orders-command-bar > .orders-search {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+  }
+  .orders-dashboard .orders-command-bar > .orders-list-toggle {
+    display: inline-flex;
+    grid-column: 3;
+    grid-row: 1;
+    width: auto;
+  }
+  .orders-dashboard .orders-command-bar > .orders-quick-filters {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  .orders-dashboard[data-list-only="true"] > :is(.orders-dashboard-header, .orders-kpi-grid),
+  .orders-dashboard[data-list-only="true"] .orders-command-bar > :not(.orders-search, .orders-list-toggle) {
+    display: none;
+  }
+  .orders-dashboard[data-list-only="true"] .orders-sticky-controls {
+    padding-block: 4px;
+  }
+  .orders-dashboard[data-list-only="true"] .orders-filter-chips {
+    flex-wrap: nowrap;
+    overflow: auto;
+  }
+  .orders-dashboard[data-list-only="true"] .orders-filter-chips > * { flex: none; }
+
+  .production-page {
+    --production-left: clamp(142px, 46vw, 186px);
+    --production-week-height: 18px;
+    --production-day-height: 25px;
+    --production-load-height: 18px;
+    padding-block: 8px;
+  }
+
+  .production-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 5px 8px;
+    margin-bottom: 6px;
+  }
+
+  .production-heading-copy h1 { font-size: clamp(17px, 5vw, 23px); }
+  .production-heading-copy p { display: none; }
+  .production-heading-actions { display: contents; }
+  .production-heading-actions > button {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+  }
+  .production-period-controls {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    gap: 5px;
+  }
+  .production-period-controls strong {
+    margin-inline-start: auto;
+    text-align: end;
+    font-size: 12px;
+  }
+  .production-heading-actions .mantine-SegmentedControl-root { grid-column: 1 / -1; }
+  .production-heading > .production-calendar-toggle { display: inline-flex; grid-column: 1 / -1; justify-self: end; }
+  .production-page[data-calendar-only="true"] :is(.production-heading-copy, .production-heading-actions > button, .production-kpis, .production-filter-shell) {
+    display: none;
+  }
+  .production-page[data-calendar-only="true"] .production-period-controls { grid-row: 1; }
+  .production-page[data-calendar-only="true"] .production-heading-actions .mantine-SegmentedControl-root { grid-column: 1; grid-row: 2; }
+  .production-page[data-calendar-only="true"] .production-calendar-toggle { grid-column: 2; grid-row: 2; }
+  .production-page[data-calendar-only="true"] .production-board-shell { min-height: 0; }
+
+  .production-kpis { margin-bottom: 6px; gap: 5px; scrollbar-width: thin; }
+  .production-kpi {
+    min-width: min(72%, 210px);
+    min-height: 45px;
+    gap: 6px;
+    padding: 4px 8px;
+  }
+  .production-kpi-icon { width: 24px; height: 24px; flex-shrink: 0; }
+  .production-kpi strong { font-size: 16px; }
+  .production-kpi small, .production-kpi em { font-size: 10px; }
+  .production-kpi-load .production-load-spark { height: 21px; }
+
+  .production-filter-primary { gap: 5px; padding: 5px; }
+  .production-filter-primary > .mantine-InputWrapper-root { flex: 1; width: auto; min-width: 0; }
+  .production-filter-shell[data-filters-open="false"] :is(.production-sort-control, .production-capacity-control) { display: none; }
+  .production-filter-primary :is(.production-sort-control, .production-capacity-control) {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .production-filter-primary :is(.production-sort-control, .production-capacity-control) .mantine-Select-root { min-width: 125px; }
+  .production-filter-grid { max-height: 26dvh; overflow-y: auto; }
+
+  .production-order-columns-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .production-order-columns-head > :is(:nth-child(2), :nth-child(4)) { display: none; }
+  .production-order-summary {
+    height: 51px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 24px minmax(0, 1fr);
+    column-gap: 2px;
+    row-gap: 1px;
+    padding: 3px 22px 3px 5px;
+  }
+  .production-order-main { grid-column: 1 / -1; grid-row: 1; gap: 4px; }
+  .production-order-main > span { flex: 1; }
+  .production-order-main > :is(img, i, .order-image-trigger),
+  .production-order-main > .order-image-trigger > img {
+    width: 20px;
+    height: 24px;
+    flex: 0 0 20px;
+  }
+  .production-order-main .crm-button {
+    width: 100%;
+    height: 24px;
+    min-height: 0 !important;
+    padding: 0;
+    font-size: 11px;
+  }
+  .production-order-main .mantine-Button-inner { justify-content: flex-start; }
+  .production-order-main .mantine-Button-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .production-order-main small { display: none; }
+  .production-order-description { grid-column: 1; grid-row: 2; }
+  .production-order-description b { font-size: 11px; }
+  .production-order-summary > .production-payment-badge {
+    grid-column: 2;
+    grid-row: 2;
+    max-width: 63px;
+    height: auto;
+    min-height: 16px;
+    padding-block: 2px;
+    padding-inline: 3px;
+    font-size: 9px;
+  }
+  .production-order-summary > .production-payment-badge .mantine-Badge-label {
+    white-space: normal;
+    line-height: 1.05;
+  }
+}
+
+@media (max-width: 360px) {
+  .production-page[data-calendar-only="false"] .production-heading-copy {
+    grid-column: 1 / -1;
+  }
+  .production-page[data-calendar-only="false"] .production-heading-actions > button {
+    grid-row: 4;
+  }
+  .production-page[data-calendar-only="false"] .production-calendar-toggle {
+    grid-column: 1;
+    grid-row: 4;
+    justify-self: start;
+  }
+}

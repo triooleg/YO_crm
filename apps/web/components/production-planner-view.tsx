@@ -80,7 +80,7 @@ function productionLabel(status: string) {
   return labels.productionStatus[status as keyof typeof labels.productionStatus] || status;
 }
 
-export function ProductionHeader({ periodLabel, mode, onMode, onPrevious, onNext, onToday, onCreateOrder, canCreateOrder }: {
+export function ProductionHeader({ periodLabel, mode, onMode, onPrevious, onNext, onToday, onCreateOrder, canCreateOrder, calendarOnly, onToggleCalendar }: {
   periodLabel: string;
   mode: ProductionRangeMode;
   onMode: (mode: ProductionRangeMode) => void;
@@ -89,6 +89,8 @@ export function ProductionHeader({ periodLabel, mode, onMode, onPrevious, onNext
   onToday: () => void;
   onCreateOrder?: () => void;
   canCreateOrder: boolean;
+  calendarOnly: boolean;
+  onToggleCalendar: () => void;
 }) {
   return <header className="production-heading">
     <div className="production-heading-copy"><h1>{productionUi.title}</h1><p>{productionUi.subtitle}</p></div>
@@ -107,6 +109,7 @@ export function ProductionHeader({ periodLabel, mode, onMode, onPrevious, onNext
       ]}/>
       {canCreateOrder && onCreateOrder && <CrmButton onClick={onCreateOrder}>{productionUi.newOrder}</CrmButton>}
     </div>
+    <CrmButton className="production-calendar-toggle" tone="secondary" aria-label={calendarOnly ? productionUi.showPlannerPanel : productionUi.calendarOnly} onClick={onToggleCalendar}>{calendarOnly ? productionUi.plannerPanel : productionUi.calendarOnly}</CrmButton>
   </header>;
 }
 
@@ -137,14 +140,14 @@ export function ProductionFiltersBar({ filters, opened, sortMode, capacity, prev
   onChange: (filters: ProductionFilters) => void;
   onReset: () => void;
 }) {
-  return <div className="production-filter-shell">
+  return <div className="production-filter-shell" data-filters-open={opened}>
     <div className="production-filter-primary">
       <TextInput value={filters.query} onChange={(event) => onChange({ ...filters, query: event.currentTarget.value })} placeholder={productionUi.search} aria-label={productionUi.search} leftSection="⌕"/>
-      <CrmButton tone="secondary" aria-expanded={opened} onClick={onToggle}>☷ {productionUi.filters}</CrmButton>
+      <CrmButton tone="secondary" aria-expanded={opened} aria-controls="production-extra-filters" onClick={onToggle}>☷ {productionUi.filters}</CrmButton>
       <label className="production-sort-control"><span>{productionUi.sortOrders}</span><Select aria-label={productionUi.sortOrders} value={sortMode} onChange={(value) => onSortMode((value || "schedule") as ProductionSortMode)} allowDeselect={false} data={[{ value: "schedule", label: productionUi.sortSchedule }, { value: "shippingProximity", label: productionUi.sortShippingProximity }]}/></label>
       <label className="production-capacity-control"><span>{productionUi.loadTitle}</span><Select aria-label={productionUi.slotsPerDay} value={String(capacity)} onChange={(value) => value && onCapacity(Number(value))} allowDeselect={false} data={[1, 2, 3, 4, 5, 6].map((value) => ({ value: String(value), label: `${value} ${productionUi.slotsPerDay}` }))}/></label>
     </div>
-    <Collapse expanded={opened}><div className="production-filter-grid">
+    <Collapse expanded={opened} id="production-extra-filters"><div className="production-filter-grid">
       <Select aria-label={productionUi.payment} value={filters.payment} onChange={(value) => onChange({ ...filters, payment: (value || "all") as ProductionFilters["payment"] })} allowDeselect={false} data={[
         { value: "all", label: productionUi.paymentAll }, { value: "unpaid", label: productionUi.paymentUnpaid }, { value: "partial", label: productionUi.paymentPartial }, { value: "deposit", label: productionUi.paymentDeposit }, { value: "paid", label: productionUi.paymentPaid },
       ]}/>

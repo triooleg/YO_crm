@@ -8,6 +8,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { uploadsRoot } from "../uploads";
 import { AddOrderItemDto, AddOrderPaymentDto, ArchiveOrdersDto, BindOrderItemMeasurementDto, CreateOrderDto, DeleteProductionSlotDto, OrderMeasurementDto, UpdateOrderBuyerCommentDto, UpdateOrderManagerCommentDto, UpdateOrderCurrencyDto, UpdateOrderDeadlineDto, UpdateOrderCreatedAtDto, UpdateOrderDeliveryAddressDto, UpdateOrderDeliveryContactDto, UpdateOrderDetailsDto, UpdateOrderDisciplineDto, UpdateOrderItemDesignNumberDto, UpdateOrderItemDetailsDto, UpdateOrderModelImageDto, UpdateOrderSourceDto, UpdateOrderStatusesDto, UpdateProductionSlotDto, UploadModelImageDto, UploadOrderFileDto, WebsiteSalesCorrectionDto, VoidOrderPaymentDto } from "./orders.dto";
+import { SaveOrderStatusOptionDto } from "./orders.dto";
 import { OrdersService } from "./orders.service";
 import { ORDER_DELIVERY_ADDRESS_ROLES } from "./order-delivery-address";
 import { isOrderImageName } from "./order-image-name";
@@ -24,6 +25,19 @@ export class OrdersController {
   @Post(":id/website-notification/read") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) reviewWebsiteNotification(@Param("id") id: string, @Req() req: Request & { user: User }) { return this.orders.reviewWebsiteNotification(id, req.user); }
   @Get() @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) list(@Query("search") search?: string, @Query("overviewFilter") overviewFilter?: string, @Query("period") period?: string, @Query() query?:OrderListReadQuery) { return this.orders.list(search, { ...query, overviewFilter, period }); }
   @Get("client-history/:clientId") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) clientHistory(@Param("clientId") clientId: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string, @Query("salesStatus") salesStatus?:string,@Query("from") from?:string,@Query("to") to?:string) { return this.orders.clientHistory(clientId, { page, pageSize,...(salesStatus?{salesStatus}:{}),...(from?{from}:{}),...(to?{to}:{}) }); }
+  @Get("status-options") @Roles("OWNER", "ADMIN", "MANAGER")
+  statusOptions() { return this.orders.orderStatusOptions(); }
+
+  @Post("status-options") @Roles("OWNER", "ADMIN")
+  createStatusOption(@Body() dto: SaveOrderStatusOptionDto, @Req() req: Request & { user: User }) {
+    return this.orders.saveOrderStatusOption(null, dto, req.user);
+  }
+
+  @Patch("status-options/:id") @Roles("OWNER", "ADMIN")
+  saveStatusOption(@Param("id") id: string, @Body() dto: SaveOrderStatusOptionDto, @Req() req: Request & { user: User }) {
+    return this.orders.saveOrderStatusOption(id, dto, req.user);
+  }
+
   @Get(":id") @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER) detail(@Param("id") id: string) { return this.orders.detail(id); }
   @Patch("archive") @Roles(UserRole.OWNER, UserRole.ADMIN) archiveOrders(@Body() dto: ArchiveOrdersDto, @Req() req: Request & { user: User }) { return this.orders.archiveOrders(dto, req.user); }
   @Post("maintenance/website-sales") @Roles(UserRole.OWNER, UserRole.ADMIN) correctWebsiteSales(@Body() dto: WebsiteSalesCorrectionDto, @Req() req: Request & { user: User }) { return this.orders.correctWebsiteSales(dto, req.user); }

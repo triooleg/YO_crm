@@ -86,3 +86,43 @@ test('failed financial read ends the busy state and offers retry',async({page})=
  await expect(page.getByRole('alert').filter({hasText:'Synthetic report unavailable'})).toBeVisible();
  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
 });
+
+
+test('a pending rate refresh updates the currently sorted report',async({page})=>{
+ let finish!:()=>void;
+ const wait=new Promise<void>(resolve=>{finish=resolve;});
+ const calls=await fixture(page);
+ let renewed=false;
+ let refreshStarted=false;
+ await page.route('**/api/finance/exchange-rates/ensure-current',async route=>{
+  refreshStarted=true;
+  await wait;
+  renewed=true;
+  return route.fulfill({json:{provider:'NBU',cache:{effectiveDate:'2026-11-02',fetchedAt:'2026-11-02T14:00:00Z'}}});
+ });
+ await page.route('**/api/finance/report?*',async route=>{
+  const params=new URL(route.request().url()).searchParams;
+  calls.push({path:'/api/finance/report',params,method:'GET'});
+  const result=report(params);
+  if(renewed){
+   result.valuationVersion='v2';
+   result.valuation.fetchedAt='2026-11-02T14:00:00Z';
+   result.debtMinor=15500;
+  }
+  return route.fulfill({json:result});
+ });
+ try{
+  await page.goto('/?section=finance&period=2026-11');
+  await expect.poll(()=>refreshStarted).toBe(true);
+  const debt=page.locator('.finance-report-kpi').filter({hasText:'Долги клиентов'});
+  await expect(debt).toContainText('140,00');
+  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+  await page.getByRole('button',{name:'Сортировать: Сумма',exact:true}).click();
+  await expect.poll(()=>calls.filter(c=>c.path==='/api/finance/report').length).toBe(3);
+  await expect(page.locator('.finance-report-page')).toHaveAttribute('aria-busy','false');
+  finish();
+  await expect(debt).toContainText('155,00');
+  const detailReads=calls.filter(c=>c.path==='/api/finance/report'&&c.params.get('projection')!=='summary');
+  expect(detailReads.at(-1)?.params.get('sort')).toBe(detailReads.at(-2)?.params.get('sort'));
+ } finally {finish();}
+});

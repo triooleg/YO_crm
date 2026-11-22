@@ -95,7 +95,7 @@ test('order deep-link filter stays visible and can be removed without leaving Fi
 import { moveFinanceMonth } from '../lib/finance-report';
 
 // Synthetic reporting records only; no customer data or provider requests.
-async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;delayDetail?:Promise<void>;checkoutEstimate?:boolean}={}){
+async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;delayDetail?:Promise<void>;checkoutEstimate?:boolean;delayReport?:Promise<void>}={}){
  const calls:{path:string;method:string;query:URLSearchParams}[]=[];let conflict=options.conflictExport;
  await page.route('**/api/**',async route=>{
   const url=new URL(route.request().url()),path=url.pathname;calls.push({path,method:route.request().method(),query:url.searchParams});
@@ -107,6 +107,7 @@ async function setup(page:Page,role='OWNER',options:{conflictExport?:boolean;del
   if(path.startsWith('/api/finance/report/orders/')){if(options.delayDetail)await options.delayDetail;return route.fulfill({json:{id:'order-1',number:'TEST-001',priceMinor:50000,depositRequiredMinor:25000,currency:'EUR',displayCurrency:url.searchParams.get('currency'),archivedAt:null,client:{displayName:'Тестовый клиент',country:'Ukraine',language:'ru'},payments:[{id:'p1',amountMinor:25000,currency:'EUR',displayAmountMinor:25000,receivedAt:'2026-10-10T12:00:00Z',method:'BANK_TRANSFER'}],invoices:[]}});}
   if(path==='/api/finance/settings')return route.fulfill({json:[]});
   if(path==='/api/finance/report'){
+   if(options.delayReport) await options.delayReport;
    const month=url.searchParams.get('month')||'2026-10',currency=url.searchParams.get('currency')||'EUR',tab=url.searchParams.get('tab')||'payments',mult=currency==='UAH'?40:currency==='USD'?1.1:1;
    const amount=(n:number)=>Math.round(n*mult),payment={id:'row-1',orderId:'order-1',number:'TEST-001',clientId:'client-1',clientName:'Тестовый клиент',date:'2026-10-10T12:00:00Z',amountMinor:amount(50000),paidMinor:amount(25000),balanceMinor:amount(25000),status:'PARTIAL',method:'BANK_TRANSFER',notes:'Длинное примечание клиента, размеры и пожелания для изготовления. '.repeat(12),originalCurrency:'EUR',originalAmountMinor:50000,originalPaidMinor:25000,originalBalanceMinor:25000,roundingDifferenceMinor:0,forecastDate:'2026-10-21',forecastSource:'deadline'};
    const expense={id:'expense-1',date:'2026-10-10',categoryId:'materials',categoryName:'Материалы',orderId:'order-1',number:'TEST-001',notes:'Ткань',amountMinor:amount(4500),originalAmountMinor:4500,originalCurrency:'EUR',shipmentId:null};
@@ -283,21 +284,89 @@ for(const [width,height] of [[1920,1080],[1366,768],[390,844]])test(`Checkout pr
  const metrics=page.locator('.finance-report-kpi');
  await expect(metrics.filter({hasText:'Налоги ФОП'})).toContainText(/234,56/);
  await expect(metrics.filter({hasText:'Финансовый результат'})).toContainText(/2\s*264,77/);
- const notice=page.getByText(/Предварительный расчёт по данным Checkout/);
+ const notice=page.locator('.crm-notifications').getByText(/Предварительный расчёт по данным Checkout/);
+ await expect(page.locator('.finance-report-page').getByText(/Предварительный расчёт по данным Checkout/)).toHaveCount(0);
  await expect(notice).toBeVisible();
  await notice.scrollIntoViewIfNeeded();
+ if(width===390){
+  const bounds=await notice.boundingBox();
+  const header=await page.locator('.finance-report-page h1').boundingBox();
+  expect(bounds!.y).toBeGreaterThan(header!.y+header!.height);
+  await expect(page.locator('.finance-information-notices')).toBeHidden();
+  await expect(page.locator('.crm-notifications[data-position="bottom-center"]').getByText(/Предварительный расчёт по данным Checkout/)).toBeVisible();
+ }
  await page.screenshot({path:info.outputPath('checkout-notice.png')});
  await expect(page.getByText(/Ожидают сверки оплаты/)).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Перейти к налоговой сверке'})).toBeVisible();
+ const toastAction=page.locator('.crm-notifications').getByRole('button',{name:'Перейти к налоговой сверке'});
+ await expect(toastAction).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  expect(calls.filter(call=>call.method!=='GET').map(call=>call.path).every(path=>path==='/api/finance/exchange-rates/ensure-current')).toBe(true);
  await page.screenshot({path:info.outputPath('checkout-preliminary.png'),fullPage:true});
- await page.getByRole('button',{name:'Перейти к налоговой сверке'}).click();
+ if(width===1920){
+  await page.getByRole("button",{name:"Предыдущий месяц",exact:true}).click();
+  await expect.poll(()=>calls.some(call=>call.query.get("month")==="2026-10")).toBe(true);
+  await expect(notice).toHaveCount(0);
+  return;
+ }
+ await toastAction.click();
+ if(width===390) await expect(page.locator('.finance-information-notices')).toBeVisible();
  await expect(page.getByRole('tab',{name:'Налоги ФОП',exact:true})).toHaveAttribute('aria-selected','true');
  await page.getByRole('combobox',{name:'Статус',exact:true}).click();
  await page.getByRole('option',{name:'Предварительно · Checkout',exact:true}).click();
  await expect.poll(()=>calls.some(call=>call.query.get('status')==='CHECKOUT_PRELIMINARY')).toBe(true);
  await expect(page.locator('.finance-tax-entries')).toContainText('Предварительно · Checkout');
+ await expect(notice).toHaveCount(0);
+ await page.reload();
+ await expect(metrics.filter({hasText:'Налоги ФОП'})).toContainText(/234,56/);
+ await expect(notice).toHaveCount(0);
+ await page.getByRole('tab',{name:'Платежи и задолженности',exact:true}).click();
+ await page.locator('.finance-report-main').getByRole('button',{name:'Перейти к налоговой сверке'}).click();
+ await expect(page.getByRole('tab',{name:'Налоги ФОП',exact:true})).toHaveAttribute('aria-selected','true');
  await page.locator('.finance-tax-entries').scrollIntoViewIfNeeded();
  await page.screenshot({path:info.outputPath('checkout-tax-tab.png')});
+});
+
+test('finance shows report totals while exchange-rate refresh is still pending', async ({ page }) => {
+ const calls=await setup(page);
+ let unblock!:()=>void;
+ const wait=new Promise<void>(resolve=>{unblock=resolve;});
+ let started=false;
+ await page.route('**/api/finance/exchange-rates/ensure-current',async route=>{
+  started=true;
+  await wait;
+  await route.fulfill({status:503,json:{message:'Тестовая задержка источника курсов'}});
+ });
+ try {
+  await page.goto('/?section=finance&period=2026-10');
+  await expect.poll(()=>started).toBe(true);
+  await expect(page.locator('.finance-report-kpi').filter({hasText:'Долги клиентов'})).toContainText(/1\s?240,00/);
+  await expect(page.locator('.finance-report-table')).toContainText('TEST-001');
+  expect(calls.some(call=>call.path==='/api/finance/report')).toBe(true);
+ } finally { unblock(); }
+ await expect(page.getByText('Тестовая задержка источника курсов',{exact:true})).toBeVisible();
+});
+
+test('Checkout preliminary figures wait for an available notification slot',async({page})=>{
+ let release!:()=>void;
+ const delayReport=new Promise<void>(resolve=>{release=resolve});
+ const calls=await setup(page,'OWNER',{checkoutEstimate:true,delayReport});
+ const items=Array.from({length:3},(_,i)=>({
+   id:`synthetic-notice-${i}`,number:`QA-${i}`,paymentStatus:'PAID',client:{displayName:'Synthetic QA'},
+ }));
+ await page.route('**/api/orders/website-notifications',route=>route.fulfill({json:{items,unreadCount:items.length}}));
+ await page.goto('/?section=finance&period=2026-11');
+ const notifications=page.locator('.crm-notifications');
+ try {
+  await expect(notifications.getByRole('button',{name:/Synthetic QA/})).toHaveCount(3);
+ } finally {release();}
+ await expect(page.locator('.finance-report-kpi').filter({hasText:'Налоги ФОП'})).toContainText(/234,56/);
+ const toast=notifications.getByText(/Предварительный расчёт по данным Checkout/);
+ await expect(toast).toHaveCount(0);
+ expect(await page.evaluate(()=>Object.keys(sessionStorage).some(k=>k.startsWith('crm:notice:finance-checkout-preliminary:')))).toBe(false);
+ await page.getByRole('button',{name:'Предыдущий месяц',exact:true}).click();
+ await expect.poll(()=>calls.some(call=>call.query.get('month')==='2026-10')).toBe(true);
+ await expect(page.locator('.finance-report-main').getByRole('button',{name:'Перейти к налоговой сверке'})).toBeVisible();
+ await notifications.getByRole('button',{name:'Закрыть уведомление',exact:true}).first().click();
+ await expect(toast).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>Object.keys(sessionStorage).some(k=>k.startsWith('crm:notice:finance-checkout-preliminary:')))).toBe(true);
 });

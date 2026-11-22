@@ -77,11 +77,11 @@ export function classifyOverviewOrder(order:OverviewOrderSource,now=new Date()) 
   const exceptionalParent=['RETURNED','LOST'].includes(order.shippingStatus);
   const exceptionalParcel=parcels.some(parcel=>['RETURNED','LOST'].includes(parcel.status));
   const cancelled=order.salesStatus==='CANCELLED'||order.productionStatus==='CANCELLED'||order.paymentStatus==='REFUNDED'||order.paymentStatus==='CANCELLED';
-  const allParcelsDelivered=shippingEvidence(order).complete&&parcels.length>0&&parcels.every(parcel=>parcel.status==='DELIVERED'||Boolean(parcel.deliveredAt));
+  const dispatched=shippingEvidence(order).complete;
+  const allParcelsDelivered=dispatched&&parcels.length>0&&parcels.every(parcel=>parcel.status==='DELIVERED'||Boolean(parcel.deliveredAt));
   const completed=!exceptionalParent&&!exceptionalParcel&&!cancelled&&(['COMPLETED','REVIEW_REQUESTED'].includes(order.salesStatus)||allParcelsDelivered||(!parcels.length&&(order.salesStatus==='DELIVERED'||order.shippingStatus==='DELIVERED'||Boolean(order.shipment?.deliveredAt))));
   // Child-only dispatch requires full item coverage; explicit root tracking/dates
   // retain the approved legacy whole-order meaning across all status consumers.
-  const dispatched=shippingEvidence(order).complete;
   const partiallyDispatched=parcels.length>0&&parcels.some(parcelSent)&&!dispatched;
   // A terminal child does not close the other active parcels or their production.
   const open=!order.archivedAt&&!cancelled&&!completed&&!exceptionalParent&&!(exceptionalParcel&&CLOSED_SALES.has(order.salesStatus));

@@ -373,6 +373,9 @@ test(`редактор ${field} сохраняет исходный контек
     const measurement = { ...item.instances[0].measurement, id: "concurrent-snapshot", values: { ...item.instances[0].measurement.values, m1: 88 } };
     await route.fulfill({ json: { ...initial, client: { ...initial.client, athletes: [athlete] }, items: [{ ...item, instances: [{ ...item.instances[0], athlete, measurement, updatedAt: "2026-10-13T13:00:00.000Z" }] }] } });
   });
+  await page.route(`**/api/clients/${order.client.id}`, route => route.fulfill({
+    json: { ...order.client, athletes: [{ id: "booking-athlete", firstName: "Анна", measurements: [] }] },
+  }));
   let submitted: Record<string, unknown> | undefined;
   await page.route(field === "name" ? "**/api/clients/*/athletes/athlete-1" : "**/api/order-tabs/*/instances/instance-1/measurement", async route => {
     submitted = route.request().postDataJSON();
@@ -859,6 +862,80 @@ test("страница и размер списка восстанавливаю
   await expect(page.getByRole("navigation", { name: "Пагинация заказов" }).getByRole("button", { name: "2", exact: true })).toHaveAttribute("aria-current", "page");
 });
 
+test("ручное бронирование создаётся без изображения модели", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await mockOrdersApi(page);
+  await page.route(`**/api/clients/${order.client.id}`, route => route.fulfill({
+    json: { ...order.client, athletes: [{ id: "booking-athlete", firstName: "Анна", measurements: [] }] },
+  }));
+  let submitted: Record<string, unknown> | undefined;
+  let images = 0;
+  await page.route("**/api/orders/model-image", route => {
+    images++;
+    return route.fallback();
+  });
+  await page.route("**/api/orders", route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ status: 201, json: { id: "booking-created" } });
+  });
+  await page.goto("/?section=orders");
+  await page.getByRole("button", { name: /Новый заказ/ }).click();
+  await page.getByRole("dialog", { name: "Выберите клиента" })
+    .getByRole("button", { name: /Клиент Mantine/ }).click();
+  const form = page.getByRole("dialog", { name: "Новый заказ" });
+  const status = form.getByLabel("Статус заказа");
+  await expect(status).toHaveValue("NEW");
+  await expect(form.getByText("Нет изображения", { exact: true })).toBeVisible();
+  await status.selectOption("BOOKING");
+  await form.getByLabel("Описание изделия").fill("Test design");
+  await form.getByLabel("Общая цена").fill("400");
+  await form.getByRole("button", { name: "Создать заказ" }).click();
+  await expect(form).toBeHidden();
+  expect(submitted).toMatchObject({ initialStatus: "BOOKING", priceMinor: 40000 });
+  expect(submitted).not.toHaveProperty("modelImagePath");
+  expect(images).toBe(0);
+});
+
+for (const width of [320, 390]) {
+  test(`мобильный список заказов сохраняет поиск и прокрутку при переключении панели — ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 720 });
+    await mockOrdersApi(page, undefined, undefined, { additionalOrders: 12 });
+    await page.goto("/?section=orders");
+    const workspace = page.locator(".orders-dashboard");
+    const table = workspace.locator(".orders-table-scroll");
+    const search = workspace.getByRole("searchbox");
+    const panel = workspace.getByRole("button", { name: "Показать панель заказов" });
+    const filters = workspace.getByRole("button", { name: "Фильтры", exact: true });
+    await expect(table.locator(".orders-summary-row").first()).toBeVisible();
+    await expect(page.locator(".crm-topbar")).toBeHidden();
+    await expect(search).toBeVisible();
+    await expect(filters).toBeHidden();
+    const compactTop = (await table.boundingBox())!.y;
+    expect(compactTop).toBeLessThan(74);
+    const searchBox = (await search.boundingBox())!;
+    const panelBox = (await panel.boundingBox())!;
+    expect(searchBox.x + searchBox.width).toBeLessThan(panelBox.x);
+    expect(Math.abs(searchBox.y - panelBox.y)).toBeLessThan(12);
+    await page.screenshot({ path: testInfo.outputPath(`orders-list-only-${width}.png`) });
+    await table.evaluate(element => { element.scrollLeft = 120; });
+    await panel.click();
+    await expect(page.locator(".crm-topbar")).toHaveCSS("height", "48px");
+    await expect(filters).toBeVisible();
+    await expect(workspace.getByRole("button", { name: "Столбцы" })).toBeVisible();
+    await expect(workspace.getByRole("button", { name: /Новый заказ/ })).toBeVisible();
+    expect(await table.evaluate(element => element.scrollLeft)).toBe(120);
+    await filters.click();
+    await expect(workspace.getByRole("dialog", { name: "Фильтры" })).toBeVisible();
+    await workspace.getByRole("button", { name: "Только список" }).click();
+    await expect(filters).toBeHidden();
+    await expect(workspace.getByRole("dialog", { name: "Фильтры" })).toHaveCount(0);
+    await expect(search).toBeVisible();
+    expect(await table.evaluate(element => element.scrollLeft)).toBe(120);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}
+
 for (const viewport of [
   { name: "approved", width: 1703, height: 895 },
   { name: "laptop", width: 1366, height: 768 },
@@ -869,11 +946,12 @@ for (const viewport of [
     const updates = await mockOrdersApi(page);
     await page.goto("/?section=orders");
 
-    const search = page.getByRole("searchbox", { name: "Номер заказа, клиент, модель…" });
+    const search = page.locator(".orders-command-bar").getByRole("searchbox");
     await search.fill("Mantine");
     await page.getByRole("button", { name: "Очистить поиск" }).click();
     await expect(search).toHaveValue("");
     await expect(search).toBeFocused();
+    if (viewport.name === "mobile") await page.getByRole("button", { name: "Показать панель заказов" }).click();
 
     const newOrder = page.getByRole("button", { name: /Новый заказ/ });
     await expect(newOrder).toHaveClass(/mantine-Button-root/);
@@ -1228,7 +1306,7 @@ test("смена статуса сохраняется без перезагру
   await expect(details).toBeVisible();
   await page.getByRole("combobox", { name: "Изменить статус" }).click();
   await page.getByRole("option", { name: "Оплачено", exact: true }).click();
-  await expect.poll(() => updates.some((update) => update.path.endsWith("/statuses") && update.body.salesStatus === "PAID")).toBe(true);
+  await expect.poll(() => updates.some((update) => update.path.endsWith("/statuses") && update.body.salesStatusOptionId === "PAID")).toBe(true);
   await expect(details).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Изменить статус" })).toHaveValue("Оплачено");
   const tint=await page.locator('.orders-summary-row[data-sales-status="PAID"]').evaluate(row=>{
@@ -1347,6 +1425,7 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockOrdersApi(page);
     await page.goto("/?section=orders");
+    if (viewport.name === "mobile") await page.getByRole("button", { name: "Показать панель заказов" }).click();
 
     const trigger = page.getByRole("button", { name: "Столбцы" });
     await trigger.click();
@@ -1381,6 +1460,7 @@ for (const viewport of [
     await expect(page.getByRole("dialog", { name: "Столбцы" }).getByRole("checkbox", { name: "Модель / Спорт" })).not.toBeChecked();
     await page.getByRole("dialog", { name: "Столбцы" }).getByRole("button", { name: "Готово" }).click();
     await page.reload();
+    if (viewport.name === "mobile") await page.getByRole("button", { name: "Показать панель заказов" }).click();
     await page.getByRole("button", { name: "Столбцы" }).click();
     const persistedDialog = page.getByRole("dialog", { name: "Столбцы" });
     await expect(persistedDialog.getByRole("checkbox", { name: "Модель / Спорт" })).not.toBeChecked();
@@ -1401,5 +1481,40 @@ for (const viewport of [
     ]);
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  });
+}
+for (const viewport of [
+  { name: "phone touch", width: 390, hasTouch: true, hoverPreview: false },
+  { name: "tablet touch", width: 1024, hasTouch: true, hoverPreview: false },
+  { name: "narrow mouse", width: 390, hasTouch: false, hoverPreview: false },
+  { name: "desktop mouse", width: 1366, hasTouch: false, hoverPreview: true },
+]) {
+  test.describe(`Orders image — ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: 844 }, hasTouch: viewport.hasTouch });
+
+    test("image viewer and hover preview follow the input mode", async ({ page }) => {
+      await mockOrdersApi(page);
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      await page.goto("/?section=orders");
+      const thumbnail = page.locator(".orders-summary-row .order-image-trigger").first();
+      const preview = page.locator(".orders-image-preview");
+      const viewer = page.getByRole("dialog", { name: `Просмотр дизайна — Открыть заказ ${order.number}` });
+
+      // hover() also checks that a compatibility mouse event cannot expose the preview on touch devices.
+      await thumbnail.locator("img").hover();
+      if (viewport.hoverPreview) await expect(preview).toBeVisible();
+      else await expect(preview).toBeHidden();
+
+      if (viewport.hasTouch) await thumbnail.tap();
+      else await thumbnail.click();
+      await expect(viewer).toBeVisible();
+      await expect(viewer.locator("img")).toBeVisible();
+      if (!viewport.hoverPreview) await expect(preview).toBeHidden();
+      await viewer.getByRole("button", { name: "Закрыть просмотр изображения" }).click();
+      await expect(viewer).toBeHidden();
+      if (!viewport.hoverPreview) await expect(preview).toBeHidden();
+      expect(errors).toEqual([]);
+    });
   });
 }

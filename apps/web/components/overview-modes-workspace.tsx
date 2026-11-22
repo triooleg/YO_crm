@@ -7,7 +7,7 @@ import { salesStatisticsUi as ui } from '../lib/i18n';
 import type { OverviewNavigate } from '../lib/overview-report';
 
 /** Keeps the established operational workspace and its domain requests intact. */
-export function OverviewModesWorkspace({ role, onNavigate }: { role: string; onNavigate: OverviewNavigate }) {
+export function OverviewModesWorkspace({ role, accountId, onNavigate }: { role: string; accountId?: string; onNavigate: OverviewNavigate }) {
   const [view, setView] = useState<'overview' | 'statistics' | null>(null);
   const allowed = ['OWNER', 'ADMIN', 'MANAGER', 'ACCOUNTANT'].includes(role);
   useEffect(() => {
@@ -33,6 +33,6 @@ export function OverviewModesWorkspace({ role, onNavigate }: { role: string; onN
     setView(next);
   }
   if (view === null) return <div role="status" aria-label={ui.loading}><Loader size="sm" /></div>;
-  if (view === 'statistics') return <SalesStatisticsWorkspace role={role} onNavigate={onNavigate} onModeChange={change} />;
+  if (view === 'statistics') return <SalesStatisticsWorkspace role={role} accountId={accountId} onNavigate={onNavigate} onModeChange={change} />;
   return <OverviewWorkspace role={role} onNavigate={onNavigate} modeControl={allowed ? <SegmentedControl className="overview-mode-control sales-statistics-mode" aria-label={ui.modeLabel} value="overview" onChange={value => change(value as 'overview' | 'statistics')} data={[{ value: 'overview', label: ui.overview }, { value: 'statistics', label: ui.statistics }]} /> : undefined} />;
 }

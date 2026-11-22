@@ -1,6 +1,14 @@
 # Database conventions
 
 - CUID primary keys and createdAt/updatedAt timestamps.
+- Web Push infrastructure exceptions
+  - WebPushEvent is an append-only event registry keyed by its stable source
+    eventKey. It records occurredAt and createdAt.
+  - WebPushDelivery uses a deterministic MD5 identifier derived from eventKey
+    and subscriptionId. The unique pair independently enforces delivery
+    deduplication. It records createdAt, availableAt, lockedUntil and sentAt.
+  - WebPushSubscription follows the standard CUID and createdAt/updatedAt
+    conventions.
 - Business entities use nullable archivedAt where history must remain.
 - Client.inboxSpamAt is a nullable Inbox-only classification, independent of archivedAt/status. Existing clients default to NULL; setting/restoring it preserves conversations, messages and orders and records Activity/AuditLog. Provider ingestion does not clear the flag.
 - Money uses integer minor units and a three-letter currency.

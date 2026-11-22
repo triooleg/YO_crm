@@ -39,8 +39,6 @@
 .orders-sort .mantine-InputWrapper-label{margin:0!important;white-space:nowrap}
 .orders-sort .mantine-NativeSelect-input{min-height:38px;height:38px}
 .orders-discipline-control,.orders-inline-status-control{width:100%}
-.orders-status-with-color{display:flex;align-items:center;gap:4px}
-.orders-status-with-color .orders-inline-status-control{flex:1;min-width:0}
 .orders-inline-status-control .mantine-NativeSelect-input{min-height:33px;height:33px;color:var(--od-editable)}
 .orders-expanded-statuses>.crm-native-select{display:grid;align-content:center;gap:5px;min-height:70px;padding:10px 12px;border-right:1px solid var(--od-border)}
 .orders-expanded-statuses>.crm-native-select .mantine-InputWrapper-label{margin:0!important;color:var(--muted);font-size:12px;text-transform:uppercase}
@@ -645,3 +643,7 @@
 }
 
 @media(max-width:700px){.orders-command-bar .orders-sort>div{min-width:0}.orders-command-bar .orders-sort select{min-width:0;width:100%;max-width:100%}}
+
+.orders-production-cell{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px}
+.orders-production-cell button svg{width:14px;height:14px}
+.orders-short-note-preview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:min(40vh,240px);overflow:hidden}

@@ -70,3 +70,10 @@ test("Chatwoot multipart preserves an MP4 video attachment", async () => {
   assert.equal(file.type, "video/mp4");
   assert.equal(file.name, "clip.mp4");
 });
+
+test("Chatwoot sends all selected photos in one multipart message", () => {
+  const photos = ["front.png", "back.png"].map(name => ({ bytes: new Uint8Array([1, 2, 3]), name, mimeType: "image/png" }));
+  const form = chatwootMultipartBody("Two views", photos);
+  assert.equal(form.get("content"), "Two views");
+  assert.deepEqual(form.getAll("attachments[]").map(file => file.name), ["front.png", "back.png"]);
+});

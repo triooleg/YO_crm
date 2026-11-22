@@ -1,5 +1,7 @@
 "use client";
 import { financeRequest, invalidateFinanceRequests } from '../lib/finance-request-coordinator';
+import { notifications } from '@mantine/notifications';
+import { useCrmNoticeOnce } from '../lib/use-crm-notice-once';
 import { FinanceInformationNotices } from "./finance-information-notices";
 import { FinanceTaxTab } from "./taxes/finance-tax-tab";
 import { useTaxPendingRefresh } from './taxes/shared';
@@ -27,13 +29,14 @@ import { CrmButton } from './crm/settings-controls';
 import { CrmTabList } from './crm/tab-list';
 import { CrmAlert } from "./crm/alert";
 import { CrmModal } from './crm/modal';
+import { refreshFinanceRates, reportRatesChanged } from '../lib/finance-rate-refresh';
 
 const symbols={EUR:'€',USD:'$',UAH:'₴'};
 function businessMonth(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Kyiv',year:'numeric',month:'2-digit'}).formatToParts(new Date());return `${parts.find(part=>part.type==='year')!.value}-${parts.find(part=>part.type==='month')!.value}`;}
 const baseFilters=():FinanceFilters=>({source:'',month:businessMonth(),currency:'EUR',range:6,tab:'payments',page:1,pageSize:10,search:'',status:'',clientId:'',categoryId:'',orderId:'',from:'',to:'',sort:'date',direction:'desc',scope:'all'});
-type Props={role?:string;onNavigate?:(section:'orders',context:Record<string,string>)=>void};
+type Props={role?:string;accountId?:string;onNavigate?:(section:'orders',context:Record<string,string>)=>void};
 type TaxCalculation={id:string;status:'RUNNING'}|{id:string;status:'COMPLETED';result:{from:string;through:string}}|{id:string;status:'FAILED';reason:'SETTINGS_CHANGED'|'CALCULATION_FAILED'};
-export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
+export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props){
   const mobileCurrencyMenu=useMediaQuery('(max-width: 800px)');
   const [filters,setFilters]=useState<FinanceFilters>(baseFilters),[ready,setReady]=useState(false),[storedData,setData]=useState<FinanceReport>(),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[ratesNotice,setRatesNotice]=useState(''),[exporting,setExporting]=useState(false);
   const [sourceChart,setSourceChart]=useState('standard');
@@ -50,6 +53,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   const reportSequence=useRef(0),actionSequence=useRef(0),valuation=useRef<string|undefined>(undefined),contextHandled=useRef(false),filtersRef=useRef(filters);filtersRef.current=filters;
   const canPay=role==='OWNER'||role==='ADMIN',canWrite=['OWNER','ADMIN','ACCOUNTANT'].includes(role);
   const summaryScope=useRef(''),loadedReportKey=useRef('');
+  const ratesInFlight=useRef<ReturnType<typeof refreshFinanceRates> | undefined>(undefined);
   const aggregateScope=JSON.stringify([filters.month,filters.currency,filters.range,filters.source||'']);
   const data=summaryScope.current===aggregateScope?storedData:undefined;
   const pending=loading||filters.search!==debouncedSearch||(data!==undefined&&loadedReportKey.current!==financeReportQuery(filters).toString());
@@ -60,22 +64,50 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
     const needsSummary=clearVersion||scope!==summaryScope.current;
     if(needsSummary){setData(undefined);valuation.current=undefined;}
     if(clearVersion)invalidateFinanceRequests();setLoading(true);setError('');setRatesNotice('');
+    // Start the report with the best valuation accepted by the server.
+    if(needsSummary&&!ratesInFlight.current){
+      const refresh=refreshFinanceRates(request);
+      ratesInFlight.current=refresh;
+      void refresh.then(()=>{if(ratesInFlight.current===refresh)ratesInFlight.current=undefined;});
+    }
+    const rates=ratesInFlight.current;
+    const read=(version?:string):Promise<FinanceReport>=>request(`/finance/report?${financeReportQuery(selected,version)}`);
+    const show=(report:FinanceReport)=>{
+      valuation.current=report.valuationVersion;summaryScope.current=scope;setData(report);
+    };
+    void rates?.then(outcome=>{if(sequence===reportSequence.current&&outcome.warning)setRatesNotice(outcome.warning)});
     try{
-      let rateWarning='';
-      // Table sorting/paging does not need another provider refresh.
-      if(needsSummary)try{await request('/finance/exchange-rates/ensure-current',{method:'POST'})}catch(reason){if(!(reason instanceof FinanceRequestError)||reason.status!==503)throw reason;rateWarning=reason.message}
-      if(sequence!==reportSequence.current)return;
       if(needsSummary){
         const query=financeReportQuery(selected);query.set('projection','summary');
-        const summary:FinanceReport=await request(`/finance/report?${query}`);
+        const readSummary=():Promise<FinanceReport>=>request(`/finance/report?${query}`);
+        let summary:FinanceReport;
+        try{summary=await readSummary();}
+        catch(reason){
+          if(!(reason instanceof FinanceRequestError)||reason.status!==503||!(await rates)?.rates)throw reason;
+          if(sequence!==reportSequence.current)return;
+          summary=await readSummary();
+        }
         if(sequence!==reportSequence.current)return;
-        setData(summary);valuation.current=summary.valuationVersion;summaryScope.current=scope;setRatesNotice(rateWarning);
+        show(summary);
       }
       let result:FinanceReport;
-      try{result=await request(`/finance/report?${financeReportQuery(selected,valuation.current)}`)}
-      catch(reason){if(!(reason instanceof FinanceRequestError)||reason.status!==409)throw reason;if(sequence!==reportSequence.current)return;valuation.current=undefined;setData(undefined);setNotice(ui.valuationChanged);result=await request(`/finance/report?${financeReportQuery(selected)}`);}
+      try{result=await read(valuation.current);}
+      catch(reason){
+        if(!(reason instanceof FinanceRequestError)||reason.status!==409)throw reason;
+        if(sequence!==reportSequence.current)return;
+        setNotice(ui.valuationChanged);
+        result=await read();
+      }
       if(sequence!==reportSequence.current)return;
-      valuation.current=result.valuationVersion;loadedReportKey.current=financeReportQuery(selected).toString();setData(result);summaryScope.current=scope;setRatesNotice(rateWarning);
+      loadedReportKey.current=financeReportQuery(selected).toString();
+      show(result);
+      void rates?.then(async outcome=>{
+        if(sequence!==reportSequence.current||!reportRatesChanged(result,outcome.rates))return;
+        setLoading(true);
+        try{const updated=await read();if(sequence===reportSequence.current)show(updated);}
+        catch(reason){if(sequence===reportSequence.current)setRatesNotice((reason as Error).message);}
+        finally{if(sequence===reportSequence.current)setLoading(false);}
+      });
       return true;
     }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';if(propagateError)throw reason;}}finally{if(sequence===reportSequence.current)setLoading(false)}
   },[request]);
@@ -109,8 +141,25 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
   useTaxPendingRefresh(data?.fiscal?.current.incomplete === true, () => void load(true), filters.month + ':' + filters.currency, pending);
   const labels={payments:ui.paymentsTab,expenses:ui.expensesTab,invoices:ui.invoicesTab,taxes:taxUi.taxes};
   const fiscal=data?.fiscal, current=fiscal?.current, previous=fiscal?.previous;
-  const checkoutPreliminary=current?.accruedTaxesMinor!=null&&fiscal?.missing.some(row=>row.month===filters.month&&row.code==='CHECKOUT_PRELIMINARY');
+  const checkoutPreliminary=current?.incomplete===true&&current.accruedTaxesMinor!=null&&fiscal?.missing.some(row=>row.month===filters.month&&row.code==='CHECKOUT_PRELIMINARY');
   const receiptConfirmationCount=data?fiscalReceiptConfirmationCount(data):0;
+  function openReceiptConfirmation(){
+    patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'});
+  }
+  const checkoutNoticeId=`finance-checkout-preliminary:${accountId??role}`;
+  useCrmNoticeOnce(checkoutNoticeId, checkoutPreliminary ? {
+    className:'finance-checkout-notice',
+    color:'yellow',
+    autoClose:10000,
+    closeButtonProps:{'aria-label':taxUi.closeCheckoutNotice},
+    message:<Stack gap="xs" align="flex-start">
+      <span>{taxUi.checkoutPreliminary}</span>
+      {receiptConfirmationCount>0&&<CrmButton size="compact-xs" tone="secondary" onClick={()=>{
+        openReceiptConfirmation();
+        notifications.hide(checkoutNoticeId);
+      }}>{taxUi.openReceiptConfirmation}</CrmButton>}
+    </Stack>,
+  } : undefined, filters.month);
   const selectedTable=data&&filters.tab==='expenses'?financeExpenseTable(data):data?.table;
   const recentExpenses=data?financeRecentExpenses(data):[];
   const fiscalMoney=(amount:number|null|undefined)=>fiscalAmountLabel(amount,filters.currency);
@@ -183,7 +232,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
         <Metric title={ui.debt} amount={money(data.debtMinor)} icon="clock" color="orange" hint={ui.currentOrders} tooltip={ui.debtHint}/>
         <Metric title={ui.forecast} amount={money(data.forecastMinor)} icon="calendar" color="blue" extra={`${data.forecastCount} ${ui.orders}`} hint={ui.horizon} tooltip={`${ui.forecastHint} ${financeDate(data.today)} – ${financeDate(data.forecastUntil)}`}/>
       </section>
-      {(!fiscal||current?.incomplete)&&<Alert color="yellow" role="status">{!fiscal?taxUi.unavailable:checkoutPreliminary?taxUi.checkoutPreliminary:taxUi.incomplete}{receiptConfirmationCount>0&&<div>{!checkoutPreliminary&&taxUi.receiptConfirmation.replace('{count}',String(receiptConfirmationCount))} <CrmButton size="compact-xs" tone="secondary" onClick={()=>patch({tab:'taxes',taxComponent:'',status:'',categoryId:'',scope:'all'})}>{taxUi.openReceiptConfirmation}</CrmButton></div>}</Alert>}
+      {(!fiscal||current?.incomplete&&!checkoutPreliminary)&&<Alert color="yellow" role="status">{!fiscal?taxUi.unavailable:taxUi.incomplete}{receiptConfirmationCount>0&&<div>{taxUi.receiptConfirmation.replace('{count}',String(receiptConfirmationCount))} <CrmButton size="compact-xs" tone="secondary" onClick={openReceiptConfirmation}>{taxUi.openReceiptConfirmation}</CrmButton></div>}</Alert>}
       {fiscal?.missing.some(item=>item.month===filters.month&&item.code==='FUTURE_PRESENTATION_DATE')&&<Alert color="yellow" role="status">{taxUi.futurePresentation}</Alert>}
       <FinanceInformationNotices presentation={fiscalPresentationNotice(data)} />
       {data&&fiscalExpenseViewUnavailable(data)&&<Alert color="orange" role="status">{taxUi.cashFallback}</Alert>}
@@ -191,7 +240,8 @@ export function FinanceWorkspace({role='ACCOUNTANT',onNavigate}:Props){
       <FinanceReportCharts report={data} initialMetric={initialChartMetric} range={filters.range} onRange={range=>patch({range})} onMonth={month=>patch({month})} onCategory={categoryId=>patch({tab:'expenses',categoryId,status:'',sort:'date',scope:'all'})} onTax={taxComponent=>patch({tab:'taxes',taxComponent,status:'',categoryId:'',sort:'date',scope:'all'})} sourceContent={sourceChart==='sources'&&fiscal?.sourceAnalytics?<article className="finance-report-card finance-report-trend"><header><h2>{sourceUi.dynamics}</h2><Select size="xs" aria-label={sourceUi.dynamics} value={String(filters.range)} onChange={value=>value&&patch({range:Number(value)})} data={[3,6,12].map(value=>({value:String(value),label:`${value} ${sourceUi.months}`}))}/></header><div className="order-source-toolbar"><SourceFilterControl value={filters.source||''} onChange={source=>patch({source,tab:'payments'})}/></div><SourceTrendChart rows={fiscal.sourceAnalytics.trend.map(row=>({...row,breakdown:row.breakdown.flatMap(item=>item.amountMinor==null?[]:[{source:item.source as OrderSource,value:item.amountMinor}])}))} currency={filters.currency} filter={filters.source||''} onSource={(source,month)=>patch({source,month,tab:'payments',scope:'all'})}/>{fiscal.missing.length>0&&<p role="status" className="finance-report-info">{taxUi.provisional}</p>}</article>:undefined}/>
 
       <section className="finance-report-workspace"><LoadingOverlay visible={pending} zIndex={5} overlayProps={{blur:1}}/><div className="finance-report-main">
-        <CrmTabList className="finance-report-tabs" value={filters.tab} ariaLabel={ui.title} onChange={value=>patch({tab:value as FinanceTab,status:'',categoryId:'',sort:'date',scope:'all'})} tabs={(['payments','expenses','taxes','invoices'] as FinanceTab[]).map(tab=>({value:tab,label:labels[tab],icon:<FinanceIcon name={tab==='invoices'?'invoice':'wallet'}/>,tabId:`finance-report-tab-${tab}`,panelId:'finance-report-panel'}))}/>
+        <Group justify="space-between" gap="xs"><CrmTabList className="finance-report-tabs" value={filters.tab} ariaLabel={ui.title} onChange={value=>patch({tab:value as FinanceTab,status:'',categoryId:'',sort:'date',scope:'all'})} tabs={(['payments','expenses','taxes','invoices'] as FinanceTab[]).map(tab=>({value:tab,label:labels[tab],icon:<FinanceIcon name={tab==='invoices'?'invoice':'wallet'}/>,tabId:`finance-report-tab-${tab}`,panelId:'finance-report-panel'}))}/>
+        {checkoutPreliminary&&receiptConfirmationCount>0&&filters.tab!=='taxes'&&<CrmButton size="compact-xs" tone="secondary" onClick={openReceiptConfirmation}>{taxUi.openReceiptConfirmation}</CrmButton>}</Group>
         <section id="finance-report-panel" role="tabpanel" aria-labelledby={`finance-report-tab-${filters.tab}`} className="finance-report-card finance-report-table-card"><header><div><h2>{labels[filters.tab]}</h2><p>{filters.tab==='payments'?ui.paymentsHint:filters.tab==='expenses'?ui.expensesHint:filters.tab==='taxes'?taxUi.historicalBasis:ui.invoicesHint}</p></div><Group gap="xs">{filters.tab==='expenses'&&canWrite&&<CrmButton tone="secondary" size="compact-sm" disabled={pending} onClick={()=>setCategoriesOpen(true)}>{ui.categories}</CrmButton>}{filters.tab!=='taxes'&&canWrite&&(filters.tab!=='payments'||canPay)&&<CrmButton disabled={pending} leftSection={<FinanceIcon name="plus"/>} onClick={()=>{setPickedOrder(null);if(filters.tab==='expenses')setExpense(null);else setPickOrder(filters.tab==='payments'?'payment':'invoice')}}>{filters.tab==='payments'?ui.addPayment:filters.tab==='expenses'?ui.addExpense:ui.addInvoice}</CrmButton>}</Group></header>
           {filters.tab==='taxes'?(data.projection==='summary'?<div role="status"><Loader size="sm"/>{ui.loading}</div>:<FinanceTaxTab report={data} filters={filters} patch={patch} role={role} onNavigate={onNavigate} onSaved={()=>void load(true)} refreshKey={taxEpoch}/>):<>
           <div className="order-source-toolbar"><SourceFilterControl ariaLabel={sourceUi.filter} value={filters.source||''} onChange={source=>patch({source})}/></div><div className="finance-report-filters"><TextInput aria-label={ui.search} placeholder={ui.search} value={filters.search} onChange={event=>patch({search:event.currentTarget.value})} leftSection={<FinanceIcon name="search"/>}/>
