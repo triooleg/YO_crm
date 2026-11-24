@@ -1,0 +1,757 @@
+.inbox-reference-shell .communications-page {
+  --inbox-list-cap: 25vw;
+  --inbox-context-cap: 28vw;
+  --inbox-chat-min: 0px;
+  --inbox-surface: #fff;
+  --inbox-border: #e5e2ec;
+  --inbox-text: #1e293b;
+  --inbox-muted: #64748b;
+  --inbox-incoming: #f1f2f6;
+  --inbox-outgoing: #eee6ff;
+  --inbox-link: #5b30bd;
+  --inbox-focus: var(--violet);
+  --inbox-conversation-gutter: 47px;
+  --line: var(--inbox-border);
+  --ink: var(--inbox-text);
+  --muted: var(--inbox-muted);
+  --canvas: #f7f7fa;
+  min-inline-size: 0;
+  background: var(--canvas);
+}
+
+.communications-page .communications-grid {
+  grid-template-rows: minmax(0, 1fr);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.communications-page :is(.communications-clients, .communications-chat, .communications-context-panel) {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.communications-page .communications-clients {
+  display: flex;
+  flex-direction: column;
+  background: var(--inbox-surface);
+}
+
+.communications-page .communications-clients > :not(.communications-client-list) {
+  flex-shrink: 0;
+}
+
+.communications-page :is(.communications-client-list, .communications-messages, .communications-context-panel) {
+  min-block-size: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.communications-page .communications-list-header {
+  padding: 14px 12px 8px;
+}
+
+.inbox-reference-shell .communications-page .communications-list-header h1 {
+  font-size: 24px !important;
+}
+
+.communications-page .communications-list-header .communications-create-client {
+  background: var(--violet);
+  box-shadow: none;
+}
+
+.communications-page .communications-redesign-filters {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.communications-page .communications-redesign-filters > :is(.communications-social-filters, .communications-order-filters) {
+  min-inline-size: 0;
+  flex: 0 0 100%;
+}
+
+.inbox-reference-shell .communications-page .communications-client-list > button {
+  min-height: 64px;
+  padding-block: 8px;
+}
+
+.inbox-reference-shell .communications-page .communications-client-list > button.active {
+  border-radius: 0;
+  background: #f1eaff;
+  box-shadow: inset 3px 0 var(--violet);
+}
+
+.communications-page .communications-client-list > button:focus-visible {
+  outline: 2px solid var(--inbox-focus);
+  outline-offset: -2px;
+}
+
+.communications-page .communications-chat {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--canvas);
+}
+
+.inbox-reference-shell .communications-page .communications-chat > .communications-chat-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px 8px;
+  min-inline-size: 0;
+  min-block-size: 58px;
+  padding: 8px 12px;
+  background: var(--inbox-surface);
+}
+
+.inbox-reference-shell .communications-page .communications-chat-client {
+  flex: 1 1 130px;
+  min-inline-size: 0;
+  gap: 8px;
+}
+
+.inbox-reference-shell .communications-page .communications-chat-client > .communications-avatar {
+  inline-size: 38px;
+  block-size: 38px;
+  flex: 0 0 38px;
+  font-size: 15px;
+}
+
+.inbox-reference-shell .communications-page .communications-chat-client-copy > b {
+  font-size: 16px;
+}
+
+.inbox-reference-shell .communications-page .communications-chat-badges {
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.communications-page .communications-chat-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.communications-page .communications-chat-header .crm-native-select {
+  flex: 0 1 auto;
+  inline-size: 260px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-inline-start: 0;
+}
+
+.communications-page .communications-chat-header .crm-native-select .mantine-NativeSelect-input {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.inbox-reference-shell .communications-page .communications-messages {
+  padding: 10px var(--inbox-conversation-gutter) 14px;
+}
+
+.communications-page .communications-message-stack {
+  min-inline-size: 0;
+}
+
+.inbox-reference-shell .communications-page .communications-message-stack > article {
+  min-inline-size: 0;
+  max-inline-size: min(90%, 680px);
+  padding: 9px 12px;
+  margin-block: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--inbox-text);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  box-shadow: none;
+}
+
+.inbox-reference-shell .communications-page .communications-message-stack > article.in {
+  background: var(--inbox-incoming);
+  border-end-start-radius: 5px;
+}
+
+.inbox-reference-shell .communications-page .communications-message-stack > article.out {
+  background: var(--inbox-outgoing);
+  border-end-end-radius: 5px;
+}
+
+.inbox-reference-shell .communications-page .communications-message-stack > article.media-only {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.communications-page .communications-message-stack > article:has(.communications-message-reactions) {
+  margin-block-end: 20px;
+}
+
+.communications-page .communications-message-content,
+.communications-page .communications-message-translation {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.communications-page .communications-message-stack :is(.communications-message-content, .communications-message-translation, .communications-engagement-context) a {
+  color: var(--inbox-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.communications-page .communications-message-content :is(img, video) {
+  max-inline-size: 100%;
+}
+
+.inbox-reference-shell .communications-page .communications-message-stack .communications-message-meta {
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block-start: 4px;
+  color: var(--inbox-muted);
+  font-size: 11px;
+}
+
+.communications-page .communications-message-meta time {
+  white-space: nowrap;
+}
+
+.communications-page .communications-message-read {
+  background: #168044;
+  box-shadow: none;
+}
+
+.communications-page .communications-message-avatar.is-business {
+  background: var(--violet);
+}
+
+.communications-page .communications-message-avatar.is-business:has(.communications-business-logo) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.communications-page .communications-business-logo {
+  border-radius: 0;
+}
+
+.inbox-reference-shell .communications-page .communications-date-separator {
+  margin: 6px -10px 8px;
+  gap: 8px;
+  color: var(--inbox-muted);
+}
+
+.communications-page .communications-date-separator > span {
+  padding: 3px 9px;
+}
+
+.inbox-reference-shell .communications-page .communications-chat > footer {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--inbox-surface);
+  box-shadow: none;
+}
+
+.communications-page .communications-compose-tools {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.inbox-reference-shell .communications-page :is(.communications-compose, .communications-compose-shortcuts, .communications-ai) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.inbox-reference-shell .communications-page .communications-compose textarea {
+  min-inline-size: 0;
+  box-sizing: border-box;
+}
+
+.inbox-reference-shell .communications-page .communications-compose > button {
+  min-inline-size: 0;
+  background: var(--violet);
+  box-shadow: none;
+}
+
+.inbox-reference-shell .communications-page .communications-compose-shortcuts {
+  flex-wrap: wrap;
+  margin-block: 3px 0;
+  padding-inline: 0;
+  overflow: visible;
+}
+
+.inbox-reference-shell .communications-page .communications-compose > .communications-draft-status {
+  position: static;
+  grid-column: 1 / -1 !important;
+  grid-row: 3;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-block-start: 2px;
+  justify-self: end;
+}
+
+.inbox-reference-shell .communications-page .communications-context-panel {
+  padding-inline: 10px;
+  background: var(--canvas);
+}
+
+.inbox-reference-shell .communications-page .communications-context-panel.collapsed:not(.open) {
+  padding-inline: 6px;
+}
+
+.inbox-reference-shell .communications-page .communications-context-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  min-block-size: 44px;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.inbox-reference-shell .communications-page .communications-context-tabpanel {
+  gap: 8px;
+}
+
+.inbox-reference-shell .communications-profile-details {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+
+.inbox-reference-shell .communications-profile-details h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.inbox-reference-shell .communications-profile-details dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.inbox-reference-shell .communications-profile-details dl > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.inbox-reference-shell .communications-profile-details dt {
+  color: var(--muted);
+}
+
+.inbox-reference-shell .communications-profile-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.inbox-reference-shell .communications-page :is(.communications-context-section, .communications-buyer-card, .communications-context-history) {
+  min-inline-size: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--inbox-surface);
+  overflow-wrap: anywhere;
+  box-shadow: none;
+}
+
+.inbox-reference-shell .communications-page :is(.communications-context-section, .communications-context-history) > header {
+  margin-block-end: 6px;
+}
+
+.inbox-reference-shell .communications-page .communications-context-next:not([data-overdue="true"]) > header > b {
+  color: var(--ink);
+}
+
+.inbox-reference-shell .communications-page .communications-context-next:not([data-overdue="true"]) > p {
+  border-color: var(--line);
+  background: var(--canvas);
+}
+
+.communications-page .communications-order-status {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--inbox-outgoing);
+  color: var(--inbox-link);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.communications-page .communications-order-status[data-tone="success"] { background: #e6f5eb; color: #166534; }
+.communications-page .communications-order-status[data-tone="warning"] { background: #fff4df; color: #92400e; }
+.communications-page .communications-order-status[data-tone="danger"] { background: #feebed; color: #991b1b; }
+
+.communications-page .communications-context-history :is(ol, ul) {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-inline-start: 18px;
+}
+
+.communications-page .communications-context-history li::marker { color: var(--violet); }
+.communications-page .communications-context-history time { color: var(--inbox-muted); font-size: 11px; }
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .inbox-reference-shell .communications-page .communications-grid {
+    grid-template-columns: min(290px, 30vw) 4px minmax(0, 1fr) !important;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat {
+    grid-column: 3;
+  }
+
+  .inbox-reference-shell .communications-page .communications-mobile-list-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .inbox-reference-shell .communications-page {
+    --inbox-conversation-gutter: 34px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat {
+    grid-column: 1;
+  }
+
+  .inbox-reference-shell .communications-page :is(.communications-clients:not(.mobile-open), .communications-resizer, .communications-context-collapsed-spacer) {
+    display: none;
+  }
+
+  .inbox-reference-shell .communications-page .communications-clients.mobile-open {
+    display: flex;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat[data-client-selected] > .communications-chat-header {
+    min-block-size: 0;
+    padding: 5px 8px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-header > .communications-chat-client {
+    order: 1;
+    flex: 1 1 0;
+    overflow: hidden;
+  }
+
+  .inbox-reference-shell .communications-page .communications-context-toggle {
+    order: 2;
+    min-block-size: 40px;
+  }
+
+  .communications-page .communications-mobile-list-toggle {
+    min-block-size: 40px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-mobile-chat-actions {
+    display: inline-flex;
+    order: 3;
+    flex-shrink: 0;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat:not([data-actions-open]) .communications-chat-header :is(
+    .communications-chat-badges,
+    .communications-active-channel
+  ) {
+    display: none !important;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat:has(.communications-mobile-chat-actions):not([data-actions-open]) .communications-chat-header :is(
+    .communications-chat-actions,
+    .communications-chat-spam,
+    .communications-split-client,
+    .communications-chat-account,
+    .communications-open-client,
+    .crm-native-select
+  ) {
+    display: none;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-header > :is(
+    .communications-chat-actions, .communications-chat-spam, .communications-split-client, .communications-open-client, .crm-native-select
+  ) {
+    order: 4;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-header .mantine-NativeSelect-input {
+    min-block-size: 40px;
+  }
+
+  .communications-page .communications-chat[data-client-selected]:not([data-actions-open]) .communications-mobile-active-channel {
+    display: block;
+    overflow: hidden;
+    color: var(--inbox-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .inbox-reference-shell .communications-page .communications-context-panel {
+    inset-block: 0;
+    block-size: 100dvh;
+  }
+
+  .inbox-reference-shell .communications-page .communications-context-panel.open {
+    padding-block-start: 46px;
+  }
+
+  .communications-page .communications-message-avatar {
+    inset-inline-start: -28px;
+    inline-size: 23px;
+    block-size: 23px;
+  }
+
+  .communications-page .communications-message-avatar .communications-avatar {
+    inline-size: 23px;
+    block-size: 23px;
+    font-size: 10px;
+  }
+
+  .communications-page .communications-message-avatar.is-business {
+    inset-inline: auto -28px;
+    font-size: 11px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-compose textarea {
+    font-size: 16px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-compose-shortcuts {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+}
+
+.communications-page .communications-client-status {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--inbox-incoming);
+  color: var(--inbox-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.communications-page .communications-client-status[data-status="ACTIVE"],
+.communications-page .communications-order-status[data-status="DELIVERED"] {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.communications-page .communications-order-status:is([data-status="EXCEPTION"], [data-status="RETURNED"], [data-status="FAILED"]) {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.communications-page .communications-list-country {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--inbox-muted);
+  font-size: 11px;
+}
+
+.communications-page .communications-list-country > span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.inbox-reference-shell .communications-page .communications-social-filters {
+  display: flex;
+  flex-wrap: nowrap;
+  padding-inline: 8px;
+  gap: 4px;
+}
+
+.inbox-reference-shell .communications-page .communications-social-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 5px;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.inbox-reference-shell .communications-page .communications-social-filter > strong {
+  padding-inline: 4px;
+}
+
+.communications-page .communications-compose-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-block-start: 4px;
+}
+
+.communications-page .communications-compose-tools > summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.communications-page .communications-compose-toolbar .communications-template-menu {
+  position: relative;
+}
+
+.communications-page .communications-compose-toolbar .communications-template-menu > div {
+  inset-inline: 0 auto;
+  max-inline-size: min(320px, 78vw);
+}
+
+.inbox-reference-shell .communications-page .communications-ai-panel.collapsed .communications-ai-manual-hint {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .inbox-reference-shell .communications-page .communications-chat-header .communications-reply-channel {
+    inline-size: clamp(146px, 14vw, 230px);
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-client .communications-chat-badges {
+    display: flex;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-badges > :is(.communications-client-status, .success) {
+    flex: 0 0 auto;
+    max-inline-size: none;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-badges > .communications-client-status {
+    order: -2;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-badges > .success {
+    order: -1;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-header:has(.communications-reply-channel) .communications-chat-badges > .is-channel {
+    display: none;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-badges > .is-channel {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .inbox-reference-shell .communications-page .communications-chat-badges > .is-channel > small {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (min-width: 1101px) and (max-width: 1500px) {
+  .inbox-reference-shell:has(> .crm-content > .communications-page) .crm-topbar-nav {
+    flex: 1 1 auto;
+    gap: 2px;
+  }
+
+  .inbox-reference-shell:has(> .crm-content > .communications-page) .crm-topbar-nav > button {
+    flex: 0 0 auto;
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .inbox-reference-shell:has(> .crm-content > .communications-page) .crm-topbar-nav > button > span {
+    flex: 0 0 auto;
+  }
+
+  .inbox-reference-shell:has(> .crm-content > .communications-page) .crm-topbar-search {
+    flex: 0 1 140px;
+  }
+}
+
+.inbox-reference-shell .communications-page .communications-channel-filter-all::before {
+  content: none;
+}
+
+.inbox-reference-shell .communications-page .communications-compose > .communications-send-options {
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 4 / 3 / 5;
+  align-self: center;
+  justify-self: end;
+  transform: none;
+}
+
+.inbox-reference-shell .communications-page .communications-send-options > summary {
+  block-size: 44px;
+  background: var(--violet);
+}
+
+.inbox-reference-shell .communications-page .communications-context-orders article > .order-image-unavailable {
+  align-self: start;
+  inline-size: 64px;
+  max-inline-size: 100%;
+  block-size: 90px;
+  border-radius: 9px;
+  background: var(--inbox-incoming);
+  color: var(--inbox-muted);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .inbox-reference-shell .communications-page .communications-message-actions > button,
+  .inbox-reference-shell .communications-page .communications-message-stack article > .communications-message-translate,
+  .inbox-reference-shell .communications-page .communications-message-stack .communications-message-reply {
+    display: none;
+  }
+
+  .inbox-reference-shell .communications-page .communications-message-more > summary {
+    inline-size: 40px;
+    block-size: 40px;
+  }
+
+  .inbox-reference-shell .communications-page .communications-message-more [role="menuitem"] {
+    min-block-size: 40px;
+  }
+}
+
+.inbox-reference-shell .communications-page .communications-context-orders {
+  order: 1;
+}
+
+.inbox-reference-shell .communications-page .communications-context-next {
+  order: 2;
+}
+
+.inbox-reference-shell .communications-page .communications-context-history {
+  order: 3;
+}
+
+.communications-page .communications-order-status[data-status="LOST"] {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.inbox-reference-shell .communications-page .communications-header-actions > .communications-redesign-filters {
+  display: inline-flex;
+  flex: 0 0 auto;
+}

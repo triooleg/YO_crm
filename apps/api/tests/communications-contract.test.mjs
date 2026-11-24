@@ -390,7 +390,7 @@ test("composer autosave updates one owned draft instead of appending duplicates"
   assert.match(service,/action:existing\?"UPDATE":"CREATE",entityType:"Message"/);
   assert.match(dto,/classUpdateMessageDraftDto[\s\S]*aiRunId/);
   assert.match(service,/scopedFeedback=awaittx\.aiResponseFeedback\.findFirst/);
-  assert.match(service,/metadata=\{\.\.\.preservedMetadata,composerDraftKey:draftKey,\.\.\.\(content&&d\.aiRunId\?\{aiRunId:d\.aiRunId\}:\{\}\)\}/);
+  assert.match(service,/metadata=\{\.\.\.preservedMetadata,composerDraftKey:draftKey,\.\.\.\(typeofcomposerEmail==="string"\?\{composerEmail\}:\{\}\),\.\.\.\(content&&d\.aiRunId\?\{aiRunId:d\.aiRunId\}:\{\}\)\}/);
 });
 
 test("saved draft validation accepts Prisma CUID ids and rejects unsafe boundaries",async()=>{
@@ -412,9 +412,9 @@ test("AI draft provenance is reserved and completed for e-mail and Chatwoot send
   const terminalRetryReturn=service.indexOf('if(attempt.status==="SENT"||attempt.status==="FAILED")return');
   assert.ok(idempotentMismatch>=0&&terminalRetryReturn>idempotentMismatch,"AI provenance mismatch must be rejected before a terminal idempotent retry returns");
   assert.match(service,/constsendAiRunId=d\.aiRunId\|\|storedAiRunId/);
-  for(const channelSend of [emailSend,chatwootSend]){
-    assert.ok(channelSend.includes("awaitthis.requireScopedAiFeedback(tx,replayScope(conversation.id))"));
-    assert.match(channelSend,/reserveAiFeedback\(tx,\{aiRunId:sendAiRunId,clientId,conversationId:conversation\.id\}\)/);
+  for(const [channelSend,conversationId] of [[emailSend,"conversationId"],[chatwootSend,"conversation.id"]]){
+    assert.ok(channelSend.includes(`awaitthis.requireScopedAiFeedback(tx,replayScope(${conversationId}))`));
+    assert.ok(channelSend.includes(`reserveAiFeedback(tx,{aiRunId:sendAiRunId,clientId,conversationId:${conversationId}})`));
     assert.match(channelSend,/aiRunId:sendAiRunId,sentMessageId:null,accepted:false/);
     assert.match(channelSend,/accepted:true,rejected:false,sentMessageId:message\.id/);
   }

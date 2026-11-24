@@ -1,4 +1,40 @@
 import { expect, test, type Page } from "@playwright/test";
+import { communicationsUi as ui } from "../lib/i18n";
+
+function conversationMenu(page: Page) {
+  return page.getByRole("button", { name: ui.conversationMenu, exact: true });
+}
+
+async function revealMobileChatActions(page: Page) {
+  const actions = page.getByRole("button", { name: ui.chatActions, exact: true });
+  if (await actions.isVisible() && await actions.getAttribute("aria-expanded") !== "true") {
+    await actions.click();
+  }
+}
+
+async function openSplitDialog(page: Page) {
+  await revealMobileChatActions(page);
+  await conversationMenu(page).click();
+  await page.getByRole("menuitem", { name: ui.splitAccounts, exact: true }).click();
+}
+
+async function expectSplitUnavailable(page: Page) {
+  await revealMobileChatActions(page);
+  await conversationMenu(page).click();
+  await expect(page.getByRole("menuitem", { name: ui.markSpam, exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: ui.splitAccounts, exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+}
+
+async function expectOnlyInstagramChannel(page: Page) {
+  const header = page.locator(".communications-chat-header");
+  await expect(header.getByRole("combobox", { name: ui.replyChannel, exact: true })).toHaveCount(0);
+  await revealMobileChatActions(page);
+  const badge = header.locator(".communications-chat-badges .is-channel");
+  await expect(badge).toHaveCount(1);
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("title", "Instagram / @yolanda_yao");
+}
 
 async function mockMergedClient(page:Page,{splitFailure,secondClient=false,initialSecondClient=false,postSplitDelayMs=0,postSplitListFailure=false,detailMessage=false,nestedChain=false,delayedDraftMs=0,delayedAsyncMs=0}:{splitFailure?:string;secondClient?:boolean;initialSecondClient?:boolean;postSplitDelayMs?:number;postSplitListFailure?:boolean;detailMessage?:boolean;nestedChain?:boolean;delayedDraftMs?:number;delayedAsyncMs?:number}={}){
   let split=false,splitPayload:unknown,detailRequests=0,draftWrites=0,postSplitListRequests=0;const events:string[]=[],draftBodies:unknown[]=[];
@@ -39,32 +75,35 @@ for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",wi
     await page.setViewportSize({width:viewport.width,height:viewport.height});
     const state=await mockMergedClient(page);
     await page.goto("/?section=inbox");
-    for(const label of ["WhatsApp / Mel Fordham","Instagram / @yolanda_yao"]){
-      const badge=page.getByTitle(label);await expect(badge).toBeVisible();
-      expect(await badge.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
-    }
-    const channelSelector=page.locator(".communications-chat-header select");
+    await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
+    await revealMobileChatActions(page);
+    const channelSelector=page.getByRole("combobox",{name:ui.replyChannel,exact:true});
     await expect(channelSelector).toBeVisible();
-    expect(await channelSelector.locator("option:checked").textContent()).toContain("Instagram / @yolanda_yao");
+    await expect(channelSelector.locator("option")).toHaveCount(2);
+    await expect(channelSelector.locator('option[value="WHATSAPP"]')).toContainText("WhatsApp / Mel Fordham");
+    await expect(channelSelector.locator('option[value="INSTAGRAM"]')).toContainText("Instagram / @yolanda_yao");
+    await expect(channelSelector).toHaveValue("INSTAGRAM");
     const channelSelectorBox=await channelSelector.boundingBox();
-    expect(channelSelectorBox?.width||0).toBeGreaterThanOrEqual(220);
-    if(viewport.name==="mobile")expect(channelSelectorBox?.height||0).toBeGreaterThanOrEqual(40);
-    const splitButton=page.getByRole("button",{name:"Разделить аккаунты"});
-    await expect(splitButton).toBeVisible();
+    if(!channelSelectorBox)throw new Error("Reply channel selector has no bounds");
+    expect(channelSelectorBox.x).toBeGreaterThanOrEqual(0);
+    expect(channelSelectorBox.x+channelSelectorBox.width).toBeLessThanOrEqual(viewport.width+1);
+    if(viewport.name==="mobile")expect(channelSelectorBox.height).toBeGreaterThanOrEqual(40);
+    const menuTrigger = conversationMenu(page);
+    await expect(menuTrigger).toBeVisible();
     await page.screenshot({path:testInfo.outputPath(`client-merged-${viewport.width}x${viewport.height}.png`),fullPage:true});
-    await splitButton.click();
+    await openSplitDialog(page);
     const dialog=page.getByRole("dialog",{name:"Разделить аккаунты"});
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/старой версией CRM/)).toBeVisible();
     await expect(dialog.getByRole("option",{name:/Mel Fordham/})).toBeAttached();
     await page.screenshot({path:testInfo.outputPath(`client-split-dialog-${viewport.width}x${viewport.height}.png`),fullPage:true});
     await dialog.getByRole("button",{name:"Отмена",exact:true}).click();
-    await expect(splitButton).toBeFocused();
-    await splitButton.click();
+    await expect(menuTrigger).toBeFocused();
+    await openSplitDialog(page);
     await dialog.getByRole("button",{name:"Разделить",exact:true}).click();
-    await expect(splitButton).toBeHidden();
     await expect(page.locator(".communications-chat-client")).toBeFocused();
-    await expect(page.locator('.communications-chat-header > span[title="Instagram / @yolanda_yao"]')).toBeVisible();
+    await expectSplitUnavailable(page);
+    await expectOnlyInstagramChannel(page);
     expect(state.payload()).toEqual({sourceClientId:"source-whatsapp"});
     await page.screenshot({path:testInfo.outputPath(`client-split-${viewport.width}x${viewport.height}.png`),fullPage:true});
   });
@@ -73,14 +112,13 @@ for(const viewport of [{name:"desktop",width:1920,height:1080},{name:"laptop",wi
 test("ошибка разделения остаётся видимой и доступной внутри диалога",async({page})=>{
   await mockMergedClient(page,{splitFailure:"CLIENT_SPLIT_DEPENDENCY_CONFLICT"});
   await page.goto("/?section=inbox");
-  const splitButton=page.getByRole("button",{name:"Разделить аккаунты"});
-  await splitButton.click();
+  await openSplitDialog(page);
   const dialog=page.getByRole("dialog",{name:"Разделить аккаунты"});
   await dialog.getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(dialog.getByRole("alert").filter({hasText:"появился заказ"})).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(splitButton).toBeFocused();
+  await expect(conversationMenu(page)).toBeFocused();
 });
 
 test("активный канал отделяемого аккаунта заменяется выжившим каналом и composer очищается",async({page})=>{
@@ -90,10 +128,10 @@ test("активный канал отделяемого аккаунта зам
   await channelSelector.selectOption("WHATSAPP");
   const composer=page.locator(".communications-compose textarea");
   await composer.fill("Черновик для отделяемого WhatsApp");
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(channelSelector).toBeHidden();
-  await expect(page.locator('.communications-chat-header > span[title="Instagram / @yolanda_yao"]')).toBeVisible();
+  await expectOnlyInstagramChannel(page);
   await expect(composer).toHaveValue("");
   expect(state.detailRequests()).toBeGreaterThanOrEqual(2);
 });
@@ -119,7 +157,7 @@ test("разделение снимает фильтр удалённого ка
   await composer.fill("Не должен сохраниться после разделения");
   await page.locator('.communications-attach input[type="file"]').setInputFiles({name:"proof.png",mimeType:"image/png",buffer:Buffer.from([137,80,78,71,13,10,26,10])});
   await expect(page.getByText("proof.png")).toBeVisible();
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(page.locator(".communications-social-filter.communications-channel-filter-all")).toHaveAttribute("aria-pressed","true");
   await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
@@ -138,12 +176,12 @@ test("успешное разделение очищает удалённый к
   await expect(page.getByText("Старое сообщение WhatsApp")).toBeVisible();
   await page.locator(".communications-chat-header select").selectOption("WHATSAPP");
   const composer=page.locator(".communications-compose textarea");await composer.fill("Локальный текст");
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(page.getByText("Старое сообщение WhatsApp")).toBeHidden();
   await expect(composer).toHaveValue("");
-  await expect(page.locator('.communications-chat-header > span[title="Instagram / @yolanda_yao"]')).toBeVisible();
-  await expect(page.getByRole("button",{name:"Разделить аккаунты"})).toBeHidden();
+  await expectOnlyInstagramChannel(page);
+  await expectSplitUnavailable(page);
   await expect(page.getByText("TEST_LIST_FAILURE")).toBeVisible();
 });
 
@@ -152,13 +190,11 @@ test("вложенное A → B → C разделение очищает ка�
   await page.goto("/?section=inbox");
   await expect(page.getByText("Старое сообщение WhatsApp")).toBeVisible();
   await expect(page.getByText("Старое сообщение Facebook")).toBeVisible();
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await expect(page.getByText("Старое сообщение WhatsApp")).toBeHidden();
   await expect(page.getByText("Старое сообщение Facebook")).toBeHidden();
-  await expect(page.locator('.communications-chat-header > span[title="Instagram / @yolanda_yao"]')).toBeVisible();
-  await expect(page.getByTitle("WhatsApp / Mel Fordham")).toBeHidden();
-  await expect(page.getByTitle("Facebook / Leaf Account")).toBeHidden();
+  await expectOnlyInstagramChannel(page);
   await expect(page.getByText("TEST_LIST_FAILURE")).toBeVisible();
 });
 
@@ -170,9 +206,9 @@ test("разделение ждёт уже начатый autosave и не во�
   await expect(composer).toHaveValue("Активное автосохранение");
   await page.waitForTimeout(950);
   await expect.poll(()=>state.draftWrites(),{timeout:8000}).toBe(1);
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
-  await expect(page.getByRole("button",{name:"Разделить аккаунты"})).toBeHidden();
+  await expectSplitUnavailable(page);
   expect(state.events().indexOf("draft-end")).toBeLessThan(state.events().indexOf("split-post"));
   await expect(composer).toHaveValue("");
   await expect(page.getByText("late",{exact:true})).toBeHidden();
@@ -230,7 +266,7 @@ test("быстрая смена канала сохраняет AI provenance в
   const state=await mockMergedClient(page,{detailMessage:true});
   await page.goto("/?section=inbox");
   await expect(page.locator(".communications-chat-client")).toContainText("Yolanda Yao");
-  await page.getByRole("button",{name:/Предложение ответа от AI/}).click();
+  await page.getByRole("switch",{name:ui.aiReplyToggle,exact:true}).check();
   await page.getByRole("button",{name:"Ответ AI"}).click();
   await page.getByRole("checkbox",{name:"Выбрать входящее сообщение для ответа"}).check();
   await page.getByRole("button",{name:"Сформировать ответ на русском"}).click();
@@ -247,18 +283,23 @@ test("быстрая смена канала сохраняет AI provenance в
 test("поздние translation summary и AI ответы не возвращаются после разделения",async({page})=>{
   await mockMergedClient(page,{postSplitListFailure:true,detailMessage:true,delayedAsyncMs:700});
   await page.goto("/?section=inbox");
-  await page.locator(".communications-message-more").evaluate((element:HTMLDetailsElement)=>{element.open=true});
-  await page.getByRole("button",{name:"Перевести",exact:true}).click({force:true});
+  const messageActions=page.locator(".communications-message-more");
+  await messageActions.locator("summary").press("Enter");
+  await messageActions.getByRole("menuitem",{name:ui.translate,exact:true}).press("Enter");
   const composer=page.locator(".communications-compose textarea");await composer.fill("Текст для AI");
-  const aiPanelToggle=page.getByRole("button",{name:/Предложение ответа от AI/});
-  await expect(aiPanelToggle).toHaveAttribute("aria-expanded","false");
+  const aiPanelToggle=page.getByRole("switch",{name:ui.aiReplyToggle,exact:true});
+  await expect(aiPanelToggle).not.toBeChecked();
   await expect(page.getByRole("button",{name:"Улучшить"})).toBeHidden();
-  await aiPanelToggle.click();
-  await expect(aiPanelToggle).toHaveAttribute("aria-expanded","true");
-  await page.locator(".communications-composer-more").evaluate((element:HTMLDetailsElement)=>{element.open=true});await page.getByRole("button",{name:"Улучшить"}).click({force:true});
-  await page.locator(".communications-context-actions button").filter({hasText:"Сводка"}).click();
+  await aiPanelToggle.check();
+  await expect(aiPanelToggle).toBeChecked();
+  const composerActions=page.locator(".communications-composer-more");
+  await composerActions.locator("summary").press("Enter");
+  await composerActions.getByRole("button",{name:ui.improve,exact:true}).press("Enter");
+  const contextActions=page.locator(".communications-context-actions");
+  await contextActions.getByText(ui.quickActions,{exact:true}).click();
+  await contextActions.getByRole("button",{name:ui.contextSummary}).click();
   const summaryButton=page.getByRole("button",{name:"Сформировать сводку"});await expect(summaryButton).toBeEnabled();await summaryButton.click();
-  await page.getByRole("button",{name:"Разделить аккаунты"}).click();
+  await openSplitDialog(page);
   await page.getByRole("dialog",{name:"Разделить аккаунты"}).getByRole("button",{name:"Разделить",exact:true}).click();
   await page.waitForTimeout(900);
   await expect(page.getByText("Поздний перевод")).toBeHidden();

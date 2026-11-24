@@ -29,7 +29,8 @@ function fixture(t, channel, { savedAttempt = attempt, stored = upload, savedMes
   t.mock.method(globalThis, "fetch", provider);
   const db = {
     client: { findFirst: async ({ where }) => where.id === "buyer" ? { source: channel, email: "buyer@example.test" } : null },
-    conversation: { findFirst: async ({ where }) => {
+    conversation: {
+      findUnique: async () => ({ id: "chat", externalId: "buyer@example.test", archivedAt: null }), findFirst: async ({ where }) => {
       assert.deepEqual(where, { clientId: "buyer", channel, archivedAt: null,
         ...(channel === "EMAIL" && where.externalId ? { externalId: { equals: "buyer@example.test", mode: "insensitive" } } : {}),
       });
@@ -42,6 +43,7 @@ function fixture(t, channel, { savedAttempt = attempt, stored = upload, savedMes
       findFirst: async () => null,
     },
     $executeRaw: async () => {},
+    $queryRaw: async () => [{ email: "buyer@example.test" }],
     $transaction: async callback => callback(db),
   };
   const service = new CommunicationsService(db, { send: provider });
@@ -303,6 +305,7 @@ for (const [channel, lostResponse, usesDraft = true] of [
     };
     db.messageDeliveryAttempt = {
       findUnique: async () => currentAttempt,
+      findUniqueOrThrow: async () => currentAttempt,
       findFirst: async () => null,
       create: async ({ data }) => currentAttempt = data,
       update: async ({ data }) => Object.assign(currentAttempt, data),
@@ -491,6 +494,7 @@ for (const [channel, ambiguous] of [["EMAIL",false], ["CHATWOOT",false], ["CHATW
     };
     db.messageDeliveryAttempt = {
       findUnique: async () => current,
+      findUniqueOrThrow: async () => current,
       findFirst: async () => null,
       create: async ({ data }) => current = data,
       update: async ({ data }) => Object.assign(current, data),

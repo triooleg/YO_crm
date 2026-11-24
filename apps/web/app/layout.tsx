@@ -41,6 +41,7 @@ import "./tax-integration-order-settings.css";
 import "./pwa-mobile.css";
 import "./pwa.css";
 import "./pwa-inbox.css";
+import "./inbox-redesign.css";
 
 export const viewport: Viewport = { themeColor: "#faf8fd", viewportFit: "cover" };
 

@@ -19,8 +19,12 @@ export function parseSalesSelection(search:string,now=new Date()):SalesQuery{
   const params=new URLSearchParams(search.startsWith('?')?search.slice(1):search);
   const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Kyiv',year:'numeric',month:'2-digit'}).formatToParts(now);
   const year=Number(parts.find(p=>p.type==='year')!.value),month=Number(parts.find(p=>p.type==='month')!.value);
-  const defaultFrom=iso(new Date(Date.UTC(year,month-12,1))),defaultTo=iso(new Date(Date.UTC(year,month,0)));
-  let from=validDate(params.get('from'))?params.get('from')!:defaultFrom,to=validDate(params.get('to'))?params.get('to')!:defaultTo;
+  const defaultFrom=iso(new Date(Date.UTC(year,0,1))),defaultTo=iso(new Date(Date.UTC(year,month,0)));
+  const requestedFrom=params.get('from'),requestedTo=params.get('to');
+  let to=validDate(requestedTo)?requestedTo:defaultTo;
+  // Preserve historical links that specify only an end date.
+  const fallbackFrom=to<defaultFrom?iso(new Date(Date.UTC(year,month-12,1))):defaultFrom;
+  let from=validDate(requestedFrom)?requestedFrom:fallbackFrom;
   if(from>to){from=defaultFrom;to=defaultTo}
   const text=(key:string)=>(params.get(key)||'').slice(0,200);
   return {from,to,currency:pick(params.get('currency'),['EUR','USD','UAH'],'EUR'),source:text('source'),status:text('status'),clientId:text('clientId'),country:text('country'),orderType:text('orderType'),discipline:text('discipline'),

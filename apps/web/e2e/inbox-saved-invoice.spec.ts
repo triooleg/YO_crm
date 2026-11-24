@@ -111,7 +111,11 @@ async function setup(page: Page, channel: InvoiceChannel = "EMAIL", sendMode?: "
 }
 
 async function openPicker(page: Page) {
-  await page.getByRole("button", { name: /Инвойс/ }).click();
+  const tools = page.locator(".communications-compose-tools");
+  const disclosure = tools.getByText(ui.composerTools, { exact: true });
+  await expect(disclosure).toBeVisible();
+  if (await tools.getAttribute("open") === null) await disclosure.click();
+  await tools.getByRole("button", { name: /Инвойс/ }).click();
   const dialog = page.getByRole("dialog", { name: ui.invoicePickerTitle });
   await expect(dialog).toBeVisible();
   return dialog;
@@ -129,10 +133,10 @@ test("selects a saved invoice without an active order and stages its scoped PDF 
   await expect(page.getByText("INV-002.pdf", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: ui.sendMessage, exact: true })).toBeEnabled();
   expect(requests.invoiceRequests).toEqual([invoicesPath, pdfPath]);
-  await page.getByLabel(ui.replyChannel).selectOption("INSTAGRAM");
+  await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption("INSTAGRAM");
   await expect(page.getByRole("button", { name: ui.sendMessage, exact: true })).toBeDisabled();
   await expect(page.getByText(ui.invoicePickerSwitchChannel)).toBeVisible();
-  await page.getByLabel(ui.replyChannel).selectOption("EMAIL");
+  await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption("EMAIL");
   await expect(composer).toHaveValue("Synthetic draft");
   await expect(page.getByRole("button", { name: ui.sendMessage, exact: true })).toBeEnabled();
   expect(requests.deliveryRequests).toEqual([]);
@@ -155,7 +159,7 @@ test("an existing attachment is preserved and Instagram offers a channel hint", 
   await page.setViewportSize({ width: 1366, height: 900 });
   expect(requests.invoiceRequests).toEqual([invoicesPath]);
   await dialog.getByRole("button", { name: ui.close }).last().click();
-  await page.getByLabel(ui.replyChannel).selectOption("EMAIL");
+  await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption("EMAIL");
   await page.locator('input[type="file"]').setInputFiles({ name: "existing.pdf", mimeType: "application/pdf", buffer: pdf });
   dialog = await openPicker(page);
   await dialog.getByLabel(ui.invoicePickerSelect).selectOption("saved-2");
@@ -181,7 +185,7 @@ for (const scope of ["channel", "client"] as const) test(`a ${scope} change canc
   await dialog.getByRole("button", { name: ui.invoicePickerAttach }).click();
   await requested;
   try {
-    if (scope === "channel") await page.getByLabel(ui.replyChannel).selectOption("INSTAGRAM", { force: true });
+    if (scope === "channel") await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption("INSTAGRAM", { force: true });
     else await page.locator(".communications-client-list>button").filter({ hasText: "Other QA" })
       .evaluate(button => (button as HTMLButtonElement).click());
     await expect(dialog).toBeHidden();
@@ -243,13 +247,13 @@ for (const channel of ["FACEBOOK", "CHATWOOT"] as const) test(`${channel} partia
   expect(requests.sends[1]).toMatchObject({ channel, draftMessageId: savedDraftId });
   expect(requests.drafts.get(channel)?.id).toBe(savedDraftId);
 
-  await page.getByLabel(ui.replyChannel).selectOption("EMAIL");
+  await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption("EMAIL");
   await expect(page.getByText(/Инвойс убран из сообщения/)).toBeVisible();
   await expect(page.getByText("INV-002.pdf", { exact: true })).toHaveCount(0);
   await expect(send).toBeDisabled();
   expect(requests.sends).toHaveLength(2);
 
-  await page.getByLabel(ui.replyChannel).selectOption(channel);
+  await page.getByRole("combobox", { name: ui.replyChannel, exact: true }).selectOption(channel);
   await expect(composer).toHaveValue("Synthetic saved draft");
 });
 

@@ -51,8 +51,8 @@ test("mobile chat gives the message list priority and keeps chat actions reachab
 
   const chat = page.locator(".communications-chat");
   const messages = chat.locator(".communications-messages");
-  const actions = chat.getByRole("button", { name: "Действия чата" });
-  const spam = chat.getByRole("button", { name: "Пометить как спам" });
+  const actions = chat.getByRole("button", { name: "Действия чата", exact: true });
+  const spam = chat.getByRole("button", { name: "Дополнительные действия чата" });
   await expect(chat.getByText("Размеры отправлены", { exact: true })).toBeVisible();
   await expect(chat.getByRole("button", { name: "Чаты" })).toBeVisible();
   await expect(chat.getByRole("button", { name: "Карточка клиента" })).toBeVisible();

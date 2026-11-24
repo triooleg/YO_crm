@@ -22,7 +22,8 @@ const attempt = { status: "SENT", clientId: "buyer", conversationId: "mail", mes
 function service({ savedAttempt = attempt, savedMessage = message, upload = stored, feedback } = {}) {
   const db = {
     client: { findFirst: async ({ where }) => where.id === "buyer" ? { email: "buyer@example.test" } : null },
-    conversation: { findFirst: async ({ where }) => {
+    conversation: {
+      findUnique: async () => ({ id: "mail", externalId: "buyer@example.test", archivedAt: null }), findFirst: async ({ where }) => {
       assert.deepEqual(where, { clientId: "buyer", channel: "EMAIL", externalId: { equals: "buyer@example.test", mode: "insensitive" }, archivedAt: null });
       return { id: "mail" };
     } },
@@ -34,6 +35,7 @@ function service({ savedAttempt = attempt, savedMessage = message, upload = stor
     },
     aiResponseFeedback: { findFirst: async ({ where }) => feedback?.(where) ?? null },
     $executeRaw: async () => {},
+    $queryRaw: async () => [{ email: "buyer@example.test" }],
     $transaction: async callback => callback(db),
   };
   return new CommunicationsService(db, { send: async () => assert.fail("replay must never call Gmail") });

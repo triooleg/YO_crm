@@ -88,8 +88,8 @@ test("AI предложение во Входящих по умолчанию с
   await mockInboxWithMessage(page);
   await page.goto("/?section=inbox");
 
-  const toggle = page.getByRole("button", { name: /Предложение ответа от AI/ });
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  const toggle = page.getByRole("switch", { name: "AI-помощник для ответа в этой переписке" });
+  await expect(toggle).not.toBeChecked();
   await expect(page.locator("#communications-ai-panel-body")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ответ AI" })).toHaveCount(0);
   const waitingRequest=page.waitForRequest(request=>request.url().includes("/api/communications?")&&request.url().includes("conversationScope=WAITING"));
@@ -98,7 +98,7 @@ test("AI предложение во Входящих по умолчанию с
   await page.screenshot({ path: testInfo.outputPath("inbox-approved-collapsed-1536x1024.png"), fullPage: false });
 
   await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(toggle).toBeChecked();
   await expect(page.locator("#communications-ai-panel-body")).toBeVisible();
   await expect(page.getByLabel("Язык ответа")).toBeVisible();
   await expect(page.getByLabel("Язык ответа")).toHaveValue("auto");
@@ -106,7 +106,7 @@ test("AI предложение во Входящих по умолчанию с
   await page.screenshot({ path: testInfo.outputPath("inbox-approved-expanded-1536x1024.png"), fullPage: false });
 
   await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).not.toBeChecked();
   await expect(page.locator("#communications-ai-panel-body")).toHaveCount(0);
 });
 
@@ -116,8 +116,6 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 76
     await mockInboxWithMessage(page);
     await page.goto("/?section=inbox");
 
-    const orderFilter = page.locator("select[aria-label='Фильтр по заказам']");
-    await expect(orderFilter).toHaveClass(/mantine-NativeSelect-input/);
     if (viewport.width < 700) {
       await expect(page.locator(".communications-message-content").filter({hasText:"Текст для копирования"})).toBeVisible();
       const listToggle=page.locator(".communications-mobile-list-toggle");
@@ -125,27 +123,32 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1366, height: 76
       await listToggle.evaluate((button:HTMLButtonElement)=>button.click());
       await expect(page.locator(".communications-clients.mobile-open")).toBeVisible();
     }
+    await expect(page.getByRole("button", { name: "Фильтр по заказам", exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`inbox-controls-${viewport.width}x${viewport.height}.png`), fullPage: false });
 
     if (viewport.width >= 1600) {
       const headerMenu = page.locator(".communications-header-menu").first();
       await headerMenu.click();
       await expect(page.getByRole("menuitem", { name: "Сбросить ширину" })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await expect(page.getByRole("button", { name: "Фильтр по заказам", exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
       await page.keyboard.press("Escape");
       await expect(headerMenu).toBeFocused();
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(headerMenu).toBeFocused();
-      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await expect(page.getByRole("button", { name: "Фильтр по заказам", exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
     } else {
-      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await expect(page.getByRole("button", { name: "Фильтр по заказам", exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`inbox-controls-menu-${viewport.width}x${viewport.height}.png`), fullPage: false });
       const createClient = page.getByRole("button", { name: "Новый клиент" });
       await createClient.focus();
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       await expect(createClient).toBeFocused();
-      await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
+      await expect(page.getByRole("button", { name: "Фильтр по заказам", exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`inbox-controls-focus-${viewport.width}x${viewport.height}.png`), fullPage: false });
     }
     if (viewport.width < 700) await page.reload();
 

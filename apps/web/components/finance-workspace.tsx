@@ -39,6 +39,7 @@ type TaxCalculation={id:string;status:'RUNNING'}|{id:string;status:'COMPLETED';r
 export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props){
   const mobileCurrencyMenu=useMediaQuery('(max-width: 800px)');
   const [filters,setFilters]=useState<FinanceFilters>(baseFilters),[ready,setReady]=useState(false),[storedData,setData]=useState<FinanceReport>(),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[ratesNotice,setRatesNotice]=useState(''),[exporting,setExporting]=useState(false);
+  const [expenseRefreshing,setExpenseRefreshing]=useState(false),[expenseRefreshFailed,setExpenseRefreshFailed]=useState(false);
   const [sourceChart,setSourceChart]=useState('standard');
   const [debouncedSearch]=useDebouncedValue(filters.search,250);
   const [taxEpoch,setTaxEpoch]=useState(0);
@@ -57,13 +58,18 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
   const aggregateScope=JSON.stringify([filters.month,filters.currency,filters.range,filters.source||'']);
   const data=summaryScope.current===aggregateScope?storedData:undefined;
   const pending=loading||filters.search!==debouncedSearch||(data!==undefined&&loadedReportKey.current!==financeReportQuery(filters).toString());
+  const expenseReportStale=expenseRefreshing||expenseRefreshFailed;
   const request=useCallback(async(path:string,init?:RequestInit)=>{const response=await financeRequest(`/api${path}`,role,{credentials:'include',cache:'no-store',...init,headers:{'Content-Type':'application/json',...init?.headers}});if(!response.ok){const body=await response.json().catch(()=>({}));throw new FinanceRequestError(Array.isArray(body.message)?body.message.join('; '):body.message||ui.error,response.status);}const result=await response.json();if(init?.method&&!['GET','HEAD'].includes(init.method.toUpperCase())&&!path.startsWith('/finance/exchange-rates/')){invalidateFinanceRequests();setTaxEpoch(value=>value+1);}return result;},[role]);
-  const load=useCallback(async(clearVersion=false,propagateError=false)=>{
+  const load=useCallback(async(refresh:boolean|'expense'=false,propagateError=false)=>{
     const sequence=++reportSequence.current,selected={...filtersRef.current};
     const scope=JSON.stringify([selected.month,selected.currency,selected.range,selected.source||'']);
+    const clearVersion=refresh===true;
     const needsSummary=clearVersion||scope!==summaryScope.current;
-    if(needsSummary){setData(undefined);valuation.current=undefined;}
-    if(clearVersion)invalidateFinanceRequests();setLoading(true);setError('');setRatesNotice('');
+    const background=refresh==='expense'&&!needsSummary&&loadedReportKey.current===financeReportQuery(selected).toString();
+    if(needsSummary){loadedReportKey.current='';setData(undefined);valuation.current=undefined;}
+    if(clearVersion)invalidateFinanceRequests();
+    if(!background){setLoading(true);setRatesNotice('');}
+    setError('');setExpenseRefreshing(background);setExpenseRefreshFailed(false);
     // Start the report with the best valuation accepted by the server.
     if(needsSummary&&!ratesInFlight.current){
       const refresh=refreshFinanceRates(request);
@@ -91,7 +97,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
         show(summary);
       }
       let result:FinanceReport;
-      try{result=await read(valuation.current);}
+      try{result=await read(background?undefined:valuation.current);}
       catch(reason){
         if(!(reason instanceof FinanceRequestError)||reason.status!==409)throw reason;
         if(sequence!==reportSequence.current)return;
@@ -103,13 +109,13 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
       show(result);
       void rates?.then(async outcome=>{
         if(sequence!==reportSequence.current||!reportRatesChanged(result,outcome.rates))return;
-        setLoading(true);
+        if(background)setExpenseRefreshing(true);else setLoading(true);
         try{const updated=await read();if(sequence===reportSequence.current)show(updated);}
         catch(reason){if(sequence===reportSequence.current)setRatesNotice((reason as Error).message);}
-        finally{if(sequence===reportSequence.current)setLoading(false);}
+        finally{if(sequence===reportSequence.current){setLoading(false);setExpenseRefreshing(false);}}
       });
       return true;
-    }catch(reason){if(sequence===reportSequence.current){setError((reason as Error).message);setData(undefined);summaryScope.current='';if(propagateError)throw reason;}}finally{if(sequence===reportSequence.current)setLoading(false)}
+    }catch(reason){if(sequence===reportSequence.current){if(background){setExpenseRefreshFailed(true);}else{setError((reason as Error).message);setData(undefined);summaryScope.current='';loadedReportKey.current='';}if(propagateError)throw reason;}}finally{if(sequence===reportSequence.current){setLoading(false);setExpenseRefreshing(false);}}
   },[request]);
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);let currency:DisplayCurrency='EUR';
@@ -134,11 +140,11 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
   }
   useEffect(()=>{if(!data||data.projection==='summary'||contextHandled.current)return;contextHandled.current=true;const params=new URLSearchParams(window.location.search),id=params.get('orderId');if(id){if(params.get('action')==='new-invoice'){void orderAction(id,'invoice');const url=new URL(window.location.href);url.searchParams.delete('action');window.history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);}}},[data]);
   function openOrder(row:PaymentRow|InvoiceRow){if(canPay&&onNavigate)onNavigate('orders',{orderId:row.orderId,tab:'finance',source:filters.source||'',currency:filters.currency});else void orderAction(row.orderId,'history','forecastDate' in row?row:undefined);}
-  async function exportReport(){if(!data||exporting||pending)return;setExporting(true);setError('');try{const response=await fetch(`/api/finance/report/export?${financeReportQuery(filters,data.valuationVersion)}`,{credentials:'include',cache:'no-store'});if(response.status===409){setNotice(ui.valuationChanged);await load(true);return;}if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||ui.error)}const url=URL.createObjectURL(await response.blob()),anchor=document.createElement('a');anchor.href=url;anchor.download=`finance-${filters.tab}-${filters.month}-${filters.currency}.csv`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(reason){setError((reason as Error).message)}finally{setExporting(false)}}
+  async function exportReport(){if(!data||exporting||pending||expenseReportStale)return;setExporting(true);setError('');try{const response=await fetch(`/api/finance/report/export?${financeReportQuery(filters,data.valuationVersion)}`,{credentials:'include',cache:'no-store'});if(response.status===409){setNotice(ui.valuationChanged);await load(true);return;}if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.message||ui.error)}const url=URL.createObjectURL(await response.blob()),anchor=document.createElement('a');anchor.href=url;anchor.download=`finance-${filters.tab}-${filters.month}-${filters.currency}.csv`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(reason){setError((reason as Error).message)}finally{setExporting(false)}}
   async function archiveExpense(row:FinanceExpenseView){if(!window.confirm(ui.archiveConfirm))return;setActionBusy(true);try{await request(`/finance/expenses/${encodeURIComponent(row.id)}`,{method:'DELETE'});await load()}catch(reason){setError((reason as Error).message)}finally{setActionBusy(false)}}
   const money=(value:number|null|undefined)=>moneyLabel(value,data?.currency||filters.currency),options=data?.options;
   const orders=[...new Map([...(options?.orders||[]),...remoteOptions.orders].map(item=>[item.id,item])).values()],clients=[...new Map([...(options?.clients||[]),...remoteOptions.clients].map(item=>[item.id,item])).values()];
-  useTaxPendingRefresh(data?.fiscal?.current.incomplete === true, () => void load(true), filters.month + ':' + filters.currency, pending);
+  useTaxPendingRefresh(data?.fiscal?.current.incomplete === true, () => void load(expenseRefreshFailed?'expense':true), filters.month + ':' + filters.currency, pending||expenseRefreshing||expense!==undefined);
   const labels={payments:ui.paymentsTab,expenses:ui.expensesTab,invoices:ui.invoicesTab,taxes:taxUi.taxes};
   const fiscal=data?.fiscal, current=fiscal?.current, previous=fiscal?.previous;
   const checkoutPreliminary=current?.incomplete===true&&current.accruedTaxesMinor!=null&&fiscal?.missing.some(row=>row.month===filters.month&&row.code==='CHECKOUT_PRELIMINARY');
@@ -214,9 +220,9 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
       <FinanceReportMonthPicker month={filters.month} label={ui.selectMonth} onChange={month=>patch({month})} icon={<FinanceIcon name="calendar"/>}/>
       <CrmButton tone="secondary" size="md" aria-label={ui.nextMonth} onClick={()=>patch({month:moveFinanceMonth(filters.month,1)})}><FinanceIcon name="right"/></CrmButton>
       <Select comboboxProps={{position:mobileCurrencyMenu?"top-end":"right-end",width:110,offset:6}} className="finance-report-currency" aria-label={ui.displayCurrency} value={filters.currency} onChange={changeCurrency} allowDeselect={false} data={(['EUR','USD','UAH'] as const).map(currency=>({value:currency,label:`${symbols[currency]} ${currency}`}))}/>
-      <Menu withinPortal position="bottom-end"><Menu.Target><CrmButton tone="secondary" size="md" loading={exporting} disabled={!data||pending} leftSection={<FinanceIcon name="download"/>}>{ui.export} ⌄</CrmButton></Menu.Target><Menu.Dropdown><Menu.Item onClick={()=>void exportReport()}>{ui.exportCsv}</Menu.Item></Menu.Dropdown></Menu>
+      <Menu withinPortal position="bottom-end"><Menu.Target><CrmButton tone="secondary" size="md" loading={exporting} disabled={!data||pending||expenseReportStale} leftSection={<FinanceIcon name="download"/>}>{ui.export} ⌄</CrmButton></Menu.Target><Menu.Dropdown><Menu.Item onClick={()=>void exportReport()}>{ui.exportCsv}</Menu.Item></Menu.Dropdown></Menu>
     </div></header>
-    {(notice||ratesNotice)&&<Alert color="yellow" role="status" withCloseButton onClose={()=>{setNotice('');setRatesNotice('')}}>{[notice,ratesNotice].filter(Boolean).join(' ')}</Alert>}{error&&<CrmAlert>{error} <CrmButton size="compact-xs" tone="secondary" onClick={()=>void load(true)}>{ui.refresh}</CrmButton></CrmAlert>}{pending&&!data&&<div className="finance-report-loading" role="status"><Loader size="sm"/>{ui.loading}</div>}
+    {(notice||ratesNotice)&&<Alert color="yellow" role="status" withCloseButton onClose={()=>{setNotice('');setRatesNotice('')}}>{[notice,ratesNotice].filter(Boolean).join(' ')}</Alert>}{error&&<CrmAlert>{error} <CrmButton size="compact-xs" tone="secondary" onClick={()=>void load(true)}>{ui.refresh}</CrmButton></CrmAlert>}{expenseRefreshFailed&&<CrmAlert>{ui.expenseRefreshFailed} <CrmButton size="compact-xs" tone="secondary" onClick={()=>void load('expense')}>{ui.refresh}</CrmButton></CrmAlert>}{pending&&!data&&<div className="finance-report-loading" role="status"><Loader size="sm"/>{ui.loading}</div>}
     {data&&<>
       {calculatingTaxes&&<Alert color="blue" role="status">{taxUi.calculationRunning}</Alert>}
       <section className={`finance-report-kpis finance-report-kpis-tax${canWrite?' finance-report-kpis-calculable':''}`} aria-label={ui.title}>
@@ -251,7 +257,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
           </div>
           {filters.orderId&&<Group role="status" justify="space-between" mb="sm"><span>{ui.order}: {contextOrderNumber}</span><CrmButton tone="secondary" size="compact-xs" onClick={clearOrderFilter}>{ui.clearOrderFilter}</CrmButton></Group>}
           {filters.scope==='forecast'&&<Alert color="blue" mb="sm">{ui.forecastHint}</Alert>}
-          <FinanceReportTable data={data} filters={{...filters,tab:selectedTable!.tab}} canPay={canPay} canWrite={canWrite} busy={actionBusy||pending} patch={patch} openOrder={openOrder} action={(...args)=>void orderAction(...args)} editExpense={setExpense} archiveExpense={row=>void archiveExpense(row)}/>
+          <FinanceReportTable data={data} filters={{...filters,tab:selectedTable!.tab}} canPay={canPay} canWrite={canWrite} busy={actionBusy||pending||(selectedTable!.tab==='expenses'&&expenseReportStale)} patch={patch} openOrder={openOrder} action={(...args)=>void orderAction(...args)} editExpense={setExpense} archiveExpense={row=>void archiveExpense(row)}/>
           {!pending&&!selectedTable!.rows.length&&<p className="finance-report-empty">{ui.empty}</p>}
           </>}
           <footer className="finance-report-pagination"><span>{ui.showing} {selectedTable!.total?((selectedTable!.page-1)*selectedTable!.pageSize+1):0}–{Math.min(selectedTable!.page*selectedTable!.pageSize,selectedTable!.total)} {ui.of} {selectedTable!.total}</span><Pagination className="finance-report-pages" value={selectedTable!.page} total={Math.max(1,Math.ceil(selectedTable!.total/selectedTable!.pageSize))} onChange={page=>patch({page})} size="md" radius="sm" aria-label={ui.page}/><Select aria-label={ui.pageSize} value={String(filters.pageSize)} onChange={value=>value&&patch({pageSize:Number(value)})} data={FINANCE_PAGE_SIZES.map(size=>({value:String(size),label:`${size} ${ui.rowsShort}`}))} allowDeselect={false}/></footer>
@@ -260,7 +266,7 @@ export function FinanceWorkspace({role='ACCOUNTANT',accountId,onNavigate}:Props)
       <article className="finance-report-card"><header><h2>{ui.upcoming}</h2><UnstyledButton className="finance-report-link" onClick={()=>patch({tab:'payments',scope:'forecast',status:'',categoryId:'',from:'',to:''})}>{ui.all} →</UnstyledButton></header>{data.upcoming.map(row=><UnstyledButton key={row.id} className="finance-report-upcoming" onClick={()=>openOrder(row)}><FinanceIcon name="calendar"/><time>{financeDate(row.forecastDate)}</time><span>{row.number} — {row.clientName}</span><b>{money(row.balanceMinor)}</b><small>{row.forecastSource==='production'?ui.forecastProduction:ui.forecastDeadline}</small></UnstyledButton>)}{!data.upcoming.length&&<p className="finance-report-empty">{ui.emptyForecast}</p>}</article></aside></section>
       <footer className="finance-report-valuation">{taxUi.legacyValuation}: {data.valuation.provider} · {ui.effectiveDate} {financeDate(data.valuation.effectiveDate)} · {ui.fetchedAt} {financeDate(data.valuation.fetchedAt)} {data.valuation.officialUrl&&/^https:\/\//.test(data.valuation.officialUrl)&&<a href={data.valuation.officialUrl} target="_blank" rel="noopener noreferrer">{ui.source} ↗</a>}</footer>
     </>}
-    {data&&expense!==undefined&&<FinanceExpenseDialog report={data} row={expense||undefined} request={request} onClose={()=>setExpense(undefined)} onSaved={async()=>{await load(true)}}/>}{data&&categoriesOpen&&<FinanceCategoryDialog categories={data.options.categories} request={request} onClose={()=>setCategoriesOpen(false)} onSaved={async()=>{await load(true)}}/>}
+    {data&&expense!==undefined&&<FinanceExpenseDialog report={data} row={expense||undefined} request={request} onClose={()=>setExpense(undefined)} onSaved={async()=>{await load('expense')}}/>}{data&&categoriesOpen&&<FinanceCategoryDialog categories={data.options.categories} request={request} onClose={()=>setCategoriesOpen(false)} onSaved={async()=>{await load(true)}}/>}
     {detail&&<FinanceOrderDialog order={detail.order} row={detail.row} currency={filters.currency} onClose={()=>setDetail(undefined)}/>}{payment&&canPay&&<QuickPayment order={payment} request={request} onClose={()=>setPayment(undefined)} onSaved={async()=>{setPayment(undefined);await load(true)}}/>}{invoice&&(invoice.invoice ? <InvoiceEditor canManageStatus={canWrite} order={invoice.order} invoice={invoice.invoice} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/> : <NewTemplateInvoice order={invoice.order} request={request} close={()=>setInvoice(undefined)} done={()=>{setInvoice(undefined);void load(true)}}/>)}
     {pickOrder&&<CrmModal busy={actionBusy} title={pickOrder==='payment'?ui.addPayment:ui.addInvoice} close={()=>{if(!actionBusy){actionSequence.current++;setPickOrder(undefined)}}}><Stack><Select label={ui.chooseOrder} searchable onSearchChange={setRemoteSearch} value={pickedOrder} onChange={setPickedOrder} data={orders.map(item=>({value:item.id,label:`${item.number} · ${item.clientName}`}))}/><CrmButton loading={actionBusy} disabled={!pickedOrder} onClick={()=>pickedOrder&&void orderAction(pickedOrder,pickOrder==='payment'?'payment':'invoice')}>{ui.open}</CrmButton></Stack></CrmModal>}
   </div></MantineProvider>;

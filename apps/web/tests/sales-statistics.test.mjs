@@ -15,9 +15,13 @@ test('KPI comparison distinguishes zero base, missing values, growth, decline an
   assert.equal(sales.salesComparison(null, 10), null);
 });
 
-test('default is twelve calendar months through current month in Kyiv', () => {
+test('default starts on January 1 and ends in the current Kyiv month', () => {
   const state = parseSalesSelection('', new Date('2026-10-18T10:00:00Z'));
-  assert.equal(state.from, '2025-11-01'); assert.equal(state.to, '2026-10-31');
+  assert.equal(state.from, '2026-01-01'); assert.equal(state.to, '2026-10-31');
+  const newYear = parseSalesSelection('', new Date('2026-12-31T22:30:00Z'));
+  assert.equal(newYear.from, '2027-01-01'); assert.equal(newYear.to, '2027-01-31');
+  const historical = parseSalesSelection('?to=2026-12-31', new Date('2026-12-31T22:30:00Z'));
+  assert.equal(historical.from, '2026-02-01'); assert.equal(historical.to, '2026-12-31');
 });
 
 test('archived receipt links retain audit identity but open the client; accountant stays in analytics', () => {
@@ -32,7 +36,7 @@ test('archived receipt links retain audit identity but open the client; accounta
 test('clamps invalid enums, dates and pagination; never consumes global tab', () => {
   const state = parseSalesSelection('?tab=clients&statTab=invalid&statMonths=5&statPage=-3&from=2026-02-30&statMetric=bogus', new Date('2026-10-18T10:00:00Z'));
   assert.equal(state.tab,'countries'); assert.equal(state.months,6); assert.equal(state.page,1);
-  assert.equal(state.metric,'orders'); assert.equal(state.from,'2025-11-01');
+  assert.equal(state.metric,'orders'); assert.equal(state.from,'2026-01-01');
 });
 test('URL roundtrip preserves unrelated route state and every applied selection', () => {
   const state = parseSalesSelection('?from=2026-01-03&to=2026-06-24&currency=USD&statTab=clients&source=OTHER&statPage=3&statDirection=asc&statRanking=received&statRepeat=repeat&statDrill=clients&country=UNKNOWN&statScope=all');

@@ -80,7 +80,7 @@ export function summarizeClientOrderStatuses(groups: readonly { salesStatus: str
 
 /** Local model names use the existing authenticated order-images route. Website
  * images retain the producer's public-HTTPS policy; never fetch while reading. */
-function historyDesignImage(source: { modelImagePath: string | null; externalImageUrl: string | null }, sourceSystem: string | null): string | null {
+export function orderDesignImageUrl(source: { modelImagePath: string | null; externalImageUrl: string | null }, sourceSystem: string | null): string | null {
   if (source.modelImagePath) { const route = '/api/orders/images/' + source.modelImagePath; return route.length <= 2048 && isOrderImageName(source.modelImagePath) ? route : null; }
   if (sourceSystem !== 'YOLEOTARD_WEBSITE' || !source.externalImageUrl || source.externalImageUrl.length > 2048 || /[\s\p{Cc}\\]/u.test(source.externalImageUrl)) return null;
   try {
@@ -102,8 +102,8 @@ export function presentClientHistoryOrder(order: HistoryOrderRecord, active?: Ac
   const designCount = active?._count._all ?? (managed ? 0 : 1);
   const quantity = active ? active._sum.quantity : managed ? 0 : 1;
   if (!Number.isSafeInteger(designCount) || designCount < 0 || quantity === null || !Number.isSafeInteger(quantity) || quantity < 0) throw new InternalServerErrorException('Не удалось прочитать состав заказа');
-  const designs: ClientOrderHistoryDesign[] = active ? items.filter(item => previewId(item.id)).map(item => ({ id: item.id, name: previewName(item.name, order.number), imageUrl: historyDesignImage(item, sourceSystem) }))
-    : managed || !previewId(order.id) ? [] : [{ id: order.id, name: previewName(order.number, order.id), imageUrl: historyDesignImage({ modelImagePath, externalImageUrl }, sourceSystem) }];
+  const designs: ClientOrderHistoryDesign[] = active ? items.filter(item => previewId(item.id)).map(item => ({ id: item.id, name: previewName(item.name, order.number), imageUrl: orderDesignImageUrl(item, sourceSystem) }))
+    : managed || !previewId(order.id) ? [] : [{ id: order.id, name: previewName(order.number, order.id), imageUrl: orderDesignImageUrl({ modelImagePath, externalImageUrl }, sourceSystem) }];
   const country = typeof visible.country === 'string' && (visible.country.length > 100 || /\p{Cc}/u.test(visible.country)) ? null : visible.country;
   return { ...visible, ...(sourceSystem?{sourceSystem,externalNumber:externalNumber??null,externalId:externalId??null}:{}), country, designCount, quantity, designs };
 }

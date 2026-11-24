@@ -64,9 +64,11 @@ async function inboxFixture(page: Page, options: {
       return route.fulfill({ status: 405, json: { message: 'Unexpected fixture mutation' } });
     }
     if (p === '/api/auth/me') return route.fulfill({ json: { user: { role: 'OWNER', displayName: 'QA operator', email: 'qa@example.test' } } });
+    if (p === '/api/orders/website-notifications') return route.fulfill({ json: { items: [], total: 0 } });
     if (p === '/api/branding') return route.fulfill({ json: {} });
     if (p === '/api/communications/unread-count') return route.fulfill({ json: { unreadCount: 0 } });
-    if (p === '/api/communications/templates') return route.fulfill({ json: [] });
+    if (p === '/api/communications/templates' || p === '/api/communications/clients/client-ai-opt-in/order-cards') return route.fulfill({ json: [] });
+    if (p === '/api/shipment-notifications/options') return route.fulfill({ json: { orders: [], conversations: [], languages: [] } });
     if (p === '/api/communications') return route.fulfill({ json: {
       items: [client()], total: 1, hasMore: false,
       scopeCounts: { all: 1, unread: 0, waiting: published ? 1 : 0 },
@@ -110,9 +112,9 @@ test('new inbound polling never restores a saved AI draft into the composer whil
   await initialDetail;
   await expect(page.locator('.communications-chat-client')).toContainText('QA opt-in client', { timeout: 30000 });
   const composer = page.locator('.communications-compose textarea');
-  const panel = page.getByRole('button', { name: /Предложение ответа от AI/ });
+  const panel = page.getByRole('switch', { name: switchName, exact: true });
   await expect(composer).toHaveValue('');
-  await expect(panel).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel).not.toBeChecked();
   await expect(page.locator('#communications-ai-panel-body')).toHaveCount(0);
   expect(state.reads()).toBeGreaterThanOrEqual(1);
   state.publish();
@@ -123,7 +125,7 @@ test('new inbound polling never restores a saved AI draft into the composer whil
   expect(state.writes.filter(w => w.path === '/api/ai-assistant/generate')).toEqual([]);
   expect(state.writes).toEqual([]); // No deletion, overwrite, autosave or send of the stored AI draft.
   expect(state.unexpected).toEqual([]);
-  await expect(panel).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel).not.toBeChecked();
   await expect(page.locator('#communications-ai-panel-body')).toHaveCount(0);
   await expect(composer, 'AI off must keep the empty composer unchanged after new inbound polling').toHaveValue('');
 });
@@ -168,22 +170,22 @@ for (const kind of ['manual', 'ai'] as const) test(`initial ${kind} draft restor
   expect(generateCalls(state.writes)).toEqual([]); expect(state.unexpected).toEqual([]);
 });
 
-for (const width of [1366, 390]) test(`AI Switch defaults off and stays synchronized with the existing panel toggle at ${width}px`, async ({ page }, info) => {
+for (const width of [1366, 390]) test(`AI switch defaults off and toggles the panel at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   const state = await inboxFixture(page, { initialInbound: true }); await openInbox(page);
   const toggle = page.getByRole('switch', { name: switchName, exact: true });
-  const oldToggle = page.getByRole('button', { name: /Предложение ответа от AI/ });
-  await expect(toggle).not.toBeChecked(); await expect(oldToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveCount(1);
+  await expect(toggle).not.toBeChecked();
   await expect(page.locator('#communications-ai-panel-body')).toHaveCount(0);
   await toggle.scrollIntoViewIfNeeded(); await screenshot(page, info, `inbox-ai-off-${width}.png`);
-  await setAi(page, true); await expect(oldToggle).toHaveAttribute('aria-expanded', 'true');
+  await setAi(page, true); await expect(toggle).toBeChecked();
   await expect(page.locator('#communications-ai-panel-body')).toBeVisible();
   await expect(page.getByText('Генерация ответа — только по нажатию кнопки. Новые сообщения её не запускают.', { exact: true })).toBeVisible();
   await screenshot(page, info, `inbox-ai-on-${width}.png`);
   expect(generateCalls(state.writes)).toEqual([]);
-  await oldToggle.click(); await expect(toggle).not.toBeChecked();
-  await oldToggle.click(); await expect(toggle).toBeChecked();
-  await setAi(page, false); await expect(oldToggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click(); await expect(toggle).not.toBeChecked();
+  await toggle.click(); await expect(toggle).toBeChecked();
+  await setAi(page, false); await expect(toggle).not.toBeChecked();
   await expect(page.locator('.communications-compose textarea')).toHaveValue('');
   expect(state.writes).toEqual([]); expect(state.unexpected).toEqual([]);
 });

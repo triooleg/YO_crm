@@ -43,7 +43,7 @@ for (const channel of ["EMAIL", "WHATSAPP", "CHATWOOT", "FACEBOOK", "INSTAGRAM"]
       const draft = () => ({ id: draftId, channel, direction: "OUTBOUND", status: "DRAFT", content: draftText, createdAt, metadata: { ...legacyAttachment, composerDraftKey: adoptedDraftKey } });
       if (path === "/api/auth/me") return route.fulfill({ json: { user: { id: "qa", role: "OWNER", displayName: "QA" } } });
       if (path === "/api/communications") return route.fulfill({ json: { items: [client], total: 1, hasMore: false } });
-      if (path === "/api/communications/templates") return route.fulfill({ json: retryBundle ? [{ id: "template", name: "QA reply template", language: "ru", content: "Unwanted replacement" }] : [] });
+      if (path === "/api/communications/templates") return route.fulfill({ json: retryBundle ? [{ id: "template", name: "Шаблоны", language: "ru", content: "Unwanted replacement" }] : [] });
       if (path === "/api/communications/attachment-client") {
         const incoming = { id: replyId, channel, direction: "INBOUND", status: "RECEIVED", content: "Incoming email", createdAt, metadata: { messageId: "<qa@example.test>", subject: "QA thread" } };
         return route.fulfill({ json: { messages: [...(retryBundle ? [incoming] : []), ...(consumed ? [] : [draft()])] } });
@@ -131,7 +131,7 @@ for (const channel of ["EMAIL", "WHATSAPP", "CHATWOOT", "FACEBOOK", "INSTAGRAM"]
     await page.getByRole("button", { name: "Отправить", exact: true }).click();
     if (retryBundle) {
       const removePhoto = page.getByRole("button", { name: "Удалить вложение back.png" });
-      const template = page.getByRole("button", { name: "QA reply template" }).first();
+      const template = page.getByRole("button", { name: "Шаблоны" }).first();
       const cancelReply = page.locator("#email-reply-target button");
       await expect(page.getByText("Маршрут отправки недоступен")).toBeVisible();
       await expect(composer).toHaveValue(content);

@@ -36,8 +36,8 @@ test("Gmail channel has inbound sync, SMTP delivery and connection verification"
   assert.match(service, /ContactChannel\.EMAIL/);
   assert.match(service, /OUTBOUND_MESSAGE_SYNCED/);
   assert.match(service, /replyToMessageId/);
-  assert.match(service, /id:d\.replyToMessageId,conversationId:conversation\.id,direction:MessageDirection\.INBOUND/);
-  assert.match(service, /latestInboundEmailReplyLookup\(conversation\.id\)/);
+  assert.match(service, /id: d\.replyToMessageId, conversationId, direction: MessageDirection\.INBOUND/);
+  assert.match(service, /latestInboundEmailReplyLookup\(conversationId\)/);
   assert.doesNotMatch(service, /include:\{messages:\{orderBy:\{createdAt:"desc"\},take:30/);
   assert.match(service, /conversationId_externalId/);
   assert.match(service, /emailConnectionChanged/);

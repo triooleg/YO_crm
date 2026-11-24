@@ -15,10 +15,15 @@ function select<T extends string>(value: string | undefined, allowed: readonly T
 export function normalizeSalesQuery(input: SalesQueryInput = {}, now = new Date()): SalesQuery {
   // ES2022 DTO instances own undefined fields for omitted optional query parameters.
   for (const [key, value] of Object.entries(input)) if (value !== undefined && (typeof value !== 'string' || value.length > (key === 'clientId' ? 128 : 200))) throw new BadRequestException('Некорректный параметр статистики');
-  const month = financeBusinessDay(now).slice(0, 7), start = new Date(`${month}-01T12:00:00Z`);
-  start.setUTCMonth(start.getUTCMonth() - 11);
+  const month = financeBusinessDay(now).slice(0, 7);
   const last = new Date(`${month}-01T12:00:00Z`); last.setUTCMonth(last.getUTCMonth() + 1); last.setUTCDate(0);
-  const from = input.from || start.toISOString().slice(0, 10), to = input.to || last.toISOString().slice(0, 10);
+  const defaultFrom = `${month.slice(0, 4)}-01-01`;
+  const to = input.to || last.toISOString().slice(0, 10);
+  // Preserve historical requests that specify only an end date.
+  const fallbackFrom = to < defaultFrom
+    ? new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() - 11, 1)).toISOString().slice(0, 10)
+    : defaultFrom;
+  const from = input.from || fallbackFrom;
   if (!validDay(from) || !validDay(to) || from > to || Date.parse(to) - Date.parse(from) > 3660 * 86400000) throw new BadRequestException('Выберите корректный период статистики не более десяти лет');
   const page = Number(input.page || 1), pageSize = Number(input.pageSize || 25);
   if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || ![10, 25, 50, 100].includes(pageSize)) throw new BadRequestException('Некорректная страница статистики');

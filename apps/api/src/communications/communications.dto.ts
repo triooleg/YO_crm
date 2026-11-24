@@ -66,6 +66,7 @@ export class SendMessageDto {
   @IsOptional() @IsEnum(ContactChannel) channel?: ContactChannel;
   @IsOptional() @IsIn(["DRAFT", "SEND"] as const) action?: "DRAFT" | "SEND";
   @IsOptional() @IsUUID("4") clientRequestId?: string;
+  @IsOptional() @IsEmail() @MaxLength(254) expectedEmail?: string;
   @IsOptional() @IsString() @Length(20, 80) draftMessageId?: string;
   @IsOptional() @IsString() @Length(20, 80) aiRunId?: string;
   @IsOptional() @IsString() @Length(20, 80) replyToMessageId?: string;
@@ -75,6 +76,7 @@ export class SendMessageDto {
   attachments?: OutboundAttachmentDto[];
 }
 export class UpdateMessageDraftDto {
+  @IsOptional() @IsEmail() @MaxLength(254) expectedEmail?: string;
   @IsOptional() @IsString() @Length(20, 80) legacyDraftId?: string;
   @IsString() @MaxLength(5000) content!: string;
   @IsEnum(ContactChannel) channel!: ContactChannel;

@@ -1,3 +1,5 @@
+import { isEmail } from "class-validator";
+import { eligibleInboxEmailClients, lockInboxEmailClientChanges, prepareFirstInboxEmail } from "./inbox-first-email";
 import { trustedInboundTimestamp } from "../web-push/web-push-timestamp";
 import { captureWebPush } from "../web-push/web-push-capture";
 import { legacyOrderNumberAlias } from '../website-orders/website-order-number';
@@ -82,6 +84,7 @@ import { latestInboxMessageIds } from "./inbox-message-window";
 import { guardHistoryNativeEvent } from "../history-migration/history-native-reconciliation";
 import { PrismaHistoryNativeStorage } from "../history-migration/history-native-storage";
 import { originalMetaHistoryTimestamp } from "../history-migration/history-native-event";
+import { orderDesignImageUrl } from "../orders/order-client-history";
 import { shippingEvidence } from "../orders/order-shipping-evidence";
 import { trackingLink } from "../shipping/tracking-link";
 
@@ -239,15 +242,15 @@ export class CommunicationsService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: {
         id: true, number: true, type: true, priceMinor: true, currency: true,
-        modelImagePath: true, requiredDeliveryAt: true, salesStatus: true, shippingStatus: true,
+        modelImagePath: true, externalImageUrl: true, sourceSystem: true, requiredDeliveryAt: true, salesStatus: true, shippingStatus: true,
         productionStatus: true, notes: true, deliveryTrackingCode: true, ...inboxMeasurementRefs,
         _count: { select: { items: true, compositionOperations: true } },
         productionSlot: { select: { startsAt: true, endsAt: true } },
         payments: { where: { voidedAt: null }, select: {
           amountMinor: true, currency: true, appliedAmountMinor: true, appliedCurrency: true,
         } },
-        items: { where: { archivedAt: null }, select: {
-          name: true, quantity: true, ...inboxMeasurementRefs,
+        items: { where: { archivedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: {
+          name: true, quantity: true, modelImagePath: true, externalImageUrl: true, ...inboxMeasurementRefs,
           _count: { select: { instances: true } },
           instances: { where: { archivedAt: null }, select: {
             id: true, productionStatus: true, ...inboxMeasurementRefs,
@@ -267,7 +270,7 @@ export class CommunicationsService {
       return { athlete, measurement };
     }
     return orders.map(order => {
-      const { shipment, orderShipments, deliveryTrackingCode, _count, items, ...card } = order;
+      const { shipment, orderShipments, deliveryTrackingCode, sourceSystem, externalImageUrl, _count, items, ...card } = order;
       // Parcel tracking alone only supplies a link. Shipment mirrors the primary parcel.
       const evidence = shippingEvidence(orderShipments.length ? {
         ...order, shipment: null, deliveryTrackingCode: null,
@@ -281,12 +284,21 @@ export class CommunicationsService {
       const legacyNumber = !orderShipments.length && (shipment?.trackingNumber?.trim() || deliveryTrackingCode?.trim());
       if (legacyNumber) tracking.push({ number: legacyNumber, url: shipment
         ? trackingLink({ ...shipment, trackingNumber: legacyNumber }) : undefined });
+      const compositionManaged = Boolean(_count.compositionOperations || _count.items);
+      const imageSources = items.length
+        ? [...items.filter(item => item.modelImagePath), { modelImagePath: order.modelImagePath, externalImageUrl: null },
+           ...items.filter(item => !item.modelImagePath), { modelImagePath: null, externalImageUrl }]
+        : compositionManaged ? [] : [{ modelImagePath: order.modelImagePath, externalImageUrl }];
+      const designImageUrl = imageSources.map(source => orderDesignImageUrl(source, sourceSystem)).find(Boolean) ?? null;
+      const deliveryCarriers = [...new Set(orderShipments.length
+        ? orderShipments.map(parcel => parcel.carrier).filter(Boolean)
+        : shipment?.carrier ? [shipment.carrier] : [])];
       const orderRefs = measurementRefs(order);
       const hasPhysicalInstances = items.some(item => item._count.instances > 0);
       return {
-        ...card, ...orderRefs, dispatchStatus, tracking,
+        ...card, ...orderRefs, dispatchStatus, tracking, designImageUrl, deliveryCarriers,
         isActive: order.salesStatus !== "COMPLETED" && order.salesStatus !== "CANCELLED",
-        compositionManaged: Boolean(_count.compositionOperations || _count.items),
+        compositionManaged,
         items: items.map(item => ({
           name: item.name, quantity: item.quantity,
           ...measurementRefs(item, hasPhysicalInstances ? undefined : orderRefs.athlete?.id),
@@ -435,6 +447,12 @@ export class CommunicationsService {
     const chatwootIdentityByConversation = new Map(chatwootIdentityMessages.map(message => [message.conversationId, chatwootConversationId([message])]));
     const operationBySource=new Map<string,(typeof mergeOperations)[number]>();
     for(const operation of mergeOperations)if(!operationBySource.has(operation.sourceClientId))operationBySource.set(operation.sourceClientId,operation);
+    const emailCandidates = clients.flatMap(client => {
+      const recipient = customerEmail(client.email, "FACEBOOK");
+      return recipient && isEmail(recipient) ? [{ clientId: client.id, recipient }] : [];
+    });
+    const eligibleEmailClients = await eligibleInboxEmailClients(this.p, emailCandidates);
+    const inboxEmails = new Map(emailCandidates.filter(entry => eligibleEmailClients.has(entry.clientId)).map(entry => [entry.clientId, entry.recipient]));
     const aggregateItems = clients.map(client => {
       const redirects=mergeRedirects.filter(redirect=>redirect.targetClientId===client.id),rows=linkedChannelRows.filter(row=>row.clientId===client.id);
       const operations=redirects.map(redirect=>operationBySource.get(redirect.sourceClientId)).filter((operation):operation is (typeof mergeOperations)[number]=>Boolean(operation));
@@ -448,6 +466,7 @@ export class CommunicationsService {
       const mergedClients=redirects.filter(redirect=>{const operation=operationBySource.get(redirect.sourceClientId);return operation?operation.targetClientId===client.id&&hasValidMovedEntityIds(operation.movedEntityIds):legacyEvidence.some(item=>item.sourceClientId===redirect.sourceClientId&&item.targetClientId===client.id)}).map(redirect=>({sourceClientId:redirect.sourceClientId,displayName:redirect.sourceClient.displayName,channels:rows.filter(row=>sourceForConversation(row)?.sourceClientId===redirect.sourceClientId).map(row=>row.channel),splitMode:operationBySource.has(redirect.sourceClientId)?"FULL" as const:"CHANNELS_ONLY" as const}));
       return ({
       ...client,
+      inboxEmail: inboxEmails.get(client.id) ?? null,
       email: customerEmail(client.email, client.facebook ? "FACEBOOK" : client.source) ?? null,
       orders: activeOrders.filter(order => order.clientId === client.id),
       buyerSummary: {
@@ -1831,14 +1850,16 @@ export class CommunicationsService {
     return checkChatwootShipmentCapability({baseUrl,token,accountId:String(metadata.accountId),inboxId:String(metadata.inboxId),providerConversationId:String(metadata.chatwootConversationId),conversationId:conversation.id,externalId:conversation.externalId,allowLookup});
   }
   sendShipmentEmail(clientId: string, input: ShipmentEmailInput, actor: User) {
-    return sendShipmentEmail(this.p, this.emailTransport, clientId, input, actor, (requestId, id, actorId, providerId) => this.recordEmailUncertain(requestId, id, actorId, providerId));
+    return sendShipmentEmail(this.p, this.emailTransport, clientId, input, actor, (requestId, _id, actorId, providerId) => this.recordEmailUncertain(requestId, actorId, providerId));
   }
   async verifyEmail(){const result=await this.emailTransport.verify();await this.p.appSetting.upsert({where:{section_key:{section:"integration.email",key:"verifiedAt"}},create:{section:"integration.email",key:"verifiedAt",value:new Date().toISOString()},update:{value:new Date().toISOString()}});return result}
-  private async recordEmailUncertain(clientRequestId:string,clientId:string,actorId:string,providerMessageId?:string,draftMessageId?:string,aiRunId?:string,replayFingerprint?:string){
+  private async recordEmailUncertain(clientRequestId:string,actorId:string,providerMessageId?:string,draftMessageId?:string,aiRunId?:string,replayFingerprint?:string){
     const duplicateFiles=await this.p.$transaction(async tx=>{
+      await lockInboxEmailClientChanges(tx);
       const candidate=await tx.messageDeliveryAttempt.findUnique({where:{clientRequestId}});if(!candidate)return[] as Array<{id:string;name:string}>;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:"+candidate.conversationId},0))`;
       const attempt=await tx.messageDeliveryAttempt.findUnique({where:{id:candidate.id}});if(!attempt||attempt.status!=="PENDING")return[] as Array<{id:string;name:string}>;
+      const {clientId}=attempt;
       const synced=providerMessageId?await tx.message.findUnique({where:{conversationId_externalId:{conversationId:attempt.conversationId,externalId:providerMessageId}},select:{id:true,metadata:true,content:true}}):null;
       if(synced){
         const claimed=await tx.communicationAttachment.findMany({where:{clientRequestId:attempt.clientRequestId,messageId:null},select:{path:true,originalName:true,mimeType:true,sizeBytes:true}}),syncedMetadata=synced.metadata&&typeof synced.metadata==="object"&&!Array.isArray(synced.metadata)?synced.metadata as Prisma.JsonObject:{},attachmentMetadata=claimed.map(item=>({type:item.mimeType.startsWith("image/")?"image":"file",name:item.originalName,mimeType:item.mimeType,sizeBytes:item.sizeBytes,url:`/api/communications/files/${item.path}`})),sentCopies=claimed.length?await tx.messageAttachment.findMany({where:{messageId:synced.id},select:{id:true,externalUrl:true}}):[];
@@ -2547,8 +2568,9 @@ export class CommunicationsService {
       }
       if(content&&d.aiRunId){const scopedFeedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:d.aiRunId,sentMessageId:null,accepted:null,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},select:{id:true}});if(!scopedFeedback)throw new BadRequestException("AI-черновик не относится к выбранному диалогу или уже отправлен")}
       const storedMetadata=existing?.metadata&&typeof existing.metadata==="object"&&!Array.isArray(existing.metadata)?existing.metadata as Prisma.JsonObject:{},
-        {aiRunId:_previousAiRunId,...preservedMetadata}=storedMetadata,
-        metadata={...preservedMetadata,composerDraftKey:draftKey,...(content&&d.aiRunId?{aiRunId:d.aiRunId}:{})};
+        {aiRunId:_previousAiRunId,composerEmail:previousEmail,...preservedMetadata}=storedMetadata,
+        composerEmail=d.channel===ContactChannel.EMAIL&&content ? d.expectedEmail ?? previousEmail : undefined,
+        metadata={...preservedMetadata,composerDraftKey:draftKey,...(typeof composerEmail==="string"?{composerEmail}:{}),...(content&&d.aiRunId?{aiRunId:d.aiRunId}:{})};
       const message=existing?await tx.message.update({where:{id:existing.id},data:{content,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.DRAFT,content,authorId:u.id,metadata}});
       if(!existing)await tx.activity.create({data:{clientId,type:"MESSAGE_DRAFTED",summary:"Автоматически сохранён исходящий черновик",metadata:{messageId:message.id,channel:conversation.channel}}});
       await tx.auditLog.create({data:{actorId:u.id,action:existing?"UPDATE":"CREATE",entityType:"Message",entityId:message.id,after:{status:"DRAFT",channel:conversation.channel,autosaved:true}}});
@@ -2629,7 +2651,7 @@ export class CommunicationsService {
       throw new BadRequestException("Отправьте текст и вложение отдельными сообщениями");
     // Attachments on a legacy draft describe its old upload, not this send.
     const storedDraftMetadata = draft?.metadata && typeof draft.metadata === "object" && !Array.isArray(draft.metadata) ? draft.metadata as Prisma.JsonObject : {};
-    const { attachments: _draftAttachments, ...draftMetadata } = storedDraftMetadata;
+    const { attachments: _draftAttachments, composerEmail: draftEmail, ...draftMetadata } = storedDraftMetadata;
     const storedAiRunId=typeof draftMetadata.aiRunId==="string"?draftMetadata.aiRunId:undefined;
     if(d.aiRunId&&storedAiRunId&&d.aiRunId!==storedAiRunId)throw new BadRequestException("AI-черновик не соответствует сохранённому предложению");
     const sendAiRunId=d.aiRunId||storedAiRunId;
@@ -2694,29 +2716,38 @@ export class CommunicationsService {
         ? { attachments: bundle.map(({ providerUrl: _providerUrl, ...safe }) => safe) }
         : {};
       if(channel===ContactChannel.EMAIL){
-        if(!selected.email)throw new BadRequestException("У клиента не указан e-mail");
-        const recipient=selected.email.trim().toLowerCase();
-        const conversation=await this.p.conversation.findFirst({where:{clientId,channel,externalId:{equals:recipient,mode:"insensitive"},archivedAt:null},select:{id:true}});
-        if(!conversation)throw new BadRequestException("Для этого клиента нет активной переписки по e-mail");
-        const explicitReply=d.replyToMessageId?await this.p.message.findFirst({where:{id:d.replyToMessageId,conversationId:conversation.id,direction:MessageDirection.INBOUND},select:{id:true,metadata:true}}):undefined;
-        if(d.replyToMessageId&&!explicitReply)throw new BadRequestException("Выбранное письмо не относится к этой переписке");
-        const replyMessage=explicitReply||await this.p.message.findFirst(latestInboundEmailReplyLookup(conversation.id));
-        const latest=replyMessage?.metadata&&typeof replyMessage.metadata==="object"&&!Array.isArray(replyMessage.metadata)?replyMessage.metadata as Prisma.JsonObject:{};
-        if(d.replyToMessageId&&typeof latest.messageId!=="string")throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
-        const {subject,parent,references}=emailReplyHeaders(latest,selected.displayName),replyToMessageId=replyMessage?.id;
-        const replayFingerprint = (draft || lockedFiles.length > 1) && lockedFiles.length
-          ? attachmentBundleFingerprint(lockedFiles, attachmentScope(conversation.id))
-          : undefined;
+        const recipient=customerEmail(selected.email,"FACEBOOK");
+        if(!recipient||!isEmail(recipient))throw new BadRequestException("У клиента не указан корректный e-mail");
+        if ((d.expectedEmail && d.expectedEmail !== recipient) || (typeof draftEmail === "string" && draftEmail !== recipient))
+          throw new ConflictException("E-mail клиента изменился. Обновите карточку перед отправкой");
+        let conversationId: string;
+        let replyToMessageId: string | undefined;
+        let {subject,parent,references} = emailReplyHeaders({}, selected.displayName);
+        const rejectedReply = () => new BadRequestException("Выбранное письмо не относится к этой переписке");
+        const lockDeliveryOwner = async (tx: Prisma.TransactionClient) => {
+          await lockInboxEmailClientChanges(tx);
+          const attempt = await tx.messageDeliveryAttempt.findUniqueOrThrow({
+            where: { clientRequestId: requestId }, select: { clientId: true },
+          });
+          return attempt.clientId;
+        };
+        const pendingEmailError=()=>new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля");
+        let replayFingerprint: string | undefined;
         return runMetaSendOnce({
           reserve: async () => this.p.$transaction(async tx => {
             const requestId = d.clientRequestId!;
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversation.id},0))`;
+            const emailThread = await prepareFirstInboxEmail(tx, clientId, recipient, u.id, d.expectedEmail);
+            conversationId = emailThread.id;
+            if (emailThread.linked && d.replyToMessageId) throw rejectedReply();
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"message-send:" + conversationId},0))`;
             const existing = await tx.messageDeliveryAttempt.findUnique({ where: { clientRequestId: requestId } });
-            if (existing && (existing.clientId !== clientId || existing.conversationId !== conversation.id))
+            if ((draft || lockedFiles.length > 1) && lockedFiles.length)
+              replayFingerprint = attachmentBundleFingerprint(lockedFiles, attachmentScope(conversationId));
+            if (existing && (emailThread.linked || existing.clientId !== clientId || existing.conversationId !== conversationId))
               throw new ConflictException("Идентификатор отправки уже использован");
             if (lockedFiles.length && existing?.status === "SENT") {
               const result = await this.completedAttachmentReplay(
-                tx, existing.messageId, lockedFiles, attachmentScope(conversation.id),
+                tx, existing.messageId, lockedFiles, attachmentScope(conversationId),
               );
               return { kind: "DONE" as const, result };
             }
@@ -2727,42 +2758,59 @@ export class CommunicationsService {
                 if (result) {
                   if (existing.status === "SENT" && messageAttachments(result.metadata).length)
                     throw new ConflictException("Идентификатор отправки уже использован");
-                  await this.requireScopedAiFeedback(tx, replayScope(conversation.id), existing.status === "SENT" ? result.id : undefined);
+                  await this.requireScopedAiFeedback(tx, replayScope(conversationId), existing.status === "SENT" ? result.id : undefined);
                   return { kind: "DONE" as const, result: { ...result, channel } };
                 }
               }
               if (blocksEmailDelivery(existing.status)) return { kind: "PENDING" as const };
             }
             const pending = await tx.messageDeliveryAttempt.findFirst({
-              where: { conversationId: conversation.id, status: { in: ["PENDING", "UNCERTAIN"] }, ...(existing ? { id: { not: existing.id } } : {}) },
+              where: { conversationId: conversationId, status: { in: ["PENDING", "UNCERTAIN"] }, ...(existing ? { id: { not: existing.id } } : {}) },
             });
-            if (pending) return { kind: "PENDING" as const };
+            if (pending) {
+              if (emailThread.linked) throw pendingEmailError();
+              return { kind: "PENDING" as const };
+            }
             if (draft) {
               const claimedDraft = await tx.message.findFirst({
-                where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversation.id },
+                where: { id: draft.id, status: MessageStatus.DRAFT, direction: MessageDirection.OUTBOUND, conversationId: conversationId },
                 select: { id: true, metadata: true },
               });
               if (!claimedDraft || isSoftDeletedMessage(claimedDraft.metadata))
                 throw new ConflictException("Черновик уже отправляется, удалён или был отправлен");
+              const savedAddress = claimedDraft.metadata && typeof claimedDraft.metadata === "object" &&
+                !Array.isArray(claimedDraft.metadata) ? claimedDraft.metadata.composerEmail : undefined;
+              if (typeof savedAddress === "string" && savedAddress !== recipient)
+                throw new ConflictException("E-mail клиента изменился. Обновите карточку перед отправкой");
             }
-            await this.requireScopedAiFeedback(tx, replayScope(conversation.id));
+            const replyMessage = d.replyToMessageId
+              ? await tx.message.findFirst({ where: { id: d.replyToMessageId, conversationId, direction: MessageDirection.INBOUND }, select: { id: true, metadata: true } })
+              : await tx.message.findFirst(latestInboundEmailReplyLookup(conversationId));
+            if (d.replyToMessageId && !replyMessage) throw rejectedReply();
+            const latest = replyMessage?.metadata && typeof replyMessage.metadata === "object" && !Array.isArray(replyMessage.metadata)
+              ? replyMessage.metadata as Prisma.JsonObject : {};
+            if (d.replyToMessageId && typeof latest.messageId !== "string")
+              throw new BadRequestException("У выбранного письма нет Gmail Message-ID для ответа");
+            ({subject,parent,references} = emailReplyHeaders(latest, selected.displayName));
+            replyToMessageId = replyMessage?.id;
+            await this.requireScopedAiFeedback(tx, replayScope(conversationId));
             if (existing) {
               await tx.messageDeliveryAttempt.update({ where: { id: existing.id }, data: { status: "PENDING", messageId: draft?.id } });
             } else {
-              await tx.messageDeliveryAttempt.create({ data: { clientRequestId: requestId, clientId, conversationId: conversation.id, status: "PENDING", messageId: draft?.id } });
+              await tx.messageDeliveryAttempt.create({ data: { clientRequestId: requestId, clientId, conversationId: conversationId, status: "PENDING", messageId: draft?.id } });
             }
             if (bundle.length) await claimBundle(tx);
             if (sendAiRunId) {
-              const claimed = await reserveAiFeedback(tx, { aiRunId: sendAiRunId, clientId, conversationId: conversation.id });
+              const claimed = await reserveAiFeedback(tx, { aiRunId: sendAiRunId, clientId, conversationId: conversationId });
               if (!claimed) throw new ConflictException("AI-черновик уже отправляется или был отправлен");
             }
             return { kind: "NEW" as const };
           }),
           deliver:()=>this.emailTransport.send({to:recipient,subject,text:content,inReplyTo:parent,references,...(bundle.length > 1 ? { attachments: bundle } : { attachment })}),
-          pendingError:()=>new ConflictException("Предыдущая отправка ещё выполняется или её результат неизвестен. Повтор не отправлен, чтобы избежать дубля"),
-          persistFailure:async error=>{if(error instanceof EmailDeliveryUncertainError){await this.recordEmailUncertain(d.clientRequestId!,clientId,u.id,undefined,draft?.id,sendAiRunId);throw new ConflictException("Gmail не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат")}return this.p.$transaction(async tx=>{const metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,to:recipient,...bundleMetadata(),failureType:error instanceof Error?error.constructor.name:"UnknownError"} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}});if(bundle.length)await linkBundle(tx,message.id,new Date());await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"FAILED",messageId:message.id}});if(sendAiRunId)await tx.aiResponseFeedback.updateMany({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}},data:{accepted:null}});await tx.activity.create({data:{clientId,type:"MESSAGE_SEND_FAILED",summary:"Gmail не принял исходящее письмо",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND_FAILED",entityType:"Message",entityId:message.id,after:{channel,status:MessageStatus.FAILED}}});return{...message,channel}})},
-          persistSuccess:async result=>this.p.$transaction(async tx=>{const sentAt=new Date(),metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,messageId:result.messageId,to:recipient,references,...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),...bundleMetadata()} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content:content||attachment?.name||"[Вложение]",externalId:result.messageId,sentAt,authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversation.id,direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:content||attachment?.name||"[Вложение]",externalId:result.messageId,sentAt,authorId:u.id,replyToMessageId,metadata}});if(bundle.length)await linkBundle(tx,message.id,sentAt);await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"SENT",messageId:message.id}});if(sendAiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId,conversationId:conversation.id,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:content,wasEdited:feedback.draftText!==content,accepted:true,rejected:false,sentMessageId:message.id}});else await tx.auditLog.create({data:{actorId:u.id,action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:sendAiRunId,after:{messageId:message.id}}})}await tx.conversation.update({where:{id:conversation.id},data:{lastMessageAt:sentAt}});await tx.activity.create({data:{clientId,type:"MESSAGE_SENT",summary:"Письмо отправлено через Gmail",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND",entityType:"Message",entityId:message.id,after:{channel,status:message.status,externalId:message.externalId}}});return{...message,channel}}),
-          persistSuccessFailure:async(result)=>{await this.recordEmailUncertain(d.clientRequestId!,clientId,u.id,result.messageId,draft?.id,sendAiRunId,replayFingerprint);throw new ConflictException("Gmail принял письмо, но CRM не сохранила результат. Повтор заблокирован до ручной проверки")},
+          pendingError:pendingEmailError,
+          persistFailure:async error=>{if(error instanceof EmailDeliveryUncertainError){await this.recordEmailUncertain(d.clientRequestId!,u.id,undefined,draft?.id,sendAiRunId);throw new ConflictException("Gmail не подтвердил результат отправки. Повтор заблокирован, чтобы клиент не получил дубликат")}return this.p.$transaction(async tx=>{const ownerId=await lockDeliveryOwner(tx);const metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,to:recipient,...bundleMetadata(),failureType:error instanceof Error?error.constructor.name:"UnknownError"} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversationId,direction:MessageDirection.OUTBOUND,status:MessageStatus.FAILED,content:content||attachment?.name||"[Вложение]",authorId:u.id,replyToMessageId,metadata}});if(bundle.length)await linkBundle(tx,message.id,new Date());await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"FAILED",messageId:message.id}});if(sendAiRunId)await tx.aiResponseFeedback.updateMany({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:ownerId,conversationId,operation:"REPLY",status:AiRunStatus.COMPLETED}},data:{accepted:null}});await tx.activity.create({data:{clientId:ownerId,type:"MESSAGE_SEND_FAILED",summary:"Gmail не принял исходящее письмо",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND_FAILED",entityType:"Message",entityId:message.id,after:{channel,status:MessageStatus.FAILED}}});return{...message,channel}})},
+          persistSuccess:async result=>this.p.$transaction(async tx=>{const ownerId=await lockDeliveryOwner(tx);const sentAt=new Date(),metadata={...draftMetadata,provider:"GMAIL",source:"CRM",subject,messageId:result.messageId,to:recipient,references,...(replayFingerprint ? { attachmentReplayFingerprint: replayFingerprint } : {}),...bundleMetadata()} as Prisma.InputJsonValue;const message=draft?await tx.message.update({where:{id:draft.id},data:{status:MessageStatus.SENT,content:content||attachment?.name||"[Вложение]",externalId:result.messageId,sentAt,authorId:u.id,replyToMessageId,metadata}}):await tx.message.create({data:{conversationId:conversationId,direction:MessageDirection.OUTBOUND,status:MessageStatus.SENT,content:content||attachment?.name||"[Вложение]",externalId:result.messageId,sentAt,authorId:u.id,replyToMessageId,metadata}});if(bundle.length)await linkBundle(tx,message.id,sentAt);await tx.messageDeliveryAttempt.update({where:{clientRequestId:d.clientRequestId!},data:{status:"SENT",messageId:message.id}});if(sendAiRunId){const feedback=await tx.aiResponseFeedback.findFirst({where:{aiRunId:sendAiRunId,sentMessageId:null,accepted:false,aiRun:{clientId:ownerId,conversationId,operation:"REPLY",status:AiRunStatus.COMPLETED}}});if(feedback)await tx.aiResponseFeedback.update({where:{id:feedback.id},data:{finalText:content,wasEdited:feedback.draftText!==content,accepted:true,rejected:false,sentMessageId:message.id}});else await tx.auditLog.create({data:{actorId:u.id,action:"AI_FEEDBACK_RESERVATION_MISSING",entityType:"AiRun",entityId:sendAiRunId,after:{messageId:message.id}}})}await tx.conversation.update({where:{id:conversationId},data:{lastMessageAt:sentAt}});await tx.activity.create({data:{clientId:ownerId,type:"MESSAGE_SENT",summary:"Письмо отправлено через Gmail",metadata:{messageId:message.id,channel}}});await tx.auditLog.create({data:{actorId:u.id,action:"SEND",entityType:"Message",entityId:message.id,after:{channel,status:message.status,externalId:message.externalId}}});return{...message,channel}}),
+          persistSuccessFailure:async(result)=>{await this.recordEmailUncertain(d.clientRequestId!,u.id,result.messageId,draft?.id,sendAiRunId,replayFingerprint);throw new ConflictException("Gmail принял письмо, но CRM не сохранила результат. Повтор заблокирован до ручной проверки")},
         });
       }
       if (channel === ContactChannel.CHATWOOT) {

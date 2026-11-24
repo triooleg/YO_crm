@@ -20,7 +20,10 @@ test('Instagram username fallback is an honestly labelled profile in every Inbox
  for(const width of [1536,390]){
   await page.setViewportSize({width,height:1080});await page.goto('/?section=inbox');
   if(width!==390)await page.locator('.communications-client-list>button').filter({hasText:client.displayName}).click();
+  if(width===390)await page.getByRole("button",{name:"Действия чата",exact:true}).click();
+  await page.getByRole("button",{name:"Дополнительные действия чата",exact:true}).click();
   const link=page.locator('.communications-chat-account');
+  await expect(link).toBeVisible();
   await expect(link).toHaveAttribute('href','https://www.instagram.com/synthetic.client/');
   await expect(link).toContainText('Открыть профиль в Instagram');
   await expect(link).toHaveAttribute('title',/нажмите «Написать»/);

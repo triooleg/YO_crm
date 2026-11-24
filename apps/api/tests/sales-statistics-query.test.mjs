@@ -14,10 +14,16 @@ function load(path) {
   vm.runInThisContext(`(function(require,module,exports){${source}\n})`, { filename: file })((name) => name.startsWith('.') && existsSync(resolve(dirname(file), name + '.ts')) ? load(resolve(dirname(file), name + '.ts')) : local(name), module, module.exports);
   return module.exports;
 }
-test('sales analytics validates an inclusive business-date range and defaults to twelve calendar months', () => {
+test('sales analytics validates an inclusive business-date range and defaults to the start of the current Kyiv year', () => {
   const { normalizeSalesQuery } = load('overview/sales-statistics.query.ts');
   const q = normalizeSalesQuery({}, new Date('2026-10-18T10:00:00Z'));
-  assert.equal(q.from, '2025-11-01'); assert.equal(q.to, '2026-10-31');
+  assert.equal(q.from, '2026-01-01'); assert.equal(q.to, '2026-10-31');
+  const newYear = normalizeSalesQuery({}, new Date('2026-12-31T22:30:00Z'));
+  assert.equal(newYear.from, '2027-01-01'); assert.equal(newYear.to, '2027-01-31');
+  const historical = normalizeSalesQuery({to:'2026-12-31'}, new Date('2026-12-31T22:30:00Z'));
+  assert.equal(historical.from, '2026-02-01'); assert.equal(historical.to, '2026-12-31');
+  const explicit = normalizeSalesQuery({ from:'2025-12-01', to:'2026-02-15' });
+  assert.equal(explicit.from, '2025-12-01'); assert.equal(explicit.to, '2026-02-15');
   assert.equal(q.scope, 'sales'); assert.equal(q.currency, 'EUR');
   assert.throws(() => normalizeSalesQuery({ from: '2026-02-30' }));
   assert.throws(() => normalizeSalesQuery({ from: '2026-10-20', to: '2026-10-01' }));

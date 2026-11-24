@@ -56,6 +56,8 @@ test("Inbox order cards read settlement and assignment evidence for active and h
   assert.equal(sent.isActive, false);
   assert.deepEqual(orderSettlement(sent), { paidMinor: 35000, balanceMinor: 0 });
   assert.equal(sent.dispatchStatus, "SHIPPED");
+  assert.deepEqual(sent.deliveryCarriers, ["NOVA_GLOBAL"]);
+  assert.deepEqual(active.deliveryCarriers, []);
   assert.deepEqual(sent.tracking, [{ number: trackingNumber, url: `https://nova.global/track/?Tracking_ID=${trackingNumber}` }]);
   assert.equal(other.isActive, true);
   assert.equal(other.dispatchStatus, "PARTIALLY_SHIPPED");
@@ -85,4 +87,32 @@ test("legacy orders keep owned snapshot fallback, while archived physical assign
   assert.equal(orderMeasurementState(legacyOrder).complete, true);
   assert.equal(orderMeasurementState(legacyItem).complete, true);
   assert.equal(orderMeasurementState(physical).complete, false);
+});
+
+test("Inbox order cards present the website design and retain a safe missing-image state", async () => {
+  const websiteImage = "https://yoleotard.com/wp-content/uploads/ice-symphony.jpg";
+  const orderImage = "https://www.yoleotard.com/wp-content/uploads/checkout.jpg";
+  const website = { ...base, sourceSystem: "YOLEOTARD_WEBSITE", externalImageUrl: orderImage };
+  const item = { name: "Ice Symphony", quantity: 1, _count: { instances: 0 }, instances: [] };
+  const rows = [
+    { ...website, items: [{ ...item, externalImageUrl: websiteImage }] },
+    { ...website, items: [item] },
+    { ...website, items: [{ ...item, modelImagePath: "a1b2c3.jpg", externalImageUrl: websiteImage }] },
+    { ...website, _count: { items: 1, compositionOperations: 1 } },
+    { ...base, externalImageUrl: websiteImage },
+    { ...website, externalImageUrl: "https://yoleotard.com/photo.png?token=private" },
+  ];
+  const db = { order: { findMany: async ({ select }) => {
+    assert.equal(select.externalImageUrl, true);
+    assert.equal(select.sourceSystem, true);
+    assert.equal(select.items.select.externalImageUrl, true);
+    assert.equal(select.items.select.modelImagePath, true);
+    return rows;
+  } } };
+  const cards = await new CommunicationsService(db, {}).clientOrderCards("buyer");
+  assert.deepEqual(cards.map(card => card.designImageUrl), [
+    websiteImage, orderImage, "/api/orders/images/a1b2c3.jpg", null, null, null,
+  ]);
+  assert.equal(cards[0].items[0].name, "Ice Symphony");
+  assert.equal("externalImageUrl" in cards[0], false);
 });

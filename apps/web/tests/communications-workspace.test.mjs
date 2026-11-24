@@ -85,7 +85,7 @@ test("каждое входящее переводится внутри сооб
 
 test("AI предложение свернуто по умолчанию, активно только после раскрытия и вставляется в редактор",()=>{
   assert.match(component,/\[aiPanelOpen,setAiPanelOpen\]=useState\(false\)/);
-  assert.match(component,/aria-expanded=\{aiPanelOpen\}/);
+  assert.match(component,/<Switch[^>]+checked=\{aiPanelOpen\}/);
   assert.match(component,/aria-controls="communications-ai-panel-body"/);
   assert.match(component,/\{aiPanelOpen&&<div id="communications-ai-panel-body"/);
   assert.match(component,/function closeAiPanel\(\)\{invalidateAiOperation\(\);setAiPanelOpen\(false\)/);
@@ -274,7 +274,7 @@ test("удаление сообщения вызывает API и перечит
   assert.match(component,/composerDraftId\.current=undefined;composerDraftKey\.current=undefined/);
 });
 test("ссылка на соцсеть содержит только видимое действие без строки аккаунта",()=>{
-  assert.match(component,/<span>\{ui\.openConversationByChannel\[activeChannel as keyof typeof ui\.openConversationByChannel\] \|\| ui\.openInSocialNetwork\} ↗<\/span><\/a>/);
+  assert.match(component, /<Menu.Item className="communications-chat-account" component="a" href=\{accountUrl\}[^>]*>\{ui\.openConversationByChannel/);
   assert.doesNotMatch(component,/<small>\{ui\.connectedAccount\}: \{accountLabel\}<\/small>/);
   assert.doesNotMatch(component,/function connectedAccountLabel/);
   assert.match(locale,/openConversationByChannel:\s*\{\s*FACEBOOK:\s*"Открыть переписку в Facebook",\s*INSTAGRAM:\s*"Открыть профиль в Instagram",\s*CHATWOOT:\s*"Открыть переписку в Chatwoot"/);
@@ -325,7 +325,7 @@ test("сохранение покупателя использует имя пр
 });
 
 test("Facebook SID виден в карточке и форме, но не редактирует scoped identity", () => {
-  assert.match(component, /client\.facebook&&<p><span>\{ui\.facebookSid\}<\/span><b>\{client\.facebook\}<\/b><\/p>/);
+  assert.match(component, /client\.facebook && <div><dt>\{ui\.facebookSid\}<\/dt><dd>\{client\.facebook\}<\/dd><\/div>/);
   assert.match(component, /client\?\.status==="LEAD"&&client\.facebook&&<label>[\s\S]*ui\.facebookSid[\s\S]*value=\{client\.facebook\}[\s\S]*readOnly/);
   assert.match(component, /!\(client\?\.status==="LEAD"&&\(client\.facebook\|\|isInstagramScopedId\(client\.instagram\)\)\)&&<label>/);
   assert.doesNotMatch(component, /name="facebook"/);
@@ -701,8 +701,8 @@ test("фильтры каналов сохраняют общий счётчик
   assert.match(component, /ui\.allChannels/);
   assert.match(component, /channelCounts\[item\]/);
   assert.match(component, /aria-label=\{`\$\{label\}: \$\{channelCounts\[item\]\}`\}/);
-  assert.match(component, /<span aria-hidden="true">\{icons\[item\]\}<\/span><\/button>/);
-  assert.doesNotMatch(component, /<strong aria-hidden="true">\{channelCounts\[item\]\}<\/strong>/);
+  assert.match(component, /<span aria-hidden="true">\{icons\[item\]\}<\/span><strong aria-hidden="true">\{channelCounts\[item\]\}<\/strong><\/button>/);
+  assert.match(component, /current: orderScope === "ACTIVE_ORDERS", onClick: \(\) => setOrderScope\("ACTIVE_ORDERS"\)/);
   assert.doesNotMatch(component, /<CrmNativeSelect className="communications-order-scope"/);
   assert.doesNotMatch(component, /<b>\{item==="EMAIL"\?ui\.gmail:ui\.sources\[item\]\}<\/b>/);
   assert.doesNotMatch(css, /communications-social-filter>b/);
@@ -759,7 +759,7 @@ test("вставленный AI ответ сохраняет provenance до я
 
 test("список отмечает готовую сводку, а шапка показывает все каналы клиента",()=>{
   assert.match(component,/c\.hasSummary&&<span className="has-summary">/);
-  assert.match(component,/availableChannels\.map\(item=>\{const channelText=/);
+  assert.match(component,/linkedChannels\.map\(item=>\{const channelText=/);
   assert.match(component,/className="is-channel" aria-label=\{channelText\} title=\{channelText\}/);
   assert.match(component,/c\.linkedChannels\?\.length\?c\.linkedChannels/);
 });
@@ -786,7 +786,7 @@ test("composer предлагает контекстные быстрые дей
   assert.match(component,/attachmentInput/);
   assert.match(component,/ui\.attachPhotoVideo/);
   assert.match(component,/ui\.measurementsShortcut/);
-  assert.match(component,/templates\.slice\(0,5\)/);
+  assert.match(component,/templates\.map\(template=>/);
   assert.match(component,/action:"new-invoice"/);
   assert.match(component,/rows=\{1\}/);
   assert.match(component,/Math\.min\(e\.currentTarget\.scrollHeight,140\)/);
@@ -816,9 +816,9 @@ test("правая панель организована доступными в
 });
 
 test("быстрые ответы под редактором используют реальные шаблоны",()=>{
-  assert.match(component,/templates\.slice\(0,5\)\.map\(template=>/);
+  assert.match(component,/templates\.map\(template=>/);
   assert.match(component,/chooseTemplate\(template\)/);
-  assert.match(component,/templates\.length>5/);
+  assert.match(component,/aria-expanded=\{templatesOpen\}/);
 });
 
 test("вкладка файлов показывает media-превью и открывает его в общем lightbox", () => {
@@ -911,12 +911,12 @@ test("post, story and comment engagement is visible and replyable in CRM",()=>{
 });
 
 
-test("шапка диалога показывает источник один раз и оставляет страну в карточке клиента", () => {
+test("шапка диалога показывает страну и сохраняет каналы и дополнительные действия", () => {
   const header = component.split('<header className="communications-chat-header">')[1].split('</header>')[0];
   assert.match(header, /availableChannels\.map/);
   assert.match(header, /className="is-channel"/);
   assert.match(header, /item\.accountName/);
-  assert.doesNotMatch(header, /client\.country|InboxCountryFlag|communications-active-channel/);
+  assert.match(header, /InboxCountryFlag country=\{client\.country\}/);
   assert.match(header, /className="communications-chat-account"/);
   assert.match(header, /href=\{accountUrl\}/);
   assert.match(header, /availableChannels\.length > 1/);
